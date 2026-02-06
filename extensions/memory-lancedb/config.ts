@@ -11,6 +11,7 @@ export type MemoryConfig = {
     dimensions?: number;
   };
   dbPath?: string;
+  storageOptions?: Record<string, string>;
   autoCapture?: boolean;
   autoRecall?: boolean;
   captureMaxChars?: number;
@@ -53,6 +54,7 @@ const DEFAULT_DB_PATH = resolveDefaultDbPath();
 const EMBEDDING_DIMENSIONS: Record<string, number> = {
   "text-embedding-3-small": 1536,
   "text-embedding-3-large": 3072,
+  "nomic-embed-text": 768,
 };
 
 function assertAllowedKeys(value: Record<string, unknown>, allowed: string[], label: string) {
@@ -97,7 +99,7 @@ export const memoryConfigSchema = {
     const cfg = value as Record<string, unknown>;
     assertAllowedKeys(
       cfg,
-      ["embedding", "dbPath", "autoCapture", "autoRecall", "captureMaxChars"],
+      ["embedding", "dbPath", "storageOptions", "autoCapture", "autoRecall", "captureMaxChars"],
       "memory config",
     );
 
@@ -128,7 +130,8 @@ export const memoryConfigSchema = {
         dimensions: typeof embedding.dimensions === "number" ? embedding.dimensions : undefined,
       },
       dbPath: typeof cfg.dbPath === "string" ? cfg.dbPath : DEFAULT_DB_PATH,
-      autoCapture: cfg.autoCapture === true,
+      storageOptions: cfg.storageOptions as Record<string, string> | undefined,
+      autoCapture: cfg.autoCapture !== false,
       autoRecall: cfg.autoRecall !== false,
       captureMaxChars: captureMaxChars ?? DEFAULT_CAPTURE_MAX_CHARS,
     };
