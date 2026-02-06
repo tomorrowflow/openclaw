@@ -60,6 +60,7 @@ const DEFAULT_DB_PATH = resolveDefaultDbPath();
 const EMBEDDING_DIMENSIONS: Record<string, number> = {
   "text-embedding-3-small": 1536,
   "text-embedding-3-large": 3072,
+  "nomic-embed-text": 768,
 };
 const EMBEDDING_CONFIG_KEYS = ["provider", "apiKey", "model", "baseUrl", "dimensions"] as const;
 
@@ -246,7 +247,7 @@ export const memoryConfigSchema = {
       },
       dreaming,
       dbPath: typeof cfg.dbPath === "string" ? cfg.dbPath : DEFAULT_DB_PATH,
-      autoCapture: cfg.autoCapture === true,
+      autoCapture: cfg.autoCapture !== false,
       autoRecall: cfg.autoRecall !== false,
       captureMaxChars,
       ...(customTriggers ? { customTriggers } : {}),

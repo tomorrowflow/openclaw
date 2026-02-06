@@ -1418,7 +1418,9 @@ export default definePluginEntry({
       return;
     }
     const dbPath = cfg.dbPath!;
-    const resolvedDbPath = dbPath.includes("://") ? dbPath : api.resolvePath(dbPath);
+    // Skip path resolution for URIs (s3://, gs://, az://, etc.) and absolute paths
+    const resolvedDbPath =
+      /^[a-z0-9]+:\/\//i.test(dbPath) || dbPath.startsWith("/") ? dbPath : api.resolvePath(dbPath);
     const { model, dimensions } = cfg.embedding;
     const disabledHookCfg = { ...cfg, autoCapture: false, autoRecall: false };
 
@@ -1476,7 +1478,7 @@ export default definePluginEntry({
       };
     };
 
-    api.logger.info(`memory-lancedb: plugin registered (db: ${resolvedDbPath}, lazy init)`);
+    api.logger.debug?.(`memory-lancedb: plugin registered (db: ${resolvedDbPath}, lazy init)`);
     api.registerMemoryCapability?.({
       publicArtifacts: {
         async listArtifacts(params) {
