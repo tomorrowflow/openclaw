@@ -40,13 +40,22 @@
           },
           "model": {
             "type": "string",
-            "enum": ["text-embedding-3-small", "text-embedding-3-large"]
+            "enum": ["text-embedding-3-small", "text-embedding-3-large", "nomic-embed-text"]
+          },
+          "baseUrl": {
+            "type": "string"
           }
         },
         "required": ["apiKey"]
       },
       "dbPath": {
         "type": "string"
+      },
+      "storageOptions": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
       },
       "autoCapture": {
         "type": "boolean"
