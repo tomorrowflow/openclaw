@@ -63,6 +63,7 @@ class MemoryDB {
   constructor(
     private readonly dbPath: string,
     private readonly vectorDim: number,
+    private readonly storageOptions?: Record<string, string>,
   ) {}
 
   private async ensureInitialized(): Promise<void> {
@@ -79,7 +80,7 @@ class MemoryDB {
 
   private async doInitialize(): Promise<void> {
     const lancedb = await loadLanceDB();
-    this.db = await lancedb.connect(this.dbPath);
+    this.db = await lancedb.connect(this.dbPath, { storageOptions: this.storageOptions });
     const tables = await this.db.tableNames();
 
     if (tables.includes(TABLE_NAME)) {
@@ -165,8 +166,9 @@ class Embeddings {
   constructor(
     apiKey: string,
     private model: string,
+    baseUrl?: string,
   ) {
-    this.client = new OpenAI({ apiKey });
+    this.client = new OpenAI({ apiKey, baseURL: baseUrl });
   }
 
   async embed(text: string): Promise<number[]> {
@@ -248,12 +250,19 @@ const memoryPlugin = {
 
   register(api: OpenClawPluginApi) {
     const cfg = memoryConfigSchema.parse(api.pluginConfig);
-    const resolvedDbPath = api.resolvePath(cfg.dbPath!);
+    // Skip path resolution for URIs (s3://, gs://, az://, etc.) and absolute paths
+    const dbPath = cfg.dbPath!;
+    const resolvedDbPath =
+      /^[a-z0-9]+:\/\//i.test(dbPath) || dbPath.startsWith("/") ? dbPath : api.resolvePath(dbPath);
     const vectorDim = vectorDimsForModel(cfg.embedding.model ?? "text-embedding-3-small");
-    const db = new MemoryDB(resolvedDbPath, vectorDim);
-    const embeddings = new Embeddings(cfg.embedding.apiKey, cfg.embedding.model!);
+    const db = new MemoryDB(resolvedDbPath, vectorDim, cfg.storageOptions);
+    const embeddings = new Embeddings(
+      cfg.embedding.apiKey,
+      cfg.embedding.model!,
+      cfg.embedding.baseUrl,
+    );
 
-    api.logger.info(`memory-lancedb: plugin registered (db: ${resolvedDbPath}, lazy init)`);
+    api.logger.debug?.(`memory-lancedb: plugin registered (db: ${resolvedDbPath}, lazy init)`);
 
     // ========================================================================
     // Tools
