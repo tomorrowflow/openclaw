@@ -7,8 +7,10 @@ export type MemoryConfig = {
     provider: "openai";
     model?: string;
     apiKey: string;
+    baseUrl?: string;
   };
   dbPath?: string;
+  storageOptions?: Record<string, string>;
   autoCapture?: boolean;
   autoRecall?: boolean;
   captureMaxChars?: number;
@@ -51,6 +53,7 @@ const DEFAULT_DB_PATH = resolveDefaultDbPath();
 const EMBEDDING_DIMENSIONS: Record<string, number> = {
   "text-embedding-3-small": 1536,
   "text-embedding-3-large": 3072,
+  "nomic-embed-text": 768,
 };
 
 function assertAllowedKeys(value: Record<string, unknown>, allowed: string[], label: string) {
@@ -93,7 +96,7 @@ export const memoryConfigSchema = {
     const cfg = value as Record<string, unknown>;
     assertAllowedKeys(
       cfg,
-      ["embedding", "dbPath", "autoCapture", "autoRecall", "captureMaxChars"],
+      ["embedding", "dbPath", "storageOptions", "autoCapture", "autoRecall", "captureMaxChars"],
       "memory config",
     );
 
@@ -101,7 +104,7 @@ export const memoryConfigSchema = {
     if (!embedding || typeof embedding.apiKey !== "string") {
       throw new Error("embedding.apiKey is required");
     }
-    assertAllowedKeys(embedding, ["apiKey", "model"], "embedding config");
+    assertAllowedKeys(embedding, ["apiKey", "model", "baseUrl"], "embedding config");
 
     const model = resolveEmbeddingModel(embedding);
 
@@ -119,9 +122,11 @@ export const memoryConfigSchema = {
         provider: "openai",
         model,
         apiKey: resolveEnvVars(embedding.apiKey),
+        baseUrl: typeof embedding.baseUrl === "string" ? embedding.baseUrl : undefined,
       },
       dbPath: typeof cfg.dbPath === "string" ? cfg.dbPath : DEFAULT_DB_PATH,
-      autoCapture: cfg.autoCapture === true,
+      storageOptions: cfg.storageOptions as Record<string, string> | undefined,
+      autoCapture: cfg.autoCapture !== false,
       autoRecall: cfg.autoRecall !== false,
       captureMaxChars: captureMaxChars ?? DEFAULT_CAPTURE_MAX_CHARS,
     };
