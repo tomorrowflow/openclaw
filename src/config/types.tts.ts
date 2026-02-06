@@ -1,4 +1,4 @@
-export type TtsProvider = "elevenlabs" | "openai" | "edge";
+export type TtsProvider = "elevenlabs" | "openai" | "edge" | "kokoro";
 
 export type TtsMode = "final" | "all";
 
@@ -71,6 +71,15 @@ export type TtsConfig = {
     volume?: string;
     saveSubtitles?: boolean;
     proxy?: string;
+    timeoutMs?: number;
+  };
+  /** Kokoro TTS configuration (local ONNX via REST API). */
+  kokoro?: {
+    enabled?: boolean;
+    url?: string;
+    voice?: string;
+    lang?: string;
+    speed?: number;
     timeoutMs?: number;
   };
   /** Optional path for local TTS user preferences JSON. */
