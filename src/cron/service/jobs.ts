@@ -487,10 +487,24 @@ export function recomputeNextRunsForMaintenance(
           }
         }
       }
-      return changed;
-    },
-    opts?.nowMs,
-  );
+    }
+    // Check for a missed run since last execution (catch-up after restart).
+    if (job.schedule.kind !== "at") {
+      const lastRan = job.state.lastRunAtMs ?? job.createdAtMs;
+      if (typeof lastRan === "number") {
+        const nextAfterLastRun = computeJobNextRunAtMs(job, lastRan);
+        if (nextAfterLastRun !== undefined && nextAfterLastRun < now) {
+          state.deps.log.info(
+            { jobId: job.id, missedAtMs: nextAfterLastRun },
+            "cron: catching up missed run",
+          );
+          job.state.nextRunAtMs = nextAfterLastRun;
+          return true;
+        }
+      }
+    }
+    return changed;
+  });
 }
 
 export function nextWakeAtMs(state: CronServiceState) {
