@@ -11,7 +11,9 @@ Designed to be executed by Claude Code or followed manually.
 
 - Node 22+, pnpm installed
 - Git remote `upstream` pointing to `https://github.com/openclaw/openclaw.git`
-- Working tree clean (`git status` shows nothing to commit)
+- Working tree clean (`git status` shows nothing to commit).
+  If the formatter left unstaged changes after the last commit, reset them:
+  `git checkout -- .`
 
 ## 1. Setup upstream remote (first time only)
 
