@@ -159,14 +159,14 @@ openclaw --version
 systemctl --user start openclaw-gateway.service
 
 # Wait for startup and verify
-sleep 5
+sleep 15
 systemctl --user status openclaw-gateway.service
 ss -ltnp | grep 18789
 ```
 
-The gateway takes a few seconds to fully initialize (signal-cli, tailscale,
+The gateway takes ~15 seconds to fully initialize (signal-cli, tailscale,
 memory-lancedb, webchat). Check the logs if the port isn't listening after
-10 seconds:
+30 seconds:
 
 ```bash
 journalctl --user -u openclaw-gateway.service -n 30 --no-pager
@@ -200,7 +200,7 @@ git fetch upstream \
   && systemctl --user stop openclaw-gateway.service \
   && sudo npm i -g openclaw@latest \
   && systemctl --user start openclaw-gateway.service \
-  && sleep 5 \
+  && sleep 15 \
   && ss -ltnp | grep 18789
 ```
 
