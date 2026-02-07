@@ -548,7 +548,9 @@ export function resolveTtsApiKey(
   config: ResolvedTtsConfig,
   provider: TtsProvider,
 ): string | undefined {
-  if (provider === "kokoro") return "kokoro";
+  if (provider === "kokoro") {
+    return "kokoro";
+  }
   if (provider === "elevenlabs") {
     return config.elevenlabs.apiKey || process.env.ELEVENLABS_API_KEY || process.env.XI_API_KEY;
   }
@@ -565,7 +567,9 @@ export function resolveTtsProviderOrder(primary: TtsProvider): TtsProvider[] {
 }
 
 export function isTtsProviderConfigured(config: ResolvedTtsConfig, provider: TtsProvider): boolean {
-  if (provider === "kokoro") return config.kokoro.enabled;
+  if (provider === "kokoro") {
+    return config.kokoro.enabled;
+  }
   if (provider === "edge") {
     return config.edge.enabled;
   }
@@ -640,7 +644,9 @@ async function kokoroTTS(params: {
     }
     return Buffer.from(await res.arrayBuffer());
   } finally {
-    if (timer) clearTimeout(timer);
+    if (timer) {
+      clearTimeout(timer);
+    }
   }
 }
 
