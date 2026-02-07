@@ -141,7 +141,38 @@ git push origin main --force-with-lease
 `--force-with-lease` is safer than `--force` because it refuses to push if
 someone else has pushed to the remote since your last fetch.
 
-## 8. Verify final state
+## 8. Deploy (stop, install, restart)
+
+Stop the running gateway, install the latest release globally, and restart.
+
+```bash
+# Stop the gateway
+systemctl --user stop openclaw-gateway.service
+
+# Install latest openclaw globally (needs sudo for /usr/lib/node_modules)
+sudo npm i -g openclaw@latest
+
+# Verify installed version
+openclaw --version
+
+# Restart the gateway
+systemctl --user start openclaw-gateway.service
+
+# Wait for startup and verify
+sleep 5
+systemctl --user status openclaw-gateway.service
+ss -ltnp | grep 18789
+```
+
+The gateway takes a few seconds to fully initialize (signal-cli, tailscale,
+memory-lancedb, webchat). Check the logs if the port isn't listening after
+10 seconds:
+
+```bash
+journalctl --user -u openclaw-gateway.service -n 30 --no-pager
+```
+
+## 9. Verify final state
 
 ```bash
 # Our commits should sit cleanly on top of upstream
@@ -165,7 +196,12 @@ git fetch upstream \
   && pnpm build \
   && pnpm check \
   && OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/ \
-  && git push origin main --force-with-lease
+  && git push origin main --force-with-lease \
+  && systemctl --user stop openclaw-gateway.service \
+  && sudo npm i -g openclaw@latest \
+  && systemctl --user start openclaw-gateway.service \
+  && sleep 5 \
+  && ss -ltnp | grep 18789
 ```
 
 Update the `pnpm vitest run` paths if our fork's changed files evolve.
@@ -181,3 +217,5 @@ Update the `pnpm vitest run` paths if our fork's changed files evolve.
 | Lint errors in our code after upstream adds new rules | Fix the violations, commit as a separate fixup                          |
 | Tests timeout or OOM                                  | Lower workers: `OPENCLAW_TEST_WORKERS=2` or run targeted tests only     |
 | `--force-with-lease` rejected                         | Someone else pushed; `git fetch origin && git rebase origin/main` first |
+| Gateway not listening after restart                   | Check logs: `journalctl --user -u openclaw-gateway.service -n 50`       |
+| `sudo npm i -g` permission denied                     | Ensure sudo is available; the global prefix needs root                  |
