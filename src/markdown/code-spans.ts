@@ -19,7 +19,11 @@ export type CodeSpanIndex = {
   isInside: (index: number) => boolean;
 };
 
-export function buildCodeSpanIndex(text: string, inlineState?: InlineCodeState): CodeSpanIndex {
+export function buildCodeSpanIndex(
+  text: string,
+  inlineState?: InlineCodeState,
+  options?: { closedOnly?: boolean },
+): CodeSpanIndex {
   const fenceSpans = parseFenceSpans(text);
   const startState = inlineState
     ? { open: inlineState.open, ticks: inlineState.ticks }
@@ -28,6 +32,7 @@ export function buildCodeSpanIndex(text: string, inlineState?: InlineCodeState):
     text,
     fenceSpans,
     startState,
+    options?.closedOnly,
   );
 
   return {
@@ -41,6 +46,7 @@ function parseInlineCodeSpans(
   text: string,
   fenceSpans: FenceSpan[],
   initialState: InlineCodeState,
+  closedOnly?: boolean,
 ): InlineCodeSpansResult {
   const spans: Array<[number, number]> = [];
   let open = initialState.open;
@@ -82,7 +88,7 @@ function parseInlineCodeSpans(
     }
   }
 
-  if (open) {
+  if (open && !closedOnly) {
     spans.push([openStart, text.length]);
   }
 
