@@ -333,6 +333,33 @@ describe("extractContentFromMessage", () => {
     expect(text).toBe("hello");
   });
 
+  it("strips <final> tags from text content", () => {
+    const text = extractContentFromMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "<final>Hello world</final>" }],
+    });
+
+    expect(text).toBe("Hello world");
+  });
+
+  it("strips <think> tags and their content from text", () => {
+    const text = extractContentFromMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "<think>reasoning</think>Hello" }],
+    });
+
+    expect(text).toBe("Hello");
+  });
+
+  it("strips tags from string content", () => {
+    const text = extractContentFromMessage({
+      role: "assistant",
+      content: "<final>Hello</final>",
+    });
+
+    expect(text).toBe("Hello");
+  });
+
   it("renders error text when stopReason is error and content is not an array", () => {
     const text = extractContentFromMessage({
       role: "assistant",
@@ -351,6 +378,35 @@ describe("extractContentFromMessage", () => {
     });
 
     expect(text).toBe("LLM streaming response contained a malformed fragment. Please try again.");
+  });
+});
+
+describe("extractTextFromMessage strips reasoning tags", () => {
+  it("strips <final> tags from assistant text blocks", () => {
+    const text = extractTextFromMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "<final>Hello world</final>" }],
+    });
+
+    expect(text).toBe("Hello world");
+  });
+
+  it("strips <think> tags and content from assistant text blocks", () => {
+    const text = extractTextFromMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "<think>reasoning</think>\n\n<final>Hello</final>" }],
+    });
+
+    expect(text).toBe("Hello");
+  });
+
+  it("strips tags from string content", () => {
+    const text = extractTextFromMessage({
+      role: "assistant",
+      content: "<final>Hello</final>",
+    });
+
+    expect(text).toBe("Hello");
   });
 });
 

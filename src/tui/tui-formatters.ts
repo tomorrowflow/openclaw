@@ -5,6 +5,7 @@ import type { SessionGoal } from "../config/sessions/types.js";
 import { isLoopbackHost } from "../gateway/net.js";
 import { formatRawAssistantErrorForUi } from "../shared/assistant-error-format.js";
 import { extractAssistantVisibleText } from "../shared/chat-message-content.js";
+import { stripReasoningTagsFromText } from "../shared/text/reasoning-tags.js";
 import { formatTokenCount } from "../utils/usage-format.js";
 
 const REPLACEMENT_CHAR_RE = /\uFFFD/g;
@@ -28,6 +29,10 @@ const RTL_ISOLATE_END = "\u2069";
 const FENCED_CODE_RE = /(```|~~~)[^\n]*\n[\s\S]*?\n\1[^\n]*/g;
 // Inline code spans with balanced backtick run (`code`, ``co`de``, ...).
 const INLINE_CODE_RE = /(`+)(?:(?!\1).)+?\1/g;
+
+function stripReasoningTags(text: string): string {
+  return stripReasoningTagsFromText(text, { mode: "preserve", trim: "start" });
+}
 
 function hasControlChars(text: string): boolean {
   for (const char of text) {
@@ -348,7 +353,7 @@ export function extractContentFromMessage(message: unknown): string {
   }
 
   if (typeof content === "string") {
-    return sanitizeRenderableText(content).trim();
+    return stripReasoningTags(sanitizeRenderableText(content).trim());
   }
 
   const parts = collectSanitizedBlockStrings({
@@ -357,13 +362,15 @@ export function extractContentFromMessage(message: unknown): string {
     valueKey: "text",
   });
   if (parts.length > 0) {
-    return parts.join("\n").trim();
+    return stripReasoningTags(parts.join("\n").trim());
   }
   return formatAssistantErrorFromRecord(record);
 }
 
 function extractAssistantRenderableContent(record: Record<string, unknown>): string {
-  const visible = sanitizeRenderableText(extractAssistantVisibleText(record) ?? "").trim();
+  const visible = stripReasoningTags(
+    sanitizeRenderableText(extractAssistantVisibleText(record) ?? "").trim(),
+  );
   const pairingQr = extractPairingQrTerminalText(record);
   const content = [visible, pairingQr].filter(Boolean).join("\n\n").trim();
   if (content) {
@@ -398,7 +405,7 @@ function extractPairingQrTerminalText(record: Record<string, unknown>): string {
 
 function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean }): string {
   if (typeof content === "string") {
-    return sanitizeRenderableText(content).trim();
+    return stripReasoningTags(sanitizeRenderableText(content).trim());
   }
   if (!Array.isArray(content)) {
     return "";
@@ -420,7 +427,7 @@ function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean 
 
   return composeThinkingAndContent({
     thinkingText: thinkingParts.join("\n").trim(),
-    contentText: textParts.join("\n").trim(),
+    contentText: stripReasoningTags(textParts.join("\n").trim()),
     showThinking: opts?.includeThinking ?? false,
   });
 }
