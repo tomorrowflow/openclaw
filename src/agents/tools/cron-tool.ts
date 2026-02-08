@@ -12,10 +12,9 @@ import { type AnyAgentTool, jsonResult, readStringParam } from "./common.js";
 import { callGatewayTool, readGatewayCallOptions, type GatewayCallOptions } from "./gateway.js";
 import { resolveInternalSessionKey, resolveMainSessionAlias } from "./sessions-helpers.js";
 
-// NOTE: We use Type.Object({}, { additionalProperties: true }) for job/patch
-// instead of CronAddParamsSchema/CronJobPatchSchema because the gateway schemas
-// contain nested unions. Tool schemas need to stay provider-friendly, so we
-// accept "any object" here and validate at runtime.
+// Explicit property hints for job/patch so non-Claude providers can construct
+// nested objects. The normalizer (normalize.ts) still handles coercion and
+// legacy/flat-format fields at runtime, so additionalProperties stays true.
 
 const CRON_ACTIONS = ["status", "list", "add", "update", "remove", "run", "runs", "wake"] as const;
 
@@ -27,6 +26,63 @@ const REMINDER_CONTEXT_PER_MESSAGE_MAX = 220;
 const REMINDER_CONTEXT_TOTAL_MAX = 700;
 const REMINDER_CONTEXT_MARKER = "\n\nRecent context:\n";
 
+const ScheduleSchema = Type.Object(
+  {
+    kind: Type.Optional(stringEnum(["at", "every", "cron"])),
+    at: Type.Optional(Type.String({ description: "ISO 8601 timestamp (for kind=at)" })),
+    everyMs: Type.Optional(
+      Type.Number({ description: "Interval in milliseconds (for kind=every)" }),
+    ),
+    expr: Type.Optional(Type.String({ description: "5-field cron expression (for kind=cron)" })),
+    tz: Type.Optional(Type.String({ description: "IANA timezone for cron expressions" })),
+  },
+  { additionalProperties: true },
+);
+
+const PayloadSchema = Type.Object(
+  {
+    kind: Type.Optional(stringEnum(["systemEvent", "agentTurn"])),
+    text: Type.Optional(Type.String({ description: "System event text (for kind=systemEvent)" })),
+    message: Type.Optional(Type.String({ description: "Agent prompt (for kind=agentTurn)" })),
+    model: Type.Optional(Type.String({ description: "Model override (for agentTurn)" })),
+    thinking: Type.Optional(
+      Type.String({ description: "Thinking level override (for agentTurn)" }),
+    ),
+    timeoutSeconds: Type.Optional(Type.Number({ description: "Timeout override (for agentTurn)" })),
+  },
+  { additionalProperties: true },
+);
+
+const DeliverySchema = Type.Object(
+  {
+    mode: Type.Optional(stringEnum(["announce", "none"])),
+    channel: Type.Optional(
+      Type.String({ description: "Channel: signal, whatsapp, telegram, discord, slack, last" }),
+    ),
+    to: Type.Optional(Type.String({ description: "Channel-specific recipient" })),
+    bestEffort: Type.Optional(Type.Boolean({ description: "Don't fail job if delivery fails" })),
+  },
+  { additionalProperties: true },
+);
+
+const CronJobSchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ description: "Human-readable job name" })),
+    schedule: Type.Optional(ScheduleSchema),
+    sessionTarget: Type.Optional(stringEnum(["main", "isolated"])),
+    payload: Type.Optional(PayloadSchema),
+    delivery: Type.Optional(DeliverySchema),
+    wakeMode: Type.Optional(stringEnum(["now", "next-heartbeat"])),
+    enabled: Type.Optional(Type.Boolean()),
+    deleteAfterRun: Type.Optional(Type.Boolean()),
+    // Flat-format shortcuts (normalizer promotes these into payload):
+    message: Type.Optional(
+      Type.String({ description: "Shortcut: auto-creates agentTurn payload" }),
+    ),
+  },
+  { additionalProperties: true },
+);
+
 // Flattened schema: runtime validates per-action requirements.
 const CronToolSchema = Type.Object({
   action: stringEnum(CRON_ACTIONS),
@@ -34,10 +90,10 @@ const CronToolSchema = Type.Object({
   gatewayToken: Type.Optional(Type.String()),
   timeoutMs: Type.Optional(Type.Number()),
   includeDisabled: Type.Optional(Type.Boolean()),
-  job: Type.Optional(Type.Object({}, { additionalProperties: true })),
+  job: Type.Optional(CronJobSchema),
   jobId: Type.Optional(Type.String()),
   id: Type.Optional(Type.String()),
-  patch: Type.Optional(Type.Object({}, { additionalProperties: true })),
+  patch: Type.Optional(CronJobSchema),
   text: Type.Optional(Type.String()),
   mode: optionalStringEnum(CRON_WAKE_MODES),
   runMode: optionalStringEnum(CRON_RUN_MODES),
