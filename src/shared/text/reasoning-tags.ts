@@ -49,6 +49,39 @@ function hasReasoningCloseTagAfter(
 }
 
 /** Strips model reasoning/final tags from visible text while preserving literal code examples. */
+function stripTrailingPartialTag(text: string): string {
+  if (!text) {
+    return text;
+  }
+  const lastOpen = text.lastIndexOf("<");
+  if (lastOpen === -1) {
+    return text;
+  }
+  if (text.indexOf(">", lastOpen) !== -1) {
+    return text;
+  }
+  const tail = text.slice(lastOpen).replace(/\s+/g, "").toLowerCase();
+  const tags = [
+    "<final>",
+    "</final>",
+    "<think>",
+    "</think>",
+    "<thinking>",
+    "</thinking>",
+    "<thought>",
+    "</thought>",
+    "<antthinking>",
+    "</antthinking>",
+  ];
+  for (const tag of tags) {
+    if (tag.startsWith(tail)) {
+      return text.slice(0, lastOpen);
+    }
+  }
+  return text;
+}
+
+/** Strips model reasoning/final tags from visible text while preserving literal code examples. */
 export function stripReasoningTagsFromText(
   text: string,
   options?: {
@@ -162,8 +195,8 @@ export function stripReasoningTagsFromText(
     firstUnclosedContentIndex !== undefined &&
     cleaned.trim()
   ) {
-    return applyTrim(cleaned.slice(firstUnclosedContentIndex), trimMode);
+    return stripTrailingPartialTag(applyTrim(cleaned.slice(firstUnclosedContentIndex), trimMode));
   }
 
-  return trimmedResult;
+  return stripTrailingPartialTag(trimmedResult);
 }
