@@ -1,5 +1,6 @@
 import { formatRawAssistantErrorForUi } from "../agents/pi-embedded-helpers.js";
 import { stripLeadingInboundMetadata } from "../auto-reply/reply/strip-inbound-meta.js";
+import { stripReasoningTagsFromText } from "../shared/text/reasoning-tags.js";
 import { stripAnsi } from "../terminal/ansi.js";
 import { formatTokenCount } from "../utils/usage-format.js";
 
@@ -15,6 +16,10 @@ const RTL_SCRIPT_RE = /[\u0590-\u08ff\ufb1d-\ufdff\ufe70-\ufefc]/;
 const BIDI_CONTROL_RE = /[\u202a-\u202e\u2066-\u2069]/;
 const RTL_ISOLATE_START = "\u2067";
 const RTL_ISOLATE_END = "\u2069";
+
+function stripReasoningTags(text: string): string {
+  return stripReasoningTagsFromText(text, { mode: "preserve", trim: "start" });
+}
 
 function hasControlChars(text: string): boolean {
   for (const char of text) {
@@ -253,7 +258,7 @@ export function extractContentFromMessage(message: unknown): string {
   const { record, content } = resolved;
 
   if (typeof content === "string") {
-    return sanitizeRenderableText(content).trim();
+    return stripReasoningTags(sanitizeRenderableText(content).trim());
   }
 
   const parts = collectSanitizedBlockStrings({
@@ -262,14 +267,14 @@ export function extractContentFromMessage(message: unknown): string {
     valueKey: "text",
   });
   if (parts.length > 0) {
-    return parts.join("\n").trim();
+    return stripReasoningTags(parts.join("\n").trim());
   }
   return formatAssistantErrorFromRecord(record);
 }
 
 function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean }): string {
   if (typeof content === "string") {
-    return sanitizeRenderableText(content).trim();
+    return stripReasoningTags(sanitizeRenderableText(content).trim());
   }
   if (!Array.isArray(content)) {
     return "";
@@ -291,7 +296,7 @@ function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean 
 
   return composeThinkingAndContent({
     thinkingText: thinkingParts.join("\n").trim(),
-    contentText: textParts.join("\n").trim(),
+    contentText: stripReasoningTags(textParts.join("\n").trim()),
     showThinking: opts?.includeThinking ?? false,
   });
 }
