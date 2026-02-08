@@ -230,11 +230,29 @@ export function isTransientHttpError(raw: string): boolean {
   return TRANSIENT_HTTP_ERROR_CODES.has(status.code);
 }
 
+function stripTrailingPartialFinalTag(text: string): string {
+  if (!text) {
+    return text;
+  }
+  const lastOpen = text.lastIndexOf("<");
+  if (lastOpen === -1) {
+    return text;
+  }
+  if (text.indexOf(">", lastOpen) !== -1) {
+    return text;
+  }
+  const tail = text.slice(lastOpen).replace(/\s+/g, "").toLowerCase();
+  if ("<final>".startsWith(tail) || "</final>".startsWith(tail)) {
+    return text.slice(0, lastOpen);
+  }
+  return text;
+}
+
 function stripFinalTagsFromText(text: string): string {
   if (!text) {
     return text;
   }
-  return text.replace(FINAL_TAG_RE, "");
+  return stripTrailingPartialFinalTag(text.replace(FINAL_TAG_RE, ""));
 }
 
 function collapseConsecutiveDuplicateBlocks(text: string): string {
