@@ -3,8 +3,14 @@ import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { loadConfig } from "../config/config.js";
 import { type AgentEventPayload, getAgentRunContext } from "../infra/agent-events.js";
 import { resolveHeartbeatVisibility } from "../infra/heartbeat-visibility.js";
+import { stripReasoningTagsFromText } from "../shared/text/reasoning-tags.js";
 import { loadSessionEntry } from "./session-utils.js";
 import { formatForLog } from "./ws-log.js";
+
+/** Defensive strip: remove <final>, <think>, etc. tags before broadcasting to clients. */
+function stripChatText(text: string): string {
+  return stripReasoningTagsFromText(text, { mode: "preserve", trim: "start" });
+}
 
 /**
  * Check if webchat broadcasts should be suppressed for heartbeat runs.
@@ -232,7 +238,8 @@ export function createAgentEventHandler({
     if (isSilentReplyText(text, SILENT_REPLY_TOKEN)) {
       return;
     }
-    chatRunState.buffers.set(clientRunId, text);
+    const cleaned = stripChatText(text);
+    chatRunState.buffers.set(clientRunId, cleaned);
     const now = Date.now();
     const last = chatRunState.deltaSentAt.get(clientRunId) ?? 0;
     if (now - last < 150) {
@@ -246,7 +253,7 @@ export function createAgentEventHandler({
       state: "delta" as const,
       message: {
         role: "assistant",
-        content: [{ type: "text", text }],
+        content: [{ type: "text", text: cleaned }],
         timestamp: now,
       },
     };
@@ -264,10 +271,11 @@ export function createAgentEventHandler({
     jobState: "done" | "error",
     error?: unknown,
   ) => {
-    const text = chatRunState.buffers.get(clientRunId)?.trim() ?? "";
-    const shouldSuppressSilent = isSilentReplyText(text, SILENT_REPLY_TOKEN);
+    const rawText = chatRunState.buffers.get(clientRunId)?.trim() ?? "";
+    const shouldSuppressSilent = isSilentReplyText(rawText, SILENT_REPLY_TOKEN);
     chatRunState.buffers.delete(clientRunId);
     chatRunState.deltaSentAt.delete(clientRunId);
+    const text = rawText ? stripChatText(rawText) : "";
     if (jobState === "done") {
       const payload = {
         runId: clientRunId,

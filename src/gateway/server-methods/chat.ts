@@ -11,6 +11,7 @@ import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.j
 import { createReplyPrefixOptions } from "../../channels/reply-prefix.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
 import { resolveSendPolicy } from "../../sessions/send-policy.js";
+import { stripReasoningTagsFromText } from "../../shared/text/reasoning-tags.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel.js";
 import {
   abortChatRunById,
@@ -170,6 +171,26 @@ function nextChatSeq(context: { agentRunSeq: Map<string, number> }, runId: strin
   return next;
 }
 
+function stripMessageContent(message: Record<string, unknown>): Record<string, unknown> {
+  const content = message.content;
+  if (!Array.isArray(content)) {
+    return message;
+  }
+  const stripped = content.map((block) => {
+    if (block && typeof block === "object") {
+      const rec = block as Record<string, unknown>;
+      if (rec.type === "text" && typeof rec.text === "string") {
+        return {
+          ...rec,
+          text: stripReasoningTagsFromText(rec.text, { mode: "preserve", trim: "start" }),
+        };
+      }
+    }
+    return block;
+  });
+  return { ...message, content: stripped };
+}
+
 function broadcastChatFinal(params: {
   context: Pick<GatewayRequestContext, "broadcast" | "nodeSendToSession" | "agentRunSeq">;
   runId: string;
@@ -182,7 +203,7 @@ function broadcastChatFinal(params: {
     sessionKey: params.sessionKey,
     seq,
     state: "final" as const,
-    message: params.message,
+    message: params.message ? stripMessageContent(params.message) : undefined,
   };
   params.context.broadcast("chat", payload);
   params.context.nodeSendToSession(params.sessionKey, "chat", payload);
