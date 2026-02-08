@@ -333,21 +333,31 @@ export async function compactEmbeddedPiSessionDirect(
   let restoreSkillEnv: (() => void) | undefined;
   process.chdir(effectiveWorkspace);
   try {
-    const shouldLoadSkillEntries = !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
+    // When sandboxed with a separate workspace, always reload skills from effectiveWorkspace
+    // so that <location> paths in the prompt point within the sandbox root (where the read
+    // tool can access them), rather than using the cached snapshot paths from the host
+    // managed-skills directory which the sandboxed read tool would reject.
+    const sandboxNeedsOwnSkills =
+      sandbox?.enabled &&
+      sandbox.workspaceAccess !== "rw" &&
+      effectiveWorkspace !== resolvedWorkspace;
+    const shouldLoadSkillEntries =
+      sandboxNeedsOwnSkills || !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
     const skillEntries = shouldLoadSkillEntries
       ? loadWorkspaceSkillEntries(effectiveWorkspace)
       : [];
-    restoreSkillEnv = params.skillsSnapshot
-      ? applySkillEnvOverridesFromSnapshot({
-          snapshot: params.skillsSnapshot,
-          config: params.config,
-        })
-      : applySkillEnvOverrides({
-          skills: skillEntries ?? [],
-          config: params.config,
-        });
+    restoreSkillEnv =
+      params.skillsSnapshot && !sandboxNeedsOwnSkills
+        ? applySkillEnvOverridesFromSnapshot({
+            snapshot: params.skillsSnapshot,
+            config: params.config,
+          })
+        : applySkillEnvOverrides({
+            skills: skillEntries ?? [],
+            config: params.config,
+          });
     const skillsPrompt = resolveSkillsPromptForRun({
-      skillsSnapshot: params.skillsSnapshot,
+      skillsSnapshot: sandboxNeedsOwnSkills ? undefined : params.skillsSnapshot,
       entries: shouldLoadSkillEntries ? skillEntries : undefined,
       config: params.config,
       workspaceDir: effectiveWorkspace,
