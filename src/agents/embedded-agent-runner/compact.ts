@@ -40,7 +40,6 @@ import {
   parseAgentSessionKey,
 } from "../../routing/session-key.js";
 import { resolveSkillsPromptForRun } from "../../skills/loading/workspace.js";
-import { resolveEmbeddedRunSkillEntries } from "../../skills/runtime/embedded-run-entries.js";
 import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
@@ -180,6 +179,7 @@ import {
   resolveSandboxSkillRuntimeInputs,
 } from "./sandbox-skills.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "./session-manager-cache.js";
+import { loadWorkspaceSkillEntries } from "../skills.js";
 import {
   resolveEmbeddedAgentBaseStreamFn,
   resolveEmbeddedAgentStreamFn,
@@ -768,31 +768,33 @@ async function compactEmbeddedAgentSessionDirectOnce(
       effectiveWorkspace,
       skillsSnapshot: params.skillsSnapshot,
     });
-    const { shouldLoadSkillEntries, skillEntries } = resolveEmbeddedRunSkillEntries({
-      workspaceDir: effectiveSkillsWorkspace,
-      config: params.config,
-      agentId: effectiveSkillAgentId,
-      eligibility: skillsEligibility,
-      skillsSnapshot: skillsSnapshotForRun,
-      workspaceOnly: loadSkillsWorkspaceOnly,
-    });
-    restoreSkillEnv = skillsSnapshotForRun
-      ? applySkillEnvOverridesFromSnapshot({
-          snapshot: skillsSnapshotForRun,
+    const sandboxNeedsOwnSkills =
+      sandbox?.enabled &&
+      sandbox.workspaceAccess !== "rw" &&
+      effectiveWorkspace !== resolvedWorkspace;
+    const shouldLoadSkillEntries =
+      sandboxNeedsOwnSkills || !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
+    const skillEntries = shouldLoadSkillEntries
+      ? loadWorkspaceSkillEntries(effectiveSkillsWorkspace, {
           config: params.config,
+          agentId: effectiveSkillAgentId,
+          eligibility: skillsEligibility,
+          ...(loadSkillsWorkspaceOnly ? { workspaceOnly: true } : {}),
         })
-      : applySkillEnvOverrides({
-          skills: skillEntries ?? [],
-          config: params.config,
-        });
-    const promptSkillEntries = mapSandboxSkillEntriesForPrompt({
-      entries: shouldLoadSkillEntries ? skillEntries : undefined,
-      skillsWorkspaceDir: effectiveSkillsWorkspace,
-      skillsPromptWorkspaceDir: effectiveSkillsPromptWorkspace,
-    });
+      : [];
+    restoreSkillEnv =
+      skillsSnapshotForRun && !sandboxNeedsOwnSkills
+        ? applySkillEnvOverridesFromSnapshot({
+            snapshot: skillsSnapshotForRun,
+            config: params.config,
+          })
+        : applySkillEnvOverrides({
+            skills: skillEntries,
+            config: params.config,
+          });
     const skillsPrompt = resolveSkillsPromptForRun({
-      skillsSnapshot: skillsSnapshotForRun,
-      entries: promptSkillEntries,
+      skillsSnapshot: sandboxNeedsOwnSkills ? undefined : skillsSnapshotForRun,
+      entries: shouldLoadSkillEntries ? skillEntries : undefined,
       config: params.config,
       workspaceDir: effectiveSkillsPromptWorkspace,
       agentId: effectiveSkillAgentId,
