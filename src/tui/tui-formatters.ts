@@ -1,5 +1,6 @@
 import { formatRawAssistantErrorForUi } from "../agents/pi-embedded-helpers.js";
 import { stripLeadingInboundMetadata } from "../auto-reply/reply/strip-inbound-meta.js";
+import { stripReasoningTagsFromText } from "../shared/text/reasoning-tags.js";
 import { stripAnsi } from "../terminal/ansi.js";
 import { formatTokenCount } from "../utils/usage-format.js";
 
@@ -11,6 +12,10 @@ const BINARY_LINE_REPLACEMENT_THRESHOLD = 12;
 const URL_PREFIX_RE = /^(https?:\/\/|file:\/\/)/i;
 const WINDOWS_DRIVE_RE = /^[a-zA-Z]:[\\/]/;
 const FILE_LIKE_RE = /^[a-zA-Z0-9._-]+$/;
+
+function stripReasoningTags(text: string): string {
+  return stripReasoningTagsFromText(text, { mode: "preserve", trim: "start" });
+}
 
 function hasControlChars(text: string): boolean {
   for (const char of text) {
@@ -193,7 +198,7 @@ export function extractContentFromMessage(message: unknown): string {
   const content = record.content;
 
   if (typeof content === "string") {
-    return sanitizeRenderableText(content).trim();
+    return stripReasoningTags(sanitizeRenderableText(content).trim());
   }
 
   // Check for error BEFORE returning empty for non-array content
@@ -226,12 +231,12 @@ export function extractContentFromMessage(message: unknown): string {
     }
   }
 
-  return parts.join("\n").trim();
+  return stripReasoningTags(parts.join("\n").trim());
 }
 
 function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean }): string {
   if (typeof content === "string") {
-    return sanitizeRenderableText(content).trim();
+    return stripReasoningTags(sanitizeRenderableText(content).trim());
   }
   if (!Array.isArray(content)) {
     return "";
@@ -259,7 +264,7 @@ function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean 
 
   return composeThinkingAndContent({
     thinkingText: thinkingParts.join("\n").trim(),
-    contentText: textParts.join("\n").trim(),
+    contentText: stripReasoningTags(textParts.join("\n").trim()),
     showThinking: opts?.includeThinking ?? false,
   });
 }
