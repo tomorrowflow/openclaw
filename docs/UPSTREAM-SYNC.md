@@ -143,14 +143,14 @@ someone else has pushed to the remote since your last fetch.
 
 ## 8. Deploy (stop, install, restart)
 
-Stop the running gateway, install the latest release globally, and restart.
+Stop the running gateway, install from the local repo globally, and restart.
 
 ```bash
 # Stop the gateway
 systemctl --user stop openclaw-gateway.service
 
-# Install latest openclaw globally (needs sudo for /usr/lib/node_modules)
-sudo npm i -g openclaw@latest
+# Install from local repo globally (needs sudo for /usr/lib/node_modules)
+sudo npm i -g .
 
 # Verify installed version
 openclaw --version
@@ -198,7 +198,7 @@ git fetch upstream \
   && OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/ \
   && git push origin main --force-with-lease \
   && systemctl --user stop openclaw-gateway.service \
-  && sudo npm i -g openclaw@latest \
+  && sudo npm i -g . \
   && systemctl --user start openclaw-gateway.service \
   && sleep 15 \
   && ss -ltnp | grep 18789
