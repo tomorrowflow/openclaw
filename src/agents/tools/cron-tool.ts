@@ -51,8 +51,9 @@ import { gatewayCallOptionSchemaProperties } from "./gateway-schema.js";
 import { callGatewayTool, readGatewayCallOptions, type GatewayCallOptions } from "./gateway.js";
 import { resolveInternalSessionKey, resolveMainSessionAlias } from "./sessions-helpers.js";
 
-// Spell out job/patch properties for model-facing schema; runtime validation
-// still happens in normalizeCronJob* to avoid nested union schemas.
+// Spell out job/patch properties for model-facing schema so providers can
+// construct nested objects; runtime normalization still handles coercion and
+// legacy/flat-format fields, and additionalProperties stays true.
 
 const CRON_ACTIONS = [
   "status",
