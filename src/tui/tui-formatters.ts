@@ -1,5 +1,10 @@
 import { formatRawAssistantErrorForUi } from "../agents/pi-embedded-helpers.js";
+import { stripReasoningTagsFromText } from "../shared/text/reasoning-tags.js";
 import { formatTokenCount } from "../utils/usage-format.js";
+
+function stripReasoningTags(text: string): string {
+  return stripReasoningTagsFromText(text, { mode: "preserve", trim: "start" });
+}
 
 export function resolveFinalAssistantText(params: {
   finalText?: string | null;
@@ -77,7 +82,7 @@ export function extractContentFromMessage(message: unknown): string {
   const content = record.content;
 
   if (typeof content === "string") {
-    return content.trim();
+    return stripReasoningTags(content.trim());
   }
 
   // Check for error BEFORE returning empty for non-array content
@@ -110,12 +115,12 @@ export function extractContentFromMessage(message: unknown): string {
     }
   }
 
-  return parts.join("\n").trim();
+  return stripReasoningTags(parts.join("\n").trim());
 }
 
 function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean }): string {
   if (typeof content === "string") {
-    return content.trim();
+    return stripReasoningTags(content.trim());
   }
   if (!Array.isArray(content)) {
     return "";
@@ -143,7 +148,7 @@ function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean 
 
   return composeThinkingAndContent({
     thinkingText: thinkingParts.join("\n").trim(),
-    contentText: textParts.join("\n").trim(),
+    contentText: stripReasoningTags(textParts.join("\n").trim()),
     showThinking: opts?.includeThinking ?? false,
   });
 }
