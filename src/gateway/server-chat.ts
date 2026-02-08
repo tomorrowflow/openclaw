@@ -4,6 +4,7 @@ import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import { loadConfig } from "../config/config.js";
 import { type AgentEventPayload, getAgentRunContext } from "../infra/agent-events.js";
 import { resolveHeartbeatVisibility } from "../infra/heartbeat-visibility.js";
+import { stripReasoningTagsFromText } from "../shared/text/reasoning-tags.js";
 import { stripInlineDirectiveTagsForDisplay } from "../utils/directive-tags.js";
 import { loadSessionEntry } from "./session-utils.js";
 import { formatForLog } from "./ws-log.js";
@@ -32,6 +33,11 @@ function resolveHeartbeatContext(runId: string, sourceRunId?: string) {
     }
   }
   return primary;
+}
+
+/** Defensive strip: remove <final>, <think>, etc. tags before broadcasting to clients. */
+function stripChatText(text: string): string {
+  return stripReasoningTagsFromText(text, { mode: "preserve", trim: "start" });
 }
 
 /**
@@ -399,10 +405,10 @@ export function createAgentEventHandler({
       sourceRunId,
       text: bufferedText,
     });
-    const text = normalizedHeartbeatText.text.trim();
+    const rawText = normalizedHeartbeatText.text.trim();
     const shouldSuppressSilent =
-      normalizedHeartbeatText.suppress || isSilentReplyText(text, SILENT_REPLY_TOKEN);
-    return { text, shouldSuppressSilent };
+      normalizedHeartbeatText.suppress || isSilentReplyText(rawText, SILENT_REPLY_TOKEN);
+    return { text: rawText, shouldSuppressSilent };
   };
 
   const flushBufferedChatDeltaIfNeeded = (
@@ -467,6 +473,7 @@ export function createAgentEventHandler({
     chatRunState.deltaLastBroadcastLen.delete(clientRunId);
     chatRunState.buffers.delete(clientRunId);
     chatRunState.deltaSentAt.delete(clientRunId);
+    const text = rawText ? stripChatText(rawText) : "";
     if (jobState === "done") {
       const payload = {
         runId: clientRunId,
