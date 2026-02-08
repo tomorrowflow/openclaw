@@ -12,6 +12,7 @@ import { resolveHeartbeatVisibility } from "../infra/heartbeat-visibility.js";
 import { logError } from "../logger.js";
 import { isAcpSessionKey, isSubagentSessionKey } from "../sessions/session-key-utils.js";
 import { resolveAssistantEventPhase } from "../shared/chat-message-content.js";
+import { stripReasoningTagsFromText } from "../shared/text/reasoning-tags.js";
 import { setSafeTimeout } from "../utils/timer-delay.js";
 import {
   normalizeLiveAssistantEventText,
@@ -116,6 +117,11 @@ function resolveHeartbeatContext(runId: string, sourceRunId?: string) {
     }
   }
   return primary;
+}
+
+/** Defensive strip: remove <final>, <think>, etc. tags before broadcasting to clients. */
+function stripChatText(text: string): string {
+  return stripReasoningTagsFromText(text, { mode: "preserve", trim: "start" });
 }
 
 /**
@@ -926,15 +932,20 @@ export function createAgentEventHandler({
       firstAssistantTimingEntry?: ChatRunEntry;
     },
   ) => {
-    const { text, shouldSuppressSilent } = resolveBufferedChatTextState(clientRunId, sourceRunId, {
-      suppressLeadFragments: false,
-    });
+    const { text: rawBufferedText, shouldSuppressSilent } = resolveBufferedChatTextState(
+      clientRunId,
+      sourceRunId,
+      {
+        suppressLeadFragments: false,
+      },
+    );
     // Flush any throttled delta so streaming clients receive the complete text
     // before the final event. The 150 ms throttle in emitChatDelta may have
     // suppressed the most recent chunk, leaving the client with stale text.
     // Only flush if the buffered text differs from the last broadcast to avoid duplicates.
     flushBufferedChatDeltaIfNeeded(sessionKey, opts?.agentId, clientRunId, sourceRunId, seq, opts);
     chatRunState.clearRun(clientRunId);
+    const text = stripChatText(rawBufferedText);
     const spawnedBy = resolveSpawnedBy(sessionKey);
     if (jobState === "done") {
       const payload = {
