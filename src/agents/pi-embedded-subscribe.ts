@@ -25,6 +25,38 @@ const THINKING_TAG_SCAN_RE = /<\s*(\/?)\s*(?:think(?:ing)?|thought|antthinking)\
 const FINAL_TAG_SCAN_RE = /<\s*(\/?)\s*final\s*>/gi;
 const log = createSubsystemLogger("agent/embedded");
 
+function stripTrailingPartialTag(text: string): string {
+  if (!text) {
+    return text;
+  }
+  const lastOpen = text.lastIndexOf("<");
+  if (lastOpen === -1) {
+    return text;
+  }
+  if (text.indexOf(">", lastOpen) !== -1) {
+    return text;
+  }
+  const tail = text.slice(lastOpen).replace(/\s+/g, "").toLowerCase();
+  const tags = [
+    "<final>",
+    "</final>",
+    "<think>",
+    "</think>",
+    "<thinking>",
+    "</thinking>",
+    "<thought>",
+    "</thought>",
+    "<antthinking>",
+    "</antthinking>",
+  ];
+  for (const tag of tags) {
+    if (tag.startsWith(tail)) {
+      return text.slice(0, lastOpen);
+    }
+  }
+  return text;
+}
+
 export type {
   BlockReplyChunking,
   SubscribeEmbeddedPiSessionParams,
@@ -389,11 +421,13 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     // If enforcement is disabled, we still strip the tags themselves to prevent
     // hallucinations (e.g. Minimax copying the style) from leaking, but we
     // do not enforce buffering/extraction logic.
-    const finalCodeSpans = buildCodeSpanIndex(processed, inlineStateStart);
+    const finalCodeSpans = buildCodeSpanIndex(processed, inlineStateStart, { closedOnly: true });
     if (!params.enforceFinalTag) {
       state.inlineCode = finalCodeSpans.inlineState;
       FINAL_TAG_SCAN_RE.lastIndex = 0;
-      return stripTagsOutsideCodeSpans(processed, FINAL_TAG_SCAN_RE, finalCodeSpans.isInside);
+      return stripTrailingPartialTag(
+        stripTagsOutsideCodeSpans(processed, FINAL_TAG_SCAN_RE, finalCodeSpans.isInside),
+      );
     }
 
     // If enforcement is enabled, only return text that appeared inside a <final> block.
@@ -437,9 +471,11 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
 
     // Hardened Cleanup: Remove any remaining <final> tags that might have been
     // missed (e.g. nested tags or hallucinations) to prevent leakage.
-    const resultCodeSpans = buildCodeSpanIndex(result, inlineStateStart);
+    const resultCodeSpans = buildCodeSpanIndex(result, inlineStateStart, { closedOnly: true });
     state.inlineCode = resultCodeSpans.inlineState;
-    return stripTagsOutsideCodeSpans(result, FINAL_TAG_SCAN_RE, resultCodeSpans.isInside);
+    return stripTrailingPartialTag(
+      stripTagsOutsideCodeSpans(result, FINAL_TAG_SCAN_RE, resultCodeSpans.isInside),
+    );
   };
 
   const stripTagsOutsideCodeSpans = (
