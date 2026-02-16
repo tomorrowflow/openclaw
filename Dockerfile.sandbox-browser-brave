@@ -1,0 +1,20 @@
+FROM openclaw-sandbox-browser:bookworm-slim
+
+USER root
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends gnupg \
+  && curl -fsSL https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg \
+    -o /usr/share/keyrings/brave-browser-archive-keyring.gpg \
+  && echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" \
+    > /etc/apt/sources.list.d/brave-browser-release.list \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends brave-browser \
+  && apt-get purge -y chromium \
+  && apt-get autoremove -y \
+  && rm -rf /var/lib/apt/lists/*
+
+# Symlink so the entrypoint's `chromium` invocation launches Brave instead
+RUN ln -sf /usr/bin/brave-browser /usr/bin/chromium
+
+USER sandbox
