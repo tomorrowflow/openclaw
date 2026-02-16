@@ -296,11 +296,11 @@ export function recomputeNextRunsForMaintenance(state: CronServiceState): boolea
       }
     }
     // Check for a missed run since last execution (catch-up after restart).
-    if (job.schedule.kind !== "at") {
-      const lastRan = job.state.lastRunAtMs ?? job.createdAtMs;
-      if (typeof lastRan === "number") {
-        const nextAfterLastRun = computeJobNextRunAtMs(job, lastRan);
-        if (nextAfterLastRun !== undefined && nextAfterLastRun < nowMs) {
+    // Only applies to jobs that have actually run before (lastRunAtMs set).
+    if (job.schedule.kind !== "at" && typeof job.state.lastRunAtMs === "number") {
+      try {
+        const nextAfterLastRun = computeJobNextRunAtMs(job, job.state.lastRunAtMs);
+        if (nextAfterLastRun !== undefined && nextAfterLastRun < now) {
           state.deps.log.info(
             { jobId: job.id, missedAtMs: nextAfterLastRun },
             "cron: catching up missed run",
@@ -308,6 +308,8 @@ export function recomputeNextRunsForMaintenance(state: CronServiceState): boolea
           job.state.nextRunAtMs = nextAfterLastRun;
           return true;
         }
+      } catch {
+        // Schedule computation failed; handled by recomputeJobNextRunAtMs above.
       }
     }
     return changed;

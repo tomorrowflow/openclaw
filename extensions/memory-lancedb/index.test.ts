@@ -131,7 +131,7 @@ describe("memory plugin e2e", () => {
       dbPath,
     });
 
-    expect(config?.autoCapture).toBe(false);
+    expect(config?.autoCapture).toBe(true);
     expect(config?.autoRecall).toBe(true);
   });
 
