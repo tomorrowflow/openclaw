@@ -109,6 +109,12 @@ export function parseTtsDirectives(
   let cleanedText = text;
   let hasDirective = false;
 
+  // Bare [[tts]] tag (no colon/content) — sets hasDirective without parameters
+  cleanedText = cleanedText.replace(/\[\[tts\]\]/gi, () => {
+    hasDirective = true;
+    return "";
+  });
+
   const blockRegex = /\[\[tts:text\]\]([\s\S]*?)\[\[\/tts:text\]\]/gi;
   cleanedText = cleanedText.replace(blockRegex, (_match, inner: string) => {
     hasDirective = true;
