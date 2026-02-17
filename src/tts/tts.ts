@@ -622,7 +622,7 @@ export async function textToSpeech(params: {
     try {
       if (provider === "kokoro") {
         if (!config.kokoro.enabled) {
-          lastError = "kokoro: disabled";
+          errors.push("kokoro: disabled");
           continue;
         }
         const kokoroVoice = params.overrides?.kokoro?.voice ?? config.kokoro.voice;
