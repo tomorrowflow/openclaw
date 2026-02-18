@@ -91,6 +91,7 @@ export function registerGatewayCli(program: Command) {
     program
       .command("gateway")
       .description("Run, inspect, and query the WebSocket Gateway")
+      .enablePositionalOptions()
       .addHelpText(
         "after",
         () =>
