@@ -931,6 +931,7 @@ export async function runDevicesListCommand(opts: DevicesRpcOpts): Promise<void>
         width: tableWidth,
         columns: [
           { key: "Device", header: "Device", minWidth: 16, flex: true },
+          { key: "ID", header: "ID", minWidth: 16, flex: true },
           { key: "Roles", header: "Roles", minWidth: 12, flex: true },
           { key: "Scopes", header: "Scopes", minWidth: 12, flex: true },
           { key: "Tokens", header: "Tokens", minWidth: 12, flex: true },
@@ -938,6 +939,7 @@ export async function runDevicesListCommand(opts: DevicesRpcOpts): Promise<void>
         ],
         rows: list.paired.map((device) => ({
           Device: sanitizeForLog(device.displayName || device.deviceId),
+          ID: sanitizeForLog(device.deviceId),
           Roles: device.roles?.length
             ? device.roles.map((role) => sanitizeForLog(role)).join(", ")
             : "",
