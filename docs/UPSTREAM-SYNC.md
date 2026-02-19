@@ -12,8 +12,8 @@ Designed to be executed by Claude Code or followed manually.
 - Node 22+, pnpm installed
 - Git remote `upstream` pointing to `https://github.com/openclaw/openclaw.git`
 - Working tree clean (`git status` shows nothing to commit).
-  If the formatter left unstaged changes after the last commit, reset them:
-  `git checkout -- .`
+  If there are unstaged changes, stash or discard them:
+  `git stash push -m "WIP before sync"` or `git checkout -- .`
 
 ## 1. Setup upstream remote (first time only)
 
@@ -60,9 +60,26 @@ If the rebase stops with conflicts:
 4. Continue: `git rebase --continue`
 5. Repeat until all commits are replayed
 
-**Common conflict pattern:** Upstream refactors a function while our fork adds
-parameters or logic to the same function. Resolution: keep upstream's
-structural changes AND our additions.
+**Common conflict patterns:**
+
+- **Upstream refactors, fork adds logic.** Upstream restructures a function or
+  extracts it into a new file while our fork adds parameters or branches.
+  Resolution: keep upstream's structural changes AND our additions, adapting
+  variable names and control flow to the new structure.
+
+- **Upstream extracts code into a new module.** If upstream moves a function
+  from `a.ts` to `b.ts` and our fork added code inside that function, the
+  rebase may apply cleanly in `a.ts` (where the function no longer exists) but
+  silently drop our addition. **After rebase, always verify our fork features
+  are still present in the new locations** (see step 5f).
+
+- **Lock file conflicts (`pnpm-lock.yaml`).** Always skip these with
+  `git rebase --skip` — `pnpm install` regenerates the lock file.
+
+- **Callback vs loop mismatch.** Upstream may refactor a `for...of` loop into
+  a callback-based helper. Our `continue` statements become `return` in
+  callbacks, and destructured parameter names may differ (e.g. `nowMs: now`).
+  Match the upstream callback signature.
 
 If a rebase goes badly: `git rebase --abort` returns to the pre-rebase state.
 
@@ -79,6 +96,9 @@ pnpm install
 ```bash
 pnpm build
 ```
+
+Type errors here often indicate conflict resolution mistakes (e.g. using a
+variable name from the old code that was renamed in upstream's refactor).
 
 ### 5c. Lint and format
 
@@ -101,15 +121,14 @@ Run tests only for files touched by our fork commits (much faster than the
 full suite on resource-constrained machines):
 
 ```bash
-OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/
-```
-
-Adjust the paths to match whatever our fork changes. To find them:
-
-```bash
 # List files changed in our fork commits vs upstream
 git diff --name-only upstream/main..main
+
+# Run tests for affected areas
+OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/ src/tui/ src/shared/text/ src/gateway/ src/markdown/
 ```
+
+Adjust the paths to match whatever our fork changes.
 
 **Note:** The full test suite (`pnpm test`) runs 900+ test files across 3
 vitest configs with worker splitting. On a 4-core/8GB machine this takes
@@ -122,12 +141,34 @@ as a nightly or pre-release check.
 OPENCLAW_TEST_WORKERS=4 pnpm test
 ```
 
-## 6. Commit any fixups
+### 5f. Verify fork features survived the rebase
 
-If lint/format required changes, commit them:
+Upstream refactors can silently drop our code when functions move between
+files. After rebase, spot-check that key fork features are still present:
 
 ```bash
-scripts/committer "fix: lint fixups after upstream sync" <files...>
+# Bare [[tts]] tag detection (moved from tts.ts to tts-core.ts by upstream)
+grep -n '\[\[tts\]\]' src/tts/tts-core.ts
+
+# Kokoro TTS provider
+grep -n 'kokoroTTS' src/tts/tts.ts
+
+# Cron catch-up logic
+grep -n 'catching up missed run' src/cron/service/jobs.ts
+
+# Memory-lancedb storageOptions
+grep -n 'storageOptions' extensions/memory-lancedb/config.ts
+```
+
+If any of these are missing, the upstream refactor moved the surrounding code
+and our additions were lost. Re-add them in the new location.
+
+## 6. Commit any fixups
+
+If build/lint/test required changes, commit them:
+
+```bash
+scripts/committer "fix: lint and test fixups after upstream sync" <files...>
 ```
 
 ## 7. Push to fork
@@ -158,15 +199,15 @@ openclaw --version
 # Restart the gateway
 systemctl --user start openclaw-gateway.service
 
-# Wait for startup and verify
-sleep 15
+# Wait for startup and verify (~35s on 4-core/8GB)
+sleep 35
 systemctl --user status openclaw-gateway.service
 ss -ltnp | grep 18789
 ```
 
-The gateway takes ~15 seconds to fully initialize (signal-cli, tailscale,
+The gateway takes ~35 seconds to fully initialize (signal-cli, tailscale,
 memory-lancedb, webchat). Check the logs if the port isn't listening after
-30 seconds:
+60 seconds:
 
 ```bash
 journalctl --user -u openclaw-gateway.service -n 30 --no-pager
@@ -183,6 +224,16 @@ git log --oneline upstream/main --not main | wc -l
 # Expected: 0
 ```
 
+## 10. Restore stashed work (if applicable)
+
+If you stashed WIP changes in the prerequisites step:
+
+```bash
+git stash pop
+```
+
+Resolve any conflicts with the newly rebased code.
+
 ---
 
 ## Quick reference (copy-paste)
@@ -195,12 +246,12 @@ git fetch upstream \
   && pnpm install \
   && pnpm build \
   && pnpm check \
-  && OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/ \
+  && OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/ src/tui/ src/shared/text/ src/gateway/ src/markdown/ \
   && git push origin main --force-with-lease \
   && systemctl --user stop openclaw-gateway.service \
   && sudo npm i -g . \
   && systemctl --user start openclaw-gateway.service \
-  && sleep 15 \
+  && sleep 35 \
   && ss -ltnp | grep 18789
 ```
 
@@ -213,9 +264,21 @@ Update the `pnpm vitest run` paths if our fork's changed files evolve.
 | Problem                                               | Fix                                                                     |
 | ----------------------------------------------------- | ----------------------------------------------------------------------- |
 | `git rebase` conflicts on every sync                  | Consider squashing fork commits into fewer logical units                |
+| `pnpm-lock.yaml` conflict during rebase               | `git rebase --skip` — `pnpm install` regenerates it                     |
 | `pnpm install` fails after rebase                     | Delete `node_modules` and retry: `rm -rf node_modules && pnpm install`  |
+| Build fails with unknown variable names               | Conflict resolution used old name; check upstream's renamed parameters  |
+| Tests fail on changed defaults                        | Our fork may override a default upstream changed; update test to match  |
+| Fork feature silently dropped after rebase            | Upstream moved the function to a new file; re-add our code there        |
 | Lint errors in our code after upstream adds new rules | Fix the violations, commit as a separate fixup                          |
 | Tests timeout or OOM                                  | Lower workers: `OPENCLAW_TEST_WORKERS=2` or run targeted tests only     |
 | `--force-with-lease` rejected                         | Someone else pushed; `git fetch origin && git rebase origin/main` first |
 | Gateway not listening after restart                   | Check logs: `journalctl --user -u openclaw-gateway.service -n 50`       |
 | `sudo npm i -g` permission denied                     | Ensure sudo is available; the global prefix needs root                  |
+
+---
+
+## Sync history
+
+| Date       | Upstream commits | Conflicts | Notes                                                                                                                                                                           |
+| ---------- | ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-02-16 | 1446             | 4         | tts.ts, memory-lancedb/config.ts, cron/jobs.ts, tui-formatters.ts. Bare `[[tts]]` handler lost in upstream tts-core.ts extraction — re-added post-sync. pnpm-lock.yaml skipped. |

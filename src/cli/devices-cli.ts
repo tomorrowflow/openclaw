@@ -260,6 +260,7 @@ export function registerDevicesCli(program: Command) {
               width: tableWidth,
               columns: [
                 { key: "Device", header: "Device", minWidth: 16, flex: true },
+                { key: "ID", header: "ID", minWidth: 16, flex: true },
                 { key: "Roles", header: "Roles", minWidth: 12, flex: true },
                 { key: "Scopes", header: "Scopes", minWidth: 12, flex: true },
                 { key: "Tokens", header: "Tokens", minWidth: 12, flex: true },
@@ -267,6 +268,7 @@ export function registerDevicesCli(program: Command) {
               ],
               rows: list.paired.map((device) => ({
                 Device: device.displayName || device.deviceId,
+                ID: device.deviceId,
                 Roles: device.roles?.length ? device.roles.join(", ") : "",
                 Scopes: device.scopes?.length ? device.scopes.join(", ") : "",
                 Tokens: formatTokenSummary(device.tokens),
