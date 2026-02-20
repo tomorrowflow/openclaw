@@ -283,3 +283,4 @@ Update the `pnpm vitest run` paths if our fork's changed files evolve.
 | ---------- | ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 2026-02-16 | 1446             | 4         | tts.ts, memory-lancedb/config.ts, cron/jobs.ts, tui-formatters.ts. Bare `[[tts]]` handler lost in upstream tts-core.ts extraction — re-added post-sync. pnpm-lock.yaml skipped. |
 | 2026-02-19 | 463              | 0         | Clean rebase, no conflicts. Control UI rebuilt on first startup after deploy. All 108 targeted test files passed (959 tests).                                                   |
+| 2026-02-20 | 133              | 0         | Clean merge, no conflicts. All 110 targeted test files passed (979 tests). Version 2026.2.20 deployed.                                                                          |
