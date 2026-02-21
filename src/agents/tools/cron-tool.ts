@@ -302,7 +302,7 @@ PAYLOAD TYPES (payload.kind):
 - "systemEvent": Injects text as system event into session
   { "kind": "systemEvent", "text": "<message>" }
 - "agentTurn": Runs agent with message (isolated sessions only)
-  { "kind": "agentTurn", "message": "<prompt>", "model": "<optional>", "thinking": "<optional>", "timeoutSeconds": <optional, 0 means no timeout> }
+  { "kind": "agentTurn", "message": "<prompt>", "model": "<optional>", "thinking": "<optional>", "timeoutSeconds": <optional, default 600> }
 
 DELIVERY (top-level):
   { "mode": "none|announce|webhook", "channel": "<optional>", "to": "<optional>", "bestEffort": <optional-bool> }
@@ -406,7 +406,10 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
             const resolvedSessionKey = opts?.agentSessionKey
               ? resolveInternalSessionKey({ key: opts.agentSessionKey, alias, mainKey })
               : undefined;
-            if (!("agentId" in job)) {
+            // Always set agentId from the caller's session to prevent
+            // spoofing — a sandboxed agent must not create jobs for a
+            // different agent.  Any user-supplied agentId is overwritten.
+            {
               const agentId = opts?.agentSessionKey
                 ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })
                 : undefined;

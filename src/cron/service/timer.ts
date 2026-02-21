@@ -259,35 +259,32 @@ export async function onTimer(state: CronServiceState) {
         job.payload.kind === "agentTurn" && typeof job.payload.timeoutSeconds === "number"
           ? Math.floor(job.payload.timeoutSeconds * 1_000)
           : undefined;
+      // Never allow timeout to be disabled — values <= 0 fall back to the
+      // default.  This prevents a malicious job from running indefinitely.
       const jobTimeoutMs =
-        configuredTimeoutMs !== undefined
-          ? configuredTimeoutMs <= 0
-            ? undefined
-            : configuredTimeoutMs
+        configuredTimeoutMs !== undefined && configuredTimeoutMs > 0
+          ? configuredTimeoutMs
           : DEFAULT_JOB_TIMEOUT_MS;
 
       try {
-        const result =
-          typeof jobTimeoutMs === "number"
-            ? await (async () => {
-                let timeoutId: NodeJS.Timeout | undefined;
-                try {
-                  return await Promise.race([
-                    executeJobCore(state, job),
-                    new Promise<never>((_, reject) => {
-                      timeoutId = setTimeout(
-                        () => reject(new Error("cron: job execution timed out")),
-                        jobTimeoutMs,
-                      );
-                    }),
-                  ]);
-                } finally {
-                  if (timeoutId) {
-                    clearTimeout(timeoutId);
-                  }
-                }
-              })()
-            : await executeJobCore(state, job);
+        const result = await (async () => {
+          let timeoutId: NodeJS.Timeout | undefined;
+          try {
+            return await Promise.race([
+              executeJobCore(state, job),
+              new Promise<never>((_, reject) => {
+                timeoutId = setTimeout(
+                  () => reject(new Error("cron: job execution timed out")),
+                  jobTimeoutMs,
+                );
+              }),
+            ]);
+          } finally {
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+            }
+          }
+        })();
         return { jobId: id, ...result, startedAt, endedAt: state.deps.nowMs() };
       } catch (err) {
         state.deps.log.warn(
