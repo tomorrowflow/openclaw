@@ -156,8 +156,20 @@ grep -n 'kokoroTTS' src/tts/tts.ts
 # Cron catch-up logic
 grep -n 'catching up missed run' src/cron/service/jobs.ts
 
+# Cron hardening: per-agent job limit
+grep -n 'MAX_JOBS_PER_AGENT' src/cron/service/ops.ts
+
 # Memory-lancedb storageOptions
 grep -n 'storageOptions' extensions/memory-lancedb/config.ts
+
+# Reasoning tag stripping in TUI formatters
+grep -n 'stripReasoningTags' src/tui/tui-formatters.ts
+
+# Reasoning tag stripping helper
+grep -n 'stripReasoningTagsFromText' src/shared/text/reasoning-tags.ts
+
+# CLI device ID display in devices list
+grep -n 'deviceId' src/cli/devices-cli.ts
 ```
 
 If any of these are missing, the upstream refactor moved the surrounding code
@@ -261,27 +273,30 @@ Update the `pnpm vitest run` paths if our fork's changed files evolve.
 
 ## Troubleshooting
 
-| Problem                                               | Fix                                                                     |
-| ----------------------------------------------------- | ----------------------------------------------------------------------- |
-| `git rebase` conflicts on every sync                  | Consider squashing fork commits into fewer logical units                |
-| `pnpm-lock.yaml` conflict during rebase               | `git rebase --skip` — `pnpm install` regenerates it                     |
-| `pnpm install` fails after rebase                     | Delete `node_modules` and retry: `rm -rf node_modules && pnpm install`  |
-| Build fails with unknown variable names               | Conflict resolution used old name; check upstream's renamed parameters  |
-| Tests fail on changed defaults                        | Our fork may override a default upstream changed; update test to match  |
-| Fork feature silently dropped after rebase            | Upstream moved the function to a new file; re-add our code there        |
-| Lint errors in our code after upstream adds new rules | Fix the violations, commit as a separate fixup                          |
-| Tests timeout or OOM                                  | Lower workers: `OPENCLAW_TEST_WORKERS=2` or run targeted tests only     |
-| `--force-with-lease` rejected                         | Someone else pushed; `git fetch origin && git rebase origin/main` first |
-| Gateway not listening after restart                   | Check logs: `journalctl --user -u openclaw-gateway.service -n 50`       |
-| `sudo npm i -g` permission denied                     | Ensure sudo is available; the global prefix needs root                  |
+| Problem                                               | Fix                                                                          |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `git rebase` conflicts on every sync                  | Consider squashing fork commits into fewer logical units                     |
+| `pnpm-lock.yaml` conflict during rebase               | `git rebase --skip` — `pnpm install` regenerates it                          |
+| `pnpm install` fails after rebase                     | Delete `node_modules` and retry: `rm -rf node_modules && pnpm install`       |
+| Build fails with unknown variable names               | Conflict resolution used old name; check upstream's renamed parameters       |
+| Tests fail on changed defaults                        | Our fork may override a default upstream changed; update test to match       |
+| Fork feature silently dropped after rebase            | Upstream moved the function to a new file; re-add our code there             |
+| Lint errors in our code after upstream adds new rules | Fix the violations, commit as a separate fixup                               |
+| Tests timeout or OOM                                  | Lower workers: `OPENCLAW_TEST_WORKERS=2` or run targeted tests only          |
+| `--force-with-lease` rejected                         | Someone else pushed; `git fetch origin && git rebase origin/main` first      |
+| Gateway not listening after restart                   | Check logs: `journalctl --user -u openclaw-gateway.service -n 50`            |
+| `sudo npm i -g` permission denied                     | Ensure sudo is available; the global prefix needs root                       |
+| A2UI bundle fails (`lit` not found)                   | `cd vendor/a2ui/renderers/lit && npm install --no-package-lock`              |
+| A2UI bundle fails (`rolldown` not found)              | `pnpm add -wD rolldown@1.0.0-rc.5`, rebuild, then `pnpm remove -wD rolldown` |
 
 ---
 
 ## Sync history
 
-| Date       | Upstream commits | Conflicts | Notes                                                                                                                                                                           |
-| ---------- | ---------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-02-16 | 1446             | 4         | tts.ts, memory-lancedb/config.ts, cron/jobs.ts, tui-formatters.ts. Bare `[[tts]]` handler lost in upstream tts-core.ts extraction — re-added post-sync. pnpm-lock.yaml skipped. |
-| 2026-02-19 | 463              | 0         | Clean rebase, no conflicts. Control UI rebuilt on first startup after deploy. All 108 targeted test files passed (959 tests).                                                   |
-| 2026-02-20 | 133              | 0         | Clean merge, no conflicts. All 110 targeted test files passed (979 tests). Version 2026.2.20 deployed.                                                                          |
-| 2026-02-20 | 19               | 0         | Clean rebase, no conflicts. All 110 targeted test files passed (989 tests). Version 2026.2.20 deployed.                                                                         |
+| Date       | Upstream commits | Conflicts | Notes                                                                                                                                                                                                                |
+| ---------- | ---------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-02-16 | 1446             | 4         | tts.ts, memory-lancedb/config.ts, cron/jobs.ts, tui-formatters.ts. Bare `[[tts]]` handler lost in upstream tts-core.ts extraction — re-added post-sync. pnpm-lock.yaml skipped.                                      |
+| 2026-02-19 | 463              | 0         | Clean rebase, no conflicts. Control UI rebuilt on first startup after deploy. All 108 targeted test files passed (959 tests).                                                                                        |
+| 2026-02-20 | 133              | 0         | Clean merge, no conflicts. All 110 targeted test files passed (979 tests). Version 2026.2.20 deployed.                                                                                                               |
+| 2026-02-20 | 19               | 0         | Clean rebase, no conflicts. All 110 targeted test files passed (989 tests). Version 2026.2.20 deployed.                                                                                                              |
+| 2026-02-21 | 83               | 3         | tui-formatters.ts, server-chat.ts, cron/timer.ts. A2UI bundling required manual `lit` + `rolldown` install. tts.ts `tmpdir()` → `resolvePreferredOpenClawTmpDir()`. All 111 targeted test files passed (1015 tests). |

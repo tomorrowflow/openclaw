@@ -636,7 +636,9 @@ export async function textToSpeech(params: {
           speed: kokoroSpeed,
           timeoutMs: config.kokoro.timeoutMs ?? config.timeoutMs,
         });
-        const tempDir = mkdtempSync(path.join(tmpdir(), "tts-"));
+        const tempRoot = resolvePreferredOpenClawTmpDir();
+        mkdirSync(tempRoot, { recursive: true, mode: 0o700 });
+        const tempDir = mkdtempSync(path.join(tempRoot, "tts-"));
         const audioPath = path.join(tempDir, `voice-${Date.now()}.mp3`);
         writeFileSync(audioPath, audioBuffer);
         scheduleCleanup(tempDir);
