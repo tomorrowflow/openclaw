@@ -1058,7 +1058,7 @@ describe("Cron issue regressions", () => {
     expect(job!.state.nextRunAtMs).toBeGreaterThanOrEqual(minNext);
   });
 
-  it("treats timeoutSeconds=0 as no timeout for isolated agentTurn jobs", async () => {
+  it("falls back to default timeout when timeoutSeconds=0 for isolated agentTurn jobs", async () => {
     const store = await makeStorePath();
     const scheduledAt = Date.parse("2026-02-15T13:00:00.000Z");
 
