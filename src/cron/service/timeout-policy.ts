@@ -21,5 +21,9 @@ export function resolveCronJobTimeoutMs(job: CronJob): number | undefined {
   if (configuredTimeoutMs === undefined) {
     return job.payload.kind === "agentTurn" ? AGENT_TURN_SAFETY_TIMEOUT_MS : DEFAULT_JOB_TIMEOUT_MS;
   }
-  return configuredTimeoutMs <= 0 ? undefined : configuredTimeoutMs;
+  // Never allow timeout to be disabled — values <= 0 fall back to the default.
+  if (configuredTimeoutMs <= 0) {
+    return job.payload.kind === "agentTurn" ? AGENT_TURN_SAFETY_TIMEOUT_MS : DEFAULT_JOB_TIMEOUT_MS;
+  }
+  return configuredTimeoutMs;
 }
