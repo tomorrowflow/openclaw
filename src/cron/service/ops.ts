@@ -473,11 +473,26 @@ export async function listPage(state: CronServiceState, opts?: CronListPageOptio
   });
 }
 
+/** Maximum number of active (non-deleted) cron jobs per agent. */
+const MAX_JOBS_PER_AGENT = 100;
+
 /** Adds a cron job, recomputes scheduler state, persists, and re-arms the timer. */
 export async function add(state: CronServiceState, input: CronJobCreate) {
   return await locked(state, async () => {
     warnIfDisabled(state, "add");
-    await ensureLoaded(state, { skipRecompute: true });
+    await ensureLoaded(state);
+
+    // Enforce per-agent job count limit to prevent resource exhaustion.
+    const agentId = input.agentId?.trim() || undefined;
+    const existingCount = (state.store?.jobs ?? []).filter(
+      (j) => (j.agentId?.trim() || undefined) === agentId,
+    ).length;
+    if (existingCount >= MAX_JOBS_PER_AGENT) {
+      throw new Error(
+        `agent has reached the maximum of ${MAX_JOBS_PER_AGENT} cron jobs — remove unused jobs before adding new ones`,
+      );
+    }
+
     const job = createJob(state, input);
     state.store?.jobs.push(job);
 

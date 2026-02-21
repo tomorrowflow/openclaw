@@ -905,7 +905,7 @@ PAYLOAD TYPES (payload.kind):
 - "systemEvent": inject text as system event
   { "kind": "systemEvent", "text": "<message>" }
 - "agentTurn": run agent with prompt; isolated/current/session only
-  { "kind": "agentTurn", "message": "<prompt>", "model": "<optional>", "thinking": "<optional>", "timeoutSeconds": <optional, 0=no timeout> }
+  { "kind": "agentTurn", "message": "<prompt>", "model": "<optional>", "thinking": "<optional>", "timeoutSeconds": <optional, default 600> }
 
 DELIVERY (top-level):
   { "mode": "none|announce|webhook", "channel": "<optional>", "to": "<optional>", "threadId": "<optional>", "bestEffort": <optional-bool> }
@@ -1000,6 +1000,66 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
               selfRemoveOnlyJobId
                 ? filterCronListResultToJobId(result, selfRemoveOnlyJobId)
                 : result,
+            );
+          }
+          case "get": {
+            const id = readCronJobIdParam(params);
+            if (!id) {
+              throw new Error("jobId required (id accepted for backward compatibility)");
+            }
+            return jsonResult(
+              await callGateway("cron.get", gatewayOpts, {
+                id,
+              }),
+            );
+          }
+          case "add": {
+            // Flat-params recovery: non-frontier models (e.g. Grok) sometimes flatten
+            // job properties to the top level alongside `action` instead of nesting
+            // them inside `job`. When `params.job` is missing or empty, reconstruct
+            // a synthetic job object from any recognised top-level job fields.
+            // See: https://github.com/openclaw/openclaw/issues/11310
+            if (isMissingOrEmptyObject(params.job)) {
+              const synthetic = recoverCronObjectFromFlatParams(params);
+              // Only use the synthetic job if at least one meaningful field is present
+              // (schedule, payload, message, or text are the minimum signals that the
+              // LLM intended to create a job).
+              if (synthetic.found && hasCronCreateSignal(synthetic.value)) {
+                params.job = synthetic.value;
+              }
+            }
+
+            if (!params.job || typeof params.job !== "object") {
+              throw new Error("job required");
+            }
+            const canonicalJob = canonicalizeCronToolObject(params.job as Record<string, unknown>);
+            assertNoCronCommandPayload(canonicalJob);
+            assertCronDeliveryInputNonBlankFields(canonicalJob.delivery);
+            const job =
+              normalizeCronJobCreate(canonicalJob, {
+                sessionContext: { sessionKey: opts?.agentSessionKey },
+              }) ?? canonicalJob;
+            capCronAgentTurnJobToolsAllow(job, opts?.creatorToolAllowlist);
+            const cfg = getRuntimeConfig();
+            if (job && typeof job === "object") {
+              const { mainKey, alias } = resolveMainSessionAlias(cfg);
+              const resolvedSessionKey = opts?.agentSessionKey
+                ? resolveInternalSessionKey({ key: opts.agentSessionKey, alias, mainKey })
+                : undefined;
+              // Always set agentId from the caller's session to prevent
+              // spoofing — a sandboxed agent must not create jobs for a
+              // different agent.  Any user-supplied agentId is overwritten.
+              {
+                const agentId = opts?.agentSessionKey
+                  ? resolveSessionAgentId({ sessionKey: opts.agentSessionKey, config: cfg })
+                  : undefined;
+                if (agentId) {
+                  (job as { agentId?: string }).agentId = agentId;
+                }
+              }
+              const sessionTarget = normalizeLowercaseStringOrEmpty(
+                (job as { sessionTarget?: unknown }).sessionTarget,
+              );
             );
           }
           case "get": {
