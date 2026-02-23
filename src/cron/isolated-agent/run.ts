@@ -507,6 +507,7 @@ export async function runCronIsolatedAgentTurn(params: {
           requireExplicitMessageTarget: deliveryRequested && resolvedDelivery.ok,
           disableMessageTool: deliveryRequested || deliveryPlan.mode === "none",
           abortSignal,
+          senderIsOwner: true,
         });
       },
     });
