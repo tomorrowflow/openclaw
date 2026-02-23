@@ -216,12 +216,25 @@ someone else has pushed to the remote since your last fetch.
 
 Stop the running gateway, install from the local repo globally, and restart.
 
+> **Two global install paths exist — both must be current.**
+> The systemd service loads from `/usr/local/lib/node_modules/openclaw/dist/`
+> (created by `sudo npm i -g .`). A symlink at `/usr/lib/node_modules/openclaw`
+> points to the dev repo. Running `pnpm build` only updates the dev repo's
+> `dist/`; the systemd gateway will keep running old code until you also run
+> `sudo npm i -g .` to copy the build output to `/usr/local/lib/`. Skipping this
+> step is the most common cause of "fix is in the code but gateway still uses
+> the old behavior".
+
 ```bash
 # Stop the gateway
 systemctl --user stop openclaw-gateway.service
 
-# Install from local repo globally (needs sudo for /usr/lib/node_modules)
+# Install from local repo globally (needs sudo for /usr/local/lib/node_modules)
 sudo npm i -g .
+
+# Verify the deploy target has the fresh build
+ls -l /usr/local/lib/node_modules/openclaw/dist/reply-*.js
+# The timestamp should match your latest `pnpm build`
 
 # Verify installed version
 openclaw --version
@@ -280,10 +293,15 @@ git fetch upstream \
   && git push origin main --force-with-lease \
   && systemctl --user stop openclaw-gateway.service \
   && sudo npm i -g . \
+  && ls -l /usr/local/lib/node_modules/openclaw/dist/reply-*.js \
   && systemctl --user start openclaw-gateway.service \
   && sleep 35 \
   && ss -ltnp | grep 18789
 ```
+
+The `ls` step after `npm i -g` is a sanity check: its timestamp should match
+the `pnpm build` output. If the timestamps are stale, the deploy failed
+silently and the gateway will still run old code.
 
 Update the `pnpm vitest run` paths if our fork's changed files evolve.
 
@@ -291,19 +309,22 @@ Update the `pnpm vitest run` paths if our fork's changed files evolve.
 
 ## Troubleshooting
 
-| Problem                                               | Fix                                                                     |
-| ----------------------------------------------------- | ----------------------------------------------------------------------- |
-| `git rebase` conflicts on every sync                  | Consider squashing fork commits into fewer logical units                |
-| `pnpm-lock.yaml` conflict during rebase               | `git rebase --skip` — `pnpm install` regenerates it                     |
-| `pnpm install` fails after rebase                     | Delete `node_modules` and retry: `rm -rf node_modules && pnpm install`  |
-| Build fails with unknown variable names               | Conflict resolution used old name; check upstream's renamed parameters  |
-| Tests fail on changed defaults                        | Our fork may override a default upstream changed; update test to match  |
-| Fork feature silently dropped after rebase            | Upstream moved the function to a new file; re-add our code there        |
-| Lint errors in our code after upstream adds new rules | Fix the violations, commit as a separate fixup                          |
-| Tests timeout or OOM                                  | Lower workers: `OPENCLAW_TEST_WORKERS=2` or run targeted tests only     |
-| `--force-with-lease` rejected                         | Someone else pushed; `git fetch origin && git rebase origin/main` first |
-| Gateway not listening after restart                   | Check logs: `journalctl --user -u openclaw-gateway.service -n 50`       |
-| `sudo npm i -g` permission denied                     | Ensure sudo is available; the global prefix needs root                  |
+| Problem                                               | Fix                                                                                                                                                                                                                                                  |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `git rebase` conflicts on every sync                  | Consider squashing fork commits into fewer logical units                                                                                                                                                                                             |
+| `pnpm-lock.yaml` conflict during rebase               | `git rebase --skip` — `pnpm install` regenerates it                                                                                                                                                                                                  |
+| `pnpm install` fails after rebase                     | Delete `node_modules` and retry: `rm -rf node_modules && pnpm install`                                                                                                                                                                               |
+| Build fails with unknown variable names               | Conflict resolution used old name; check upstream's renamed parameters                                                                                                                                                                               |
+| Tests fail on changed defaults                        | Our fork may override a default upstream changed; update test to match                                                                                                                                                                               |
+| Fork feature silently dropped after rebase            | Upstream moved the function to a new file; re-add our code there                                                                                                                                                                                     |
+| Lint errors in our code after upstream adds new rules | Fix the violations, commit as a separate fixup                                                                                                                                                                                                       |
+| Tests timeout or OOM                                  | Lower workers: `OPENCLAW_TEST_WORKERS=2` or run targeted tests only                                                                                                                                                                                  |
+| `--force-with-lease` rejected                         | Someone else pushed; `git fetch origin && git rebase origin/main` first                                                                                                                                                                              |
+| Gateway not listening after restart                   | Check logs: `journalctl --user -u openclaw-gateway.service -n 50`                                                                                                                                                                                    |
+| `sudo npm i -g` permission denied                     | Ensure sudo is available; the global prefix needs root                                                                                                                                                                                               |
+| Fix is in source but gateway uses old behavior        | `pnpm build` only updates `dist/` in the dev repo; the systemd service loads from `/usr/local/lib/node_modules/openclaw/dist/`. Run `sudo npm i -g .` to deploy, or `sudo cp -r dist/* /usr/local/lib/node_modules/openclaw/dist/` for a quick patch |
+| A2UI bundle fails (`lit` not found)                   | `cd vendor/a2ui/renderers/lit && npm install --no-package-lock`                                                                                                                                                                                      |
+| A2UI bundle fails (`rolldown` not found)              | `pnpm add -wD rolldown@1.0.0-rc.5`, rebuild, then `pnpm remove -wD rolldown`                                                                                                                                                                         |
 
 ---
 
