@@ -232,9 +232,15 @@ systemctl --user stop openclaw-gateway.service
 # Install from local repo globally (needs sudo for /usr/local/lib/node_modules)
 sudo npm i -g .
 
+# Rebuild the Control UI (not included in `pnpm build`)
+pnpm ui:build
+sudo cp -r dist/control-ui /usr/local/lib/node_modules/openclaw/dist/control-ui
+
 # Verify the deploy target has the fresh build
 ls -l /usr/local/lib/node_modules/openclaw/dist/reply-*.js
 # The timestamp should match your latest `pnpm build`
+ls /usr/local/lib/node_modules/openclaw/dist/control-ui/index.html
+# Must exist — without it the web UI shows "Control UI assets not found"
 
 # Verify installed version
 openclaw --version
@@ -293,15 +299,21 @@ git fetch upstream \
   && git push origin main --force-with-lease \
   && systemctl --user stop openclaw-gateway.service \
   && sudo npm i -g . \
+  && pnpm ui:build \
+  && sudo cp -r dist/control-ui /usr/local/lib/node_modules/openclaw/dist/control-ui \
   && ls -l /usr/local/lib/node_modules/openclaw/dist/reply-*.js \
+  && ls /usr/local/lib/node_modules/openclaw/dist/control-ui/index.html \
   && systemctl --user start openclaw-gateway.service \
   && sleep 35 \
   && ss -ltnp | grep 18789
 ```
 
-The `ls` step after `npm i -g` is a sanity check: its timestamp should match
-the `pnpm build` output. If the timestamps are stale, the deploy failed
-silently and the gateway will still run old code.
+The `ls` steps after `npm i -g` are sanity checks: the `reply-*.js` timestamp
+should match your latest `pnpm build` output, and `control-ui/index.html` must
+exist. If the timestamps are stale, the deploy failed silently and the gateway
+will still run old code. If `control-ui/` is missing, the web UI will show
+"Control UI assets not found" — `pnpm build` does **not** include the UI;
+`pnpm ui:build` + copy is a separate step.
 
 Update the `pnpm vitest run` paths if our fork's changed files evolve.
 
@@ -323,6 +335,7 @@ Update the `pnpm vitest run` paths if our fork's changed files evolve.
 | Gateway not listening after restart                   | Check logs: `journalctl --user -u openclaw-gateway.service -n 50`                                                                                                                                                                                    |
 | `sudo npm i -g` permission denied                     | Ensure sudo is available; the global prefix needs root                                                                                                                                                                                               |
 | Fix is in source but gateway uses old behavior        | `pnpm build` only updates `dist/` in the dev repo; the systemd service loads from `/usr/local/lib/node_modules/openclaw/dist/`. Run `sudo npm i -g .` to deploy, or `sudo cp -r dist/* /usr/local/lib/node_modules/openclaw/dist/` for a quick patch |
+| Web UI shows "Control UI assets not found"            | `pnpm ui:build && sudo cp -r dist/control-ui /usr/local/lib/node_modules/openclaw/dist/control-ui`. The UI is **not** part of `pnpm build`; every `sudo npm i -g .` wipes `dist/` and you must rebuild+copy the UI separately                        |
 | A2UI bundle fails (`lit` not found)                   | `cd vendor/a2ui/renderers/lit && npm install --no-package-lock`                                                                                                                                                                                      |
 | A2UI bundle fails (`rolldown` not found)              | `pnpm add -wD rolldown@1.0.0-rc.5`, rebuild, then `pnpm remove -wD rolldown`                                                                                                                                                                         |
 
