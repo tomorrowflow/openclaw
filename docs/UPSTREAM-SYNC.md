@@ -125,7 +125,7 @@ full suite on resource-constrained machines):
 git diff --name-only upstream/main..main
 
 # Run tests for affected areas
-OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/ src/tui/ src/shared/text/ src/gateway/ src/markdown/
+OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/ src/tui/ src/shared/text/ src/gateway/ src/markdown/ src/agents/pi-embedded-runner/ src/agents/pi-embedded-helpers/ src/auto-reply/ src/cli/
 ```
 
 Adjust the paths to match whatever our fork changes.
@@ -158,6 +158,36 @@ grep -n 'catching up missed run' src/cron/service/jobs.ts
 
 # Memory-lancedb storageOptions
 grep -n 'storageOptions' extensions/memory-lancedb/config.ts
+
+# Reasoning tag stripping in TUI formatters
+grep -n 'stripReasoningTags' src/tui/tui-formatters.ts
+
+# Reasoning tag stripping helper
+grep -n 'stripReasoningTagsFromText' src/shared/text/reasoning-tags.ts
+
+# CLI device ID display in devices list
+grep -n 'deviceId' src/cli/devices-cli.ts
+
+# Gateway reasoning tag stripping
+grep -n 'stripReasoningTagsFromText' src/gateway/server-chat.ts
+
+# Streaming partial tag stripping (prevents leaked <final>/<thinking> fragments)
+grep -n 'stripTrailingPartialTag' src/agents/pi-embedded-subscribe.ts
+
+# Error text partial tag stripping
+grep -n 'stripTrailingPartialFinalTag' src/agents/pi-embedded-helpers/errors.ts
+
+# Sandbox skill reload for sandboxed workspaces
+grep -n 'sandboxNeedsOwnSkills' src/agents/pi-embedded-runner/compact.ts
+
+# Code-span closedOnly option (supports partial tag stripping)
+grep -n 'closedOnly' src/markdown/code-spans.ts
+
+# Kokoro TTS in config schema
+grep -n 'kokoro' src/config/zod-schema.core.ts
+
+# CLI positional options fix (prevents gateway subcommand option shadowing)
+grep -n 'enablePositionalOptions' src/cli/program/build-program.ts
 ```
 
 If any of these are missing, the upstream refactor moved the surrounding code
@@ -246,7 +276,7 @@ git fetch upstream \
   && pnpm install \
   && pnpm build \
   && pnpm check \
-  && OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/ src/tui/ src/shared/text/ src/gateway/ src/markdown/ \
+  && OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/ src/tui/ src/shared/text/ src/gateway/ src/markdown/ src/agents/pi-embedded-runner/ src/agents/pi-embedded-helpers/ src/auto-reply/ src/cli/ \
   && git push origin main --force-with-lease \
   && systemctl --user stop openclaw-gateway.service \
   && sudo npm i -g . \
