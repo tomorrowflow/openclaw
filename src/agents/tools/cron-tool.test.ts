@@ -184,7 +184,7 @@ describe("cron tool", () => {
     });
   });
 
-  it("does not default agentId when job.agentId is null", async () => {
+  it("stamps agentId from caller even when job.agentId is null (anti-spoofing)", async () => {
     const tool = createCronTool({ agentSessionKey: "main" });
     await tool.execute("call-null", {
       action: "add",
@@ -198,7 +198,9 @@ describe("cron tool", () => {
     const call = callGatewayMock.mock.calls[0]?.[0] as {
       params?: { agentId?: unknown };
     };
-    expect(call?.params?.agentId).toBeNull();
+    // Fork: agentId is always overwritten with the caller's resolved agent
+    // to prevent sandboxed agents from escaping to the main agent via null.
+    expect(call?.params?.agentId).toBe("agent-123");
   });
 
   it("stamps cron.add with caller sessionKey when missing", async () => {
@@ -295,7 +297,7 @@ describe("cron tool", () => {
     expect(text).not.toContain("Recent context:");
   });
 
-  it("preserves explicit agentId null on add", async () => {
+  it("stamps agentId from caller even when explicit null on add (anti-spoofing)", async () => {
     callGatewayMock.mockResolvedValueOnce({ ok: true });
 
     const tool = createCronTool({ agentSessionKey: "main" });
@@ -314,7 +316,8 @@ describe("cron tool", () => {
       params?: { agentId?: string | null };
     };
     expect(call.method).toBe("cron.add");
-    expect(call.params?.agentId).toBeNull();
+    // Fork: agentId is always overwritten with the caller's resolved agent.
+    expect(call.params?.agentId).toBe("agent-123");
   });
 
   it("infers delivery from threaded session keys", async () => {
