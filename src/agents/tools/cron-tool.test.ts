@@ -845,21 +845,19 @@ describe("cron tool", () => {
     });
   });
 
-  it("rejects null agentId on add from the scoped agent cron tool", async () => {
+  it("stamps agentId from caller even when job.agentId is null (anti-spoofing)", async () => {
     const tool = createTestCronTool({ agentSessionKey: "main" });
-    await expect(
-      tool.execute("call-null", {
-        action: "add",
-        job: {
-          name: "wake-up",
-          schedule: { at: new Date(123).toISOString() },
-          payload: { kind: "systemEvent", text: "hello" },
-          agentId: null,
-        },
-      }),
-    ).rejects.toThrow("cron job agentId must match the calling agent");
+    await tool.execute("call-null", {
+      action: "add",
+      job: {
+        name: "wake-up",
+        schedule: { at: new Date(123).toISOString() },
+        payload: { kind: "systemEvent", text: "hello" },
+        agentId: null,
+      },
+    });
 
-    expect(callGatewayMock).not.toHaveBeenCalled();
+    expect(readGatewayCall().params?.agentId).toBe("agent-123");
   });
 
   it("preserves explicit agentId for sessionless cron add callers", async () => {
@@ -1388,23 +1386,24 @@ describe("cron tool", () => {
     expect(text).not.toContain("Recent context:");
   });
 
-  it("rejects explicit agentId null on add", async () => {
+  it("stamps agentId from caller even when explicit null on add (anti-spoofing)", async () => {
     callGatewayMock.mockResolvedValueOnce({ ok: true });
 
     const tool = createTestCronTool({ agentSessionKey: "main" });
-    await expect(
-      tool.execute("call6", {
-        action: "add",
-        job: {
-          name: "reminder",
-          schedule: { at: new Date(123).toISOString() },
-          agentId: null,
-          payload: { kind: "systemEvent", text: "Reminder: the thing." },
-        },
-      }),
-    ).rejects.toThrow("cron job agentId must match the calling agent");
+    await tool.execute("call6", {
+      action: "add",
+      job: {
+        name: "reminder",
+        schedule: { at: new Date(123).toISOString() },
+        agentId: null,
+        payload: { kind: "systemEvent", text: "Reminder: the thing." },
+      },
+    });
 
-    expect(callGatewayMock).not.toHaveBeenCalled();
+    const call = readGatewayCall();
+    expect(call.method).toBe("cron.add");
+    // Fork: agentId is always overwritten with the caller's resolved agent.
+    expect(call.params?.agentId).toBe("agent-123");
   });
 
   it("does not infer delivery from raw session-key fragments without delivery context", async () => {
