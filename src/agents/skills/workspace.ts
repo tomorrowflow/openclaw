@@ -612,7 +612,7 @@ export async function syncSkillsToWorkspace(params: {
     await fsp.mkdir(targetSkillsDir, { recursive: true });
 
     const usedDirNames = new Set<string>();
-    for (const entry of entries) {
+    for (const entry of filterSkillEntries(entries, params.config)) {
       let dest: string | null = null;
       try {
         dest = resolveSyncedSkillDestinationPath({
