@@ -1658,8 +1658,8 @@ export async function syncSkillsToWorkspace(params: {
     await prepareSyncedSkillsDirectory(targetSkillsDir);
 
     const usedDirNames = new Set<string>();
-    for (const entry of entries) {
-      let dest: string | null;
+    for (const entry of filterSkillEntries(entries, params.config)) {
+      let dest: string | null = null;
       try {
         dest = resolveSyncedSkillDestinationPath({
           targetSkillsDir,
