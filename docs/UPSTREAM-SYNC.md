@@ -257,6 +257,27 @@ systemctl --user status openclaw-gateway.service
 ss -ltnp | grep 18789
 ```
 
+### Check for duplicate plugin warnings
+
+After deploy, verify no bundled extensions were accidentally duplicated
+into the user config extensions dir (`~/.openclaw/extensions/`):
+
+```bash
+openclaw --version 2>&1 | grep -i 'duplicate plugin'
+# Expected: no output. If a duplicate is reported, remove the copy from
+# ~/.openclaw/extensions/<name> — the bundled version in
+# $(npm root -g)/openclaw/extensions/ is sufficient.
+
+# Also verify nothing lingering in the config extensions dir:
+ls ~/.openclaw/extensions/
+# Should only contain user-authored (non-bundled) extensions, if any.
+```
+
+The plugin discovery system scans both `plugins.load.paths` (e.g.
+`~/.openclaw/extensions/`) and the bundled extensions dir. If the same
+extension exists in both locations, the realpath dedup check fails (different
+paths) and a "duplicate plugin id" warning is emitted.
+
 The gateway takes ~35 seconds to fully initialize (signal-cli, tailscale,
 memory-lancedb, webchat). Check the logs if the port isn't listening after
 60 seconds:
@@ -344,6 +365,7 @@ Update the `pnpm vitest run` paths if our fork's changed files evolve.
 | Web UI shows "Control UI assets not found"            | `pnpm ui:build && sudo cp -r dist/control-ui "$(npm root -g)/openclaw/dist/control-ui"`. The UI is **not** part of `pnpm build`; every `sudo npm i -g . --install-links` wipes `dist/` and you must rebuild+copy the UI separately   |
 | A2UI bundle fails (`lit` not found)                   | `cd vendor/a2ui/renderers/lit && npm install --no-package-lock`                                                                                                                                                                      |
 | A2UI bundle fails (`rolldown` not found)              | `pnpm add -wD rolldown@1.0.0-rc.5`, rebuild, then `pnpm remove -wD rolldown`                                                                                                                                                         |
+| "duplicate plugin id detected" warning on startup     | A bundled extension was manually copied into `~/.openclaw/extensions/`. Remove the copy — bundled extensions are discovered automatically from `$(npm root -g)/openclaw/extensions/`                                                 |
 
 ---
 
