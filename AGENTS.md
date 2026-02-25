@@ -157,6 +157,7 @@
 ## Troubleshooting
 
 - Rebrand/migration issues or legacy config/service warnings: run `openclaw doctor` (see `docs/gateway/doctor.md`).
+- **Duplicate plugin ID warning:** never manually copy bundled extensions (from `extensions/`) into `~/.openclaw/extensions/`. The plugin discovery system scans both the bundled dir (`$(npm root -g)/openclaw/extensions/`) and config load paths (`plugins.load.paths`). Placing the same extension in both locations produces "duplicate plugin id detected" warnings because they resolve to different filesystem paths and cannot be deduped. Bundled extensions are already discovered automatically; `~/.openclaw/extensions/` is only for user-authored or non-bundled plugins.
 
 ## Agent-Specific Notes
 
