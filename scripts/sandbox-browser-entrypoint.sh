@@ -53,13 +53,32 @@ CHROME_ARGS+=(
   "--user-data-dir=${HOME}/.chrome"
   "--no-first-run"
   "--no-default-browser-check"
+  "--window-size=${WINDOW_SIZE}"
+  # Rendering consistency: deterministic fonts + color for reliable screenshots.
+  "--font-render-hinting=none"
+  "--force-color-profile=srgb"
+  "--hide-scrollbars"
+  # Resource & telemetry: silence network calls and background work.
   "--disable-dev-shm-usage"
   "--disable-background-networking"
-  "--disable-features=TranslateUI"
+  "--disable-background-timer-throttling"
+  "--disable-backgrounding-occluded-windows"
+  "--disable-renderer-backgrounding"
+  "--disable-client-side-phishing-detection"
+  "--disable-default-apps"
+  "--disable-domain-reliability"
+  "--disable-sync"
   "--disable-breakpad"
   "--disable-crash-reporter"
   "--metrics-recording-only"
-  "--window-size=${WINDOW_SIZE}"
+  "--mute-audio"
+  "--no-pings"
+  "--password-store=basic"
+  # Agent-friendly: no blocking dialogs, allow popups, permit HTTP navigation.
+  "--disable-popup-blocking"
+  "--disable-prompt-on-repost"
+  "--disable-ipc-flooding-protection"
+  "--disable-features=TranslateUI,HttpsFirstBalancedModeAutoEnable"
 )
 
 if [[ "${ALLOW_NO_SANDBOX}" == "1" ]]; then
