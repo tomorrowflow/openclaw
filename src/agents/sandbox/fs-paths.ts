@@ -3,6 +3,8 @@ import { resolveSandboxInputPath, resolveSandboxPath } from "../sandbox-paths.js
 import { splitSandboxBindSpec } from "./bind-spec.js";
 import {
   SANDBOX_AGENT_WORKSPACE_MOUNT,
+  SANDBOX_MEDIA_HOST_DIR,
+  SANDBOX_MEDIA_MOUNT,
   SANDBOX_SHARED_HOST_DIR,
   SANDBOX_SHARED_MOUNT,
 } from "./constants.js";
@@ -88,6 +90,14 @@ export function buildSandboxFsMounts(sandbox: SandboxContext): SandboxFsMount[] 
     hostRoot: path.resolve(SANDBOX_SHARED_HOST_DIR),
     containerRoot: normalizeContainerPath(SANDBOX_SHARED_MOUNT),
     writable: true,
+    source: "bind",
+  });
+
+  // Hardcoded media directory mount (STATE_DIR/media → /workspace/media, read-only).
+  mounts.push({
+    hostRoot: path.resolve(SANDBOX_MEDIA_HOST_DIR),
+    containerRoot: normalizeContainerPath(SANDBOX_MEDIA_MOUNT),
+    writable: false,
     source: "bind",
   });
 

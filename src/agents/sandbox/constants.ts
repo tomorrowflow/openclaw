@@ -53,6 +53,11 @@ export const SANDBOX_AGENT_WORKSPACE_MOUNT = "/agent";
 export const SANDBOX_SHARED_HOST_DIR = path.join(STATE_DIR, "shared");
 export const SANDBOX_SHARED_MOUNT = "/workspace/shared";
 
+/** Hardcoded media directory: STATE_DIR/media mounted read-only at /media in sandbox containers.
+ *  Covers inbound (Signal/messaging attachments), browser screenshots, and outbound media. */
+export const SANDBOX_MEDIA_HOST_DIR = path.join(STATE_DIR, "media");
+export const SANDBOX_MEDIA_MOUNT = "/media";
+
 export const SANDBOX_STATE_DIR = path.join(STATE_DIR, "sandbox");
 export const SANDBOX_REGISTRY_PATH = path.join(SANDBOX_STATE_DIR, "containers.json");
 export const SANDBOX_BROWSER_REGISTRY_PATH = path.join(SANDBOX_STATE_DIR, "browsers.json");
