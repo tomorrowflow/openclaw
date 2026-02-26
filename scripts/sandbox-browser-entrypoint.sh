@@ -35,6 +35,9 @@ RENDERER_PROCESS_LIMIT="${OPENCLAW_BROWSER_RENDERER_PROCESS_LIMIT:-2}"
 
 mkdir -p "${HOME}" "${HOME}/.chrome" "${XDG_CONFIG_HOME}" "${XDG_CACHE_HOME}"
 
+# Recreate /tmp/.X11-unix when tmpfs wipes the image-layer copy.
+mkdir -p /tmp/.X11-unix 2>/dev/null || true
+
 Xvfb :1 -screen 0 1280x800x24 -ac -nolisten tcp &
 
 if [[ "${HEADLESS}" == "1" ]]; then
