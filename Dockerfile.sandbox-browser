@@ -8,7 +8,9 @@ RUN apt-get update \
     ca-certificates \
     chromium \
     curl \
+    fonts-freefont-ttf \
     fonts-liberation \
+    fonts-noto-cjk \
     fonts-noto-color-emoji \
     git \
     jq \
