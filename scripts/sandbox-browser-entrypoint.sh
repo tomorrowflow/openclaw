@@ -15,12 +15,18 @@ HEADLESS="${OPENCLAW_BROWSER_HEADLESS:-${CLAWDBOT_BROWSER_HEADLESS:-0}}"
 ALLOW_NO_SANDBOX="${OPENCLAW_BROWSER_NO_SANDBOX:-${CLAWDBOT_BROWSER_NO_SANDBOX:-0}}"
 NOVNC_PASSWORD="${OPENCLAW_BROWSER_NOVNC_PASSWORD:-${CLAWDBOT_BROWSER_NOVNC_PASSWORD:-}}"
 
+SCREEN_RES="${OPENCLAW_BROWSER_SCREEN_RESOLUTION:-1920x1080x24}"
+
 mkdir -p "${HOME}" "${HOME}/.chrome" "${XDG_CONFIG_HOME}" "${XDG_CACHE_HOME}"
+
+# Remove stale Chrome singleton lock files left over from unclean container shutdown.
+# Without this, Chromium refuses to start: "The profile appears to be in use by another process".
+rm -f "${HOME}/.chrome/SingletonLock" "${HOME}/.chrome/SingletonCookie" "${HOME}/.chrome/SingletonSocket" 2>/dev/null || true
 
 # Recreate /tmp/.X11-unix when tmpfs wipes the image-layer copy.
 mkdir -p /tmp/.X11-unix 2>/dev/null || true
 
-Xvfb :1 -screen 0 1280x800x24 -ac -nolisten tcp &
+Xvfb :1 -screen 0 "${SCREEN_RES}" -ac -nolisten tcp &
 
 if [[ "${HEADLESS}" == "1" ]]; then
   CHROME_ARGS=(
@@ -37,6 +43,10 @@ else
   CHROME_CDP_PORT="$((CDP_PORT + 1))"
 fi
 
+# Extract width×height from the resolution string (e.g. "1920x1080x24" → "1920,1080").
+WINDOW_SIZE="${SCREEN_RES%x[0-9]*}"
+WINDOW_SIZE="${WINDOW_SIZE/x/,}"
+
 CHROME_ARGS+=(
   "--remote-debugging-address=127.0.0.1"
   "--remote-debugging-port=${CHROME_CDP_PORT}"
@@ -49,6 +59,7 @@ CHROME_ARGS+=(
   "--disable-breakpad"
   "--disable-crash-reporter"
   "--metrics-recording-only"
+  "--window-size=${WINDOW_SIZE}"
 )
 
 if [[ "${ALLOW_NO_SANDBOX}" == "1" ]]; then
