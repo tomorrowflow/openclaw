@@ -248,6 +248,16 @@ ls "$(npm root -g)/openclaw/dist/control-ui/index.html"
 # Verify installed version
 openclaw --version
 
+# Update the systemd unit's OPENCLAW_SERVICE_VERSION to match the new version.
+# The gateway's resolveRuntimeServiceVersion() reads this env var at runtime —
+# if it's stale, the web UI will show the old version even after a restart.
+NEW_VER=$(node -p "require('$(npm root -g)/openclaw/package.json').version")
+sed -i "s/OPENCLAW_SERVICE_VERSION=.*/OPENCLAW_SERVICE_VERSION=$NEW_VER/" \
+  ~/.config/systemd/user/openclaw-gateway.service
+sed -i "s/Description=OpenClaw Gateway (v.*)/Description=OpenClaw Gateway (v$NEW_VER)/" \
+  ~/.config/systemd/user/openclaw-gateway.service
+systemctl --user daemon-reload
+
 # Restart the gateway
 systemctl --user start openclaw-gateway.service
 
@@ -327,6 +337,10 @@ git fetch upstream \
   && sudo cp -r dist/control-ui "$(npm root -g)/openclaw/dist/control-ui" \
   && ls -l "$(npm root -g)/openclaw/dist/reply-"*.js \
   && ls "$(npm root -g)/openclaw/dist/control-ui/index.html" \
+  && NEW_VER=$(node -p "require('$(npm root -g)/openclaw/package.json').version") \
+  && sed -i "s/OPENCLAW_SERVICE_VERSION=.*/OPENCLAW_SERVICE_VERSION=$NEW_VER/" ~/.config/systemd/user/openclaw-gateway.service \
+  && sed -i "s/Description=OpenClaw Gateway (v.*)/Description=OpenClaw Gateway (v$NEW_VER)/" ~/.config/systemd/user/openclaw-gateway.service \
+  && systemctl --user daemon-reload \
   && systemctl --user start openclaw-gateway.service \
   && sleep 35 \
   && ss -ltnp | grep 18789
@@ -366,6 +380,7 @@ Update the `pnpm vitest run` paths if our fork's changed files evolve.
 | A2UI bundle fails (`lit` not found)                   | `cd vendor/a2ui/renderers/lit && npm install --no-package-lock`                                                                                                                                                                      |
 | A2UI bundle fails (`rolldown` not found)              | `pnpm add -wD rolldown@1.0.0-rc.5`, rebuild, then `pnpm remove -wD rolldown`                                                                                                                                                         |
 | "duplicate plugin id detected" warning on startup     | A bundled extension was manually copied into `~/.openclaw/extensions/`. Remove the copy — bundled extensions are discovered automatically from `$(npm root -g)/openclaw/extensions/`                                                 |
+| Web UI shows old version after deploy                 | The systemd unit has a stale `OPENCLAW_SERVICE_VERSION` env var. Update it with `sed` and `systemctl --user daemon-reload` (see step 8). The gateway reads this env var at runtime via `resolveRuntimeServiceVersion()`              |
 
 ---
 
