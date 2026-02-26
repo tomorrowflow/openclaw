@@ -162,6 +162,9 @@ function buildSandboxBrowserResolvedConfig(params: {
       maxTabsPerSession: 8,
       sweepMinutes: 5,
     },
+    // Sandbox browser runs in a Docker container with its own network isolation;
+    // allow private-network navigation so agents can reach host services (e.g. localhost apps).
+    ssrfPolicy: { dangerouslyAllowPrivateNetwork: true },
     profiles: {
       [DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME]: {
         cdpPort: params.cdpPort,
