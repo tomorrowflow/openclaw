@@ -13,6 +13,8 @@ import type { SandboxFsBridgeContext } from "./backend-handle.types.js";
 import { splitSandboxBindSpec } from "./bind-spec.js";
 import {
   SANDBOX_AGENT_WORKSPACE_MOUNT,
+  SANDBOX_MEDIA_HOST_DIR,
+  SANDBOX_MEDIA_MOUNT,
   SANDBOX_SHARED_HOST_DIR,
   SANDBOX_SHARED_MOUNT,
 } from "./constants.js";
@@ -114,6 +116,14 @@ export function buildSandboxFsMounts(sandbox: SandboxFsBridgeContext): SandboxFs
       source: "protectedSkill",
     });
   }
+
+  // Hardcoded media directory mount (STATE_DIR/media → /workspace/media, read-only).
+  mounts.push({
+    hostRoot: path.resolve(SANDBOX_MEDIA_HOST_DIR),
+    containerRoot: normalizeContainerPath(SANDBOX_MEDIA_MOUNT),
+    writable: false,
+    source: "bind",
+  });
 
   for (const bind of sandbox.docker.binds ?? []) {
     const parsed = parseSandboxBindMount(bind);

@@ -175,6 +175,8 @@ import {
 } from "./config-hash.js";
 import {
   DEFAULT_SANDBOX_IMAGE,
+  SANDBOX_MEDIA_HOST_DIR,
+  SANDBOX_MEDIA_MOUNT,
   SANDBOX_SHARED_HOST_DIR,
   SANDBOX_SHARED_MOUNT,
 } from "./constants.js";
@@ -570,6 +572,9 @@ async function createSandboxContainer(params: {
   // Persistent shared directory from STATE_DIR (trusted hardcoded mount, not user-configured).
   mkdirSync(SANDBOX_SHARED_HOST_DIR, { recursive: true });
   args.push("-v", `${SANDBOX_SHARED_HOST_DIR}:${SANDBOX_SHARED_MOUNT}`);
+  // Media directory (inbound attachments, browser screenshots, outbound) — read-only.
+  mkdirSync(SANDBOX_MEDIA_HOST_DIR, { recursive: true });
+  args.push("-v", `${SANDBOX_MEDIA_HOST_DIR}:${SANDBOX_MEDIA_MOUNT}:ro`);
   appendCustomBinds(args, cfg);
   appendReadOnlyWorkspaceSkillMountArgs({
     args,
