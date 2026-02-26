@@ -23,7 +23,9 @@ RUN apt-get update \
 COPY scripts/sandbox-browser-entrypoint.sh /usr/local/bin/openclaw-sandbox-browser
 RUN chmod +x /usr/local/bin/openclaw-sandbox-browser
 
-RUN useradd --create-home --shell /bin/bash sandbox
+RUN useradd --create-home --shell /bin/bash sandbox \
+  && mkdir -p /tmp/.X11-unix \
+  && chmod 1777 /tmp/.X11-unix
 USER sandbox
 WORKDIR /home/sandbox
 
