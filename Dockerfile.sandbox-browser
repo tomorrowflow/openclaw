@@ -13,7 +13,9 @@ RUN --mount=type=cache,id=openclaw-sandbox-bookworm-apt-cache,target=/var/cache/
     ca-certificates \
     chromium \
     curl \
+    fonts-freefont-ttf \
     fonts-liberation \
+    fonts-noto-cjk \
     fonts-noto-color-emoji \
     git \
     jq \
