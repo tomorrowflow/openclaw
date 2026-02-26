@@ -4,6 +4,8 @@
  * Starts or reuses Chrome/noVNC containers, exposes authenticated CDP/observer URLs, and tracks browser registry state.
  */
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
@@ -21,7 +23,12 @@ import {
   DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME,
   resolveProfile,
   type ResolvedBrowserConfig,
-} from "../../plugin-sdk/browser-profiles.js";
+} from "../../plugin-sdk/browser-config.js";
+import {
+  startBrowserBridgeServer,
+  stopBrowserBridgeServer,
+} from "../../plugin-sdk/browser-runtime.js";
+import { STATE_DIR } from "../../config/paths.js";
 import { defaultRuntime } from "../../runtime.js";
 import { BROWSER_BRIDGES } from "./browser-bridges.js";
 import { computeSandboxBrowserConfigHash } from "./config-hash.js";
@@ -64,6 +71,9 @@ import {
 } from "./workspace-mounts.js";
 
 const HOT_BROWSER_WINDOW_MS = 5 * 60 * 1000;
+// Hardcoded browser home from STATE_DIR (trusted, bypass bind-source-root validation).
+const SANDBOX_BROWSER_HOME_DIR = path.join(STATE_DIR, "browser-home");
+const SANDBOX_BROWSER_HOME_MOUNT = "/tmp/openclaw-home";
 const CDP_SOURCE_RANGE_ENV_KEY = "OPENCLAW_BROWSER_CDP_SOURCE_RANGE";
 const CDP_AUTH_TOKEN_ENV_KEY = "OPENCLAW_BROWSER_CDP_AUTH_TOKEN";
 const SANDBOX_BROWSER_IMAGE_CONTRACT_LABEL = "org.openclaw.sandbox-browser.contract";
@@ -362,6 +372,9 @@ export async function ensureSandboxBrowser(params: {
       readOnlyWorkspaceSkillMounts,
       includeReadOnlyWorkspaceSkillMounts: false,
     });
+    // Persistent browser home from STATE_DIR (trusted hardcoded mount, not user-configured).
+    fs.mkdirSync(SANDBOX_BROWSER_HOME_DIR, { recursive: true });
+    args.push("-v", `${SANDBOX_BROWSER_HOME_DIR}:${SANDBOX_BROWSER_HOME_MOUNT}`);
     if (browserDockerCfg.binds?.length) {
       for (const bind of browserDockerCfg.binds) {
         args.push("-v", bind);
@@ -375,6 +388,9 @@ export async function ensureSandboxBrowser(params: {
     if (noVncEnabled) {
       args.push("-p", `127.0.0.1::${params.cfg.browser.noVncPort}`);
     }
+    // Chromium's internal sandbox requires unprivileged user namespaces which may be
+    // restricted by AppArmor on modern kernels. Docker provides the isolation layer.
+    args.push("-e", "OPENCLAW_BROWSER_NO_SANDBOX=1");
     args.push("-e", `OPENCLAW_BROWSER_HEADLESS=${params.cfg.browser.headless ? "1" : "0"}`);
     args.push("-e", `OPENCLAW_BROWSER_ENABLE_NOVNC=${params.cfg.browser.enableNoVnc ? "1" : "0"}`);
     args.push("-e", `OPENCLAW_BROWSER_CDP_PORT=${params.cfg.browser.cdpPort}`);

@@ -11,7 +11,11 @@ import { isPathInside } from "../../infra/path-guards.js";
 import { resolveSandboxInputPath, resolveSandboxPath } from "../sandbox-paths.js";
 import type { SandboxFsBridgeContext } from "./backend-handle.types.js";
 import { splitSandboxBindSpec } from "./bind-spec.js";
-import { SANDBOX_AGENT_WORKSPACE_MOUNT } from "./constants.js";
+import {
+  SANDBOX_AGENT_WORKSPACE_MOUNT,
+  SANDBOX_SHARED_HOST_DIR,
+  SANDBOX_SHARED_MOUNT,
+} from "./constants.js";
 import { resolveSandboxHostPathViaExistingAncestor } from "./host-paths.js";
 import {
   isPathInsideContainerRoot,
@@ -87,6 +91,14 @@ export function buildSandboxFsMounts(sandbox: SandboxFsBridgeContext): SandboxFs
       source: "agent",
     });
   }
+
+  // Hardcoded shared directory mount (STATE_DIR/shared → /workspace/shared).
+  mounts.push({
+    hostRoot: path.resolve(SANDBOX_SHARED_HOST_DIR),
+    containerRoot: normalizeContainerPath(SANDBOX_SHARED_MOUNT),
+    writable: true,
+    source: "bind",
+  });
 
   for (const mount of resolveReadOnlyWorkspaceSkillMounts({
     workspaceDir: sandbox.workspaceDir,

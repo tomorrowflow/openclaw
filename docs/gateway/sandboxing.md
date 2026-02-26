@@ -373,6 +373,53 @@ Example (read-only source + an extra data directory):
 
 </Warning>
 
+## Secret mounts
+
+`agents.defaults.sandbox.docker.secretMounts` injects host credential files into the
+sandbox as both environment variables and read-only file mounts at `/run/secrets/<name>`.
+
+This bypasses the environment variable sanitizer — use it for API keys that tools like
+`claude`, `codex`, or `himalaya` need inside the sandbox.
+
+Global and per-agent secret mounts are merged (agent overrides per key).
+Under `scope: "shared"`, per-agent secret mounts are ignored.
+
+Example:
+
+```json5
+{
+  agents: {
+    defaults: {
+      sandbox: {
+        docker: {
+          secretMounts: {
+            ANTHROPIC_API_KEY: "/home/user/.openclaw/secrets/anthropic-api-key",
+            OPENAI_API_KEY: "/home/user/.openclaw/secrets/openai-api-key",
+          },
+        },
+      },
+    },
+  },
+}
+```
+
+Create the secret files on the host:
+
+```bash
+mkdir -p ~/.openclaw/secrets
+echo "sk-ant-..." > ~/.openclaw/secrets/anthropic-api-key
+chmod 600 ~/.openclaw/secrets/anthropic-api-key
+```
+
+Security notes:
+
+- Source files must be absolute paths; system directories (`/etc`, `/proc`, `/sys`, `/dev`)
+  are blocked.
+- Files are mounted read-only. The container cannot modify them.
+- Secret values are injected as container env vars (visible in `docker inspect`).
+- Changing a secret mount path triggers container recreation. Changing file _contents_
+  does not (restart the container to pick up rotated secrets).
+
 ## Images and setup
 
 Default Docker image: `openclaw-sandbox:bookworm-slim`

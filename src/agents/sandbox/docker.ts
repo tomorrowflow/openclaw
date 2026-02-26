@@ -5,6 +5,7 @@
  */
 import { spawn } from "node:child_process";
 import { createAbortError } from "../../infra/abort-signal.js";
+import { mkdirSync, readFileSync } from "node:fs";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
   materializeWindowsSpawnProgram,
@@ -134,7 +135,7 @@ export function execDockerRaw(
       const stdout = Buffer.concat(stdoutChunks);
       const stderr = Buffer.concat(stderrChunks);
       if (aborted || signal?.aborted) {
-      reject(createAbortError("Aborted"));
+        reject(createAbortError("Aborted"));
         return;
       }
       const exitCode = code ?? 0;
@@ -172,7 +173,11 @@ import {
   computeSandboxConfigHash,
   SANDBOX_DOCKER_EXPLICIT_ENV_POLICY_EPOCH,
 } from "./config-hash.js";
-import { DEFAULT_SANDBOX_IMAGE } from "./constants.js";
+import {
+  DEFAULT_SANDBOX_IMAGE,
+  SANDBOX_SHARED_HOST_DIR,
+  SANDBOX_SHARED_MOUNT,
+} from "./constants.js";
 import { readRegistryEntry, updateRegistry } from "./registry.js";
 import { resolveSandboxAgentId, resolveSandboxScopeKey, slugifySessionKey } from "./shared.js";
 import type { SandboxConfig, SandboxDockerConfig, SandboxWorkspaceAccess } from "./types.js";
@@ -459,6 +464,13 @@ export function buildSandboxCreateArgs(params: {
   for (const [key, value] of Object.entries(markOpenClawExecEnv(envSanitization.allowed))) {
     args.push("--env", `${key}=${value}`);
   }
+  // Secret mounts: read file contents and inject as env vars (bypasses env sanitizer).
+  if (params.cfg.secretMounts) {
+    for (const [name, filePath] of Object.entries(params.cfg.secretMounts)) {
+      const content = readFileSync(filePath, "utf8").trim();
+      args.push("--env", `${name}=${content}`);
+    }
+  }
   for (const cap of params.cfg.capDrop) {
     args.push("--cap-drop", cap);
   }
@@ -555,11 +567,20 @@ async function createSandboxContainer(params: {
     readOnlyWorkspaceSkillMounts: params.readOnlyWorkspaceSkillMounts,
     includeReadOnlyWorkspaceSkillMounts: false,
   });
+  // Persistent shared directory from STATE_DIR (trusted hardcoded mount, not user-configured).
+  mkdirSync(SANDBOX_SHARED_HOST_DIR, { recursive: true });
+  args.push("-v", `${SANDBOX_SHARED_HOST_DIR}:${SANDBOX_SHARED_MOUNT}`);
   appendCustomBinds(args, cfg);
   appendReadOnlyWorkspaceSkillMountArgs({
     args,
     readOnlyWorkspaceSkillMounts: params.readOnlyWorkspaceSkillMounts,
   });
+  // Secret file mounts at /run/secrets/<name> (read-only).
+  if (cfg.secretMounts) {
+    for (const [name, filePath] of Object.entries(cfg.secretMounts)) {
+      args.push("-v", `${filePath}:/run/secrets/${name}:ro`);
+    }
+  }
   args.push(cfg.image, "sleep", "infinity");
 
   await execDocker(args);
