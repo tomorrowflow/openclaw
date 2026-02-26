@@ -33,11 +33,12 @@ describe("timeout-policy", () => {
     expect(timeout).toBe(AGENT_TURN_SAFETY_TIMEOUT_MS);
   });
 
-  it("disables timeout when timeoutSeconds <= 0", () => {
+  it("falls back to safety timeout when timeoutSeconds <= 0", () => {
     const timeout = resolveCronJobTimeoutMs(
       makeJob({ kind: "agentTurn", message: "hi", timeoutSeconds: 0 }),
     );
-    expect(timeout).toBeUndefined();
+    // Fork hardening: never allow timeout to be disabled — <=0 falls back to safety timeout.
+    expect(timeout).toBe(AGENT_TURN_SAFETY_TIMEOUT_MS);
   });
 
   it("applies explicit timeoutSeconds when positive", () => {
