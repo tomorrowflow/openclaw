@@ -159,6 +159,77 @@ describe("sandbox docker config", () => {
   });
 });
 
+describe("sandbox docker secretMounts config", () => {
+  it("accepts valid secretMounts config", () => {
+    const res = validateConfigObject({
+      agents: {
+        defaults: {
+          sandbox: {
+            docker: {
+              secretMounts: {
+                ANTHROPIC_API_KEY: "/home/user/.openclaw/secrets/anthropic-api-key",
+                OPENAI_API_KEY: "/home/user/.openclaw/secrets/openai-api-key",
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.config.agents?.defaults?.sandbox?.docker?.secretMounts).toEqual({
+        ANTHROPIC_API_KEY: "/home/user/.openclaw/secrets/anthropic-api-key",
+        OPENAI_API_KEY: "/home/user/.openclaw/secrets/openai-api-key",
+      });
+    }
+  });
+
+  it("rejects non-string values in secretMounts", () => {
+    const res = validateConfigObject({
+      agents: {
+        defaults: {
+          sandbox: {
+            docker: {
+              secretMounts: { MY_KEY: 123 },
+            },
+          },
+        },
+      },
+    });
+    expect(res.ok).toBe(false);
+  });
+
+  it("rejects non-absolute paths in secretMounts via superRefine", () => {
+    const res = validateConfigObject({
+      agents: {
+        defaults: {
+          sandbox: {
+            docker: {
+              secretMounts: { MY_KEY: "relative/path" },
+            },
+          },
+        },
+      },
+    });
+    expect(res.ok).toBe(false);
+  });
+
+  it("rejects invalid env var names in secretMounts via superRefine", () => {
+    const res = validateConfigObject({
+      agents: {
+        defaults: {
+          sandbox: {
+            docker: {
+              secretMounts: { "123BAD": "/home/user/secret" },
+            },
+          },
+        },
+      },
+    });
+    expect(res.ok).toBe(false);
+  });
+});
+
 describe("sandbox browser binds config", () => {
   it("accepts binds array in sandbox.browser config", () => {
     const res = validateConfigObject({

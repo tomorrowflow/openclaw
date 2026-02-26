@@ -42,6 +42,9 @@ export type SandboxDockerSettings = {
   extraHosts?: string[];
   /** Additional bind mounts (host:container:mode format, e.g. ["/host/path:/container/path:rw"]). */
   binds?: string[];
+  /** Secret file mounts: maps env-var name → host file path. Files are mounted read-only
+   *  at /run/secrets/<name> and injected as env vars (bypassing the env sanitizer). */
+  secretMounts?: Record<string, string>;
   /**
    * Dangerous override: allow bind mounts that target reserved container paths
    * like /workspace or /agent.

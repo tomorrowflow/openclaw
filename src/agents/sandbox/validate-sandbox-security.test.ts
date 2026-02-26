@@ -9,6 +9,7 @@ import {
   validateSeccompProfile,
   validateApparmorProfile,
   validateSandboxSecurity,
+  validateSecretMounts,
 } from "./validate-sandbox-security.js";
 
 function expectBindMountsToThrow(binds: string[], expected: RegExp, label: string) {
@@ -280,6 +281,65 @@ describe("profile hardening", () => {
   });
 });
 
+describe("validateSecretMounts", () => {
+  it("accepts valid secret mount (absolute path, not blocked)", () => {
+    expect(() =>
+      validateSecretMounts({
+        ANTHROPIC_API_KEY: "/home/user/.openclaw/secrets/anthropic-api-key",
+        OPENAI_API_KEY: "/home/user/.openclaw/secrets/openai-api-key",
+      }),
+    ).not.toThrow();
+  });
+
+  it("accepts undefined or empty secret mounts", () => {
+    expect(() => validateSecretMounts(undefined)).not.toThrow();
+    expect(() => validateSecretMounts({})).not.toThrow();
+  });
+
+  it("rejects non-absolute source path", () => {
+    expect(() =>
+      validateSecretMounts({
+        MY_KEY: "relative/path/to/secret",
+      }),
+    ).toThrow(/non-absolute source path/);
+  });
+
+  it("rejects blocked system paths", () => {
+    const cases = [
+      { key: "A", path: "/etc/shadow" },
+      { key: "B", path: "/proc/1/environ" },
+      { key: "C", path: "/sys/fs/cgroup" },
+      { key: "D", path: "/dev/null" },
+      { key: "E", path: "/run/docker.sock" },
+    ] as const;
+    for (const { key, path } of cases) {
+      expect(() => validateSecretMounts({ [key]: path }), `${key}=${path}`).toThrow(/blocked path/);
+    }
+  });
+
+  it("rejects invalid env var key names", () => {
+    const cases = ["123BAD", "MY-KEY", "my key", "", "A.B"] as const;
+    for (const key of cases) {
+      expect(() => validateSecretMounts({ [key]: "/home/user/secret" }), key).toThrow(
+        /not a valid environment variable name/,
+      );
+    }
+  });
+
+  it("blocks symlink escapes into blocked directories", () => {
+    const dir = mkdtempSync(join(tmpdir(), "openclaw-sbx-sec-"));
+    const link = join(dir, "etc-link");
+    symlinkSync("/etc", link);
+    const secretPath = join(link, "my-secret");
+
+    if (process.platform === "win32") {
+      return;
+    }
+
+    expect(() => validateSecretMounts({ MY_SECRET: secretPath })).toThrow(/blocked path/);
+  });
+});
+
 describe("validateSandboxSecurity", () => {
   it("passes with safe config", () => {
     expect(() =>
@@ -290,5 +350,24 @@ describe("validateSandboxSecurity", () => {
         apparmorProfile: "openclaw-sandbox",
       }),
     ).not.toThrow();
+  });
+
+  it("passes with safe config including secret mounts", () => {
+    expect(() =>
+      validateSandboxSecurity({
+        binds: ["/home/user/src:/src:rw"],
+        secretMounts: { MY_KEY: "/home/user/.secrets/key" },
+        network: "none",
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects invalid secret mounts via validateSandboxSecurity", () => {
+    expect(() =>
+      validateSandboxSecurity({
+        secretMounts: { MY_KEY: "/etc/shadow" },
+        network: "none",
+      }),
+    ).toThrow(/blocked path/);
   });
 });

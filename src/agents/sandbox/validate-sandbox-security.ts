@@ -325,9 +325,68 @@ export function validateApparmorProfile(profile: string | undefined): void {
   }
 }
 
+/**
+ * Validate secret mounts — checks that each source path is absolute and not in a blocked
+ * system directory. Does NOT enforce allowed-source-roots (secrets live outside workspace).
+ */
+export function validateSecretMounts(secretMounts: Record<string, string> | undefined): void {
+  if (!secretMounts || Object.keys(secretMounts).length === 0) {
+    return;
+  }
+
+  const envVarPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+  for (const [key, filePath] of Object.entries(secretMounts)) {
+    if (!envVarPattern.test(key)) {
+      throw new Error(
+        `Sandbox security: secret mount key "${key}" is not a valid environment variable name. ` +
+          "Keys must match /^[A-Za-z_][A-Za-z0-9_]*$/.",
+      );
+    }
+
+    if (!filePath.startsWith("/")) {
+      throw new Error(
+        `Sandbox security: secret mount "${key}" uses a non-absolute source path "${filePath}". ` +
+          "Only absolute POSIX paths are supported for secret mounts.",
+      );
+    }
+
+    const normalized = normalizeHostPath(filePath);
+
+    const blockedReason = getBlockedReasonForSourcePath(normalized);
+    if (blockedReason) {
+      const blockedPath =
+        blockedReason.kind === "covers" || blockedReason.kind === "targets"
+          ? blockedReason.blockedPath
+          : normalized;
+      const verb = blockedReason.kind === "covers" ? "covers" : "targets";
+      throw new Error(
+        `Sandbox security: secret mount "${key}" source "${filePath}" ${verb} blocked path "${blockedPath}". ` +
+          "Mounting system directories into sandbox containers is not allowed.",
+      );
+    }
+
+    // Symlink escape hardening: resolve through existing ancestors and re-check.
+    const canonical = resolveSandboxHostPathViaExistingAncestor(normalized);
+    const canonicalBlocked = getBlockedReasonForSourcePath(canonical);
+    if (canonicalBlocked) {
+      const canonicalBlockedPath =
+        canonicalBlocked.kind === "covers" || canonicalBlocked.kind === "targets"
+          ? canonicalBlocked.blockedPath
+          : canonical;
+      const verb = canonicalBlocked.kind === "covers" ? "covers" : "targets";
+      throw new Error(
+        `Sandbox security: secret mount "${key}" source "${filePath}" resolves to "${canonical}" which ${verb} blocked path "${canonicalBlockedPath}". ` +
+          "Mounting system directories into sandbox containers is not allowed.",
+      );
+    }
+  }
+}
+
 export function validateSandboxSecurity(
   cfg: {
     binds?: string[];
+    secretMounts?: Record<string, string>;
     network?: string;
     seccompProfile?: string;
     apparmorProfile?: string;
@@ -335,6 +394,7 @@ export function validateSandboxSecurity(
   } & ValidateBindMountsOptions,
 ): void {
   validateBindMounts(cfg.binds, cfg);
+  validateSecretMounts(cfg.secretMounts);
   validateNetworkMode(cfg.network, {
     allowContainerNamespaceJoin: cfg.dangerouslyAllowContainerNamespaceJoin === true,
   });

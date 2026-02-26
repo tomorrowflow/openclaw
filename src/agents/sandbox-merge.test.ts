@@ -97,6 +97,53 @@ describe("sandbox config merges", () => {
     }
   });
 
+  it("merges sandbox docker secretMounts (agent wins per-key)", () => {
+    const resolved = resolveSandboxDockerConfig({
+      scope: "agent",
+      globalDocker: {
+        secretMounts: {
+          ANTHROPIC_API_KEY: "/home/user/.secrets/anthropic",
+          SHARED_KEY: "/home/user/.secrets/shared",
+        },
+      },
+      agentDocker: {
+        secretMounts: {
+          OPENAI_API_KEY: "/home/user/.secrets/openai",
+          SHARED_KEY: "/home/user/.secrets/shared-override",
+        },
+      },
+    });
+    expect(resolved.secretMounts).toEqual({
+      ANTHROPIC_API_KEY: "/home/user/.secrets/anthropic",
+      SHARED_KEY: "/home/user/.secrets/shared-override",
+      OPENAI_API_KEY: "/home/user/.secrets/openai",
+    });
+  });
+
+  it("returns undefined secretMounts when neither global nor agent has them", () => {
+    const resolved = resolveSandboxDockerConfig({
+      scope: "agent",
+      globalDocker: {},
+      agentDocker: {},
+    });
+    expect(resolved.secretMounts).toBeUndefined();
+  });
+
+  it("ignores agent secretMounts under shared scope", () => {
+    const resolved = resolveSandboxDockerConfig({
+      scope: "shared",
+      globalDocker: {
+        secretMounts: { GLOBAL_KEY: "/home/user/.secrets/global" },
+      },
+      agentDocker: {
+        secretMounts: { AGENT_KEY: "/home/user/.secrets/agent" },
+      },
+    });
+    expect(resolved.secretMounts).toEqual({
+      GLOBAL_KEY: "/home/user/.secrets/global",
+    });
+  });
+
   it("applies per-agent browser and prune overrides (ignored under shared scope)", () => {
     const browser = resolveSandboxBrowserConfig({
       scope: "agent",

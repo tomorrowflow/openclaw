@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { mkdirSync, readFileSync } from "node:fs";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { sanitizeEnvVars } from "./sanitize-env-vars.js";
 
@@ -109,7 +110,12 @@ export function execDockerRaw(
 import { formatCliCommand } from "../../cli/command-format.js";
 import { defaultRuntime } from "../../runtime.js";
 import { computeSandboxConfigHash } from "./config-hash.js";
-import { DEFAULT_SANDBOX_IMAGE, SANDBOX_AGENT_WORKSPACE_MOUNT } from "./constants.js";
+import {
+  DEFAULT_SANDBOX_IMAGE,
+  SANDBOX_AGENT_WORKSPACE_MOUNT,
+  SANDBOX_SHARED_HOST_DIR,
+  SANDBOX_SHARED_MOUNT,
+} from "./constants.js";
 import { readRegistry, updateRegistry } from "./registry.js";
 import { resolveSandboxAgentId, resolveSandboxScopeKey, slugifySessionKey } from "./shared.js";
 import type { SandboxConfig, SandboxDockerConfig, SandboxWorkspaceAccess } from "./types.js";
@@ -319,6 +325,13 @@ export function buildSandboxCreateArgs(params: {
   for (const [key, value] of Object.entries(envSanitization.allowed)) {
     args.push("--env", `${key}=${value}`);
   }
+  // Secret mounts: read file contents and inject as env vars (bypasses env sanitizer).
+  if (params.cfg.secretMounts) {
+    for (const [name, filePath] of Object.entries(params.cfg.secretMounts)) {
+      const content = readFileSync(filePath, "utf8").trim();
+      args.push("--env", `${name}=${content}`);
+    }
+  }
   for (const cap of params.cfg.capDrop) {
     args.push("--cap-drop", cap);
   }
@@ -407,7 +420,16 @@ async function createSandboxContainer(params: {
       `${params.agentWorkspaceDir}:${SANDBOX_AGENT_WORKSPACE_MOUNT}${agentMountSuffix}`,
     );
   }
+  // Persistent shared directory from STATE_DIR (trusted hardcoded mount, not user-configured).
+  mkdirSync(SANDBOX_SHARED_HOST_DIR, { recursive: true });
+  args.push("-v", `${SANDBOX_SHARED_HOST_DIR}:${SANDBOX_SHARED_MOUNT}`);
   appendCustomBinds(args, cfg);
+  // Secret file mounts at /run/secrets/<name> (read-only).
+  if (cfg.secretMounts) {
+    for (const [name, filePath] of Object.entries(cfg.secretMounts)) {
+      args.push("-v", `${filePath}:/run/secrets/${name}:ro`);
+    }
+  }
   args.push(cfg.image, "sleep", "infinity");
 
   await execDocker(args);

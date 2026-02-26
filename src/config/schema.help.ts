@@ -331,6 +331,10 @@ export const FIELD_HELP: Record<string, string> = {
   "gateway.auth.token":
     "Required by default for gateway access (unless using Tailscale Serve identity); required for non-loopback binds.",
   "gateway.auth.password": "Required for Tailscale funnel.",
+  "agents.defaults.sandbox.docker.secretMounts":
+    "Map of env-var-name → host-file-path. Each file is mounted read-only at /run/secrets/<name> and its content injected as an environment variable. Bypasses the env var sanitizer. Source files must use absolute paths and cannot reference system directories.",
+  "agents.list[].sandbox.docker.secretMounts":
+    "Per-agent override for sandbox secret mounts (shallow-merged with global; agent wins per-key).",
   "agents.defaults.sandbox.browser.network":
     "Docker network for sandbox browser containers (default: openclaw-sandbox-browser). Avoid bridge if you need stricter isolation.",
   "agents.list[].sandbox.browser.network": "Per-agent override for sandbox browser Docker network.",
