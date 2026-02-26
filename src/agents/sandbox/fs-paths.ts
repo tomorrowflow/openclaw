@@ -1,7 +1,11 @@
 import path from "node:path";
 import { resolveSandboxInputPath, resolveSandboxPath } from "../sandbox-paths.js";
 import { splitSandboxBindSpec } from "./bind-spec.js";
-import { SANDBOX_AGENT_WORKSPACE_MOUNT } from "./constants.js";
+import {
+  SANDBOX_AGENT_WORKSPACE_MOUNT,
+  SANDBOX_SHARED_HOST_DIR,
+  SANDBOX_SHARED_MOUNT,
+} from "./constants.js";
 import { resolveSandboxHostPathViaExistingAncestor } from "./host-paths.js";
 import { isPathInsideContainerRoot, normalizeContainerPath } from "./path-utils.js";
 import type { SandboxContext } from "./types.js";
@@ -78,6 +82,14 @@ export function buildSandboxFsMounts(sandbox: SandboxContext): SandboxFsMount[] 
       source: "agent",
     });
   }
+
+  // Hardcoded shared directory mount (STATE_DIR/shared → /workspace/shared).
+  mounts.push({
+    hostRoot: path.resolve(SANDBOX_SHARED_HOST_DIR),
+    containerRoot: normalizeContainerPath(SANDBOX_SHARED_MOUNT),
+    writable: true,
+    source: "bind",
+  });
 
   for (const bind of sandbox.docker.binds ?? []) {
     const parsed = parseSandboxBindMount(bind);
