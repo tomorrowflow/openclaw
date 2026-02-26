@@ -226,9 +226,19 @@ Stop the running gateway, install from the local repo globally, and restart.
 > install command below. Skipping this step is the most common cause of "fix is
 > in the code but gateway still uses the old behavior".
 
+> **Cross-user systemctl:** The gateway runs as the `openclaw` user (UID 1001)
+> via a user-level systemd service. When deploying from a different user (e.g.
+> `frogger`), all `systemctl --user` and `journalctl --user` commands must be
+> prefixed with `sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw)`
+> so they target the correct user session. Without `XDG_RUNTIME_DIR`, systemd
+> cannot find the user bus and the commands fail with "Failed to connect to bus".
+
 ```bash
+# Helper alias (optional, for readability)
+OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) systemctl --user"
+
 # Stop the gateway
-systemctl --user stop openclaw-gateway.service
+$OC_SYSTEMCTL stop openclaw-gateway.service
 
 # Install from local repo globally — --install-links ensures a real copy
 # (without it, npm 7+ creates a symlink to the dev repo which breaks
@@ -253,17 +263,21 @@ openclaw --version
 # if it's stale, the web UI will show the old version even after a restart.
 NEW_VER=$(node -p "require('$(npm root -g)/openclaw/package.json').version")
 sed -i "s/OPENCLAW_SERVICE_VERSION=.*/OPENCLAW_SERVICE_VERSION=$NEW_VER/" \
-  ~/.config/systemd/user/openclaw-gateway.service
+  /home/openclaw/.config/systemd/user/openclaw-gateway.service
 sed -i "s/Description=OpenClaw Gateway (v.*)/Description=OpenClaw Gateway (v$NEW_VER)/" \
-  ~/.config/systemd/user/openclaw-gateway.service
-systemctl --user daemon-reload
+  /home/openclaw/.config/systemd/user/openclaw-gateway.service
+$OC_SYSTEMCTL daemon-reload
+
+# Remove stale sandbox containers so they pick up new mounts/env vars.
+# Skip this if the deploy only changes gateway logic (no sandbox changes).
+docker rm -f $(docker ps -a --filter "name=openclaw-sbx" --format "{{.Names}}" 2>/dev/null) 2>/dev/null || true
 
 # Restart the gateway
-systemctl --user start openclaw-gateway.service
+$OC_SYSTEMCTL start openclaw-gateway.service
 
 # Wait for startup and verify (~35s on 4-core/8GB)
 sleep 35
-systemctl --user status openclaw-gateway.service
+$OC_SYSTEMCTL status openclaw-gateway.service
 ss -ltnp | grep 18789
 ```
 
@@ -293,7 +307,8 @@ memory-lancedb, webchat). Check the logs if the port isn't listening after
 60 seconds:
 
 ```bash
-journalctl --user -u openclaw-gateway.service -n 30 --no-pager
+sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) \
+  journalctl --user -u openclaw-gateway.service -n 30 --no-pager
 ```
 
 ## 9. Verify final state
@@ -323,7 +338,8 @@ Resolve any conflicts with the newly rebased code.
 
 ```bash
 # Full sync in one go (abort on any failure)
-git fetch upstream \
+OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) systemctl --user" \
+  && git fetch upstream \
   && MERGE_BASE=$(git merge-base main upstream/main) \
   && git rebase --onto upstream/main "$MERGE_BASE" main \
   && pnpm install \
@@ -331,17 +347,18 @@ git fetch upstream \
   && pnpm check \
   && OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/ src/tui/ src/shared/text/ src/gateway/ src/markdown/ src/agents/pi-embedded-runner/ src/agents/pi-embedded-helpers/ src/auto-reply/ src/cli/ \
   && git push origin main --force-with-lease \
-  && systemctl --user stop openclaw-gateway.service \
+  && $OC_SYSTEMCTL stop openclaw-gateway.service \
   && sudo npm i -g . --install-links \
   && pnpm ui:build \
   && sudo cp -r dist/control-ui "$(npm root -g)/openclaw/dist/control-ui" \
   && ls -l "$(npm root -g)/openclaw/dist/reply-"*.js \
   && ls "$(npm root -g)/openclaw/dist/control-ui/index.html" \
   && NEW_VER=$(node -p "require('$(npm root -g)/openclaw/package.json').version") \
-  && sed -i "s/OPENCLAW_SERVICE_VERSION=.*/OPENCLAW_SERVICE_VERSION=$NEW_VER/" ~/.config/systemd/user/openclaw-gateway.service \
-  && sed -i "s/Description=OpenClaw Gateway (v.*)/Description=OpenClaw Gateway (v$NEW_VER)/" ~/.config/systemd/user/openclaw-gateway.service \
-  && systemctl --user daemon-reload \
-  && systemctl --user start openclaw-gateway.service \
+  && sed -i "s/OPENCLAW_SERVICE_VERSION=.*/OPENCLAW_SERVICE_VERSION=$NEW_VER/" /home/openclaw/.config/systemd/user/openclaw-gateway.service \
+  && sed -i "s/Description=OpenClaw Gateway (v.*)/Description=OpenClaw Gateway (v$NEW_VER)/" /home/openclaw/.config/systemd/user/openclaw-gateway.service \
+  && $OC_SYSTEMCTL daemon-reload \
+  && docker rm -f $(docker ps -a --filter "name=openclaw-sbx" --format "{{.Names}}" 2>/dev/null) 2>/dev/null; true \
+  && $OC_SYSTEMCTL start openclaw-gateway.service \
   && sleep 35 \
   && ss -ltnp | grep 18789
 ```
