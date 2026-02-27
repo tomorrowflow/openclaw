@@ -388,7 +388,7 @@ export function buildTtsSystemPromptHint(cfg: OpenClawConfig): string | undefine
   const summarize = isSummarizationEnabled(prefsPath) ? "on" : "off";
   const autoHint =
     autoMode === "inbound"
-      ? "Only use TTS when the user's last message includes audio/voice."
+      ? "TTS is auto-applied when the user sends audio/voice. You can also force a voice reply anytime by including a [[tts]] tag."
       : autoMode === "tagged"
         ? "Only use TTS when you include [[tts]] or [[tts:text]] tags."
         : undefined;
@@ -939,7 +939,7 @@ export async function maybeApplyTtsToPayload(params: {
   if (autoMode === "tagged" && !directives.hasDirective) {
     return nextPayload;
   }
-  if (autoMode === "inbound" && params.inboundAudio !== true) {
+  if (autoMode === "inbound" && params.inboundAudio !== true && !directives.hasDirective) {
     return nextPayload;
   }
 
