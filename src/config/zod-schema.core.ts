@@ -428,6 +428,7 @@ export const TtsConfigSchema = z
         voice: z.string().optional(),
         lang: z.string().optional(),
         speed: z.number().min(0.25).max(4).optional(),
+        model: z.string().optional(),
         timeoutMs: z.number().int().min(1000).max(120000).optional(),
       })
       .strict()
