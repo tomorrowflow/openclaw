@@ -32,4 +32,13 @@ describe("media-understanding provider registry", () => {
     expect(provider?.id).toBe("minimax-portal");
     expect(provider?.capabilities).toEqual(["image"]);
   });
+
+  it("registers the whisper-asr provider with audio capability", () => {
+    const registry = buildMediaUnderstandingRegistry();
+    const provider = getMediaUnderstandingProvider("whisper-asr", registry);
+
+    expect(provider?.id).toBe("whisper-asr");
+    expect(provider?.capabilities).toEqual(["audio"]);
+    expect(provider?.transcribeAudio).toBeDefined();
+  });
 });
