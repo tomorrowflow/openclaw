@@ -57,7 +57,7 @@ function ttsUsage(): ReplyPayload {
       `• edge — Free, fast (default)\n` +
       `• openai — High quality (requires API key)\n` +
       `• elevenlabs — Premium voices (requires API key)\n` +
-      `• kokoro — Local neural voices (requires MCP server)\n\n` +
+      `• kokoro — Local neural voices (Kokoro-FastAPI)\n\n` +
       `**Text Limit (default: 1500, max: 4096):**\n` +
       `When text exceeds the limit:\n` +
       `• Summary ON: AI summarizes, then generates audio\n` +

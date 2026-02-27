@@ -56,10 +56,11 @@ const DEFAULT_EDGE_VOICE = "en-US-MichelleNeural";
 const DEFAULT_EDGE_LANG = "en-US";
 const DEFAULT_EDGE_OUTPUT_FORMAT = "audio-24khz-48kbitrate-mono-mp3";
 
-const DEFAULT_KOKORO_URL = "http://localhost:3050";
+const DEFAULT_KOKORO_URL = "http://localhost:9007";
 const DEFAULT_KOKORO_VOICE = "af_heart";
 const DEFAULT_KOKORO_LANG = "en-us";
 const DEFAULT_KOKORO_SPEED = 1;
+const DEFAULT_KOKORO_MODEL = "kokoro";
 
 const DEFAULT_ELEVENLABS_VOICE_SETTINGS = {
   stability: 0.5,
@@ -139,6 +140,7 @@ export type ResolvedTtsConfig = {
     voice: string;
     lang: string;
     speed: number;
+    model: string;
     timeoutMs?: number;
   };
   prefsPath?: string;
@@ -186,6 +188,7 @@ export type TtsDirectiveOverrides = {
     voice?: string;
     lang?: string;
     speed?: number;
+    model?: string;
   };
 };
 
@@ -327,6 +330,7 @@ export function resolveTtsConfig(cfg: OpenClawConfig): ResolvedTtsConfig {
       voice: raw.kokoro?.voice?.trim() || DEFAULT_KOKORO_VOICE,
       lang: raw.kokoro?.lang?.trim() || DEFAULT_KOKORO_LANG,
       speed: raw.kokoro?.speed ?? DEFAULT_KOKORO_SPEED,
+      model: raw.kokoro?.model?.trim() || DEFAULT_KOKORO_MODEL,
       timeoutMs: raw.kokoro?.timeoutMs,
     },
     prefsPath: raw.prefsPath,
@@ -570,16 +574,25 @@ async function kokoroTTS(params: {
   voice: string;
   lang: string;
   speed: number;
+  model?: string;
   timeoutMs?: number;
 }): Promise<Buffer> {
-  const { text, url, voice, lang, speed, timeoutMs } = params;
+  const { text, url, voice, lang, speed, model, timeoutMs } = params;
   const controller = new AbortController();
   const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
   try {
-    const res = await fetch(`${url}/api/tts`, {
+    const res = await fetch(`${url}/v1/audio/speech`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, voice, lang, speed }),
+      body: JSON.stringify({
+        model: model ?? DEFAULT_KOKORO_MODEL,
+        input: text,
+        voice,
+        response_format: "mp3",
+        speed,
+        stream: false,
+        lang_code: lang,
+      }),
       signal: controller.signal,
     });
     if (!res.ok) {
@@ -631,12 +644,14 @@ export async function textToSpeech(params: {
         const kokoroVoice = params.overrides?.kokoro?.voice ?? config.kokoro.voice;
         const kokoroLang = params.overrides?.kokoro?.lang ?? config.kokoro.lang;
         const kokoroSpeed = params.overrides?.kokoro?.speed ?? config.kokoro.speed;
+        const kokoroModel = params.overrides?.kokoro?.model ?? config.kokoro.model;
         const audioBuffer = await kokoroTTS({
           text: params.text,
           url: config.kokoro.url,
           voice: kokoroVoice,
           lang: kokoroLang,
           speed: kokoroSpeed,
+          model: kokoroModel,
           timeoutMs: config.kokoro.timeoutMs ?? config.timeoutMs,
         });
         const tempDir = mkdtempSync(path.join(resolvePreferredOpenClawTmpDir(), "tts-"));

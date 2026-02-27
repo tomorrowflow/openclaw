@@ -73,13 +73,14 @@ export type TtsConfig = {
     proxy?: string;
     timeoutMs?: number;
   };
-  /** Kokoro TTS configuration (local ONNX via REST API). */
+  /** Kokoro TTS configuration (local neural TTS via Kokoro-FastAPI). */
   kokoro?: {
     enabled?: boolean;
     url?: string;
     voice?: string;
     lang?: string;
     speed?: number;
+    model?: string;
     timeoutMs?: number;
   };
   /** Optional path for local TTS user preferences JSON. */

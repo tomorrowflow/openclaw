@@ -298,12 +298,21 @@ function resolveEntryRunOptions(params: {
   return { maxBytes, maxChars, timeoutMs, prompt };
 }
 
+// Local providers that don't require API keys (e.g. Docker services).
+const LOCAL_KEYLESS_PROVIDERS = new Set(["whisper-asr"]);
+
 async function resolveProviderExecutionAuth(params: {
   providerId: string;
   cfg: OpenClawConfig;
   entry: MediaUnderstandingModelConfig;
   agentDir?: string;
 }) {
+  if (LOCAL_KEYLESS_PROVIDERS.has(params.providerId)) {
+    return {
+      apiKeys: ["local"],
+      providerConfig: params.cfg.models?.providers?.[params.providerId],
+    };
+  }
   const auth = await resolveApiKeyForProvider({
     provider: params.providerId,
     cfg: params.cfg,
