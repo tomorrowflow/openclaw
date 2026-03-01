@@ -259,6 +259,12 @@ $OC_SYSTEMCTL stop openclaw-gateway.service
 # Build fresh before install to guarantee dist/ is up-to-date
 pnpm build
 
+# Clean stale npm temp symlinks that block the install.
+# npm renames the existing dir to .openclaw-<random> before replacing it.
+# If a previous install (without --install-links) left a symlink with that
+# name, the rename fails with ENOTDIR. Removing it first is always safe.
+sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
+
 # Install from local repo globally — --install-links ensures a real copy
 # (without it, npm 7+ creates a symlink to the dev repo which breaks
 # cross-user access)
@@ -385,6 +391,7 @@ OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) syste
   && git push origin main --force-with-lease \
   && $OC_SYSTEMCTL stop openclaw-gateway.service \
   && pnpm build \
+  && sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null; true \
   && sudo npm i -g . --install-links \
   && pnpm ui:build \
   && sudo cp -r dist/control-ui "$(npm root -g)/openclaw/dist/control-ui" \
@@ -430,6 +437,7 @@ uses `docs/fork-features.txt` — update that file when adding/removing features
 | `--force-with-lease` rejected                         | Someone else pushed; `git fetch origin && git rebase origin/main` first                                                                                                                                                              |
 | Gateway not listening after restart                   | Check logs: `journalctl --user -u openclaw-gateway.service -n 50`                                                                                                                                                                    |
 | `sudo npm i -g` permission denied                     | Ensure sudo is available; the global prefix needs root                                                                                                                                                                               |
+| `ENOTDIR` on `sudo npm i -g . --install-links`        | A stale `.openclaw-*` symlink in `$(npm root -g)/` blocks npm's atomic rename. Remove it: `sudo rm -f "$(npm root -g)"/.openclaw-*` then retry the install                                                                           |
 | Fix is in source but gateway uses old behavior        | `pnpm build` only updates `dist/` in the dev repo; the service loads from `$(npm root -g)/openclaw/dist/`. Run `sudo npm i -g . --install-links` to deploy, or `sudo cp -r dist/* "$(npm root -g)/openclaw/dist/"` for a quick patch |
 | Web UI shows "Control UI assets not found"            | `pnpm ui:build && sudo cp -r dist/control-ui "$(npm root -g)/openclaw/dist/control-ui"`. The UI is **not** part of `pnpm build`; every `sudo npm i -g . --install-links` wipes `dist/` and you must rebuild+copy the UI separately   |
 | A2UI bundle fails (`lit` not found)                   | `cd vendor/a2ui/renderers/lit && npm install --no-package-lock`                                                                                                                                                                      |
