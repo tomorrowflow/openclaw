@@ -126,6 +126,14 @@ When running autonomously:
 pnpm install
 ```
 
+This step is critical even when no `package.json` changed. Extensions like
+`memory-lancedb` have their own `node_modules/` with pnpm symlinks into the
+root `node_modules/.pnpm/` store. After a rebase that touches `pnpm-lock.yaml`
+(even if resolved by accepting upstream's version), these symlinks may point to
+stale or missing store entries. Running `pnpm install` regenerates the store and
+all symlinks, ensuring extension native deps (e.g. `@lancedb/lancedb`) resolve
+correctly.
+
 ### 5b. Build
 
 ```bash
@@ -270,6 +278,18 @@ sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
 # cross-user access)
 sudo npm i -g . --install-links
 
+# Install extension runtime deps.
+# npm pack strips node_modules/ from extensions, so bundled plugins with
+# their own dependencies (e.g. memory-lancedb needs @lancedb/lancedb) will
+# fail at runtime with "Cannot find module" unless we install them here.
+GLOBAL_EXT="$(npm root -g)/openclaw/extensions"
+for ext_pkg in "$GLOBAL_EXT"/*/package.json; do
+  ext_dir=$(dirname "$ext_pkg")
+  if jq -e '.dependencies // empty | length > 0' "$ext_pkg" >/dev/null 2>&1; then
+    sudo npm install --omit=dev --ignore-scripts --prefix "$ext_dir" 2>/dev/null || true
+  fi
+done
+
 # Rebuild the Control UI (not included in `pnpm build`)
 pnpm ui:build
 sudo cp -r dist/control-ui "$(npm root -g)/openclaw/dist/control-ui"
@@ -393,6 +413,8 @@ OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) syste
   && pnpm build \
   && sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null; true \
   && sudo npm i -g . --install-links \
+  && GLOBAL_EXT="$(npm root -g)/openclaw/extensions" \
+  && for ext_pkg in "$GLOBAL_EXT"/*/package.json; do ext_dir=$(dirname "$ext_pkg"); jq -e '.dependencies // empty | length > 0' "$ext_pkg" >/dev/null 2>&1 && sudo npm install --omit=dev --ignore-scripts --prefix "$ext_dir" 2>/dev/null || true; done \
   && pnpm ui:build \
   && sudo cp -r dist/control-ui "$(npm root -g)/openclaw/dist/control-ui" \
   && ls -l "$(npm root -g)/openclaw/dist/reply-"*.js \
@@ -424,27 +446,28 @@ uses `docs/fork-features.txt` — update that file when adding/removing features
 
 ## Troubleshooting
 
-| Problem                                               | Fix                                                                                                                                                                                                                                  |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `git rebase` conflicts on every sync                  | Consider squashing fork commits into fewer logical units                                                                                                                                                                             |
-| `pnpm-lock.yaml` conflict during rebase               | `git checkout --theirs pnpm-lock.yaml && git add pnpm-lock.yaml && git rebase --continue` — `pnpm install` regenerates it                                                                                                            |
-| `pnpm install` fails after rebase                     | Delete `node_modules` and retry: `rm -rf node_modules && pnpm install`                                                                                                                                                               |
-| Build fails with unknown variable names               | Conflict resolution used old name; check upstream's renamed parameters                                                                                                                                                               |
-| Tests fail on changed defaults                        | Our fork may override a default upstream changed; update test to match                                                                                                                                                               |
-| Fork feature silently dropped after rebase            | Upstream moved the function to a new file; re-add our code there                                                                                                                                                                     |
-| Lint errors in our code after upstream adds new rules | Fix the violations, commit as a separate fixup                                                                                                                                                                                       |
-| Tests timeout or OOM                                  | Lower workers: `OPENCLAW_TEST_WORKERS=2` or run targeted tests only                                                                                                                                                                  |
-| `--force-with-lease` rejected                         | Someone else pushed; `git fetch origin && git rebase origin/main` first                                                                                                                                                              |
-| Gateway not listening after restart                   | Check logs: `journalctl --user -u openclaw-gateway.service -n 50`                                                                                                                                                                    |
-| `sudo npm i -g` permission denied                     | Ensure sudo is available; the global prefix needs root                                                                                                                                                                               |
-| `ENOTDIR` on `sudo npm i -g . --install-links`        | A stale `.openclaw-*` symlink in `$(npm root -g)/` blocks npm's atomic rename. Remove it: `sudo rm -f "$(npm root -g)"/.openclaw-*` then retry the install                                                                           |
-| Fix is in source but gateway uses old behavior        | `pnpm build` only updates `dist/` in the dev repo; the service loads from `$(npm root -g)/openclaw/dist/`. Run `sudo npm i -g . --install-links` to deploy, or `sudo cp -r dist/* "$(npm root -g)/openclaw/dist/"` for a quick patch |
-| Web UI shows "Control UI assets not found"            | `pnpm ui:build && sudo cp -r dist/control-ui "$(npm root -g)/openclaw/dist/control-ui"`. The UI is **not** part of `pnpm build`; every `sudo npm i -g . --install-links` wipes `dist/` and you must rebuild+copy the UI separately   |
-| A2UI bundle fails (`lit` not found)                   | `cd vendor/a2ui/renderers/lit && npm install --no-package-lock`                                                                                                                                                                      |
-| A2UI bundle fails (`rolldown` not found)              | `pnpm add -wD rolldown@1.0.0-rc.5`, rebuild, then `pnpm remove -wD rolldown`                                                                                                                                                         |
-| "duplicate plugin id detected" warning on startup     | A bundled extension was manually copied into `~/.openclaw/extensions/`. Remove the copy — bundled extensions are discovered automatically from `$(npm root -g)/openclaw/extensions/`                                                 |
-| Web UI shows old version after deploy                 | The systemd unit has a stale `OPENCLAW_SERVICE_VERSION` env var. Update it with `sed` and `systemctl --user daemon-reload` (see step 8). The gateway reads this env var at runtime via `resolveRuntimeServiceVersion()`              |
-| Deploy breaks the gateway (won't start)               | Rollback: `$OC_SYSTEMCTL stop openclaw-gateway.service && git checkout <last-known-good-tag> && pnpm build && sudo npm i -g . --install-links && $OC_SYSTEMCTL start openclaw-gateway.service`                                       |
+| Problem                                               | Fix                                                                                                                                                                                                                                                                               |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `git rebase` conflicts on every sync                  | Consider squashing fork commits into fewer logical units                                                                                                                                                                                                                          |
+| `pnpm-lock.yaml` conflict during rebase               | `git checkout --theirs pnpm-lock.yaml && git add pnpm-lock.yaml && git rebase --continue` — `pnpm install` regenerates it                                                                                                                                                         |
+| `pnpm install` fails after rebase                     | Delete `node_modules` and retry: `rm -rf node_modules && pnpm install`                                                                                                                                                                                                            |
+| Build fails with unknown variable names               | Conflict resolution used old name; check upstream's renamed parameters                                                                                                                                                                                                            |
+| Tests fail on changed defaults                        | Our fork may override a default upstream changed; update test to match                                                                                                                                                                                                            |
+| Fork feature silently dropped after rebase            | Upstream moved the function to a new file; re-add our code there                                                                                                                                                                                                                  |
+| Lint errors in our code after upstream adds new rules | Fix the violations, commit as a separate fixup                                                                                                                                                                                                                                    |
+| Tests timeout or OOM                                  | Lower workers: `OPENCLAW_TEST_WORKERS=2` or run targeted tests only                                                                                                                                                                                                               |
+| `--force-with-lease` rejected                         | Someone else pushed; `git fetch origin && git rebase origin/main` first                                                                                                                                                                                                           |
+| Gateway not listening after restart                   | Check logs: `journalctl --user -u openclaw-gateway.service -n 50`                                                                                                                                                                                                                 |
+| `sudo npm i -g` permission denied                     | Ensure sudo is available; the global prefix needs root                                                                                                                                                                                                                            |
+| `ENOTDIR` on `sudo npm i -g . --install-links`        | A stale `.openclaw-*` symlink in `$(npm root -g)/` blocks npm's atomic rename. Remove it: `sudo rm -f "$(npm root -g)"/.openclaw-*` then retry the install                                                                                                                        |
+| Fix is in source but gateway uses old behavior        | `pnpm build` only updates `dist/` in the dev repo; the service loads from `$(npm root -g)/openclaw/dist/`. Run `sudo npm i -g . --install-links` to deploy, or `sudo cp -r dist/* "$(npm root -g)/openclaw/dist/"` for a quick patch                                              |
+| Web UI shows "Control UI assets not found"            | `pnpm ui:build && sudo cp -r dist/control-ui "$(npm root -g)/openclaw/dist/control-ui"`. The UI is **not** part of `pnpm build`; every `sudo npm i -g . --install-links` wipes `dist/` and you must rebuild+copy the UI separately                                                |
+| A2UI bundle fails (`lit` not found)                   | `cd vendor/a2ui/renderers/lit && npm install --no-package-lock`                                                                                                                                                                                                                   |
+| A2UI bundle fails (`rolldown` not found)              | `pnpm add -wD rolldown@1.0.0-rc.5`, rebuild, then `pnpm remove -wD rolldown`                                                                                                                                                                                                      |
+| "duplicate plugin id detected" warning on startup     | A bundled extension was manually copied into `~/.openclaw/extensions/`. Remove the copy — bundled extensions are discovered automatically from `$(npm root -g)/openclaw/extensions/`                                                                                              |
+| Web UI shows old version after deploy                 | The systemd unit has a stale `OPENCLAW_SERVICE_VERSION` env var. Update it with `sed` and `systemctl --user daemon-reload` (see step 8). The gateway reads this env var at runtime via `resolveRuntimeServiceVersion()`                                                           |
+| Extension module not found (e.g. `@lancedb/lancedb`)  | Extension `node_modules/` contains pnpm symlinks into the root `.pnpm/` store. After rebase, these may dangle. Fix: `pnpm install` (step 5a). For the global install, ensure `--install-links` was used — without it, npm preserves the symlinks which break outside the dev repo |
+| Deploy breaks the gateway (won't start)               | Rollback: `$OC_SYSTEMCTL stop openclaw-gateway.service && git checkout <last-known-good-tag> && pnpm build && sudo npm i -g . --install-links && $OC_SYSTEMCTL start openclaw-gateway.service`                                                                                    |
 
 ---
 
