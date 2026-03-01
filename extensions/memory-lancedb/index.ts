@@ -1693,7 +1693,7 @@ export default definePluginEntry({
             const vector = await embeddings.embed(
               normalizeRecallQuery(query, currentCfg.recallMaxChars),
             );
-            const results = await db.search(vector, 5, 0.7);
+            const results = await db.search(vector, 5, 0.3);
 
             if (results.length === 0) {
               return {
