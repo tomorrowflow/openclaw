@@ -1,0 +1,72 @@
+# Fork feature checklist — one grep-verifiable entry per line.
+# Format: pattern | file | description
+# Used by step 5f in UPSTREAM-SYNC.md to verify fork features survived rebase.
+# Update this file when adding or removing fork features.
+
+# --- TTS / Audio ---
+\[\[tts\]\] | src/tts/tts-core.ts | Bare [[tts]] tag detection (sets hasDirective without parameters)
+kokoroTTS | src/tts/tts.ts | Kokoro TTS provider implementation
+kokoro | src/config/zod-schema.core.ts | Kokoro TTS in config schema (TtsProviderSchema enum)
+kokoro | src/config/types.tts.ts | Kokoro TTS type definition (TtsProvider union)
+kokoro | src/auto-reply/reply/commands-tts.ts | Kokoro in /tts help and provider switch
+inbound.*hasDirective | src/tts/tts.ts | [[tts]] directive overrides inbound-only auto mode
+
+# --- Speech-to-Text (Whisper ASR) ---
+whisperAsrProvider | src/media-understanding/providers/index.ts | Whisper ASR registered in provider list
+whisper-asr | src/media-understanding/providers/whisper-asr/index.ts | Whisper ASR native provider module
+transcribeWhisperAsr | src/media-understanding/providers/whisper-asr/audio.ts | Whisper ASR transcription implementation
+whisper-asr | src/media-understanding/defaults.ts | Whisper ASR default model mapping (faster-whisper)
+LOCAL_KEYLESS_PROVIDERS | src/media-understanding/runner.entries.ts | Whisper ASR keyless provider bypass
+DEFAULT_FFMPEG_API_URL | src/media-understanding/providers/whisper-asr/audio.ts | FFmpeg API URL default (localhost:9008)
+
+# --- Streaming / Tag Stripping ---
+stripReasoningTagsFromText | src/shared/text/reasoning-tags.ts | Reasoning tag stripping helper
+stripReasoningTags | src/tui/tui-formatters.ts | TUI reasoning tag stripping
+stripReasoningTagsFromText | src/gateway/server-chat.ts | Gateway reasoning tag stripping
+stripTrailingPartialTag | src/agents/pi-embedded-subscribe.ts | Streaming partial tag stripping
+stripTrailingPartialFinalTag | src/agents/pi-embedded-helpers/errors.ts | Error text partial tag stripping
+closedOnly | src/markdown/code-spans.ts | Code-span closedOnly option (partial tag support)
+
+# --- Sandbox ---
+sandboxNeedsOwnSkills | src/agents/pi-embedded-runner/compact.ts | Sandbox skill reload for sandboxed workspaces
+sandboxNeedsOwnSkills | src/agents/pi-embedded-runner/run/attempt.ts | Sandbox skill reload in attempt runner
+dangerouslyAllowPrivateNetwork | src/agents/sandbox/browser.ts | Allow private-network navigation in sandbox browser
+SANDBOX_MEDIA_MOUNT | src/agents/sandbox/constants.ts | Media dir mount (STATE_DIR/media read-only)
+SANDBOX_SHARED_MOUNT | src/agents/sandbox/constants.ts | Shared dir mount (STATE_DIR/shared)
+SANDBOX_BROWSER_HOME | src/agents/sandbox/browser.ts | Persistent browser home dir mount
+validateSecretMounts | src/agents/sandbox/validate-sandbox-security.ts | Secret mounts security validation
+secretMounts | src/config/zod-schema.agent-runtime.ts | Secret mounts config schema
+secretMounts | src/agents/sandbox/config.ts | Secret mounts config merge logic
+secretMounts | src/agents/sandbox/docker.ts | Secret mounts injected as env vars in container
+
+# --- Cron Hardening ---
+MAX_JOBS_PER_AGENT | src/cron/service/ops.ts | Per-agent cron job count limit
+configuredTimeoutMs <= 0 | src/cron/service/timeout-policy.ts | Timeout hardening (<=0 falls back to default)
+senderIsOwner: true | src/cron/isolated-agent/run.ts | Owner privileges for isolated cron sessions
+ScheduleSchema | src/agents/tools/cron-tool.ts | Explicit TypeBox schema for cron job/patch objects
+
+# --- Auth ---
+ownerAllowAll | src/auto-reply/command-auth.ts | Wildcard (*) support for ownerAllowFrom
+
+# --- CLI ---
+enablePositionalOptions | src/cli/program/build-program.ts | Positional options fix (prevents option shadowing)
+enablePositionalOptions | src/cli/gateway-cli/register.ts | Positional options fix for gateway register
+deviceId | src/cli/devices-cli.ts | Device ID display in devices list
+
+# --- Memory (LanceDB) ---
+storageOptions | extensions/memory-lancedb/config.ts | LanceDB storageOptions config
+nomic-embed-text | extensions/memory-lancedb/config.ts | Nomic embedding model dimension mapping
+baseUrl | extensions/memory-lancedb/config.ts | Embedding API baseUrl config
+
+# --- Skills ---
+Kokoro TTS | skills/kokoro-tts/SKILL.md | Kokoro TTS skill (agent instructions)
+whisper-asr | skills/whisper-asr/SKILL.md | Whisper ASR skill (agent instructions)
+excalidraw | skills/excalidraw/SKILL.md | Excalidraw skill (agent instructions)
+
+# --- Plugins / Skills / Dockerfiles ---
+excalidraw | extensions/excalidraw/openclaw.plugin.json | Excalidraw canvas plugin
+brave-browser | Dockerfile.sandbox-browser-brave | Brave browser overlay Dockerfile
+fonts-noto-cjk | Dockerfile.sandbox-browser | CJK/Unicode fonts in sandbox browser image
+1920x1080 | scripts/sandbox-browser-entrypoint.sh | Default screen resolution bump
+SingletonLock | scripts/sandbox-browser-entrypoint.sh | Clear stale Chrome locks on startup
+X11-unix | scripts/sandbox-browser-entrypoint.sh | Recreate X11-unix dir for tmpfs resilience
