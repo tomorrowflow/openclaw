@@ -15,6 +15,25 @@ Designed to be executed by Claude Code or followed manually.
   If there are unstaged changes, stash or discard them:
   `git stash push -m "WIP before sync"` or `git checkout -- .`
 
+## Autonomous execution (YOLO mode)
+
+This document is designed for autonomous (YOLO-mode) execution by Claude Code.
+Everything proceeds automatically **except** at these stop-and-ask gates:
+
+1. **Rebase conflicts that can't be auto-resolved** — semantic merges where both
+   sides changed the same logic differently (step 4)
+2. **Build or typecheck failures after conflict resolution** — may indicate a
+   bad merge that needs human judgement (step 5b)
+3. **Fork features missing after rebase** — the `docs/fork-features.txt` check
+   found dropped code that needs manual re-addition (step 5f)
+4. **Config schema changes** — upstream introduced changes that would alter
+   `/home/openclaw/.openclaw` config in destructive ways (step 8a)
+5. **Gateway fails to start after deploy** — port 18789 not listening after
+   60 seconds (step 8)
+
+Everything else (clean rebases, lock file regeneration, formatting fixups,
+sandbox cleanup, version bumps) proceeds without asking.
+
 ## 1. Setup upstream remote (first time only)
 
 ```bash
@@ -73,8 +92,9 @@ If the rebase stops with conflicts:
   silently drop our addition. **After rebase, always verify our fork features
   are still present in the new locations** (see step 5f).
 
-- **Lock file conflicts (`pnpm-lock.yaml`).** Always skip these with
-  `git rebase --skip` — `pnpm install` regenerates the lock file.
+- **Lock file conflicts (`pnpm-lock.yaml`).** Always accept upstream's version
+  and continue — `pnpm install` regenerates the lock file:
+  `git checkout --theirs pnpm-lock.yaml && git add pnpm-lock.yaml && git rebase --continue`
 
 - **Callback vs loop mismatch.** Upstream may refactor a `for...of` loop into
   a callback-based helper. Our `continue` statements become `return` in
@@ -82,6 +102,21 @@ If the rebase stops with conflicts:
   Match the upstream callback signature.
 
 If a rebase goes badly: `git rebase --abort` returns to the pre-rebase state.
+
+### Autonomous (YOLO) conflict resolution policy
+
+When running autonomously:
+
+1. Try auto-resolution for each conflicting file.
+2. For `pnpm-lock.yaml` conflicts: always accept upstream's version:
+   ```bash
+   git checkout --theirs pnpm-lock.yaml && git add pnpm-lock.yaml && git rebase --continue
+   ```
+3. For source files where both sides changed the same logic differently
+   (semantic conflict, not just a clean add/remove), **stop and ask the
+   operator** — do not guess at the intended merge.
+4. For trivial conflicts (e.g. adjacent additions, import ordering, whitespace),
+   resolve automatically and continue.
 
 ## 5. Verify the merge
 
@@ -117,18 +152,19 @@ commit the fix.
 
 ### 5d. Run targeted tests
 
-Run tests only for files touched by our fork commits (much faster than the
-full suite on resource-constrained machines):
+Run tests only for directories touched by our fork commits (much faster than
+the full suite on resource-constrained machines):
 
 ```bash
-# List files changed in our fork commits vs upstream
-git diff --name-only upstream/main..main
+# Auto-derive test directories from fork-changed files
+TEST_DIRS=$(git diff --name-only upstream/main..main \
+  | grep '\.test\.ts$\|\.ts$' | sed 's|/[^/]*$||' | sort -u \
+  | grep -v '^docs\|^scripts\|^skills\|^Dockerfile')
 
-# Run tests for affected areas
-OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/ src/tui/ src/shared/text/ src/gateway/ src/markdown/ src/agents/pi-embedded-runner/ src/agents/pi-embedded-helpers/ src/auto-reply/ src/cli/
+OPENCLAW_TEST_WORKERS=4 pnpm vitest run $TEST_DIRS
 ```
 
-Adjust the paths to match whatever our fork changes.
+Adjust manually if the auto-derived list is too broad or misses a directory.
 
 **Note:** The full test suite (`pnpm test`) runs 900+ test files across 3
 vitest configs with worker splitting. On a 4-core/8GB machine this takes
@@ -144,54 +180,28 @@ OPENCLAW_TEST_WORKERS=4 pnpm test
 ### 5f. Verify fork features survived the rebase
 
 Upstream refactors can silently drop our code when functions move between
-files. After rebase, spot-check that key fork features are still present:
+files. After rebase, verify all fork features are still present using the
+machine-readable checklist in `docs/fork-features.txt`:
 
 ```bash
-# Bare [[tts]] tag detection (moved from tts.ts to tts-core.ts by upstream)
-grep -n '\[\[tts\]\]' src/tts/tts-core.ts
-
-# Kokoro TTS provider
-grep -n 'kokoroTTS' src/tts/tts.ts
-
-# Cron catch-up logic
-grep -n 'catching up missed run' src/cron/service/jobs.ts
-
-# Memory-lancedb storageOptions
-grep -n 'storageOptions' extensions/memory-lancedb/config.ts
-
-# Reasoning tag stripping in TUI formatters
-grep -n 'stripReasoningTags' src/tui/tui-formatters.ts
-
-# Reasoning tag stripping helper
-grep -n 'stripReasoningTagsFromText' src/shared/text/reasoning-tags.ts
-
-# CLI device ID display in devices list
-grep -n 'deviceId' src/cli/devices-cli.ts
-
-# Gateway reasoning tag stripping
-grep -n 'stripReasoningTagsFromText' src/gateway/server-chat.ts
-
-# Streaming partial tag stripping (prevents leaked <final>/<thinking> fragments)
-grep -n 'stripTrailingPartialTag' src/agents/pi-embedded-subscribe.ts
-
-# Error text partial tag stripping
-grep -n 'stripTrailingPartialFinalTag' src/agents/pi-embedded-helpers/errors.ts
-
-# Sandbox skill reload for sandboxed workspaces
-grep -n 'sandboxNeedsOwnSkills' src/agents/pi-embedded-runner/compact.ts
-
-# Code-span closedOnly option (supports partial tag stripping)
-grep -n 'closedOnly' src/markdown/code-spans.ts
-
-# Kokoro TTS in config schema
-grep -n 'kokoro' src/config/zod-schema.core.ts
-
-# CLI positional options fix (prevents gateway subcommand option shadowing)
-grep -n 'enablePositionalOptions' src/cli/program/build-program.ts
+MISSING=0
+while IFS='|' read -r pattern file desc; do
+  pattern=$(echo "$pattern" | xargs); file=$(echo "$file" | xargs)
+  if ! grep -qn "$pattern" "$file" 2>/dev/null; then
+    echo "MISSING: $desc ($pattern in $file)"
+    MISSING=1
+  fi
+done < <(grep -v '^#\|^$' docs/fork-features.txt)
+if [ "$MISSING" -eq 1 ]; then
+  echo "STOP: fork features missing — re-add them in the new locations"
+fi
 ```
 
-If any of these are missing, the upstream refactor moved the surrounding code
+If any features are missing, the upstream refactor moved the surrounding code
 and our additions were lost. Re-add them in the new location.
+
+**Maintenance:** update `docs/fork-features.txt` when adding or removing fork
+features.
 
 ## 6. Commit any fixups
 
@@ -199,6 +209,12 @@ If build/lint/test required changes, commit them:
 
 ```bash
 scripts/committer "fix: lint and test fixups after upstream sync" <files...>
+```
+
+If `pnpm install` changed `pnpm-lock.yaml`, commit it before pushing:
+
+```bash
+scripts/committer "chore: regenerate pnpm-lock.yaml after upstream sync" pnpm-lock.yaml
 ```
 
 ## 7. Push to fork
@@ -240,6 +256,9 @@ OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) syste
 # Stop the gateway
 $OC_SYSTEMCTL stop openclaw-gateway.service
 
+# Build fresh before install to guarantee dist/ is up-to-date
+pnpm build
+
 # Install from local repo globally — --install-links ensures a real copy
 # (without it, npm 7+ creates a symlink to the dev repo which breaks
 # cross-user access)
@@ -262,24 +281,39 @@ openclaw --version
 # The gateway's resolveRuntimeServiceVersion() reads this env var at runtime —
 # if it's stale, the web UI will show the old version even after a restart.
 NEW_VER=$(node -p "require('$(npm root -g)/openclaw/package.json').version")
-sed -i "s/OPENCLAW_SERVICE_VERSION=.*/OPENCLAW_SERVICE_VERSION=$NEW_VER/" \
+sudo -u openclaw sed -i "s/OPENCLAW_SERVICE_VERSION=.*/OPENCLAW_SERVICE_VERSION=$NEW_VER/" \
   /home/openclaw/.config/systemd/user/openclaw-gateway.service
-sed -i "s/Description=OpenClaw Gateway (v.*)/Description=OpenClaw Gateway (v$NEW_VER)/" \
+sudo -u openclaw sed -i "s/Description=OpenClaw Gateway (v.*)/Description=OpenClaw Gateway (v$NEW_VER)/" \
   /home/openclaw/.config/systemd/user/openclaw-gateway.service
 $OC_SYSTEMCTL daemon-reload
 
 # Remove stale sandbox containers so they pick up new mounts/env vars.
-# Skip this if the deploy only changes gateway logic (no sandbox changes).
+# Always clean — it's fast and avoids subtle stale-mount bugs.
 docker rm -f $(docker ps -a --filter "name=openclaw-sbx" --format "{{.Names}}" 2>/dev/null) 2>/dev/null || true
 
 # Restart the gateway
 $OC_SYSTEMCTL start openclaw-gateway.service
 
-# Wait for startup and verify (~35s on 4-core/8GB)
-sleep 35
+# Poll for startup (up to 60s) instead of a fixed sleep
+for i in $(seq 1 12); do ss -ltnp | grep -q 18789 && break; sleep 5; done
 $OC_SYSTEMCTL status openclaw-gateway.service
 ss -ltnp | grep 18789
 ```
+
+### 8a. Check for config schema changes
+
+After install but before verifying the gateway, check if upstream introduced
+config schema changes that affect the running environment:
+
+```bash
+# If openclaw doctor --fix is available, run it as the openclaw user
+sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) \
+  openclaw doctor --fix 2>&1 || true
+```
+
+**YOLO gate:** stop and ask if `doctor --fix` reports destructive changes
+(removing keys, changing defaults that affect running agents). Safe changes
+(adding new optional keys, migrating deprecated names) proceed automatically.
 
 ### Check for duplicate plugin warnings
 
@@ -345,21 +379,24 @@ OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) syste
   && pnpm install \
   && pnpm build \
   && pnpm check \
-  && OPENCLAW_TEST_WORKERS=4 pnpm vitest run src/tts/ src/cron/ extensions/memory-lancedb/ src/tui/ src/shared/text/ src/gateway/ src/markdown/ src/agents/pi-embedded-runner/ src/agents/pi-embedded-helpers/ src/auto-reply/ src/cli/ \
+  && TEST_DIRS=$(git diff --name-only upstream/main..main | grep '\.test\.ts$\|\.ts$' | sed 's|/[^/]*$||' | sort -u | grep -v '^docs\|^scripts\|^skills\|^Dockerfile') \
+  && OPENCLAW_TEST_WORKERS=4 pnpm vitest run $TEST_DIRS \
+  && grep -v '^#\|^$' docs/fork-features.txt | while IFS='|' read -r p f d; do p=$(echo "$p"|xargs); f=$(echo "$f"|xargs); grep -q "$p" "$f" 2>/dev/null || echo "MISSING: $d"; done \
   && git push origin main --force-with-lease \
   && $OC_SYSTEMCTL stop openclaw-gateway.service \
+  && pnpm build \
   && sudo npm i -g . --install-links \
   && pnpm ui:build \
   && sudo cp -r dist/control-ui "$(npm root -g)/openclaw/dist/control-ui" \
   && ls -l "$(npm root -g)/openclaw/dist/reply-"*.js \
   && ls "$(npm root -g)/openclaw/dist/control-ui/index.html" \
   && NEW_VER=$(node -p "require('$(npm root -g)/openclaw/package.json').version") \
-  && sed -i "s/OPENCLAW_SERVICE_VERSION=.*/OPENCLAW_SERVICE_VERSION=$NEW_VER/" /home/openclaw/.config/systemd/user/openclaw-gateway.service \
-  && sed -i "s/Description=OpenClaw Gateway (v.*)/Description=OpenClaw Gateway (v$NEW_VER)/" /home/openclaw/.config/systemd/user/openclaw-gateway.service \
+  && sudo -u openclaw sed -i "s/OPENCLAW_SERVICE_VERSION=.*/OPENCLAW_SERVICE_VERSION=$NEW_VER/" /home/openclaw/.config/systemd/user/openclaw-gateway.service \
+  && sudo -u openclaw sed -i "s/Description=OpenClaw Gateway (v.*)/Description=OpenClaw Gateway (v$NEW_VER)/" /home/openclaw/.config/systemd/user/openclaw-gateway.service \
   && $OC_SYSTEMCTL daemon-reload \
   && docker rm -f $(docker ps -a --filter "name=openclaw-sbx" --format "{{.Names}}" 2>/dev/null) 2>/dev/null; true \
   && $OC_SYSTEMCTL start openclaw-gateway.service \
-  && sleep 35 \
+  && for i in $(seq 1 12); do ss -ltnp | grep -q 18789 && break; sleep 5; done \
   && ss -ltnp | grep 18789
 ```
 
@@ -373,7 +410,8 @@ will still run old code. If `control-ui/` is missing, the web UI will show
 **Note:** `--install-links` is required. Without it, npm 7+ creates a symlink
 to the dev repo instead of copying, which breaks cross-user access.
 
-Update the `pnpm vitest run` paths if our fork's changed files evolve.
+Test directories are auto-derived from the fork diff. The fork feature check
+uses `docs/fork-features.txt` — update that file when adding/removing features.
 
 ---
 
@@ -382,7 +420,7 @@ Update the `pnpm vitest run` paths if our fork's changed files evolve.
 | Problem                                               | Fix                                                                                                                                                                                                                                  |
 | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `git rebase` conflicts on every sync                  | Consider squashing fork commits into fewer logical units                                                                                                                                                                             |
-| `pnpm-lock.yaml` conflict during rebase               | `git rebase --skip` — `pnpm install` regenerates it                                                                                                                                                                                  |
+| `pnpm-lock.yaml` conflict during rebase               | `git checkout --theirs pnpm-lock.yaml && git add pnpm-lock.yaml && git rebase --continue` — `pnpm install` regenerates it                                                                                                            |
 | `pnpm install` fails after rebase                     | Delete `node_modules` and retry: `rm -rf node_modules && pnpm install`                                                                                                                                                               |
 | Build fails with unknown variable names               | Conflict resolution used old name; check upstream's renamed parameters                                                                                                                                                               |
 | Tests fail on changed defaults                        | Our fork may override a default upstream changed; update test to match                                                                                                                                                               |
@@ -398,6 +436,7 @@ Update the `pnpm vitest run` paths if our fork's changed files evolve.
 | A2UI bundle fails (`rolldown` not found)              | `pnpm add -wD rolldown@1.0.0-rc.5`, rebuild, then `pnpm remove -wD rolldown`                                                                                                                                                         |
 | "duplicate plugin id detected" warning on startup     | A bundled extension was manually copied into `~/.openclaw/extensions/`. Remove the copy — bundled extensions are discovered automatically from `$(npm root -g)/openclaw/extensions/`                                                 |
 | Web UI shows old version after deploy                 | The systemd unit has a stale `OPENCLAW_SERVICE_VERSION` env var. Update it with `sed` and `systemctl --user daemon-reload` (see step 8). The gateway reads this env var at runtime via `resolveRuntimeServiceVersion()`              |
+| Deploy breaks the gateway (won't start)               | Rollback: `$OC_SYSTEMCTL stop openclaw-gateway.service && git checkout <last-known-good-tag> && pnpm build && sudo npm i -g . --install-links && $OC_SYSTEMCTL start openclaw-gateway.service`                                       |
 
 ---
 
