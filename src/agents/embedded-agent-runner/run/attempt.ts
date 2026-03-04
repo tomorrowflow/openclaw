@@ -212,6 +212,8 @@ import {
   releasePendingAgentSteeringItems,
 } from "../../subagent-registry.js";
 import { ensureSystemPromptCacheBoundary } from "../../system-prompt-cache-boundary.js";
+import { resolveSystemPromptOverride } from "../../system-prompt-override.js";
+import { loadWorkspaceSkillEntries } from "../../skills.js";
 import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import {
@@ -303,7 +305,6 @@ import { buildEmbeddedSandboxInfo, resolveEmbeddedSandboxInfoExecPolicy } from "
 import { resolveSandboxSkillRuntimeInputs } from "../sandbox-skills.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "../session-manager-cache.js";
 import { prepareSessionManagerForRun } from "../session-manager-init.js";
-import { loadWorkspaceSkillEntries } from "../../skills.js";
 import {
   describeEmbeddedAgentStreamStrategy,
   resetEmbeddedAgentBaseStreamFnCacheForTest,
