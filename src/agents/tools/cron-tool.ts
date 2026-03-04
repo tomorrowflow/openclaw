@@ -65,7 +65,7 @@ const DeliverySchema = Type.Object(
   { additionalProperties: true },
 );
 
-const CronJobSchema = Type.Object(
+const _CronJobSchema = Type.Object(
   {
     name: Type.Optional(Type.String({ description: "Human-readable job name" })),
     schedule: Type.Optional(ScheduleSchema),
