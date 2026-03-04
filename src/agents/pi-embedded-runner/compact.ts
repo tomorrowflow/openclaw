@@ -73,6 +73,7 @@ import {
   resolveSkillsPromptForRun,
   type SkillSnapshot,
 } from "../skills.js";
+import { loadWorkspaceSkillEntries } from "../skills.js";
 import { resolveTranscriptPolicy } from "../transcript-policy.js";
 import {
   compactWithSafetyTimeout,
@@ -90,7 +91,6 @@ import { log } from "./logger.js";
 import { buildModelAliasLines, resolveModel } from "./model.js";
 import { buildEmbeddedSandboxInfo } from "./sandbox-info.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "./session-manager-cache.js";
-import { loadWorkspaceSkillEntries } from "../skills.js";
 import {
   applySystemPromptOverrideToSession,
   buildEmbeddedSystemPrompt,
