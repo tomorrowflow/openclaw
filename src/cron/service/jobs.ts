@@ -463,28 +463,25 @@ export function recomputeNextRunsForMaintenance(
   opts?: { recomputeExpired?: boolean; nowMs?: number },
 ): boolean {
   const recomputeExpired = opts?.recomputeExpired ?? false;
-  return walkSchedulableJobs(
-    state,
-    ({ job, nowMs: now }) => {
-      let changed = false;
-      if (!isFiniteTimestamp(job.state.nextRunAtMs)) {
-        // Missing or invalid nextRunAtMs is always repaired.
+  return walkSchedulableJobs(state, ({ job, nowMs: now }) => {
+    let changed = false;
+    if (!isFiniteTimestamp(job.state.nextRunAtMs)) {
+      // Missing or invalid nextRunAtMs is always repaired.
+      if (recomputeJobNextRunAtMs({ state, job, nowMs: now })) {
+        changed = true;
+      }
+    } else if (
+      recomputeExpired &&
+      now >= job.state.nextRunAtMs &&
+      typeof job.state.runningAtMs !== "number"
+    ) {
+      // Only advance when the expired slot was already executed.
+      // If not, preserve the past-due value so the job can still run.
+      const lastRun = job.state.lastRunAtMs;
+      const alreadyExecutedSlot = isFiniteTimestamp(lastRun) && lastRun >= job.state.nextRunAtMs;
+      if (alreadyExecutedSlot) {
         if (recomputeJobNextRunAtMs({ state, job, nowMs: now })) {
           changed = true;
-        }
-      } else if (
-        recomputeExpired &&
-        now >= job.state.nextRunAtMs &&
-        typeof job.state.runningAtMs !== "number"
-      ) {
-        // Only advance when the expired slot was already executed.
-        // If not, preserve the past-due value so the job can still run.
-        const lastRun = job.state.lastRunAtMs;
-        const alreadyExecutedSlot = isFiniteTimestamp(lastRun) && lastRun >= job.state.nextRunAtMs;
-        if (alreadyExecutedSlot) {
-          if (recomputeJobNextRunAtMs({ state, job, nowMs: now })) {
-            changed = true;
-          }
         }
       }
     }

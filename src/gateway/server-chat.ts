@@ -464,7 +464,10 @@ export function createAgentEventHandler({
     error?: unknown,
     stopReason?: string,
   ) => {
-    const { text, shouldSuppressSilent } = resolveBufferedChatTextState(clientRunId, sourceRunId);
+    const { text: rawText, shouldSuppressSilent } = resolveBufferedChatTextState(
+      clientRunId,
+      sourceRunId,
+    );
     // Flush any throttled delta so streaming clients receive the complete text
     // before the final event. The 150 ms throttle in emitChatDelta may have
     // suppressed the most recent chunk, leaving the client with stale text.
