@@ -137,8 +137,16 @@ correctly.
 ### 5b. Build
 
 ```bash
-pnpm build
+OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 pnpm build
 ```
+
+The `OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1` flag is **required** on this server.
+Without it, upstream's `optionalBundledClusters` list skips building multi-file
+extensions (acpx, diagnostics-otel, diffs, googlechat, matrix, memory-lancedb,
+msteams, nostr, tlon, twitch, whatsapp, zalouser). Those extensions end up
+without `index.js` entry points in `dist/extensions/<name>/`, and the plugin
+discovery security check rejects them with "extension entry escapes package
+directory" (the actual error is ENOENT).
 
 Type errors here often indicate conflict resolution mistakes (e.g. using a
 variable name from the old code that was renamed in upstream's refactor).
@@ -240,22 +248,39 @@ someone else has pushed to the remote since your last fetch.
 
 Stop the running gateway, install from the local repo globally, and restart.
 
+> **Two-user model.** The `frogger` user holds the source repo at
+> `/home/frogger/openclaw/` and runs build/test/push. The `openclaw` user
+> (UID 1001) runs the gateway service and owns its runtime config at
+> `/home/openclaw/.openclaw/`. The global install at
+> `$(npm root -g)/openclaw/` (typically `/usr/lib/node_modules/openclaw/`)
+> is the bridge: `frogger` writes to it via `sudo npm i -g`, and `openclaw`
+> reads from it at runtime.
+
 > **Global install must be a real copy, not a symlink.**
 > npm 7+ defaults to symlinking local installs (`install-links=false`), which
 > breaks when the gateway runs as a different user (e.g. `openclaw`) that cannot
 > traverse the dev repo's home directory. Always pass `--install-links` to force
-> a real copy. The install target is `$(npm root -g)/openclaw/` (typically
-> `/usr/lib/node_modules/openclaw/`). Running `pnpm build` only updates the dev
-> repo's `dist/`; the gateway will keep running old code until you also run the
-> install command below. Skipping this step is the most common cause of "fix is
-> in the code but gateway still uses the old behavior".
+> a real copy. Running `pnpm build` only updates the dev repo's `dist/`; the
+> gateway will keep running old code until you also run the install command
+> below. Skipping this step is the most common cause of "fix is in the code but
+> gateway still uses the old behavior".
 
-> **Cross-user systemctl:** The gateway runs as the `openclaw` user (UID 1001)
-> via a user-level systemd service. When deploying from a different user (e.g.
-> `frogger`), all `systemctl --user` and `journalctl --user` commands must be
-> prefixed with `sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw)`
-> so they target the correct user session. Without `XDG_RUNTIME_DIR`, systemd
-> cannot find the user bus and the commands fail with "Failed to connect to bus".
+> **Cross-user systemctl:** The gateway runs as the `openclaw` user via a
+> user-level systemd service. When deploying from `frogger`, all
+> `systemctl --user` and `journalctl --user` commands must be prefixed with
+> `sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw)` so they
+> target the correct user session. Without `XDG_RUNTIME_DIR`, systemd cannot
+> find the user bus and the commands fail with "Failed to connect to bus".
+> Similarly, `openclaw config validate`, `openclaw doctor --fix`, and
+> `openclaw gateway restart` must run as the `openclaw` user to read/write
+> the correct `~/.openclaw/` config directory.
+
+> **Optional bundled extensions.** The build step **must** use
+> `OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1`. Without it, upstream's
+> `optionalBundledClusters` skips building multi-file extensions (googlechat,
+> matrix, memory-lancedb, msteams, whatsapp, etc.). The global install will
+> have `dist/extensions/<name>/` directories containing only manifests and no
+> `index.js`, causing the plugin discovery security check to reject them.
 
 ```bash
 # Helper alias (optional, for readability)
@@ -264,8 +289,8 @@ OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) syste
 # Stop the gateway
 $OC_SYSTEMCTL stop openclaw-gateway.service
 
-# Build fresh before install to guarantee dist/ is up-to-date
-pnpm build
+# Build fresh before install — include optional bundled extensions
+OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 pnpm build
 
 # Clean stale npm temp symlinks that block the install.
 # npm renames the existing dir to .openclaw-<random> before replacing it.
@@ -278,11 +303,13 @@ sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
 # cross-user access)
 sudo npm i -g . --install-links
 
-# Install extension runtime deps.
+# Install extension runtime deps in the global install.
 # npm pack strips node_modules/ from extensions, so bundled plugins with
 # their own dependencies (e.g. memory-lancedb needs @lancedb/lancedb) will
 # fail at runtime with "Cannot find module" unless we install them here.
-GLOBAL_EXT="$(npm root -g)/openclaw/extensions"
+# NOTE: Extensions live under dist/extensions/ in the global install, not
+# a top-level extensions/ directory.
+GLOBAL_EXT="$(npm root -g)/openclaw/dist/extensions"
 for ext_pkg in "$GLOBAL_EXT"/*/package.json; do
   ext_dir=$(dirname "$ext_pkg")
   if jq -e '.dependencies // empty | length > 0' "$ext_pkg" >/dev/null 2>&1; then
@@ -326,16 +353,32 @@ $OC_SYSTEMCTL status openclaw-gateway.service
 ss -ltnp | grep 18789
 ```
 
-### 8a. Check for config schema changes
+### 8a. Validate config and check for schema changes
 
-After install but before verifying the gateway, check if upstream introduced
-config schema changes that affect the running environment:
+After install but before starting the gateway, validate the config and check
+if upstream introduced config schema changes that affect the running environment.
+All commands must run as the `openclaw` user so they read/write the correct
+`/home/openclaw/.openclaw/` config directory:
 
 ```bash
-# If openclaw doctor --fix is available, run it as the openclaw user
+# Validate config first — catches missing plugins, stale entries, schema mismatches
+sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) \
+  openclaw config validate 2>&1
+
+# If config is invalid, try doctor --fix
 sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) \
   openclaw doctor --fix 2>&1 || true
 ```
+
+**Common config validation failures after sync:**
+
+- **"extension entry escapes package directory"** — the build was run without
+  `OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1`. Rebuild and redeploy.
+- **"plugin not found: \<name\>"** — stale plugin references in
+  `plugins.allow`, `plugins.entries`, or `plugins.slots`. Remove them from
+  `/home/openclaw/.openclaw/openclaw.json` or use `openclaw doctor --fix`.
+- **Missing required config properties** — upstream added new required fields
+  to types like `ResolvedTtsConfig`. Update test fixtures and config stubs.
 
 **YOLO gate:** stop and ask if `doctor --fix` reports destructive changes
 (removing keys, changing defaults that affect running agents). Safe changes
@@ -403,17 +446,17 @@ OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) syste
   && MERGE_BASE=$(git merge-base main upstream/main) \
   && git rebase --onto upstream/main "$MERGE_BASE" main \
   && pnpm install \
-  && pnpm build \
+  && OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 pnpm build \
   && pnpm check \
   && TEST_DIRS=$(git diff --name-only upstream/main..main | grep '\.test\.ts$\|\.ts$' | sed 's|/[^/]*$||' | sort -u | grep -v '^docs\|^scripts\|^skills\|^Dockerfile') \
   && OPENCLAW_TEST_WORKERS=4 pnpm vitest run $TEST_DIRS \
   && grep -v '^#\|^$' docs/fork-features.txt | while IFS='|' read -r p f d; do p=$(echo "$p"|xargs); f=$(echo "$f"|xargs); grep -q "$p" "$f" 2>/dev/null || echo "MISSING: $d"; done \
   && git push origin main --force-with-lease \
   && $OC_SYSTEMCTL stop openclaw-gateway.service \
-  && pnpm build \
+  && OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 pnpm build \
   && sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null; true \
   && sudo npm i -g . --install-links \
-  && GLOBAL_EXT="$(npm root -g)/openclaw/extensions" \
+  && GLOBAL_EXT="$(npm root -g)/openclaw/dist/extensions" \
   && for ext_pkg in "$GLOBAL_EXT"/*/package.json; do ext_dir=$(dirname "$ext_pkg"); jq -e '.dependencies // empty | length > 0' "$ext_pkg" >/dev/null 2>&1 && sudo npm install --omit=dev --ignore-scripts --prefix "$ext_dir" 2>/dev/null || true; done \
   && pnpm ui:build \
   && sudo cp -r dist/control-ui "$(npm root -g)/openclaw/dist/control-ui" \
@@ -467,7 +510,10 @@ uses `docs/fork-features.txt` — update that file when adding/removing features
 | "duplicate plugin id detected" warning on startup     | A bundled extension was manually copied into `~/.openclaw/extensions/`. Remove the copy — bundled extensions are discovered automatically from `$(npm root -g)/openclaw/extensions/`                                                                                              |
 | Web UI shows old version after deploy                 | The systemd unit has a stale `OPENCLAW_SERVICE_VERSION` env var. Update it with `sed` and `systemctl --user daemon-reload` (see step 8). The gateway reads this env var at runtime via `resolveRuntimeServiceVersion()`                                                           |
 | Extension module not found (e.g. `@lancedb/lancedb`)  | Extension `node_modules/` contains pnpm symlinks into the root `.pnpm/` store. After rebase, these may dangle. Fix: `pnpm install` (step 5a). For the global install, ensure `--install-links` was used — without it, npm preserves the symlinks which break outside the dev repo |
-| Deploy breaks the gateway (won't start)               | Rollback: `$OC_SYSTEMCTL stop openclaw-gateway.service && git checkout <last-known-good-tag> && pnpm build && sudo npm i -g . --install-links && $OC_SYSTEMCTL start openclaw-gateway.service`                                                                                    |
+| "extension entry escapes package directory" on startup | Build was run without `OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1`. Multi-file extensions (googlechat, matrix, memory-lancedb, etc.) are in `optionalBundledClusters` and skipped without this flag. Rebuild with the flag and redeploy                                                    |
+| "plugin not found" in config validation               | Stale references in `plugins.allow`, `plugins.entries`, or `plugins.slots` in `/home/openclaw/.openclaw/openclaw.json`. Remove the stale entries manually or run `openclaw doctor --fix` as the openclaw user                                                                     |
+| `openclaw config validate` sees wrong config           | Running as `frogger` reads `/home/frogger/.openclaw/`, not the gateway's config. Always run config/doctor commands as: `sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) openclaw config validate`                                                                    |
+| Deploy breaks the gateway (won't start)               | Rollback: `$OC_SYSTEMCTL stop openclaw-gateway.service && git checkout <last-known-good-tag> && OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 pnpm build && sudo npm i -g . --install-links && $OC_SYSTEMCTL start openclaw-gateway.service`                                                 |
 
 ---
 
@@ -488,4 +534,4 @@ uses `docs/fork-features.txt` — update that file when adding/removing features
 | 2026-03-04 | 1317             | 10        | types.tts.ts + tts.ts (merged upstream SecretInput import + buildTtsFailureResult with fork kokoro provider), memory-lancedb/index.ts (merged storageOptions + dimensions params), 2× pi-embedded-runner compact.ts + attempt.ts (upstream extracted `resolveEmbeddedRunSkillEntries` helper; kept fork sandbox-specific skill reload logic), cron-tool.ts (kept fork permissive Type.Object schema over upstream CronJobSchema), server-chat.ts (merged upstream delta flush with fork rawText reasoning-tag stripping), cron service.issue-regressions.test.ts (sync makeStorePath signature), cron isolated-agent/run.ts (merged upstream bootstrap warning signatures + fork senderIsOwner), 2× sandbox docker.ts + browser.ts (merged upstream appendWorkspaceMountArgs helper with fork shared/media/browser-home mounts), pnpm-lock.yaml (accepted upstream). Fixups: unused CronJobSchema prefixed, format fixes. All 847 targeted test files run (7331 tests passed; 7 pre-existing upstream failures). Version 2026.3.3 deployed.                                                                                                                                               |
 | 2026-03-14 | 2152             | 10        | tts.ts (merged upstream resolveTtsRequestSetup helper with fork kokoroTTS function), jobs.ts (kept fork catch-up-after-restart logic inside upstream walkSchedulableJobs callback), pi-embedded-helpers/errors.ts (merged upstream classifyFailoverReasonFromHttpStatus with fork stripTrailingPartialFinalTag), server-chat.ts (merged upstream flushBufferedChatDeltaIfNeeded helper with fork rawText reasoning-tag stripping; fixed text redeclaration), ops.ts (merged upstream normalizeCronCreateDeliveryInput with fork per-agent job count limit), isolated-agent/run.ts (kept upstream interim-ack retry + senderIsOwner; fork duplicate dropped), command-auth.ts (upstream already includes ownerAllowAll in senderIsOwner via senderIsOwnerByScope), media-understanding/providers/index.test.ts (merged upstream minimax-portal + fork whisper-asr tests), pnpm-lock.yaml (accepted upstream), 7× GitHub workflow modify/delete (fork removes CI workflows). Fixups: jobs.ts indentation, server-chat.ts text redeclaration, format fixes. 959 targeted test files run (6262 tests passed; 124 pre-existing upstream failures from missing loadWorkspaceSkillEntries mock). |
 | 2026-03-15 | 136              | 3         | pnpm-lock.yaml (accepted upstream), 2× GitHub workflow modify/delete (docker-release.yml, ci.yml + workflow-sanity.yml — fork removes CI workflows). No source code conflicts. All fork features verified present. 917 targeted test files passed (8662 tests); 57 pre-existing upstream failures (missing resolveModelAsync/loadWorkspaceSkillEntries mocks, CronPattern validation, environment-specific vault/symlink issues). Version 2026.3.14 deployed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| 2026-03-21 | 1658             | 4         | media-understanding/providers/index.ts (merged upstream mergeProviderIntoRegistry helper with fork whisper-asr provider), media-understanding/providers/index.test.ts (kept fork whisper-asr test, dropped moonshot/minimax-portal tests for non-existent providers), tts.ts (kept upstream resolveReadySpeechProvider pattern, removed fork inline kokoro/edge handling now handled by providers/kokoro.ts), pi-embedded-runner/compact.ts (removed duplicate loadWorkspaceSkillEntries import, kept truncateSessionAfterCompaction), 2× GitHub workflow modify/delete (ci.yml + install-smoke.yml). Fixups: added kokoro property to openai extension test fixture, excluded node_modules from UNRESOLVED_IMPORT build guard (jimp/baileys), fixed curly lint in kokoro.ts, removed unused kokoroTTS function. TTS/media provider tests all pass (79 tests); cron failures are pre-existing upstream. `lint:tmp:no-raw-channel-fetch` fails due to environmental issue (resolveRepoRoot scanning `/home/frogger/extensions/` outside repo). |
+| 2026-03-21 | 1658             | 4         | media-understanding/providers/index.ts (merged upstream mergeProviderIntoRegistry helper with fork whisper-asr provider), media-understanding/providers/index.test.ts (kept fork whisper-asr test, dropped moonshot/minimax-portal tests for non-existent providers), tts.ts (kept upstream resolveReadySpeechProvider pattern, removed fork inline kokoro/edge handling now handled by providers/kokoro.ts), pi-embedded-runner/compact.ts (removed duplicate loadWorkspaceSkillEntries import, kept truncateSessionAfterCompaction), 2× GitHub workflow modify/delete (ci.yml + install-smoke.yml). Fixups: added kokoro property to openai extension test fixture, excluded node_modules from UNRESOLVED_IMPORT build guard (jimp/baileys), fixed curly lint in kokoro.ts, removed unused kokoroTTS function. TTS/media provider tests all pass (79 tests); cron failures are pre-existing upstream. Deploy: discovered `OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1` is required — without it, multi-file extensions (googlechat, matrix, memory-lancedb, etc.) lack `index.js` entry points and plugin discovery rejects them. Cleaned stale plugin config references (archon, planka, lightrag, dav). Extension deps path corrected to `dist/extensions/`. Version 2026.3.14 deployed. |
