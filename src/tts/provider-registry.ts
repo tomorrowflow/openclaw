@@ -6,11 +6,14 @@ import {
   resolvePluginCapabilityProviders,
 } from "../plugins/capability-provider-runtime.js";
 import type { SpeechProviderPlugin } from "../plugins/types.js";
-export { normalizeSpeechProviderId } from "./provider-registry-core.js";
 import {
   createSpeechProviderRegistry,
+  normalizeSpeechProviderId,
   type SpeechProviderRegistryResolver,
 } from "./provider-registry-core.js";
+import { buildKokoroSpeechProvider } from "./providers/kokoro.js";
+
+export { normalizeSpeechProviderId } from "./provider-registry-core.js";
 
 /** Resolve speech providers from configured plugin capabilities. */
 function resolveSpeechProviderPluginEntries(cfg?: OpenClawConfig): SpeechProviderPlugin[] {
@@ -31,7 +34,16 @@ const defaultSpeechProviderRegistryResolver: SpeechProviderRegistryResolver = {
       providerId,
       cfg,
     }),
-  listProviders: resolveSpeechProviderPluginEntries,
+  // Built-in providers are appended after plugin-provided ones so plugins can override.
+  listProviders: (cfg) => {
+    const plugins = resolveSpeechProviderPluginEntries(cfg);
+    const kokoro = buildKokoroSpeechProvider();
+    const kokoroId = normalizeSpeechProviderId(kokoro.id);
+    const hasKokoro = plugins.some(
+      (provider) => normalizeSpeechProviderId(provider.id) === kokoroId,
+    );
+    return hasKokoro ? plugins : [...plugins, kokoro];
+  },
 };
 
 /** Config-aware registry used by setup/status/runtime paths before plugins are loaded. */

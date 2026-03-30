@@ -4,15 +4,12 @@
 # Update this file when adding or removing fork features.
 
 # --- TTS / Audio ---
-\[\[tts\]\] | src/tts/tts-core.ts | Bare [[tts]] tag detection (sets hasDirective without parameters)
-kokoroTTS | src/tts/tts.ts | Kokoro TTS provider implementation
-kokoro | src/config/zod-schema.core.ts | Kokoro TTS in config schema (TtsProviderSchema enum)
-kokoro | src/config/types.tts.ts | Kokoro TTS type definition (TtsProvider union)
-kokoro | src/auto-reply/reply/commands-tts.ts | Kokoro in /tts help and provider switch
-inbound.*hasDirective | src/tts/tts.ts | [[tts]] directive overrides inbound-only auto mode
+\[\[tts\]\] | src/tts/directives.ts | Bare [[tts]] tag detection (sets hasDirective without parameters)
+kokoroTTS | src/tts/providers/kokoro.ts | Kokoro TTS provider implementation
+buildKokoroSpeechProvider | src/tts/provider-registry.ts | Kokoro registered as built-in speech provider
 
 # --- Speech-to-Text (Whisper ASR) ---
-whisperAsrProvider | src/media-understanding/providers/index.ts | Whisper ASR registered in provider list
+whisperAsrProvider | src/media-understanding/provider-registry.ts | Whisper ASR registered in provider list
 whisper-asr | src/media-understanding/providers/whisper-asr/index.ts | Whisper ASR native provider module
 transcribeWhisperAsr | src/media-understanding/providers/whisper-asr/audio.ts | Whisper ASR transcription implementation
 whisper-asr | src/media-understanding/defaults.ts | Whisper ASR default model mapping (faster-whisper)

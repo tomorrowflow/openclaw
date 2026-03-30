@@ -30,22 +30,32 @@ async function kokoroTTS(params: {
   }
 }
 
+function trimToString(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function toNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 export function buildKokoroSpeechProvider(): SpeechProviderPlugin {
   return {
     id: "kokoro",
     label: "Kokoro",
-    isConfigured: ({ config }) => config.kokoro.enabled,
+    isConfigured: ({ providerConfig }) => providerConfig.enabled === true,
     synthesize: async (req) => {
-      const kokoroVoice = req.overrides?.kokoro?.voice ?? req.config.kokoro.voice;
-      const kokoroLang = req.overrides?.kokoro?.lang ?? req.config.kokoro.lang;
-      const kokoroSpeed = req.overrides?.kokoro?.speed ?? req.config.kokoro.speed;
+      const cfg = req.providerConfig;
+      const overrides = req.providerOverrides ?? {};
+      const voice = trimToString(overrides.voice, trimToString(cfg.voice, "af_heart"));
+      const lang = trimToString(overrides.lang, trimToString(cfg.lang, "en-us"));
+      const speed = toNumber(overrides.speed, toNumber(cfg.speed, 1));
       const audioBuffer = await kokoroTTS({
         text: req.text,
-        url: req.config.kokoro.url || DEFAULT_KOKORO_URL,
-        voice: kokoroVoice,
-        lang: kokoroLang,
-        speed: kokoroSpeed,
-        timeoutMs: req.config.kokoro.timeoutMs ?? req.config.timeoutMs,
+        url: trimToString(cfg.url, DEFAULT_KOKORO_URL),
+        voice,
+        lang,
+        speed,
+        timeoutMs: toNumber(cfg.timeoutMs, req.timeoutMs),
       });
       return {
         audioBuffer,
