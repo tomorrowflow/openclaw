@@ -168,24 +168,40 @@ commit the fix.
 
 ### 5d. Run targeted tests
 
-Run tests only for directories touched by our fork commits (much faster than
-the full suite on resource-constrained machines):
+Run tests **only for files that had actual conflict resolutions** during the
+rebase. These are the files where merge mistakes could have been introduced.
+Testing all directories touched by fork commits is unnecessarily broad and
+can take over an hour on resource-constrained machines.
+
+**How to pick test files:**
+
+1. Review which source files had conflicts during the rebase (step 4).
+2. For each conflicted source file, find the closest test file:
+   - Co-located: `<file>.test.ts` next to the source file
+   - Same directory: `*.test.ts` files in the same directory
+   - Parent directory: test files covering the module (e.g.
+     `provider-error-patterns.test.ts` covers `errors.ts`)
+3. Skip test files for conflicts that were trivial (pnpm-lock.yaml,
+   workflow deletes, commits that were skipped entirely).
 
 ```bash
-# Auto-derive test directories from fork-changed files
-TEST_DIRS=$(git diff --name-only upstream/main..main \
-  | grep '\.test\.ts$\|\.ts$' | sed 's|/[^/]*$||' | sort -u \
-  | grep -v '^docs\|^scripts\|^skills\|^Dockerfile')
-
-OPENCLAW_VITEST_MAX_WORKERS=4 pnpm vitest run $TEST_DIRS
+# Example: test only the 4 files affected by conflict resolution
+OPENCLAW_VITEST_MAX_WORKERS=4 pnpm vitest run \
+  src/agents/pi-embedded-helpers/provider-error-patterns.test.ts \
+  src/agents/tools/cron-tool.test.ts \
+  src/cron/service/ops.test.ts \
+  src/tts/provider-registry.test.ts
 ```
 
-Adjust manually if the auto-derived list is too broad or misses a directory.
+Adjust the list to match the actual conflicts in each sync. A typical sync
+with 5-10 conflicts runs 50-100 tests in under 10 seconds.
 
 **Note:** The full test suite (`pnpm test`) runs 900+ test files across 3
 vitest configs with worker splitting. On a 4-core/8GB machine this takes
-30+ minutes. Use targeted tests for the sync workflow; run the full suite
-as a nightly or pre-release check.
+30+ minutes. The old approach of auto-deriving test directories from all
+fork-changed files (`git diff --name-only`) was similarly slow (20+
+directories, 60+ minutes). Use conflict-scoped tests for the sync workflow;
+run the full suite as a nightly or pre-release check.
 
 ### 5e. (Optional) Full test suite
 
@@ -522,8 +538,7 @@ OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) syste
   && pnpm install \
   && OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 pnpm build \
   && pnpm check \
-  && TEST_DIRS=$(git diff --name-only upstream/main..main | grep '\.test\.ts$\|\.ts$' | sed 's|/[^/]*$||' | sort -u | grep -v '^docs\|^scripts\|^skills\|^Dockerfile') \
-  && OPENCLAW_VITEST_MAX_WORKERS=4 pnpm vitest run $TEST_DIRS \
+  && echo ">>> Run conflict-scoped tests manually (see step 5d) <<<" \
   && grep -v '^#\|^$' docs/fork-features.txt | while IFS='|' read -r p f d; do p=$(echo "$p"|xargs); f=$(echo "$f"|xargs); grep -q "$p" "$f" 2>/dev/null || echo "MISSING: $d"; done \
   && git push origin main --force-with-lease \
   && $OC_SYSTEMCTL stop openclaw-gateway.service \
@@ -558,8 +573,10 @@ will still run old code. If `control-ui/` is missing, the web UI will show
 **Note:** `--install-links` is required. Without it, npm 7+ creates a symlink
 to the dev repo instead of copying, which breaks cross-user access.
 
-Test directories are auto-derived from the fork diff. The fork feature check
-uses `docs/fork-features.txt` — update that file when adding/removing features.
+Tests are scoped to conflict-affected files only (see step 5d) — the quick
+reference cannot automate this because the test list depends on which files
+actually conflicted. The fork feature check uses `docs/fork-features.txt` —
+update that file when adding/removing features.
 
 ---
 
@@ -618,4 +635,5 @@ uses `docs/fork-features.txt` — update that file when adding/removing features
 | 2026-03-14 | 2152             | 10        | tts.ts (merged upstream resolveTtsRequestSetup helper with fork kokoroTTS function), jobs.ts (kept fork catch-up-after-restart logic inside upstream walkSchedulableJobs callback), pi-embedded-helpers/errors.ts (merged upstream classifyFailoverReasonFromHttpStatus with fork stripTrailingPartialFinalTag), server-chat.ts (merged upstream flushBufferedChatDeltaIfNeeded helper with fork rawText reasoning-tag stripping; fixed text redeclaration), ops.ts (merged upstream normalizeCronCreateDeliveryInput with fork per-agent job count limit), isolated-agent/run.ts (kept upstream interim-ack retry + senderIsOwner; fork duplicate dropped), command-auth.ts (upstream already includes ownerAllowAll in senderIsOwner via senderIsOwnerByScope), media-understanding/providers/index.test.ts (merged upstream minimax-portal + fork whisper-asr tests), pnpm-lock.yaml (accepted upstream), 7× GitHub workflow modify/delete (fork removes CI workflows). Fixups: jobs.ts indentation, server-chat.ts text redeclaration, format fixes. 959 targeted test files run (6262 tests passed; 124 pre-existing upstream failures from missing loadWorkspaceSkillEntries mock).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 2026-03-15 | 136              | 3         | pnpm-lock.yaml (accepted upstream), 2× GitHub workflow modify/delete (docker-release.yml, ci.yml + workflow-sanity.yml — fork removes CI workflows). No source code conflicts. All fork features verified present. 917 targeted test files passed (8662 tests); 57 pre-existing upstream failures (missing resolveModelAsync/loadWorkspaceSkillEntries mocks, CronPattern validation, environment-specific vault/symlink issues). Version 2026.3.14 deployed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | 2026-03-30 | 2705             | 12        | 5× TTS files (commands-tts.ts, types.tts.ts, zod-schema.core.ts, provider-registry.ts, tts.ts — upstream refactored TTS into plugin-based provider registry; kept upstream's generic provider map, moved fork kokoro to src/tts/providers/kokoro.ts as built-in SpeechProviderPlugin), memory-lancedb/index.ts (upstream renamed loadLanceDB→loadLanceDbModule; kept fork storageOptions), tts-core.ts (upstream moved parseTtsDirectives to directives.ts; re-added bare [[tts]] tag to new location), cron-tool.test.ts (upstream renamed createCronTool→createTestCronTool; kept fork anti-spoofing assertion), sandbox/browser.ts (upstream moved imports to plugin-sdk/browser-runtime.js; kept fork fs/path/STATE_DIR imports, fixed STATE_DIR path config.js→paths.js), media-understanding/provider-registry.ts (upstream+fork both adding whisper-asr; kept upstream's BUILTIN_PROVIDERS pattern), openai/index.test.ts (removed fork's legacy per-provider config fixtures; upstream uses providerConfigs map), tsdown-build.mjs (upstream renamed extensions/→BUNDLED_PLUGIN_PATH_PREFIX), pnpm-lock.yaml (accepted upstream), 2× GitHub workflow modify/delete (docker-release.yml, 7× remaining workflows — fork removes CI). Fixups: whisper-asr/audio.ts import path ../shared.js→../../shared.js, tts.ts restored to upstream's thin re-export facade (was accidentally bloated by --theirs during curly-brace lint conflict), kokoro.ts rewritten for new SpeechProviderPlugin API (providerConfig/providerOverrides instead of config.kokoro), kokoro registered as built-in in provider-registry.ts, provider-registry.test.ts updated to expect kokoro in provider list, fork-features.txt updated for new file locations. Pre-deploy: removed stale /home/frogger/extensions/ (old custom plugins from pre-MCP-migration era causing lint false positives via resolveRepoRoot path mismatch). Config fix: doctor --fix removed stale messages.tts.kokoro key. Discovered OPENCLAW_TEST_WORKERS env var renamed to OPENCLAW_VITEST_MAX_WORKERS upstream (22 GiB RAM = "constrained" band = 2 workers default). Version 2026.3.29 deployed. |
+| 2026-04-03 | 1344             | 8         | errors.ts (merged upstream classifyFailoverReasonFromCode/classifyFailoverSignal with fork stripTrailingPartialFinalTag), cron-tool.ts 2× (kept fork detailed schemas CronJobObjectSchema/CronPatchObjectSchema over upstream's simpler CronJobSchema; second conflict was lint fixup re-resolving same area), ops.ts (upstream removed normalizeCronCreateDeliveryInput; switched to direct `input` while keeping fork per-agent job limit), pnpm-lock.yaml (accepted upstream), ci.yml (fork removes CI workflows), tts.ts 2× + whisper-asr/audio.ts (3 commits skipped — curly-brace lint fix, monolithic Kokoro/Whisper provider commit, and [[tts]] directive override were all obsolete after upstream's TTS refactor to plugin-based provider registry). Restored: whisper-asr provider files (audio.ts, index.ts, audio.test.ts), skill files (kokoro-tts/SKILL.md, whisper-asr/SKILL.md), and provider-registry/defaults/runner.entries diffs were lost when the monolithic tts.ts commit was skipped — manually re-extracted from original commit eea21f67dc. Fixed whisper-asr/audio.ts import path ../shared.js→../../shared.js (known issue from 2026-03-30 sync). Lint fix: kokoro.ts curly brace. Changed test strategy: conflict-scoped tests (4 files, 74 tests, 7s) instead of directory-wide sweep (20 dirs, 60+ min). Version 2026.4.3 deployed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | 2026-03-21 | 1658             | 4         | media-understanding/providers/index.ts (merged upstream mergeProviderIntoRegistry helper with fork whisper-asr provider), media-understanding/providers/index.test.ts (kept fork whisper-asr test, dropped moonshot/minimax-portal tests for non-existent providers), tts.ts (kept upstream resolveReadySpeechProvider pattern, removed fork inline kokoro/edge handling now handled by providers/kokoro.ts), pi-embedded-runner/compact.ts (removed duplicate loadWorkspaceSkillEntries import, kept truncateSessionAfterCompaction), 2× GitHub workflow modify/delete (ci.yml + install-smoke.yml). Fixups: added kokoro property to openai extension test fixture, excluded node_modules from UNRESOLVED_IMPORT build guard (jimp/baileys), fixed curly lint in kokoro.ts, removed unused kokoroTTS function. TTS/media provider tests all pass (79 tests); cron failures are pre-existing upstream. Deploy: discovered `OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1` is required — without it, multi-file extensions (googlechat, matrix, memory-lancedb, etc.) lack `index.js` entry points and plugin discovery rejects them. Cleaned stale plugin config references (archon, planka, lightrag, dav). Extension deps path corrected to `dist/extensions/`. Post-deploy: migrated dav/planka/lightrag from custom `~/.openclaw/extensions/` plugins (removed from disk, `mcpUrl` config field never in core) to `mcp.servers` entries using `supergateway` stdio-to-HTTP bridge (`sudo npm i -g supergateway`). Fixed URLs from `host.docker.internal` to `localhost` (gateway runs on host, not Docker). Added `--oauth2Bearer` for dav auth. Set `tools.sandbox.tools.allow` to `["*"]` so MCP tool names pass sandbox policy filter. Added nemotron-3-super:cloud model with `nemotron` alias. Version 2026.3.14 deployed.                                                                                                                                                                                                                                                                                                                                     |
