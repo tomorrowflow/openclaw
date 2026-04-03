@@ -26,7 +26,9 @@ async function kokoroTTS(params: {
     }
     return Buffer.from(await res.arrayBuffer());
   } finally {
-    if (timer) clearTimeout(timer);
+    if (timer) {
+      clearTimeout(timer);
+    }
   }
 }
 

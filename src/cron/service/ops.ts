@@ -481,7 +481,6 @@ export async function add(state: CronServiceState, input: CronJobCreate) {
   return await locked(state, async () => {
     warnIfDisabled(state, "add");
     await ensureLoaded(state);
-
     // Enforce per-agent job count limit to prevent resource exhaustion.
     const agentId = input.agentId?.trim() || undefined;
     const existingCount = (state.store?.jobs ?? []).filter(

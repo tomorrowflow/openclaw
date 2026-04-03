@@ -23,6 +23,14 @@ export {
   MIN_AUDIO_FILE_BYTES,
 } from "./defaults.constants.js";
 
+export const DEFAULT_AUDIO_MODELS: Record<string, string> = {
+  groq: "whisper-large-v3-turbo",
+  openai: "gpt-4o-mini-transcribe",
+  deepgram: "nova-3",
+  mistral: "voxtral-mini-latest",
+  "whisper-asr": "faster-whisper",
+};
+
 let defaultRegistryCache: Map<string, MediaUnderstandingProvider> | null = null;
 const configRegistryCache = new Map<string, Map<string, MediaUnderstandingProvider>>();
 const MAX_CONFIG_REGISTRY_CACHE_ENTRIES = 32;
