@@ -1,15 +1,45 @@
 // Cron service issue regression tests cover historical scheduler failures.
 import { describe, expect, it, vi } from "vitest";
+import type { HeartbeatRunResult } from "../infra/heartbeat-wake.js";
+import { clearCommandLane, setCommandLaneConcurrency } from "../process/command-queue.js";
+import { CommandLane } from "../process/lanes.js";
+import * as schedule from "./schedule.js";
 import {
+  createAbortAwareIsolatedRunner,
+  createDefaultIsolatedRunner,
+  createDeferred,
+  createDueIsolatedJob,
+  createIsolatedRegressionJob,
+  createRunningCronServiceState,
+  noopLogger,
   setupCronIssueRegressionFixtures,
   startCronForStore,
   topOfHourOffsetMs,
+  writeCronJobs,
+  writeCronStoreSnapshot,
 } from "./service.issue-regressions.test-helpers.js";
+import { CronService } from "./service.js";
 import { loadCronStore, saveCronStore } from "./store.js";
+import { createNoopLogger } from "./service.test-harness.js";
+import { computeJobNextRunAtMs } from "./service/jobs.js";
+import { enqueueRun, run } from "./service/ops.js";
+import { createCronServiceState } from "./service/state.js";
+import type { CronEvent } from "./service/state.js";
+import {
+  applyJobResult,
+  DEFAULT_JOB_TIMEOUT_MS,
+  executeJob,
+  executeJobCore,
+  onTimer,
+  runMissedJobs,
+} from "./service/timer.js";
 import type { CronJob, CronJobState } from "./types.js";
+
+const FAST_TIMEOUT_SECONDS = 0.0025;
 
 describe("Cron issue regressions", () => {
   const cronIssueRegressionFixtures = setupCronIssueRegressionFixtures();
+  const makeStorePath = () => cronIssueRegressionFixtures.makeStorePath();
 
   it("covers schedule updates and payload patching", async () => {
     const store = cronIssueRegressionFixtures.makeStorePath();

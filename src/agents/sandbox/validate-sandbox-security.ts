@@ -445,7 +445,8 @@ export function validateSecretMounts(secretMounts: Record<string, string> | unde
 
     const normalized = normalizeHostPath(filePath);
 
-    const blockedReason = getBlockedReasonForSourcePath(normalized);
+    const blockedHostPaths = getBlockedHostPaths();
+    const blockedReason = getBlockedReasonForSourcePath(normalized, blockedHostPaths);
     if (blockedReason) {
       const blockedPath =
         blockedReason.kind === "covers" || blockedReason.kind === "targets"
@@ -460,7 +461,7 @@ export function validateSecretMounts(secretMounts: Record<string, string> | unde
 
     // Symlink escape hardening: resolve through existing ancestors and re-check.
     const canonical = resolveSandboxHostPathViaExistingAncestor(normalized);
-    const canonicalBlocked = getBlockedReasonForSourcePath(canonical);
+    const canonicalBlocked = getBlockedReasonForSourcePath(canonical, blockedHostPaths);
     if (canonicalBlocked) {
       const canonicalBlockedPath =
         canonicalBlocked.kind === "covers" || canonicalBlocked.kind === "targets"

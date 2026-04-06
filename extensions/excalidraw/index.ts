@@ -79,7 +79,7 @@ function createCanvasClient(baseUrl: string, logger: PluginApi["logger"]) {
 
 // ---------- Tool definitions ----------
 
-const EXCALIDRAW_ELEMENT_TYPES = [
+const _EXCALIDRAW_ELEMENT_TYPES = [
   "rectangle",
   "ellipse",
   "diamond",
@@ -102,7 +102,9 @@ interface ToolSpec {
 function stripUndefined(obj: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) {
-    if (v !== undefined && v !== null) out[k] = v;
+    if (v !== undefined && v !== null) {
+      out[k] = v;
+    }
   }
   return out;
 }
@@ -165,7 +167,7 @@ const TOOLS: ToolSpec[] = [
       properties: { id: { type: "string", description: "Element ID" } },
       required: ["id"],
     },
-    handler: (p, api) => api.get(`/api/elements/${p.id}`),
+    handler: (p, api) => api.get(`/api/elements/${String(p.id)}`),
   },
   {
     name: "update_element",
@@ -193,7 +195,7 @@ const TOOLS: ToolSpec[] = [
     },
     handler: (p, api) => {
       const { id, ...rest } = p;
-      return api.put(`/api/elements/${id}`, stripUndefined(rest));
+      return api.put(`/api/elements/${String(id)}`, stripUndefined(rest));
     },
   },
   {
@@ -204,7 +206,7 @@ const TOOLS: ToolSpec[] = [
       properties: { id: { type: "string", description: "Element ID" } },
       required: ["id"],
     },
-    handler: (p, api) => api.del(`/api/elements/${p.id}`),
+    handler: (p, api) => api.del(`/api/elements/${String(p.id)}`),
   },
   {
     name: "query_elements",
@@ -217,7 +219,7 @@ const TOOLS: ToolSpec[] = [
       additionalProperties: true,
     },
     handler: (p, api) => {
-      const qs = p.type ? `?type=${encodeURIComponent(String(p.type))}` : "";
+      const qs = p.type ? `?type=${encodeURIComponent(p.type as string)}` : "";
       return api.get(`/api/elements/search${qs}`);
     },
   },
@@ -378,7 +380,9 @@ const TOOLS: ToolSpec[] = [
           /* skip */
         }
       }
-      if (elems.length === 0) return JSON.stringify({ success: false, error: "No elements found" });
+      if (elems.length === 0) {
+        return JSON.stringify({ success: false, error: "No elements found" });
+      }
 
       let target: number;
       for (const el of elems) {
@@ -445,8 +449,9 @@ const TOOLS: ToolSpec[] = [
           /* skip */
         }
       }
-      if (elems.length < 3)
+      if (elems.length < 3) {
         return JSON.stringify({ success: true, message: "Need 3+ elements to distribute" });
+      }
 
       if (dir === "horizontal") {
         elems.sort((a, b) => a.x - b.x);
@@ -480,7 +485,9 @@ const TOOLS: ToolSpec[] = [
     },
     handler: async (p, api) => {
       const ids = p.elementIds as string[];
-      for (const id of ids) await api.put(`/api/elements/${id}`, { locked: true });
+      for (const id of ids) {
+        await api.put(`/api/elements/${id}`, { locked: true });
+      }
       return JSON.stringify({ success: true, locked: ids.length });
     },
   },
@@ -496,7 +503,9 @@ const TOOLS: ToolSpec[] = [
     },
     handler: async (p, api) => {
       const ids = p.elementIds as string[];
-      for (const id of ids) await api.put(`/api/elements/${id}`, { locked: false });
+      for (const id of ids) {
+        await api.put(`/api/elements/${id}`, { locked: false });
+      }
       return JSON.stringify({ success: true, unlocked: ids.length });
     },
   },
@@ -555,10 +564,14 @@ const TOOLS: ToolSpec[] = [
       const raw = await api.get("/api/elements");
       try {
         const parsed = JSON.parse(raw);
-        if (!parsed.success || !Array.isArray(parsed.elements)) return raw;
+        if (!parsed.success || !Array.isArray(parsed.elements)) {
+          return raw;
+        }
 
         const elems = parsed.elements;
-        if (elems.length === 0) return JSON.stringify({ description: "Canvas is empty." });
+        if (elems.length === 0) {
+          return JSON.stringify({ description: "Canvas is empty." });
+        }
 
         const types: Record<string, number> = {};
         let minX = Infinity,
@@ -579,12 +592,19 @@ const TOOLS: ToolSpec[] = [
           maxY = Math.max(maxY, y + h);
 
           let label = `${el.type} (${el.id})`;
-          if (el.text) label += ` text="${el.text}"`;
-          if (el.label?.text) label += ` label="${el.label.text}"`;
+          if (el.text) {
+            label += ` text="${el.text}"`;
+          }
+          if (el.label?.text) {
+            label += ` label="${el.label.text}"`;
+          }
           label += ` at (${x}, ${y})`;
-          if (w || h) label += ` ${w}x${h}`;
-          if (el.backgroundColor && el.backgroundColor !== "transparent")
+          if (w || h) {
+            label += ` ${w}x${h}`;
+          }
+          if (el.backgroundColor && el.backgroundColor !== "transparent") {
             label += ` bg=${el.backgroundColor}`;
+          }
           summaries.push(label);
         }
 
@@ -646,9 +666,11 @@ const TOOLS: ToolSpec[] = [
       try {
         const parsed = JSON.parse(String(p.data));
         elements = parsed.elements || parsed;
-        if (!Array.isArray(elements)) throw new Error("No elements array found");
+        if (!Array.isArray(elements)) {
+          throw new Error("No elements array found");
+        }
       } catch (err) {
-        return JSON.stringify({ success: false, error: `Invalid JSON: ${err}` });
+        return JSON.stringify({ success: false, error: `Invalid JSON: ${String(err)}` });
       }
 
       if (mode === "replace") {

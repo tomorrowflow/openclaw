@@ -345,10 +345,10 @@ export function extractContentFromMessage(message: unknown): string {
 
   if (record.role === "assistant") {
     if (typeof content === "string") {
-      return sanitizeRenderableText(content).trim();
+      return stripReasoningTags(sanitizeRenderableText(content).trim());
     }
     if (Array.isArray(content)) {
-      return extractAssistantRenderableContent(record);
+      return stripReasoningTags(extractAssistantRenderableContent(record));
     }
   }
 
@@ -441,11 +441,13 @@ export function extractTextFromMessage(
     return "";
   }
   if (record.role === "assistant") {
-    return composeThinkingAndContent({
-      thinkingText: extractThinkingFromMessage(record),
-      contentText: extractAssistantRenderableContent(record),
-      showThinking: opts?.includeThinking ?? false,
-    });
+    return stripReasoningTags(
+      composeThinkingAndContent({
+        thinkingText: extractThinkingFromMessage(record),
+        contentText: extractAssistantRenderableContent(record),
+        showThinking: opts?.includeThinking ?? false,
+      }),
+    );
   }
   const text = extractTextBlocks(record.content, opts);
   if (text) {

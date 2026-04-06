@@ -10,6 +10,7 @@ import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
+import { STATE_DIR } from "../../config/paths.js";
 import { deriveDefaultBrowserCdpPortRange } from "../../config/port-defaults.js";
 import { isSameSsrFPolicy, type SsrFPolicy } from "../../infra/net/ssrf.js";
 import {
@@ -24,11 +25,6 @@ import {
   resolveProfile,
   type ResolvedBrowserConfig,
 } from "../../plugin-sdk/browser-config.js";
-import {
-  startBrowserBridgeServer,
-  stopBrowserBridgeServer,
-} from "../../plugin-sdk/browser-runtime.js";
-import { STATE_DIR } from "../../config/paths.js";
 import { defaultRuntime } from "../../runtime.js";
 import { BROWSER_BRIDGES } from "./browser-bridges.js";
 import { computeSandboxBrowserConfigHash } from "./config-hash.js";
