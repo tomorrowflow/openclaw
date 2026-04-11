@@ -1,23 +1,29 @@
 import type { SpeechProviderPlugin } from "../../plugins/types.js";
 
-const DEFAULT_KOKORO_URL = "http://localhost:3050";
+const DEFAULT_KOKORO_URL = "http://localhost:9007";
 
 async function kokoroTTS(params: {
   text: string;
   url: string;
   voice: string;
-  lang: string;
   speed: number;
   timeoutMs?: number;
 }): Promise<Buffer> {
-  const { text, url, voice, lang, speed, timeoutMs } = params;
+  const { text, url, voice, speed, timeoutMs } = params;
   const controller = new AbortController();
   const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
   try {
-    const res = await fetch(`${url}/api/tts`, {
+    // kokoro-fastapi uses the OpenAI-compatible /v1/audio/speech endpoint
+    const res = await fetch(`${url}/v1/audio/speech`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, voice, lang, speed }),
+      body: JSON.stringify({
+        model: "kokoro",
+        input: text,
+        voice,
+        speed,
+        response_format: "mp3",
+      }),
       signal: controller.signal,
     });
     if (!res.ok) {
@@ -49,13 +55,11 @@ export function buildKokoroSpeechProvider(): SpeechProviderPlugin {
       const cfg = req.providerConfig;
       const overrides = req.providerOverrides ?? {};
       const voice = trimToString(overrides.voice, trimToString(cfg.voice, "af_heart"));
-      const lang = trimToString(overrides.lang, trimToString(cfg.lang, "en-us"));
       const speed = toNumber(overrides.speed, toNumber(cfg.speed, 1));
       const audioBuffer = await kokoroTTS({
         text: req.text,
         url: trimToString(cfg.url, DEFAULT_KOKORO_URL),
         voice,
-        lang,
         speed,
         timeoutMs: toNumber(cfg.timeoutMs, req.timeoutMs),
       });
