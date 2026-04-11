@@ -101,6 +101,18 @@ If the rebase stops with conflicts:
   callbacks, and destructured parameter names may differ (e.g. `nowMs: now`).
   Match the upstream callback signature.
 
+- **GitHub Actions workflows reintroduced by upstream.** This fork does not
+  use GitHub Actions — all workflows, reusable actions, CodeQL config,
+  dependabot, and actionlint were removed. Upstream regularly adds or modifies
+  `.github/workflows/*.yml`, `.github/actions/`, `.github/codeql/`,
+  `.github/dependabot.yml`, and `.github/actionlint.yaml`. During rebase,
+  these show up as modify/delete conflicts. **Always resolve by deleting**
+  (`git rm <file> && git add <file>`) — do not keep upstream's version.
+  If new workflow files are added by upstream (no conflict, just new files),
+  delete them after the rebase completes:
+  `git rm .github/workflows/*.yml .github/actions/ .github/codeql/ .github/dependabot.yml .github/actionlint.yaml 2>/dev/null`
+  and commit as a fixup.
+
 If a rebase goes badly: `git rebase --abort` returns to the pre-rebase state.
 
 ### Autonomous (YOLO) conflict resolution policy
