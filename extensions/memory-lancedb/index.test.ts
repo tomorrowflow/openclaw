@@ -281,10 +281,10 @@ describe("memory plugin e2e", () => {
     expect(config?.recallMaxChars).toBe(1800);
   });
 
-  test("config schema keeps autoCapture disabled by default", () => {
+  test("config schema keeps autoCapture enabled by default (fork)", async () => {
     const config = parseConfig();
 
-    expect(config?.autoCapture).toBe(false);
+    expect(config?.autoCapture).toBe(true);
     expect(config?.autoRecall).toBe(true);
   });
 

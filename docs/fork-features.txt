@@ -21,7 +21,7 @@ stripReasoningTagsFromText | src/shared/text/reasoning-tags.ts | Reasoning tag s
 stripReasoningTags | src/tui/tui-formatters.ts | TUI reasoning tag stripping
 stripReasoningTagsFromText | src/gateway/server-chat.ts | Gateway reasoning tag stripping
 stripTrailingPartialTag | src/agents/pi-embedded-subscribe.ts | Streaming partial tag stripping
-stripTrailingPartialFinalTag | src/agents/pi-embedded-helpers/errors.ts | Error text partial tag stripping
+stripTrailingPartialFinalTag | src/agents/pi-embedded-helpers/sanitize-user-facing-text.ts | Error text partial tag stripping
 closedOnly | src/markdown/code-spans.ts | Code-span closedOnly option (partial tag support)
 
 # --- Sandbox ---

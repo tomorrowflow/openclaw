@@ -356,12 +356,31 @@ function shouldRewriteRawPayloadWithoutErrorContext(raw: string): boolean {
   return false;
 }
 
+function stripTrailingPartialFinalTag(text: string): string {
+  if (!text) {
+    return text;
+  }
+  const lastOpen = text.lastIndexOf("<");
+  if (lastOpen === -1) {
+    return text;
+  }
+  if (text.indexOf(">", lastOpen) !== -1) {
+    return text;
+  }
+  const tail = text.slice(lastOpen).replace(/\s+/g, "").toLowerCase();
+  if ("<final>".startsWith(tail) || "</final>".startsWith(tail)) {
+    return text.slice(0, lastOpen);
+  }
+  return text;
+}
+
+
 function stripFinalTagsFromText(text: unknown): string {
   const normalized = coerceChatContentText(text);
   if (!normalized) {
     return normalized;
   }
-  return stripFinalTags(normalized);
+  return stripTrailingPartialFinalTag(stripFinalTags(normalized));
 }
 
 function stripToolCallsOmittedPlaceholderLines(text: string): string {
