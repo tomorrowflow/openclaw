@@ -88,6 +88,8 @@ minimumReleaseAgeExclude:
   - "sqlite-vec-*"
   - "rastermill"
   - "clawpdf"
+  - "@aws-sdk/*"
+  - "@smithy/*"
 
 nodeLinker: hoisted
 blockExoticSubdeps: true
