@@ -1,4 +1,5 @@
 // Cron service issue regression tests cover historical scheduler failures.
+import fs from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import type { HeartbeatRunResult } from "../infra/heartbeat-wake.js";
 import { clearCommandLane, setCommandLaneConcurrency } from "../process/command-queue.js";
@@ -19,7 +20,6 @@ import {
   writeCronStoreSnapshot,
 } from "./service.issue-regressions.test-helpers.js";
 import { CronService } from "./service.js";
-import { loadCronStore, saveCronStore } from "./store.js";
 import { createNoopLogger } from "./service.test-harness.js";
 import { computeJobNextRunAtMs } from "./service/jobs.js";
 import { enqueueRun, run } from "./service/ops.js";
@@ -33,6 +33,7 @@ import {
   onTimer,
   runMissedJobs,
 } from "./service/timer.js";
+import { loadCronStore, saveCronStore } from "./store.js";
 import type { CronJob, CronJobState } from "./types.js";
 
 const FAST_TIMEOUT_SECONDS = 0.0025;
@@ -1503,11 +1504,13 @@ describe("Cron issue regressions", () => {
     expect(job.state.lastStatus).toBe("ok");
     expect(job.state.scheduleErrorCount).toBe(1);
     expect(job.state.lastError).toMatch(/^schedule error:/);
-    expect(job.state.nextRunAtMs).toBe(endedAt + 2_000);
+    // Upstream #66019: schedule error clears nextRunAtMs to avoid refire loops.
+    // recordScheduleComputeError auto-disables after repeated failures.
+    expect(job.state.nextRunAtMs).toBeUndefined();
     expect(job.enabled).toBe(true);
   });
 
-  it("falls back to backoff schedule when cron next-run computation throws on error path (#30905)", () => {
+  it("clears nextRunAtMs when cron next-run computation throws on error path (#30905)", () => {
     const startedAt = Date.parse("2026-03-02T12:05:00.000Z");
     const endedAt = startedAt + 25;
     const state = createCronServiceState({
@@ -1542,7 +1545,8 @@ describe("Cron issue regressions", () => {
     expect(job.state.consecutiveErrors).toBe(1);
     expect(job.state.scheduleErrorCount).toBe(1);
     expect(job.state.lastError).toMatch(/^schedule error:/);
-    expect(job.state.nextRunAtMs).toBe(endedAt + 30_000);
+    // Upstream #66019: schedule error clears nextRunAtMs to avoid refire loops.
+    expect(job.state.nextRunAtMs).toBeUndefined();
     expect(job.enabled).toBe(true);
   });
 
