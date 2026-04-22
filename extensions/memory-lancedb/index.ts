@@ -1914,7 +1914,9 @@ export default definePluginEntry({
         }
 
         return {
-          prependContext: context,
+          appendSystemContext: formatRelevantMemoriesContext(
+            cleanResults,
+          ),
         };
       } catch (err) {
         api.logger.warn(`memory-lancedb: recall failed: ${String(err)}`);
