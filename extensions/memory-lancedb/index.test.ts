@@ -1449,6 +1449,7 @@ describe("memory plugin e2e", () => {
         input: "what editor should i use?",
       });
       expect(result?.appendSystemContext).toContain("I prefer Helix for editing code.");
+      expect(result?.appendSystemContext).toContain("I prefer Helix for editing code.");
       expect(logger.info).toHaveBeenCalledWith("memory-lancedb: injecting 1 memories into context");
     } finally {
       vi.doUnmock("openclaw/plugin-sdk/runtime-env");

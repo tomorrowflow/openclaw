@@ -877,6 +877,9 @@ describe("Cron issue regressions", () => {
       requestHeartbeatNow: vi.fn(),
       runIsolatedAgentJob: vi.fn(async (params) => {
         const abortSignal = params.abortSignal;
+        // Upstream's executeJobCoreWithTimeout defers the timeout until
+        // execution actually starts for non-main isolated agentTurn jobs.
+        params.onExecutionStarted?.();
         if (abortSignal?.aborted) {
           now += 100;
           throw new Error("aborted");
@@ -1048,7 +1051,8 @@ describe("Cron issue regressions", () => {
       }),
     );
     const enqueueSystemEvent = vi.fn();
-    const requestHeartbeatNow = vi.fn();
+    // Upstream c06739d7 renamed requestHeartbeatNow → requestHeartbeat.
+    const requestHeartbeat = vi.fn();
     const job: CronJob = {
       id: "busy-recurring-main",
       name: "busy recurring main",
@@ -1067,9 +1071,12 @@ describe("Cron issue regressions", () => {
       log: noopLogger,
       nowMs,
       enqueueSystemEvent,
-      requestHeartbeatNow,
+      requestHeartbeat,
       runHeartbeatOnce,
-      wakeNowHeartbeatBusyMaxWaitMs: 120_000,
+      // Upstream now retries skipped heartbeats up to maxWaitMs.  Use 0 here so
+      // the fork's "fall through to requestHeartbeat when busy" path triggers
+      // immediately, matching the original "finishes quickly" intent.
+      wakeNowHeartbeatBusyMaxWaitMs: 0,
       wakeNowHeartbeatBusyRetryDelayMs: 250,
       runIsolatedAgentJob: createDefaultIsolatedRunner(),
     });
@@ -1079,7 +1086,7 @@ describe("Cron issue regressions", () => {
 
     expect(enqueueSystemEvent).toHaveBeenCalledTimes(1);
     expect(runHeartbeatOnce).toHaveBeenCalledTimes(1);
-    expect(requestHeartbeatNow).toHaveBeenCalledWith(
+    expect(requestHeartbeat).toHaveBeenCalledWith(
       expect.objectContaining({
         reason: "cron:busy-recurring-main",
       }),
@@ -1430,30 +1437,41 @@ describe("Cron issue regressions", () => {
       nowMs: () => now,
       enqueueSystemEvent: vi.fn(),
       requestHeartbeatNow: vi.fn(),
-      runIsolatedAgentJob: vi.fn(async ({ abortSignal }: { abortSignal?: AbortSignal }) => {
-        started = true;
-        await new Promise<void>((resolve) => {
-          if (!abortSignal) {
-            resolve();
-            return;
-          }
-          if (abortSignal.aborted) {
-            abortWallMs = Date.now();
-            resolve();
-            return;
-          }
-          abortSignal.addEventListener(
-            "abort",
-            () => {
+      runIsolatedAgentJob: vi.fn(
+        async ({
+          abortSignal,
+          onExecutionStarted,
+        }: {
+          abortSignal?: AbortSignal;
+          onExecutionStarted?: () => void;
+        }) => {
+          started = true;
+          // Upstream's executeJobCoreWithTimeout defers the timeout until
+          // execution actually starts for non-main isolated agentTurn jobs.
+          onExecutionStarted?.();
+          await new Promise<void>((resolve) => {
+            if (!abortSignal) {
+              resolve();
+              return;
+            }
+            if (abortSignal.aborted) {
               abortWallMs = Date.now();
               resolve();
-            },
-            { once: true },
-          );
-        });
-        now += 5;
-        return { status: "ok" as const, summary: "done" };
-      }),
+              return;
+            }
+            abortSignal.addEventListener(
+              "abort",
+              () => {
+                abortWallMs = Date.now();
+                resolve();
+              },
+              { once: true },
+            );
+          });
+          now += 5;
+          return { status: "ok" as const, summary: "done" };
+        },
+      ),
     });
 
     await onTimer(state);
