@@ -364,7 +364,7 @@ function stripTrailingPartialFinalTag(text: string): string {
   if (lastOpen === -1) {
     return text;
   }
-  if (text.indexOf(">", lastOpen) !== -1) {
+  if (text.includes(">", lastOpen)) {
     return text;
   }
   const tail = text.slice(lastOpen).replace(/\s+/g, "").toLowerCase();
@@ -373,7 +373,6 @@ function stripTrailingPartialFinalTag(text: string): string {
   }
   return text;
 }
-
 
 function stripFinalTagsFromText(text: unknown): string {
   const normalized = coerceChatContentText(text);

@@ -57,7 +57,7 @@ function stripTrailingPartialTag(text: string): string {
   if (lastOpen === -1) {
     return text;
   }
-  if (text.indexOf(">", lastOpen) !== -1) {
+  if (text.includes(">", lastOpen)) {
     return text;
   }
   const tail = text.slice(lastOpen).replace(/\s+/g, "").toLowerCase();
