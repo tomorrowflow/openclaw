@@ -90,6 +90,9 @@ minimumReleaseAgeExclude:
   - "clawpdf"
   - "@aws-sdk/*"
   - "@smithy/*"
+  - "typebox"
+  - "@microsoft/teams.*"
+  - "marked"
 
 nodeLinker: hoisted
 blockExoticSubdeps: true
