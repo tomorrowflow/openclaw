@@ -1573,6 +1573,7 @@
     "deadcode:ts-prune": "pnpm dlx ts-prune src extensions scripts",
     "deadcode:ts-unused": "pnpm dlx ts-unused-exports tsconfig.json --ignoreTestFiles --exitWithCount",
     "deadcode:unused-files": "node scripts/check-deadcode-unused-files.mjs",
+    "deploy:globally": "node scripts/deploy-globally.mjs",
     "deps:root-ownership": "node scripts/root-dependency-ownership-audit.mjs",
     "deps:root-ownership:check": "node scripts/root-dependency-ownership-audit.mjs --check",
     "deps:changes:report": "node scripts/dependency-changes-report.mjs",
