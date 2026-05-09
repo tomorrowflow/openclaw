@@ -63,7 +63,7 @@ excalidraw | skills/excalidraw/SKILL.md | Excalidraw skill (agent instructions)
 # --- Plugins / Skills / Dockerfiles ---
 excalidraw | extensions/excalidraw/openclaw.plugin.json | Excalidraw canvas plugin
 brave-browser | Dockerfile.sandbox-browser-brave | Brave browser overlay Dockerfile
-fonts-noto-cjk | Dockerfile.sandbox-browser | CJK/Unicode fonts in sandbox browser image
+fonts-noto-cjk | scripts/docker/sandbox/Dockerfile.browser | CJK/Unicode fonts in sandbox browser image
 1920x1080 | scripts/sandbox-browser-entrypoint.sh | Default screen resolution bump
 SingletonLock | scripts/sandbox-browser-entrypoint.sh | Clear stale Chrome locks on startup
 X11-unix | scripts/sandbox-browser-entrypoint.sh | Recreate X11-unix dir for tmpfs resilience
