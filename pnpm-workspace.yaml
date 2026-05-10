@@ -93,6 +93,13 @@ minimumReleaseAgeExclude:
   - "typebox"
   - "@microsoft/teams.*"
   - "marked"
+  - "@google/genai"
+  - "@tloncorp/*"
+  - "@copilotkit/*"
+  - "jscpd"
+  - "kysely"
+  - "jscpd-sarif-reporter"
+  - "@jscpd/*"
 
 nodeLinker: hoisted
 blockExoticSubdeps: true
