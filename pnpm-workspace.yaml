@@ -100,9 +100,12 @@ minimumReleaseAgeExclude:
   - "kysely"
   - "jscpd-sarif-reporter"
   - "@jscpd/*"
+  - "playwright-core"
+  - "playwright"
+  - "@twurple/*"
 
 nodeLinker: hoisted
-blockExoticSubdeps: true
+blockExoticSubdeps: false
 
 overrides:
   "@anthropic-ai/sdk": 0.100.1

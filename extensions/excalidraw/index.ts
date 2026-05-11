@@ -79,16 +79,6 @@ function createCanvasClient(baseUrl: string, logger: PluginApi["logger"]) {
 
 // ---------- Tool definitions ----------
 
-const _EXCALIDRAW_ELEMENT_TYPES = [
-  "rectangle",
-  "ellipse",
-  "diamond",
-  "arrow",
-  "text",
-  "line",
-  "freedraw",
-];
-
 interface ToolSpec {
   name: string;
   description: string;
