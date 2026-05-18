@@ -103,6 +103,9 @@ minimumReleaseAgeExclude:
   - "playwright-core"
   - "playwright"
   - "@twurple/*"
+  - "@earendil-works/pi-agent-core"
+  - "@earendil-works/*"
+  - "@pierre/*"
 
 nodeLinker: hoisted
 blockExoticSubdeps: false

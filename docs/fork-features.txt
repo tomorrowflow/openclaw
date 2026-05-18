@@ -39,7 +39,6 @@ secretMounts | src/agents/sandbox/docker.ts | Secret mounts injected as env vars
 # --- Cron Hardening ---
 MAX_JOBS_PER_AGENT | src/cron/service/ops.ts | Per-agent cron job count limit
 configuredTimeoutMs <= 0 | src/cron/service/timeout-policy.ts | Timeout hardening (<=0 falls back to default)
-senderIsOwner: true | src/cron/isolated-agent/run-executor.ts | Owner privileges for isolated cron sessions
 ScheduleSchema | src/agents/tools/cron-tool.ts | Explicit TypeBox schema for cron job/patch objects
 
 # --- Auth ---

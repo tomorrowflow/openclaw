@@ -74,7 +74,10 @@ import { getPluginToolMeta } from "../../../plugins/tools.js";
 import { isSubagentSessionKey } from "../../../routing/session-key.js";
 import { annotateInterSessionPromptText } from "../../../sessions/input-provenance.js";
 import { isTranscriptOnlyOpenClawAssistantMessage } from "../../../shared/transcript-only-openclaw-assistant.js";
-import { resolveSkillsPromptForRun } from "../../../skills/loading/workspace.js";
+import {
+  loadWorkspaceSkillEntries,
+  resolveSkillsPromptForRun,
+} from "../../../skills/loading/workspace.js";
 import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
@@ -213,7 +216,6 @@ import {
 } from "../../subagent-registry.js";
 import { ensureSystemPromptCacheBoundary } from "../../system-prompt-cache-boundary.js";
 import { resolveSystemPromptOverride } from "../../system-prompt-override.js";
-import { loadWorkspaceSkillEntries } from "../../skills.js";
 import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import {
@@ -1077,7 +1079,6 @@ export async function runEmbeddedAttempt(
     const {
       skillsEligibility,
       skillsPromptWorkspaceDir: effectiveSkillsPromptWorkspace,
-      skillsSnapshot: skillsSnapshotForRun,
       skillsWorkspaceDir: effectiveSkillsWorkspace,
       workspaceOnly: loadSkillsWorkspaceOnly,
     } = resolveSandboxSkillRuntimeInputs({
@@ -1089,6 +1090,7 @@ export async function runEmbeddedAttempt(
       sandbox?.enabled &&
       sandbox.workspaceAccess !== "rw" &&
       effectiveWorkspace !== resolvedWorkspace;
+    const skillsSnapshotForRun = sandboxNeedsOwnSkills ? undefined : params.skillsSnapshot;
     const shouldLoadSkillEntries =
       sandboxNeedsOwnSkills || !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
     const skillEntries = shouldLoadSkillEntries

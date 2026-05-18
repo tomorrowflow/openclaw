@@ -39,7 +39,10 @@ import {
   isSubagentSessionKey,
   parseAgentSessionKey,
 } from "../../routing/session-key.js";
-import { resolveSkillsPromptForRun } from "../../skills/loading/workspace.js";
+import {
+  loadWorkspaceSkillEntries,
+  resolveSkillsPromptForRun,
+} from "../../skills/loading/workspace.js";
 import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
@@ -179,7 +182,6 @@ import {
   resolveSandboxSkillRuntimeInputs,
 } from "./sandbox-skills.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "./session-manager-cache.js";
-import { loadWorkspaceSkillEntries } from "../skills.js";
 import {
   resolveEmbeddedAgentBaseStreamFn,
   resolveEmbeddedAgentStreamFn,
@@ -772,6 +774,7 @@ async function compactEmbeddedAgentSessionDirectOnce(
       sandbox?.enabled &&
       sandbox.workspaceAccess !== "rw" &&
       effectiveWorkspace !== resolvedWorkspace;
+    const skillsSnapshotForRun = sandboxNeedsOwnSkills ? undefined : params.skillsSnapshot;
     const shouldLoadSkillEntries =
       sandboxNeedsOwnSkills || !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
     const skillEntries = shouldLoadSkillEntries
