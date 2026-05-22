@@ -94,6 +94,7 @@ minimumReleaseAgeExclude:
   - "@microsoft/teams.*"
   - "marked"
   - "@google/genai"
+  - "@larksuiteoapi/node-sdk"
   - "@tloncorp/*"
   - "@copilotkit/*"
   - "jscpd"
@@ -111,6 +112,7 @@ nodeLinker: hoisted
 blockExoticSubdeps: false
 
 overrides:
+  ws: 8.20.1
   "@anthropic-ai/sdk": 0.100.1
   "@opentelemetry/core": 2.8.0
   "@aws-sdk/core": 3.974.13
