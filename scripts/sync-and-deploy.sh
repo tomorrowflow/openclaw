@@ -3,12 +3,12 @@
 # Runs every Monday and Thursday night via cron.
 #
 # Stages:
-#   1. Codex agent (Docker) — fetch + rebase + conflict resolution
-#   2. Host — pnpm install, build, check, fork-feature verification
-#   3. Host — git push --force-with-lease
-#   4. Host — deploy (stop → npm i -g → pnpm deploy:globally → restart)
+#   1. Codex agent (Docker) — fetch, rebase, conflict resolution, install,
+#      build, check, fork-feature verification, git push  (steps 1–7)
+#   2. Host — deploy: stop → npm i -g → pnpm deploy:globally → restart  (step 8)
+#      (deploy requires sudo/systemd — cannot run inside the Docker sandbox)
 #
-# On any failure the script exits non-zero; later stages are skipped.
+# On any failure the script exits non-zero; deploy is skipped.
 # Logs go to ~/logs/sync-YYYYMMDD-HHMMSS.log.
 
 set -euo pipefail
@@ -26,54 +26,18 @@ OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID systemctl --use
 
 step() { echo ""; echo "── $1 ──────────────────────────────────────────────────────────"; }
 
-echo "=== OpenClaw upstream sync $(date) ==="
+echo "=== OpenClaw upstream sync + deploy  $(date) ==="
 echo "    repo : $REPO_DIR"
 echo "    log  : $LOG_FILE"
 
-# ── 1. Rebase via Codex agent ──────────────────────────────────────────────
-step "1/7  Rebase (Codex agent)"
+# ── 1. Sync via Codex agent ────────────────────────────────────────────────
+# The agent handles steps 1–7: fetch → rebase → install → build → check →
+# fork-feature verification → push.  Exits 1 on non-success.
+step "1/2  Sync (Codex agent — steps 1–7)"
 npx tsx .sandcastle/sync.ts
 
-# ── 2. Install ────────────────────────────────────────────────────────────
-step "2/7  pnpm install"
-corepack pnpm install --no-frozen-lockfile
-
-# ── 3. Build ──────────────────────────────────────────────────────────────
-step "3/7  pnpm build"
-OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 corepack pnpm build
-
-# ── 4. Check (lint / types / shrinkwrap) ──────────────────────────────────
-step "4/7  pnpm check"
-# pnpm check spawns nested pnpm; create a shim so those spawns resolve.
-mkdir -p .tmp/bin
-printf '#!/bin/sh\nexec corepack pnpm "$@"\n' > .tmp/bin/pnpm
-chmod +x .tmp/bin/pnpm
-PATH="$(pwd)/.tmp/bin:$PATH" CI=true corepack pnpm check
-rm -rf .tmp/
-
-# ── 5. Fork features ──────────────────────────────────────────────────────
-step "5/7  Fork feature verification"
-MISSING=0
-while IFS='|' read -r pattern file desc; do
-  pattern=$(echo "$pattern" | xargs)
-  file=$(echo "$file" | xargs)
-  if ! grep -qn "$pattern" "$file" 2>/dev/null; then
-    echo "  MISSING: $desc  ($pattern  in $file)"
-    MISSING=1
-  fi
-done < <(grep -v '^#\|^$' docs/fork-features.txt)
-if [ "$MISSING" -eq 1 ]; then
-  echo "✗ Fork features missing — re-add them before deploying"
-  exit 1
-fi
-echo "  ✓ All fork features present"
-
-# ── 6. Push ───────────────────────────────────────────────────────────────
-step "6/7  git push --force-with-lease"
-git push origin main --force-with-lease
-
-# ── 7. Deploy ─────────────────────────────────────────────────────────────
-step "7/7  Deploy"
+# ── 2. Deploy ─────────────────────────────────────────────────────────────
+step "2/2  Deploy (host — step 8)"
 
 $OC_SYSTEMCTL stop openclaw-gateway.service
 
