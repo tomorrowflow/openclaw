@@ -88,8 +88,12 @@ STAGE="deploy: npm i -g"
 sudo npm i -g . --install-links
 
 # Copy externalized extensions, reinstall supergateway, rebuild Control UI.
+# CI=true keeps pnpm non-interactive: the Control UI rebuild (scripts/ui.js)
+# may run `pnpm install`, which can hit pnpm's "remove modules and reinstall
+# from scratch? (Y/n)" purge prompt. Under cron (no TTY) that would hang/fail;
+# CI mode makes pnpm auto-proceed.
 STAGE="deploy: pnpm deploy:globally"
-corepack pnpm deploy:globally
+CI=true corepack pnpm deploy:globally
 
 # Sanity checks — timestamps must match the fresh build.
 ls -l "$(npm root -g)/openclaw/dist/reply-"*.js
@@ -110,9 +114,13 @@ docker rm -f \
   $(docker ps -a --filter "name=openclaw-sbx" --format "{{.Names}}" 2>/dev/null) \
   2>/dev/null || true
 
-# Validate config + run doctor (safe changes proceed automatically).
+# Validate config + run doctor. --non-interactive applies safe migrations only
+# and never prompts (a destructive config change would otherwise block here
+# waiting for confirmation, hanging the unattended cron with the gateway down).
+# If a skipped destructive migration leaves the gateway unable to start, the
+# health check below catches it and the failure alert fires.
 sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw config validate 2>&1 || true
-sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw doctor --fix 2>&1 || true
+sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw doctor --fix --non-interactive 2>&1 || true
 
 STAGE="deploy: gateway restart"
 $OC_SYSTEMCTL start openclaw-gateway.service
