@@ -5,11 +5,16 @@
 # Stages:
 #   1. Codex agent (Docker) — fetch, rebase, conflict resolution, install,
 #      build, check, fork-feature verification, git push  (steps 1–7)
-#   2. Host — deploy: stop → npm i -g → pnpm deploy:globally → restart  (step 8)
+#   2. Host — deploy (step 8): npm i -g → pnpm deploy:globally → cutover restart.
+#      The gateway keeps serving the current version through install + bundle +
+#      migrations, so a failure there leaves the live service UP (old version).
+#      Only the final restart cuts over; the EXIT trap restores a running
+#      gateway if a cutover failure left it down.
 #      (deploy requires sudo/systemd — cannot run inside the Docker sandbox)
 #
-# On any failure the script exits non-zero; deploy is skipped and a Signal
-# alert is sent (failure only — no message on success).
+# On any failure the script exits non-zero; the deploy is skipped (sync stage)
+# or the gateway is restored (deploy stage), and a Signal alert is sent
+# (failure only — no message on success).
 # Logs go to ~/logs/sync-YYYYMMDD-HHMMSS.log.
 
 set -euo pipefail
@@ -45,9 +50,14 @@ OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID systemctl --use
 # Tracks the current phase so the failure alert can say where it broke.
 STAGE="startup"
 
-# Send a Signal alert as the openclaw user. Best-effort: if the gateway is down
-# (e.g. a deploy failure between stop and restart) the send will fail and we
-# just log it — the per-run log file remains the source of truth.
+# Set to 1 only once the deploy reaches the cutover (gateway restart). Until
+# then the gateway is never stopped, so a pre-cutover failure leaves it running
+# and needs no restore. After cutover the EXIT trap uses this to bring it back.
+GATEWAY_TOUCHED=0
+
+# Send a Signal alert as the openclaw user. Best-effort: runs after
+# restore_gateway_if_down, but if the gateway still cannot come up the send
+# fails and we just log it — the per-run log file remains the source of truth.
 notify_failure() {
   local rc="$1"
   local msg="⚠ OpenClaw sync FAILED on $(hostname) — stage: ${STAGE} (exit ${rc}). Log: ${LOG_FILE}"
@@ -57,8 +67,30 @@ notify_failure() {
     --message "$msg" 2>&1 | tail -3 || echo "[sync] (alert send failed — gateway may be down)"
 }
 
-# Fire the alert on any non-zero exit. flock-skip above exits 0 (no alert).
-trap 'rc=$?; [ "$rc" -ne 0 ] && notify_failure "$rc"' EXIT
+# Best-effort recovery: if a cutover failure left the gateway down, restart it
+# so a broken deploy never leaves the live service offline. No-op before cutover
+# (the gateway was never stopped) or if it is already listening.
+restore_gateway_if_down() {
+  [ "$GATEWAY_TOUCHED" -eq 1 ] || return 0
+  ss -ltnp 2>/dev/null | grep -q 18789 && return 0
+  echo "[sync] gateway down after failure — attempting restart"
+  $OC_SYSTEMCTL restart openclaw-gateway.service 2>&1 | tail -3 || true
+  for _ in $(seq 1 12); do
+    ss -ltnp 2>/dev/null | grep -q 18789 && break
+    sleep 5
+  done
+}
+
+# Fire on any non-zero exit. flock-skip above exits 0 (no alert). Restore the
+# gateway first so the service is back before the alert (which itself goes
+# through the gateway).
+on_exit() {
+  local rc=$?
+  [ "$rc" -ne 0 ] || return 0
+  restore_gateway_if_down
+  notify_failure "$rc"
+}
+trap on_exit EXIT
 
 step() { echo ""; echo "── $1 ──────────────────────────────────────────────────────────"; }
 
@@ -74,17 +106,18 @@ step "1/2  Sync (Codex agent — steps 1–7)"
 npx tsx .sandcastle/sync.ts
 
 # ── 2. Deploy ─────────────────────────────────────────────────────────────
-STAGE="deploy: stop gateway"
+# The gateway stays up (old version) through install + bundle + migrations so a
+# failure here never takes the live service down — only the cutover restart at
+# the end swaps versions. The running node process holds its loaded modules in
+# memory (open inodes), so overwriting dist on disk does not disturb it.
 step "2/2  Deploy (host — step 8)"
-
-$OC_SYSTEMCTL stop openclaw-gateway.service
 
 # Clear stale npm temp symlinks that block the atomic rename during install.
 sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
 
 # Install from local repo globally — --install-links forces a real copy
 # (without it npm 7+ creates a symlink, which breaks cross-user access).
-STAGE="deploy: npm i -g"
+STAGE="deploy: npm i -g (gateway still up)"
 sudo npm i -g . --install-links
 
 # Copy externalized extensions, reinstall supergateway, rebuild Control UI.
@@ -92,7 +125,7 @@ sudo npm i -g . --install-links
 # may run `pnpm install`, which can hit pnpm's "remove modules and reinstall
 # from scratch? (Y/n)" purge prompt. Under cron (no TTY) that would hang/fail;
 # CI mode makes pnpm auto-proceed.
-STAGE="deploy: pnpm deploy:globally"
+STAGE="deploy: pnpm deploy:globally (gateway still up)"
 CI=true corepack pnpm deploy:globally
 
 # Sanity checks — timestamps must match the fresh build.
@@ -109,21 +142,26 @@ sudo -u openclaw sed -i \
   /home/openclaw/.config/systemd/user/openclaw-gateway.service
 $OC_SYSTEMCTL daemon-reload
 
-# Remove stale sandbox containers so they pick up new mounts/env vars.
+# Validate config + run doctor. --non-interactive applies safe migrations only
+# and never prompts (a destructive config change would otherwise block here
+# waiting for confirmation). Runs against the still-live gateway; the cutover
+# restart below picks up any migrated config.
+sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw config validate 2>&1 || true
+sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw doctor --fix --non-interactive 2>&1 || true
+
+# ── Cutover ────────────────────────────────────────────────────────────────
+# Everything above kept the old gateway serving. From here we swap to the new
+# version. A failure now means the new build is genuinely broken; the EXIT trap
+# still attempts to bring a gateway back (restore_gateway_if_down).
+STAGE="deploy: cutover (gateway restart)"
+GATEWAY_TOUCHED=1
+
+# Remove stale sandbox containers so they respawn with new mounts/env vars.
 docker rm -f \
   $(docker ps -a --filter "name=openclaw-sbx" --format "{{.Names}}" 2>/dev/null) \
   2>/dev/null || true
 
-# Validate config + run doctor. --non-interactive applies safe migrations only
-# and never prompts (a destructive config change would otherwise block here
-# waiting for confirmation, hanging the unattended cron with the gateway down).
-# If a skipped destructive migration leaves the gateway unable to start, the
-# health check below catches it and the failure alert fires.
-sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw config validate 2>&1 || true
-sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw doctor --fix --non-interactive 2>&1 || true
-
-STAGE="deploy: gateway restart"
-$OC_SYSTEMCTL start openclaw-gateway.service
+$OC_SYSTEMCTL restart openclaw-gateway.service
 
 # Poll up to 60 s for the gateway to start listening.
 echo "  Waiting for gateway on :18789..."
