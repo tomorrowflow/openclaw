@@ -137,9 +137,70 @@ function npmInstallExtensionDeps(extDir) {
   stripDevDependencies(packageJsonPath);
   // --ignore-scripts: skip lifecycle scripts in deps (e.g. lancedb postinstall
   // would re-fetch native binaries; we already bundle them via pnpm install).
-  sh(`sudo npm install --omit=dev --ignore-scripts --prefix ${JSON.stringify(extDir)}`, {
-    silent: true,
-  });
+  // --legacy-peer-deps: externalized plugins pin their full dependency set —
+  // the exact versions pnpm already resolved in the workspace — but npm 7+
+  // enforces peer ranges strictly. memory-lancedb pins apache-arrow@21 while
+  // @lancedb/lancedb declares a peer of apache-arrow<=18.1, so a strict npm
+  // install aborts with ERESOLVE on a combo pnpm installs fine. Defer to the
+  // pinned versions like pnpm does instead of failing the whole deploy.
+  sh(
+    `sudo npm install --omit=dev --ignore-scripts --legacy-peer-deps --prefix ${JSON.stringify(extDir)}`,
+    { silent: true },
+  );
+}
+
+// Top-level package names under a node_modules dir, expanding @scope/name.
+function listInstalledPackages(nodeModulesDir) {
+  if (!fs.existsSync(nodeModulesDir)) {
+    return [];
+  }
+  const names = [];
+  for (const entry of fs.readdirSync(nodeModulesDir, { withFileTypes: true })) {
+    if (entry.name.startsWith(".") || (!entry.isDirectory() && !entry.isSymbolicLink())) {
+      continue;
+    }
+    if (!entry.name.startsWith("@")) {
+      names.push(entry.name);
+      continue;
+    }
+    const scopeDir = path.join(nodeModulesDir, entry.name);
+    for (const sub of fs.readdirSync(scopeDir, { withFileTypes: true })) {
+      if (sub.isDirectory() || sub.isSymbolicLink()) {
+        names.push(`${entry.name}/${sub.name}`);
+      }
+    }
+  }
+  return names;
+}
+
+// The bundler hoists each externalized plugin's lazy runtime chunk up to the
+// core dist root (e.g. dist/lancedb-runtime-*.js does `import("@lancedb/lancedb")`),
+// so those deps must resolve from dist/, not the plugin's own node_modules.
+// Copy each plugin-only dep up to dist/node_modules; deps the core install
+// already has are skipped so we never shadow the core's pinned versions (doing
+// so swaps shared packages like openai/typebox/tslib under the whole core and
+// crashes startup).
+function hoistExtensionDepsToDistRoot(extNodeModules, coreNodeModules, distNodeModules) {
+  const hoisted = [];
+  for (const name of listInstalledPackages(extNodeModules)) {
+    // Skip core-shared deps (shadowing them swaps shared packages under the
+    // whole core and crashes startup) and any dep an earlier externalized
+    // plugin already placed (first-wins; both share the workspace-resolved
+    // version, so avoid churn and last-writer overwrites).
+    if (fs.existsSync(path.join(coreNodeModules, name))) {
+      continue;
+    }
+    const dest = path.join(distNodeModules, name);
+    if (fs.existsSync(dest)) {
+      continue;
+    }
+    sh(`sudo mkdir -p ${JSON.stringify(path.dirname(dest))}`);
+    sh(`sudo cp -r ${JSON.stringify(path.join(extNodeModules, name))} ${JSON.stringify(dest)}`);
+    hoisted.push(name);
+  }
+  if (hoisted.length > 0) {
+    log(`hoisted ${hoisted.length} plugin-only deps to dist/node_modules: ${hoisted.join(", ")}`);
+  }
 }
 
 function bundleExternalizedExtensions() {
@@ -148,6 +209,8 @@ function bundleExternalizedExtensions() {
   const localDistRoot = path.join(REPO_ROOT, "dist", "extensions");
   const globalRoot = npmGlobalRoot();
   const globalDistRoot = path.join(globalRoot, "openclaw", "dist", "extensions");
+  const coreNodeModules = path.join(globalRoot, "openclaw", "node_modules");
+  const distNodeModules = path.join(globalRoot, "openclaw", "dist", "node_modules");
 
   if (!fs.existsSync(localDistRoot)) {
     throw new Error(
@@ -169,6 +232,11 @@ function bundleExternalizedExtensions() {
     const globalPath = path.join(globalDistRoot, name);
     copyDir(localPath, globalPath);
     npmInstallExtensionDeps(globalPath);
+    hoistExtensionDepsToDistRoot(
+      path.join(globalPath, "node_modules"),
+      coreNodeModules,
+      distNodeModules,
+    );
     restored.push(name);
   }
   if (restored.length > 0) {
