@@ -20,13 +20,13 @@ DEFAULT_FFMPEG_API_URL | src/media-understanding/providers/whisper-asr/audio.ts 
 stripReasoningTagsFromText | src/shared/text/reasoning-tags.ts | Reasoning tag stripping helper
 stripReasoningTags | src/tui/tui-formatters.ts | TUI reasoning tag stripping
 stripReasoningTagsFromText | src/gateway/server-chat.ts | Gateway reasoning tag stripping
-stripTrailingPartialTag | src/agents/pi-embedded-subscribe.ts | Streaming partial tag stripping
-stripTrailingPartialFinalTag | src/agents/pi-embedded-helpers/sanitize-user-facing-text.ts | Error text partial tag stripping
-closedOnly | src/markdown/code-spans.ts | Code-span closedOnly option (partial tag support)
+stripTrailingPartialTag | src/agents/embedded-agent-subscribe.ts | Streaming partial tag stripping
+stripTrailingPartialFinalTag | src/agents/embedded-agent-helpers/sanitize-user-facing-text.ts | Error text partial tag stripping
+closedOnly | packages/markdown-core/src/code-spans.ts | Code-span closedOnly option (partial tag support)
 
 # --- Sandbox ---
-sandboxNeedsOwnSkills | src/agents/pi-embedded-runner/compact.ts | Sandbox skill reload for sandboxed workspaces
-sandboxNeedsOwnSkills | src/agents/pi-embedded-runner/run/attempt.ts | Sandbox skill reload in attempt runner
+sandboxNeedsOwnSkills | src/agents/embedded-agent-runner/compact.ts | Sandbox skill reload for sandboxed workspaces
+sandboxNeedsOwnSkills | src/agents/embedded-agent-runner/run/attempt.ts | Sandbox skill reload in attempt runner
 dangerouslyAllowPrivateNetwork | src/agents/sandbox/browser.ts | Allow private-network navigation in sandbox browser
 SANDBOX_MEDIA_MOUNT | src/agents/sandbox/constants.ts | Media dir mount (STATE_DIR/media read-only)
 SANDBOX_SHARED_MOUNT | src/agents/sandbox/constants.ts | Shared dir mount (STATE_DIR/shared)

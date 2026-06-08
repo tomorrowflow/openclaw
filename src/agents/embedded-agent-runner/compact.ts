@@ -177,10 +177,7 @@ import { createEmbeddedAgentResourceLoader } from "./resource-loader.js";
 import { wrapStreamFnWithDiagnosticModelCallEvents } from "./run/attempt.model-diagnostic-events.js";
 import { resolveAttemptSpawnWorkspaceDir } from "./run/attempt.thread-helpers.js";
 import { buildEmbeddedSandboxInfo, resolveEmbeddedSandboxInfoExecPolicy } from "./sandbox-info.js";
-import {
-  mapSandboxSkillEntriesForPrompt,
-  resolveSandboxSkillRuntimeInputs,
-} from "./sandbox-skills.js";
+import { resolveSandboxSkillRuntimeInputs } from "./sandbox-skills.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "./session-manager-cache.js";
 import {
   resolveEmbeddedAgentBaseStreamFn,
@@ -774,7 +771,6 @@ async function compactEmbeddedAgentSessionDirectOnce(
       sandbox?.enabled &&
       sandbox.workspaceAccess !== "rw" &&
       effectiveWorkspace !== resolvedWorkspace;
-    const skillsSnapshotForRun = sandboxNeedsOwnSkills ? undefined : params.skillsSnapshot;
     const shouldLoadSkillEntries =
       sandboxNeedsOwnSkills || !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
     const skillEntries = shouldLoadSkillEntries

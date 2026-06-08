@@ -79,7 +79,7 @@ export function createReasoningTagTextPartitioner(): ReasoningTagTextPartitioner
       const activeFenceState = reasoningDepth === 0 ? fenceState : hiddenFenceState;
       const codeSpans = buildCodeSpanIndex(buffer, activeInlineCodeState, activeFenceState);
       const hasUnclosedCode =
-        reasoningDepth === 0 && Boolean(codeSpans.inlineState.open || codeSpans.fenceState.open);
+        reasoningDepth === 0 && Boolean(codeSpans.inlineState.open || codeSpans.fenceState?.open);
       const hasRawReasoning = hasRawReasoningTag(buffer);
       const tag = findNextReasoningTag(buffer, (index) =>
         final && hasUnclosedCode && hasRawReasoning ? false : codeSpans.isInside(index),
