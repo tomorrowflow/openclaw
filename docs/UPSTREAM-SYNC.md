@@ -48,25 +48,41 @@ git fetch upstream
 
 ## 3. Check divergence
 
+This fork tracks the newest upstream **release** branch (`release/X.Y.Z`), not
+`main`. `main` never carries version bumps — its `package.json` stays at a baseline
+even as code lands — so only rebasing onto release branches makes the deployed
+version advance. (Historically we worked around this by hand-bumping every
+`package.json` to the release branch's version; tracking the release branch
+directly removes that hack.)
+
 ```bash
-# Our fork-only commits (not in upstream)
-git log --oneline main --not upstream/main
+# Newest release branch by version (release/X.Y.Z only — release-ci/* excluded)
+git for-each-ref --format='%(refname:short)' 'refs/remotes/upstream/release/*' \
+  | sed 's#^upstream/release/##' \
+  | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1
 
-# How many upstream commits we're missing
-git log --oneline upstream/main --not main | wc -l
-
-# Find the common ancestor
-git merge-base main upstream/main
+# Our fork-only commits (in main, in no upstream ref) — the patch stack we replant
+git log --oneline main --not --remotes=upstream
 ```
 
-## 4. Rebase fork commits onto upstream
+## 4. Rebase fork commits onto the newest release branch
 
-Rebase our fork-specific commits on top of the latest upstream/main.
-This keeps a linear history with our changes on top.
+Replant our fork-specific patch stack on top of the newest upstream release
+branch. This keeps a linear history with our changes on top.
 
 ```bash
-MERGE_BASE=$(git merge-base main upstream/main)
-git rebase --onto upstream/main "$MERGE_BASE" main
+TARGET=$(git for-each-ref --format='%(refname:short)' 'refs/remotes/upstream/release/*' \
+  | sed 's#^upstream/release/##' \
+  | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+
+# Base = parent of the oldest fork commit = the upstream commit the stack sits on.
+# Derive it from `--not --remotes=upstream`, never from `merge-base main
+# upstream/main`: once we track a release branch the latter walks back to where the
+# release line diverged from main and would drag the release branch's own commits
+# into the rebase set.
+BASE=$(git rev-parse "$(git rev-list main --not --remotes=upstream | tail -1)^")
+
+git rebase --onto "upstream/release/$TARGET" "$BASE" main
 ```
 
 ### Resolving conflicts
@@ -513,12 +529,19 @@ sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) \
 ## 9. Verify final state
 
 ```bash
-# Our commits should sit cleanly on top of upstream
-git log --oneline main --not upstream/main
+TARGET=$(git for-each-ref --format='%(refname:short)' 'refs/remotes/upstream/release/*' \
+  | sed 's#^upstream/release/##' \
+  | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
 
-# Upstream should have no commits we're missing
-git log --oneline upstream/main --not main | wc -l
+# Our patch stack should sit cleanly on top of the tracked release branch
+git log --oneline main --not --remotes=upstream
+
+# The tracked release branch should have no commits we're missing
+git log --oneline "upstream/release/$TARGET" --not main | wc -l
 # Expected: 0
+
+# Deployed version should now match the release branch (e.g. 2026.6.5-beta.3)
+node -p "require('./package.json').version"
 ```
 
 ## 10. Restore stashed work (if applicable)
@@ -538,9 +561,10 @@ Resolve any conflicts with the newly rebased code.
 ```bash
 # Full sync in one go (abort on any failure)
 OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) systemctl --user" \
-  && git fetch upstream \
-  && MERGE_BASE=$(git merge-base main upstream/main) \
-  && git rebase --onto upstream/main "$MERGE_BASE" main \
+  && git fetch upstream --tags --prune \
+  && TARGET=$(git for-each-ref --format='%(refname:short)' 'refs/remotes/upstream/release/*' | sed 's#^upstream/release/##' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1) \
+  && BASE=$(git rev-parse "$(git rev-list main --not --remotes=upstream | tail -1)^") \
+  && git rebase --onto "upstream/release/$TARGET" "$BASE" main \
   && pnpm install \
   && OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 pnpm build \
   && pnpm check \
