@@ -3389,11 +3389,11 @@ function resolveStaleLegacySessionFile(params: {
     return undefined;
   }
   const legacyBackupHasTranscript = safeReadDir(path.dirname(params.legacyDir)).some(
-    (dirent) =>
-      dirent.isDirectory() &&
-      dirent.name.startsWith(`${path.basename(params.legacyDir)}.legacy-`) &&
+    (candidate) =>
+      candidate.isDirectory() &&
+      candidate.name.startsWith(`${path.basename(params.legacyDir)}.legacy-`) &&
       fileExists(
-        path.join(path.dirname(params.legacyDir), dirent.name, path.basename(legacySessionFile)),
+        path.join(path.dirname(params.legacyDir), candidate.name, path.basename(legacySessionFile)),
       ),
   );
   if (legacyBackupHasTranscript) {
@@ -3401,10 +3401,10 @@ function resolveStaleLegacySessionFile(params: {
   }
   const parsed = path.parse(path.basename(legacySessionFile));
   const hasCollisionRename = safeReadDir(params.targetDir).some(
-    (dirent) =>
-      dirent.isFile() &&
-      dirent.name.startsWith(`${parsed.name}.legacy-`) &&
-      dirent.name.endsWith(parsed.ext),
+    (candidate) =>
+      candidate.isFile() &&
+      candidate.name.startsWith(`${parsed.name}.legacy-`) &&
+      candidate.name.endsWith(parsed.ext),
   );
   if (hasCollisionRename) {
     return undefined;
