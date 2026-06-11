@@ -19,7 +19,6 @@ import {
   writeCronJobs,
   writeCronStoreSnapshot,
 } from "./service.issue-regressions.test-helpers.js";
-import { CronService } from "./service.js";
 import { createNoopLogger } from "./service.test-harness.js";
 import { computeJobNextRunAtMs } from "./service/jobs.js";
 import { enqueueRun, run } from "./service/ops.js";
@@ -602,7 +601,7 @@ describe("Cron issue regressions", () => {
     });
     await writeCronJobs(store.storePath, [cronJob]);
 
-    let now = scheduledAt;
+    const now = scheduledAt;
     const state = createCronServiceState({
       cronEnabled: true,
       storePath: store.storePath,

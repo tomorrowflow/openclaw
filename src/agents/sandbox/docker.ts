@@ -582,8 +582,8 @@ async function createSandboxContainer(params: {
   });
   // Secret file mounts at /run/secrets/<name> (read-only).
   if (cfg.secretMounts) {
-    for (const [name, filePath] of Object.entries(cfg.secretMounts)) {
-      args.push("-v", `${filePath}:/run/secrets/${name}:ro`);
+    for (const [mountName, filePath] of Object.entries(cfg.secretMounts)) {
+      args.push("-v", `${filePath}:/run/secrets/${mountName}:ro`);
     }
   }
   args.push(cfg.image, "sleep", "infinity");
