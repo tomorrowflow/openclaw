@@ -1089,6 +1089,7 @@ export async function runEmbeddedAttempt(
       sandbox?.enabled &&
       sandbox.workspaceAccess !== "rw" &&
       effectiveWorkspace !== resolvedWorkspace;
+    const skillsSnapshotForRun = sandboxNeedsOwnSkills ? undefined : params.skillsSnapshot;
     const shouldLoadSkillEntries =
       sandboxNeedsOwnSkills || !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
     const skillEntries = shouldLoadSkillEntries
