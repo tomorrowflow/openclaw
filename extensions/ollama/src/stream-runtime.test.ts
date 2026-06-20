@@ -272,6 +272,65 @@ describe("createConfiguredOllamaCompatStreamWrapper", () => {
     expect(payload.options).toEqual({ num_ctx: 131072 });
   });
 
+  // FORK PATCH (ollama tool-call args as string): the openai-compat payload patch
+  // must NOT re-objectify tool_call arguments. Ollama's OpenAI endpoint rejects an
+  // object with "cannot unmarshal object into Go struct field
+  // .messages.tool_calls.function.arguments of type string". See .sandcastle/sync-prompt.md.
+  it("keeps openai-compat tool_call arguments as strings when patching the payload", async () => {
+    let patchedPayload: Record<string, unknown> | undefined;
+    const baseStreamFn = vi.fn((_model, _context, options) => {
+      options?.onPayload?.({
+        messages: [
+          {
+            role: "assistant",
+            tool_calls: [
+              // already a string (as core's openai transport emits) — keep verbatim
+              { function: { name: "read", arguments: '{"path":"README.md"}' } },
+              // stray object — must be stringified, never left as an object
+              { function: { name: "bash", arguments: { command: "ls" } } },
+            ],
+          },
+        ],
+      });
+      return (async function* () {})();
+    });
+    const model = {
+      api: "openai-completions",
+      provider: "ollama",
+      id: "glm-5.2:cloud",
+      contextWindow: 131072,
+      params: { num_ctx: 65536 },
+    };
+
+    const wrapped = createConfiguredOllamaCompatStreamWrapper({
+      provider: "ollama",
+      modelId: "glm-5.2:cloud",
+      model,
+      streamFn: baseStreamFn,
+    } as never);
+
+    await wrapped?.(
+      model as never,
+      { messages: [] } as never,
+      {
+        onPayload: (payload: unknown) => {
+          patchedPayload = payload as Record<string, unknown>;
+        },
+      } as never,
+    );
+
+    const payload = requireRecord(patchedPayload, "patched payload");
+    const messages = payload.messages as Array<{
+      tool_calls: Array<{ function: { arguments: unknown } }>;
+    }>;
+    const toolCalls = messages[0].tool_calls;
+    expect(toolCalls[0].function.arguments).toBe('{"path":"README.md"}');
+    expect(toolCalls[1].function.arguments).toBe('{"command":"ls"}');
+    for (const call of toolCalls) {
+      expect(typeof call.function.arguments).toBe("string");
+    }
+  });
+
   it("forwards think=false on native Ollama chat requests when thinking is off", async () => {
     await withMockNdjsonFetch(
       [

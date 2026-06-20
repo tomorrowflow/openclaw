@@ -740,6 +740,65 @@ function normalizeOllamaToolCallArguments(value: unknown): Record<string, unknow
   return ensureArgsObject(value);
 }
 
+// FORK PATCH (ollama tool-call args as string): the OpenAI-compatible
+// `/v1/chat/completions` endpoint Ollama serves requires
+// `tool_calls[].function.arguments` to be a STRING (stringified JSON); only the
+// native `/api/chat` transport takes an object. Core's openai transport already
+// emits the correct string, so keep it verbatim and only stringify a stray
+// object. Re-parsing to an object here (the upstream default) makes Ollama's Go
+// server reject the request with `cannot unmarshal object into Go struct field
+// .messages.tool_calls.function.arguments of type string`, which fails the whole
+// run on any turn that replays prior tool calls. See .sandcastle/sync-prompt.md.
+function ensureArgsString(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === undefined || value === null) {
+    return "{}";
+  }
+  return JSON.stringify(value);
+}
+
+function normalizeOllamaCompatMessageToolArgs(payloadRecord: Record<string, unknown>): void {
+  const messages = payloadRecord.messages;
+  if (!Array.isArray(messages)) {
+    return;
+  }
+
+  for (const message of messages) {
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      continue;
+    }
+    const messageRecord = message as Record<string, unknown>;
+
+    const functionCall = messageRecord.function_call;
+    if (functionCall && typeof functionCall === "object" && !Array.isArray(functionCall)) {
+      const functionCallRecord = functionCall as Record<string, unknown>;
+      if (Object.hasOwn(functionCallRecord, "arguments")) {
+        functionCallRecord.arguments = ensureArgsString(functionCallRecord.arguments);
+      }
+    }
+
+    const toolCalls = messageRecord.tool_calls;
+    if (!Array.isArray(toolCalls)) {
+      continue;
+    }
+    for (const toolCall of toolCalls) {
+      if (!toolCall || typeof toolCall !== "object" || Array.isArray(toolCall)) {
+        continue;
+      }
+      const functionSpec = (toolCall as Record<string, unknown>).function;
+      if (!functionSpec || typeof functionSpec !== "object" || Array.isArray(functionSpec)) {
+        continue;
+      }
+      const functionRecord = functionSpec as Record<string, unknown>;
+      if (Object.hasOwn(functionRecord, "arguments")) {
+        functionRecord.arguments = ensureArgsString(functionRecord.arguments);
+      }
+    }
+  }
+}
+
 function inferOllamaSchemaType(schema: Record<string, unknown>): string | undefined {
   if (schema.properties && isRecord(schema.properties)) {
     return "object";
