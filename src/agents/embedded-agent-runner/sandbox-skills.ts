@@ -5,6 +5,15 @@
  * copies instead of reusing host-path snapshots.
  */
 import path from "node:path";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import {
+  loadWorkspaceSkillEntries,
+  resolveSkillsPromptForRun,
+} from "../../skills/loading/workspace.js";
+import {
+  applySkillEnvOverrides,
+  applySkillEnvOverridesFromSnapshot,
+} from "../../skills/runtime/env-overrides.js";
 import type { SkillEligibilityContext, SkillSnapshot } from "../../skills/types.js";
 import type { SkillEntry } from "../../skills/types.js";
 import type { SandboxContext } from "../sandbox/types.js";
@@ -53,10 +62,7 @@ function mapPathFromWorkspaceToContainer(params: {
   if (!relativePath) {
     return params.targetWorkspaceDir.replace(/\\/g, "/");
   }
-  return containerJoin(
-    params.targetWorkspaceDir,
-    ...relativePath.split(path.sep).filter(Boolean),
-  );
+  return containerJoin(params.targetWorkspaceDir, ...relativePath.split(path.sep).filter(Boolean));
 }
 
 export function mapSandboxSkillEntriesForPrompt(params: {
@@ -145,4 +151,59 @@ export function resolveSandboxSkillRuntimeInputs(params: {
     skillsWorkspaceDir: params.effectiveWorkspace,
     workspaceOnly: false,
   };
+}
+
+/**
+ * Builds the prompt-facing skills text and applies skill env overrides for an
+ * embedded run, given the workspace inputs from {@link resolveSandboxSkillRuntimeInputs}.
+ *
+ * `resolveSandboxSkillRuntimeInputs` returns `skillsSnapshot: undefined` for every
+ * sandboxed run, so a present snapshot means a non-sandbox run whose host paths are
+ * already readable. When absent, entries are loaded fresh and their host paths are
+ * remapped to the in-container copies; otherwise the prompt would hand the sandbox
+ * unreadable absolute paths (e.g. `/usr/lib/node_modules/openclaw/skills/...`).
+ *
+ * Returns the env-restore closure the caller must invoke during run teardown.
+ */
+export function resolveEmbeddedRunSkillsPrompt(params: {
+  skillsEligibility?: SkillEligibilityContext;
+  skillsPromptWorkspaceDir: string;
+  skillsSnapshot?: SkillSnapshot;
+  skillsWorkspaceDir: string;
+  workspaceOnly: boolean;
+  config?: OpenClawConfig;
+  agentId?: string;
+}): { restoreSkillEnv: () => void; skillsPrompt: string } {
+  const shouldLoadSkillEntries = !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
+  const skillEntries = shouldLoadSkillEntries
+    ? loadWorkspaceSkillEntries(params.skillsWorkspaceDir, {
+        config: params.config,
+        ...(params.agentId ? { agentId: params.agentId } : {}),
+        ...(params.skillsEligibility ? { eligibility: params.skillsEligibility } : {}),
+        ...(params.workspaceOnly ? { workspaceOnly: true } : {}),
+      })
+    : [];
+  const restoreSkillEnv = params.skillsSnapshot
+    ? applySkillEnvOverridesFromSnapshot({
+        snapshot: params.skillsSnapshot,
+        config: params.config,
+      })
+    : applySkillEnvOverrides({
+        skills: skillEntries,
+        config: params.config,
+      });
+  const promptSkillEntries = mapSandboxSkillEntriesForPrompt({
+    entries: shouldLoadSkillEntries ? skillEntries : undefined,
+    skillsWorkspaceDir: params.skillsWorkspaceDir,
+    skillsPromptWorkspaceDir: params.skillsPromptWorkspaceDir,
+  });
+  const skillsPrompt = resolveSkillsPromptForRun({
+    skillsSnapshot: params.skillsSnapshot,
+    entries: promptSkillEntries,
+    config: params.config,
+    workspaceDir: params.skillsPromptWorkspaceDir,
+    ...(params.agentId ? { agentId: params.agentId } : {}),
+    ...(params.skillsEligibility ? { eligibility: params.skillsEligibility } : {}),
+  });
+  return { restoreSkillEnv, skillsPrompt };
 }

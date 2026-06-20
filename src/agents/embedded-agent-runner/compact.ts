@@ -39,14 +39,6 @@ import {
   isSubagentSessionKey,
   parseAgentSessionKey,
 } from "../../routing/session-key.js";
-import {
-  loadWorkspaceSkillEntries,
-  resolveSkillsPromptForRun,
-} from "../../skills/loading/workspace.js";
-import {
-  applySkillEnvOverrides,
-  applySkillEnvOverridesFromSnapshot,
-} from "../../skills/runtime/env-overrides.js";
 import { resolveUserPath } from "../../utils.js";
 import { normalizeMessageChannel } from "../../utils/message-channel.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
@@ -177,7 +169,10 @@ import { createEmbeddedAgentResourceLoader } from "./resource-loader.js";
 import { wrapStreamFnWithDiagnosticModelCallEvents } from "./run/attempt.model-diagnostic-events.js";
 import { resolveAttemptSpawnWorkspaceDir } from "./run/attempt.thread-helpers.js";
 import { buildEmbeddedSandboxInfo, resolveEmbeddedSandboxInfoExecPolicy } from "./sandbox-info.js";
-import { resolveSandboxSkillRuntimeInputs } from "./sandbox-skills.js";
+import {
+  resolveEmbeddedRunSkillsPrompt,
+  resolveSandboxSkillRuntimeInputs,
+} from "./sandbox-skills.js";
 import { prewarmSessionFile, trackSessionManagerAccess } from "./session-manager-cache.js";
 import {
   resolveEmbeddedAgentBaseStreamFn,
@@ -767,38 +762,18 @@ async function compactEmbeddedAgentSessionDirectOnce(
       effectiveWorkspace,
       skillsSnapshot: params.skillsSnapshot,
     });
-    const sandboxNeedsOwnSkills =
-      sandbox?.enabled &&
-      sandbox.workspaceAccess !== "rw" &&
-      effectiveWorkspace !== resolvedWorkspace;
-    const shouldLoadSkillEntries =
-      sandboxNeedsOwnSkills || !params.skillsSnapshot || !params.skillsSnapshot.resolvedSkills;
-    const skillEntries = shouldLoadSkillEntries
-      ? loadWorkspaceSkillEntries(effectiveSkillsWorkspace, {
-          config: params.config,
-          agentId: effectiveSkillAgentId,
-          eligibility: skillsEligibility,
-          ...(loadSkillsWorkspaceOnly ? { workspaceOnly: true } : {}),
-        })
-      : [];
-    restoreSkillEnv =
-      skillsSnapshotForRun && !sandboxNeedsOwnSkills
-        ? applySkillEnvOverridesFromSnapshot({
-            snapshot: skillsSnapshotForRun,
-            config: params.config,
-          })
-        : applySkillEnvOverrides({
-            skills: skillEntries,
-            config: params.config,
-          });
-    const skillsPrompt = resolveSkillsPromptForRun({
-      skillsSnapshot: sandboxNeedsOwnSkills ? undefined : skillsSnapshotForRun,
-      entries: shouldLoadSkillEntries ? skillEntries : undefined,
-      config: params.config,
-      workspaceDir: effectiveSkillsPromptWorkspace,
-      agentId: effectiveSkillAgentId,
-      eligibility: skillsEligibility,
-    });
+    const { restoreSkillEnv: restoreSkillEnvForRun, skillsPrompt } = resolveEmbeddedRunSkillsPrompt(
+      {
+        skillsEligibility,
+        skillsPromptWorkspaceDir: effectiveSkillsPromptWorkspace,
+        skillsSnapshot: skillsSnapshotForRun,
+        skillsWorkspaceDir: effectiveSkillsWorkspace,
+        workspaceOnly: loadSkillsWorkspaceOnly,
+        config: params.config,
+        agentId: effectiveSkillAgentId,
+      },
+    );
+    restoreSkillEnv = restoreSkillEnvForRun;
 
     const sessionLabel = params.sessionKey ?? params.sessionId;
     const resolvedMessageProvider = params.messageChannel ?? params.messageProvider;

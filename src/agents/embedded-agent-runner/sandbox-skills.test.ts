@@ -9,6 +9,7 @@ import { resolveEmbeddedRunSkillEntries } from "../../skills/runtime/embedded-ru
 import type { SkillSnapshot } from "../../skills/types.js";
 import {
   mapSandboxSkillEntriesForPrompt,
+  resolveEmbeddedRunSkillsPrompt,
   resolveSandboxSkillRuntimeInputs,
 } from "./sandbox-skills.js";
 
@@ -168,6 +169,69 @@ describe("resolveSandboxSkillRuntimeInputs", () => {
       expect(prompt.replaceAll("\\", "/")).not.toContain("/skills/canvas/SKILL.md");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rebuilds the embedded run prompt with container skill paths for rw sandboxes", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-embedded-skills-"));
+    try {
+      const effectiveWorkspace = path.join(root, "workspace");
+      const materializedWorkspace = path.join(root, "state", "sandbox-skills");
+      const skillDir = path.join(materializedWorkspace, "skills", "demo");
+      await fs.mkdir(skillDir, { recursive: true });
+      await fs.writeFile(
+        path.join(skillDir, "SKILL.md"),
+        ["---", "name: demo", "description: Demo skill", "---", "# Demo", ""].join("\n"),
+        "utf8",
+      );
+
+      // Production composition: a rw sandbox drops the host snapshot, so the prompt
+      // must be rebuilt from in-container paths, never the host bundled-install path.
+      const inputs = resolveSandboxSkillRuntimeInputs({
+        sandbox: {
+          enabled: true,
+          containerWorkdir: "/workspace",
+          skillsWorkspaceDir: materializedWorkspace,
+          workspaceAccess: "rw",
+        },
+        effectiveWorkspace,
+        skillsSnapshot: snapshot,
+      });
+      const { restoreSkillEnv, skillsPrompt } = resolveEmbeddedRunSkillsPrompt({
+        skillsPromptWorkspaceDir: inputs.skillsPromptWorkspaceDir,
+        skillsSnapshot: inputs.skillsSnapshot,
+        skillsWorkspaceDir: inputs.skillsWorkspaceDir,
+        workspaceOnly: inputs.workspaceOnly,
+      });
+      try {
+        expect(skillsPrompt).toContain("/workspace/.openclaw/sandbox-skills/skills/demo/SKILL.md");
+        expect(skillsPrompt).not.toContain(hostSkillPath);
+        expect(skillsPrompt.replaceAll("\\", "/")).not.toContain(
+          materializedWorkspace.replaceAll("\\", "/"),
+        );
+      } finally {
+        restoreSkillEnv();
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("returns the host snapshot prompt verbatim for non-sandboxed runs", () => {
+    const inputs = resolveSandboxSkillRuntimeInputs({
+      effectiveWorkspace: "/workspace",
+      skillsSnapshot: snapshot,
+    });
+    const { restoreSkillEnv, skillsPrompt } = resolveEmbeddedRunSkillsPrompt({
+      skillsPromptWorkspaceDir: inputs.skillsPromptWorkspaceDir,
+      skillsSnapshot: inputs.skillsSnapshot,
+      skillsWorkspaceDir: inputs.skillsWorkspaceDir,
+      workspaceOnly: inputs.workspaceOnly,
+    });
+    try {
+      expect(skillsPrompt).toBe(snapshot.prompt);
+    } finally {
+      restoreSkillEnv();
     }
   });
 
