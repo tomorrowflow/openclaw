@@ -25,8 +25,9 @@ stripTrailingPartialFinalTag | src/agents/embedded-agent-helpers/sanitize-user-f
 closedOnly | packages/markdown-core/src/code-spans.ts | Code-span closedOnly option (partial tag support)
 
 # --- Sandbox ---
-sandboxNeedsOwnSkills | src/agents/embedded-agent-runner/compact.ts | Sandbox skill reload for sandboxed workspaces
-sandboxNeedsOwnSkills | src/agents/embedded-agent-runner/run/attempt.ts | Sandbox skill reload in attempt runner
+resolveEmbeddedRunSkillsPrompt | src/agents/embedded-agent-runner/sandbox-skills.ts | Sandbox skill prompt rebuild from in-container paths (shared helper; fixes host-path SKILL.md leak incl. rw sandboxes)
+resolveEmbeddedRunSkillsPrompt | src/agents/embedded-agent-runner/run/attempt.ts | Sandbox skill prompt rebuild wired into attempt runner
+resolveEmbeddedRunSkillsPrompt | src/agents/embedded-agent-runner/compact.ts | Sandbox skill prompt rebuild wired into compaction runner
 dangerouslyAllowPrivateNetwork | src/agents/sandbox/browser.ts | Allow private-network navigation in sandbox browser
 SANDBOX_MEDIA_MOUNT | src/agents/sandbox/constants.ts | Media dir mount (STATE_DIR/media read-only)
 SANDBOX_SHARED_MOUNT | src/agents/sandbox/constants.ts | Shared dir mount (STATE_DIR/shared)
@@ -48,6 +49,9 @@ ownerAllowAll | src/auto-reply/command-auth.ts | Wildcard (*) support for ownerA
 enablePositionalOptions | src/cli/program/build-program.ts | Positional options fix (prevents option shadowing)
 enablePositionalOptions | src/cli/gateway-cli/register.ts | Positional options fix for gateway register
 deviceId | src/cli/devices-cli.ts | Device ID display in devices list
+
+# --- Ollama (provider compat patches) ---
+ensureArgsString | extensions/ollama/src/stream.ts | OpenAI-compat tool_call arguments kept as string (fixes ollama 400 "cannot unmarshal object ... arguments of type string" on tool-call replay; e.g. glm-5.2:cloud)
 
 # --- Memory (LanceDB) ---
 storageOptions | extensions/memory-lancedb/config.ts | LanceDB storageOptions config
