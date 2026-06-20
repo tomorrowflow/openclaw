@@ -422,7 +422,7 @@ Security notes:
 
 ## Images and setup
 
-Default Docker image: `openclaw-sandbox:bookworm-slim`
+Default Docker image: `openclaw-sandbox:trixie-slim`
 
 <Note>
 **Source checkout vs npm install**
@@ -443,8 +443,8 @@ If you installed OpenClaw via `npm install -g openclaw`, use the inline `docker 
     From an npm install (no source checkout needed):
 
     ```bash
-    docker build -t openclaw-sandbox:bookworm-slim - <<'DOCKERFILE'
-    FROM debian:bookworm-slim
+    docker build -t openclaw-sandbox:trixie-slim - <<'DOCKERFILE'
+    FROM debian:trixie-slim
     ENV DEBIAN_FRONTEND=noninteractive
     RUN apt-get update && apt-get install -y --no-install-recommends \
       bash ca-certificates curl git jq python3 ripgrep \
@@ -458,7 +458,7 @@ If you installed OpenClaw via `npm install -g openclaw`, use the inline `docker 
 
     The default image does **not** include Node. If a skill needs Node (or other runtimes), either bake a custom image or install via `sandbox.docker.setupCommand` (requires network egress + writable root + root user).
 
-    OpenClaw does not silently substitute plain `debian:bookworm-slim` when `openclaw-sandbox:bookworm-slim` is missing. Sandbox runs that target the default image fail fast with a build instruction until you build it, because the bundled image carries `python3` for sandbox write/edit helpers.
+    OpenClaw does not silently substitute plain `debian:trixie-slim` when `openclaw-sandbox:trixie-slim` is missing. Sandbox runs that target the default image fail fast with a build instruction until you build it, because the bundled image carries `python3` for sandbox write/edit helpers.
 
   </Step>
   <Step title="Optional: build the common image">
@@ -472,7 +472,7 @@ If you installed OpenClaw via `npm install -g openclaw`, use the inline `docker 
 
     From an npm install, build the default image first (see above), then build the common image on top using the [`scripts/docker/sandbox/Dockerfile.common`](https://github.com/openclaw/openclaw/blob/main/scripts/docker/sandbox/Dockerfile.common) from the repository.
 
-    Then set `agents.defaults.sandbox.docker.image` to `openclaw-sandbox-common:bookworm-slim`.
+    Then set `agents.defaults.sandbox.docker.image` to `openclaw-sandbox-common:trixie-slim`.
 
   </Step>
   <Step title="Optional: build the sandbox browser image">

@@ -63,7 +63,7 @@ function buildPruneConfig(): SandboxConfig {
     workspaceAccess: "none",
     workspaceRoot: "/tmp/openclaw-sandboxes",
     docker: {
-      image: "openclaw-sandbox:bookworm-slim",
+      image: "openclaw-sandbox:trixie-slim",
       containerPrefix: "openclaw-sbx-",
       workdir: "/workspace",
       readOnlyRoot: true,
@@ -80,7 +80,7 @@ function buildPruneConfig(): SandboxConfig {
     },
     browser: {
       enabled: true,
-      image: "openclaw-sandbox-browser:bookworm-slim",
+      image: "openclaw-sandbox-browser:trixie-slim",
       containerPrefix: "openclaw-sbx-browser-",
       network: "none",
       cdpPort: 9222,
@@ -123,7 +123,7 @@ describe("maybePruneSandboxes", () => {
           backendId: "docker",
           createdAtMs: Date.now() - 4 * 60 * 60 * 1000,
           lastUsedAtMs: Date.now() - 2 * 60 * 60 * 1000,
-          image: "openclaw-sandbox:bookworm-slim",
+          image: "openclaw-sandbox:trixie-slim",
         },
       ],
     });
@@ -159,7 +159,7 @@ describe("maybePruneSandboxes", () => {
           backendId: "docker",
           createdAtMs: Date.now(),
           lastUsedAtMs: Number.MAX_SAFE_INTEGER,
-          image: "openclaw-sandbox:bookworm-slim",
+          image: "openclaw-sandbox:trixie-slim",
         },
       ],
     });

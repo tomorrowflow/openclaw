@@ -1,4 +1,4 @@
-FROM openclaw-sandbox-browser:bookworm-slim
+FROM openclaw-sandbox-browser:trixie-slim
 
 USER root
 
