@@ -3,6 +3,8 @@
 Telegraph style. Root rules only. Read scoped `AGENTS.md` before subtree work.
 Skills own workflows; root owns hard policy and routing.
 
+Be aware, this is the source repository. The installation is on the same system under /home/openclaw/.openclaw within openclaw user space. Use sudo if changes are needed to the openclaw runtime environment.
+
 ## Start
 
 - Repo: `https://github.com/openclaw/openclaw`
