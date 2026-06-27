@@ -65,6 +65,8 @@ excalidraw | skills/excalidraw/SKILL.md | Excalidraw skill (agent instructions)
 
 # --- Plugins / Skills / Dockerfiles ---
 excalidraw | extensions/excalidraw/openclaw.plugin.json | Excalidraw canvas plugin
+denoland/deno | scripts/docker/sandbox/Dockerfile | Deno runtime installed in sandbox base image (official release binary on PATH)
+curl_cffi | scripts/docker/sandbox/Dockerfile | curl_cffi installed into system Python (PEP 668 break-system-packages) for sandbox scripts
 brave-browser | Dockerfile.sandbox-browser-brave | Brave browser overlay Dockerfile
 fonts-noto-cjk | scripts/docker/sandbox/Dockerfile.browser | CJK/Unicode fonts in sandbox browser image
 1920x1080 | scripts/sandbox-browser-entrypoint.sh | Default screen resolution bump
