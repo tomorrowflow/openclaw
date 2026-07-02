@@ -250,6 +250,14 @@ export function wrapOllamaCompatNumCtx(baseFn: StreamFn | undefined, numCtx: num
     });
 }
 
+function wrapOllamaCompatMessageToolArgs(baseFn: StreamFn | undefined): StreamFn {
+  const streamFn = baseFn ?? streamSimple;
+  return (model, context, options) =>
+    streamWithPayloadPatch(streamFn, model, context, options, (payloadRecord) => {
+      normalizeOllamaCompatMessageToolArgs(payloadRecord);
+    });
+}
+
 type OllamaThinkValue = boolean | "low" | "medium" | "high";
 
 const OLLAMA_OPTION_PARAM_KEYS = new Set([
@@ -456,6 +464,10 @@ export function createConfiguredOllamaCompatStreamWrapper(
 
   if (injectNumCtx && model) {
     streamFn = wrapOllamaCompatNumCtx(streamFn, resolveOllamaNumCtx(model));
+  }
+
+  if (model?.api === "openai-completions") {
+    streamFn = wrapOllamaCompatMessageToolArgs(streamFn);
   }
 
   const configuredThinkValue = model ? resolveOllamaThinkParamValue(model.params) : undefined;

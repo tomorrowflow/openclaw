@@ -1033,15 +1033,15 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
               throw new Error("job required");
             }
             const canonicalJob = canonicalizeCronToolObject(params.job as Record<string, unknown>);
-            assertNoCronCommandPayload(canonicalJob);
+            assertNoCronShellExecution(canonicalJob);
             assertCronDeliveryInputNonBlankFields(canonicalJob.delivery);
             const job =
               normalizeCronJobCreate(canonicalJob, {
                 sessionContext: { sessionKey: opts?.agentSessionKey },
               }) ?? canonicalJob;
             capCronAgentTurnJobToolsAllow(job, opts?.creatorToolAllowlist);
-            const cfg = getRuntimeConfig();
             if (job && typeof job === "object") {
+              const cfg = getRuntimeConfig();
               const { mainKey, alias } = resolveMainSessionAlias(cfg);
               const resolvedSessionKey = opts?.agentSessionKey
                 ? resolveInternalSessionKey({ key: opts.agentSessionKey, alias, mainKey })
@@ -1056,63 +1056,6 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
                 if (agentId) {
                   (job as { agentId?: string }).agentId = agentId;
                 }
-              }
-              const sessionTarget = normalizeLowercaseStringOrEmpty(
-                (job as { sessionTarget?: unknown }).sessionTarget,
-              );
-            );
-          }
-          case "get": {
-            const id = readCronJobIdParam(params);
-            if (!id) {
-              throw new Error("jobId required (id accepted for backward compatibility)");
-            }
-            return jsonResult(
-              await callGateway("cron.get", gatewayOpts, {
-                id,
-              }),
-            );
-          }
-          case "add": {
-            // Flat-params recovery: non-frontier models (e.g. Grok) sometimes flatten
-            // job properties to the top level alongside `action` instead of nesting
-            // them inside `job`. When `params.job` is missing or empty, reconstruct
-            // a synthetic job object from any recognised top-level job fields.
-            // See: https://github.com/openclaw/openclaw/issues/11310
-            if (isMissingOrEmptyObject(params.job)) {
-              const synthetic = recoverCronObjectFromFlatParams(params);
-              // Only use the synthetic job if at least one meaningful field is present
-              // (schedule, payload, message, or text are the minimum signals that the
-              // LLM intended to create a job).
-              if (synthetic.found && hasCronCreateSignal(synthetic.value)) {
-                params.job = synthetic.value;
-              }
-            }
-
-            if (!params.job || typeof params.job !== "object") {
-              throw new Error("job required");
-            }
-            const canonicalJob = canonicalizeCronToolObject(params.job as Record<string, unknown>);
-            assertNoCronShellExecution(canonicalJob);
-            assertCronDeliveryInputNonBlankFields(canonicalJob.delivery);
-            const job =
-              normalizeCronJobCreate(canonicalJob, {
-                sessionContext: { sessionKey: opts?.agentSessionKey },
-              }) ?? canonicalJob;
-            capCronAgentTurnJobToolsAllow(job, opts?.creatorToolAllowlist);
-            if (job && typeof job === "object") {
-              const { mainKey, alias } = resolveMainSessionAlias(runtimeConfig);
-              const resolvedSessionKey = opts?.agentSessionKey
-                ? resolveInternalSessionKey({ key: opts.agentSessionKey, alias, mainKey })
-                : undefined;
-              if (callerScope) {
-                assertCronToolAgentFieldMatchesScope({
-                  value: (job as { agentId?: unknown }).agentId,
-                  field: "cron job agentId",
-                  callerScope,
-                });
-                (job as { agentId?: string }).agentId = callerScope.agentId;
-                assertCronToolSessionRefsMatchScope(job as Record<string, unknown>, callerScope);
               }
               const sessionTarget = normalizeLowercaseStringOrEmpty(
                 (job as { sessionTarget?: unknown }).sessionTarget,

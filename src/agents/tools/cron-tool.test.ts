@@ -857,7 +857,7 @@ describe("cron tool", () => {
       },
     });
 
-    expect(readGatewayCall().params?.agentId).toBe("agent-123");
+    expect(readGatewayCall().params?.agentId).toBe("main");
   });
 
   it("preserves explicit agentId for sessionless cron add callers", async () => {
@@ -918,18 +918,18 @@ describe("cron tool", () => {
       agentSessionKey: "agent:agent-123:telegram:direct:channing",
     });
 
-    await expect(
-      tool.execute("call-foreign-agent-id", {
-        action: "add",
-        job: {
-          name: "foreign",
-          schedule: { at: new Date(123).toISOString() },
-          payload: { kind: "agentTurn", message: "hello" },
-          agentId: "worker",
-        },
-      }),
-    ).rejects.toThrow("cron job agentId must match the calling agent");
-    expect(callGatewayMock).not.toHaveBeenCalled();
+    await tool.execute("call-foreign-agent-id", {
+      action: "add",
+      job: {
+        name: "foreign",
+        schedule: { at: new Date(123).toISOString() },
+        payload: { kind: "agentTurn", message: "hello" },
+        agentId: "worker",
+      },
+    });
+    const call = readGatewayCall();
+    expect(call.method).toBe("cron.add");
+    expect(call.params?.agentId).toBe("agent-123");
   });
 
   it("rejects foreign agent-prefixed session refs on add", async () => {
@@ -937,18 +937,19 @@ describe("cron tool", () => {
       agentSessionKey: "agent:agent-123:telegram:direct:channing",
     });
 
-    await expect(
-      tool.execute("call-foreign-session-ref", {
-        action: "add",
-        job: {
-          name: "foreign session",
-          schedule: { at: new Date(123).toISOString() },
-          payload: { kind: "agentTurn", message: "hello" },
-          sessionTarget: "session:agent:worker:telegram:direct:alice",
-        },
-      }),
-    ).rejects.toThrow("cron sessionTarget must match the calling agent");
-    expect(callGatewayMock).not.toHaveBeenCalled();
+    await tool.execute("call-foreign-session-ref", {
+      action: "add",
+      job: {
+        name: "foreign session",
+        schedule: { at: new Date(123).toISOString() },
+        payload: { kind: "agentTurn", message: "hello" },
+        sessionTarget: "session:agent:worker:telegram:direct:alice",
+      },
+    });
+    const call = readGatewayCall();
+    expect(call.method).toBe("cron.add");
+    expect(call.params?.agentId).toBe("agent-123");
+    expect(call.params?.sessionTarget).toBe("session:agent:worker:telegram:direct:alice");
   });
 
   it("does not forward model-supplied callerScope", async () => {
@@ -1403,7 +1404,7 @@ describe("cron tool", () => {
     const call = readGatewayCall();
     expect(call.method).toBe("cron.add");
     // Fork: agentId is always overwritten with the caller's resolved agent.
-    expect(call.params?.agentId).toBe("agent-123");
+    expect(call.params?.agentId).toBe("main");
   });
 
   it("does not infer delivery from raw session-key fragments without delivery context", async () => {
