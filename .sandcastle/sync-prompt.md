@@ -88,16 +88,48 @@ Report `upstreamCommits: $NEW_COMMITS` and set `trackedRelease` to `$TARGET` (e.
 
 ### Conflict resolution rules
 
+Apply these **in order**. The redundant-commit check comes first because it
+resolves the large majority of stops on a release→release bump.
+
+- **Redundant upstream commit — check this FIRST, before any merge.** The replay
+  range `$BASE..main` is not only our fork patches; it includes every upstream
+  commit that landed between syncs. The newer release branch already contains
+  most of them, but git cannot auto-drop a redundant commit once an earlier
+  replayed commit shifts its context, so it surfaces as a conflict (often a
+  scary-looking semantic one). At every stop, test whether the commit being
+  replayed is already in the release and skip it if so — do **not** hand-merge:
+  ```bash
+  git merge-base --is-ancestor "$(git rev-parse REBASE_HEAD)" \
+    "upstream/release/$TARGET" && git rebase --skip
+  ```
+  A skipped redundant commit leaves the release's version in place, which already
+  has its change. Only commits that are **not** ancestors of
+  `upstream/release/$TARGET` are genuine fork patches worth merging by hand.
+  (In the 2026.7.1 sync, 776 of 981 replayed commits were redundant. The stop-gate
+  that failed the run — an iOS snapshot-test refactor — was one of them, already
+  shipped in the release; it should have been skipped, not treated as semantic.)
 - **pnpm-lock.yaml**: always accept upstream's version:
   `git checkout --theirs pnpm-lock.yaml && git add pnpm-lock.yaml && git rebase --continue`
+- **Generated baselines** (`docs/.generated/*.sha256`): accept the release version:
+  `git checkout "upstream/release/$TARGET" -- <file> && git add <file>`
+- **Release-owned changelogs** (`CHANGELOG.md`, `apps/ios/CHANGELOG.md`): release
+  generation owns these — accept the release version:
+  `git checkout "upstream/release/$TARGET" -- <file> && git add <file>`
+- **iOS release metadata the release no longer tracks**
+  (`apps/ios/Config/Version.xcconfig`, `apps/ios/fastlane/metadata/*/release_notes.txt`):
+  these are generated/gitignored upstream and show up as modify/delete — resolve
+  by deleting: `git rm <file> && git rebase --continue`
 - **GitHub Actions files** (`.github/workflows/`, `.github/actions/`, `.github/codeql/`,
   `.github/dependabot.yml`, `.github/actionlint.yaml`): this fork removes CI — always delete:
   `git rm <file> && git rebase --continue`
   After rebase also delete any new workflow files added by upstream (no conflict, just new):
   `git rm .github/workflows/*.yml .github/actions/ .github/codeql/ .github/dependabot.yml .github/actionlint.yaml 2>/dev/null || true`
 - **Source code — trivial** (adjacent additions, import ordering, whitespace): resolve and continue.
-- **Source code — semantic** (both sides changed the same logic differently): **stop gate** — set
-  `status: "failed"` and report details.
+- **Genuine fork-only source — semantic** (commit is NOT an ancestor of the
+  release AND both sides changed the same logic differently): **stop gate** — set
+  `status: "failed"` and report details. This applies only after the redundant
+  check above rules the commit out; a "semantic" conflict on an already-released
+  commit is not a stop gate, it is a skip.
 
 ### Step 5a: Install
 

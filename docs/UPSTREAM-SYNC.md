@@ -87,7 +87,29 @@ git rebase --onto "upstream/release/$TARGET" "$BASE" main
 
 ### Resolving conflicts
 
-If the rebase stops with conflicts:
+**First, at every stop, ask: is this commit already in the release?** The replay
+range `BASE..main` is not just our fork patches — it includes every upstream
+commit that landed between syncs. On a release→release bump the newer release
+branch already contains most of them, but git cannot auto-drop a redundant commit
+once an earlier replayed commit shifts its context, so it surfaces as a conflict
+(frequently a scary-looking "semantic" one). Skip these — do not hand-merge:
+
+```bash
+# Run at every conflict stop, before anything else:
+if git merge-base --is-ancestor "$(git rev-parse REBASE_HEAD)" \
+     "upstream/release/$TARGET"; then
+  git rebase --skip          # commit already in the base; its change is present
+fi
+```
+
+A skipped redundant commit leaves the release's version in place, which already
+contains that change. Only commits that are **not** ancestors of
+`upstream/release/$TARGET` are our genuine fork patches, and those are the only
+ones worth resolving by hand. (In the 2026.7.1 sync, 776 of 981 replayed commits
+were redundant; the stop-gate that failed the run was one of them — an
+already-released iOS snapshot-test refactor that should have been skipped.)
+
+If the commit is genuinely fork-only and stops with conflicts:
 
 1. Check which files conflict: `git diff --name-only --diff-filter=U`
 2. Open each file, find `<<<<<<<` markers, resolve by combining both sides
@@ -112,6 +134,15 @@ If the rebase stops with conflicts:
   and continue — `pnpm install` regenerates the lock file:
   `git checkout --theirs pnpm-lock.yaml && git add pnpm-lock.yaml && git rebase --continue`
 
+- **Release-owned generated files.** For `CHANGELOG.md`, `apps/ios/CHANGELOG.md`,
+  and `docs/.generated/*.sha256` baselines, take the release branch's version —
+  release generation owns them:
+  `git checkout "upstream/release/$TARGET" -- <file> && git add <file>`.
+  For iOS release metadata the release no longer tracks
+  (`apps/ios/Config/Version.xcconfig`,
+  `apps/ios/fastlane/metadata/*/release_notes.txt`), the conflict is
+  modify/delete — resolve by deleting: `git rm <file>`.
+
 - **Callback vs loop mismatch.** Upstream may refactor a `for...of` loop into
   a callback-based helper. Our `continue` statements become `return` in
   callbacks, and destructured parameter names may differ (e.g. `nowMs: now`).
@@ -135,15 +166,27 @@ If a rebase goes badly: `git rebase --abort` returns to the pre-rebase state.
 
 When running autonomously:
 
-1. Try auto-resolution for each conflicting file.
+1. **At every stop, first check whether the commit is already in the release**
+   and skip it if so — this resolves the majority of stops:
+   ```bash
+   git merge-base --is-ancestor "$(git rev-parse REBASE_HEAD)" \
+     "upstream/release/$TARGET" && git rebase --skip
+   ```
 2. For `pnpm-lock.yaml` conflicts: always accept upstream's version:
    ```bash
    git checkout --theirs pnpm-lock.yaml && git add pnpm-lock.yaml && git rebase --continue
    ```
-3. For source files where both sides changed the same logic differently
-   (semantic conflict, not just a clean add/remove), **stop and ask the
-   operator** — do not guess at the intended merge.
-4. For trivial conflicts (e.g. adjacent additions, import ordering, whitespace),
+3. For release-owned generated files (`CHANGELOG.md`, `apps/ios/CHANGELOG.md`,
+   `docs/.generated/*.sha256`): take the release version
+   (`git checkout "upstream/release/$TARGET" -- <file>`). For iOS metadata the
+   release dropped (`apps/ios/Config/Version.xcconfig`,
+   `apps/ios/fastlane/metadata/*/release_notes.txt`): `git rm <file>`.
+4. For **genuine fork-only** source files (the commit is NOT an ancestor of the
+   release) where both sides changed the same logic differently (semantic
+   conflict, not just a clean add/remove), **stop and ask the operator** — do not
+   guess at the intended merge. A "semantic" conflict on an already-released
+   commit is not a stop; it is a skip (rule 1).
+5. For trivial conflicts (e.g. adjacent additions, import ordering, whitespace),
    resolve automatically and continue.
 
 ## 5. Verify the merge
