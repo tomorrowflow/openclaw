@@ -1697,6 +1697,7 @@
     "deps:vuln:gate": "node --import ./scripts/tsx.mjs scripts/dependency-vulnerability-gate.mts",
     "db:kysely:check": "node --import ./scripts/tsx.mjs scripts/generate-kysely-types.mts --verify",
     "db:kysely:gen": "node --import ./scripts/tsx.mjs scripts/generate-kysely-types.mts",
+    "deploy:globally": "node scripts/deploy-globally.mjs",
     "dev": "node scripts/run-node.mjs",
     "dev:ui:mock": "node --import ./scripts/tsx.mjs scripts/control-ui-mock-dev.ts",
     "docs:check-config-examples": "node scripts/check-docs-config-examples.mjs",
