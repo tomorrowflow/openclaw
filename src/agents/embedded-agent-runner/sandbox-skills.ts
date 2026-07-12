@@ -12,6 +12,9 @@ import type {
   SkillUsagePath,
   SkillEntry,
 } from "../../skills/types.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { resolveSkillsPromptForRun } from "../../skills/loading/workspace.js";
+import type { SkillEligibilityContext, SkillSnapshot, SkillUsagePath } from "../../skills/types.js";
 import type { SandboxContext } from "../sandbox/types.js";
 
 const MATERIALIZED_SKILLS_WORKSPACE_CONTAINER_PARTS = [".openclaw", "sandbox-skills"] as const;
@@ -143,6 +146,30 @@ export function mapSandboxSkillUsagePaths(params: {
         targetWorkspaceDir: params.skillsPromptWorkspaceDir,
       }) ?? entry.readPath,
   }));
+}
+
+export function resolveEmbeddedRunSkillsPrompt(params: {
+  agentId: string;
+  config?: OpenClawConfig;
+  entries?: SkillEntry[];
+  eligibility?: SkillEligibilityContext;
+  skillsPromptWorkspaceDir: string;
+  skillsSnapshot?: SkillSnapshot;
+  skillsWorkspaceDir: string;
+}): string {
+  const promptSkillEntries = mapSandboxSkillEntriesForPrompt({
+    entries: params.entries,
+    skillsWorkspaceDir: params.skillsWorkspaceDir,
+    skillsPromptWorkspaceDir: params.skillsPromptWorkspaceDir,
+  });
+  return resolveSkillsPromptForRun({
+    skillsSnapshot: params.skillsSnapshot,
+    entries: promptSkillEntries,
+    config: params.config,
+    workspaceDir: params.skillsPromptWorkspaceDir,
+    agentId: params.agentId,
+    eligibility: params.eligibility,
+  });
 }
 
 export function resolveSandboxSkillRuntimeInputs(params: {

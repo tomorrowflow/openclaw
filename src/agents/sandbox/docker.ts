@@ -5,6 +5,10 @@ import { markOpenClawExecEnv } from "../../infra/openclaw-exec-env.js";
  *
  * Wraps Docker spawn, environment sanitization, container inspection, creation, and exec behavior.
  */
+import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { createAbortError } from "../../infra/abort-signal.js";
+import { toErrorObject } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { KeyedAsyncQueue } from "../../plugin-sdk/keyed-async-queue.js";
 import { computeSandboxConfigHash } from "./config-hash.js";
@@ -82,6 +86,43 @@ const sandboxContainerLifecycleQueue = new KeyedAsyncQueue();
 
 type ExecDockerOptions = ExecDockerRawOptions;
 
+function envRecordsEqual(left: Record<string, string>, right: Record<string, string>): boolean {
+  const leftEntries = Object.entries(left).toSorted(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey),
+  );
+  const rightEntries = Object.entries(right).toSorted(([leftKey], [rightKey]) =>
+    leftKey.localeCompare(rightKey),
+  );
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+  return leftEntries.every(([key, value], index) => {
+    const rightEntry = rightEntries[index];
+    return rightEntry?.[0] === key && rightEntry[1] === value;
+  });
+}
+
+function appendSecretMountArgs(args: string[], secretMounts: Record<string, string> | undefined): void {
+  if (!secretMounts) {
+    return;
+  }
+  for (const [name, filePath] of Object.entries(secretMounts)) {
+    const secretValue = readFileSync(filePath, "utf8").trimEnd();
+    // Keep the source file readable inside the container and expose the value
+    // as an env var so agents can use it without bypassing the secret contract.
+    args.push("-v", `${filePath}:/run/secrets/${name}:ro`);
+    args.push("--env", `${name}=${secretValue}`);
+  }
+}
+
+export function resolveDockerEnvPolicyEpoch(env: Record<string, string | undefined> | undefined) {
+  const explicitEnv = env ?? {};
+  const previousAllowed = sanitizeEnvVars(explicitEnv).allowed;
+  const currentAllowed = sanitizeExplicitSandboxEnvVars(explicitEnv).allowed;
+  return envRecordsEqual(previousAllowed, currentAllowed)
+    ? undefined
+    : SANDBOX_DOCKER_EXPLICIT_ENV_POLICY_EPOCH;
+}
 export async function execDocker(args: string[], opts?: ExecDockerOptions) {
   const result = await execDockerRaw(args, opts);
   return {
@@ -388,6 +429,7 @@ export function buildSandboxCreateArgs(params: {
     );
   }
   const env = markOpenClawExecEnv(envSanitization.allowed);
+  appendSecretMountArgs(args, params.cfg.secretMounts);
   for (const cap of params.cfg.capDrop) {
     args.push("--cap-drop", cap);
   }
