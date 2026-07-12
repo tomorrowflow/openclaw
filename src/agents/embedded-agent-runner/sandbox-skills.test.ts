@@ -3,12 +3,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createSyntheticSourceInfo } from "../../skills/loading/skill-contract.js";
 import { resolveSkillsPrompt } from "../../skills/loading/workspace-skill-prompt.js";
 import { resolveEmbeddedRunSkillEntries } from "../../skills/runtime/embedded-run-entries.js";
 import type { SkillSnapshot } from "../../skills/types.js";
 import {
-  mapSandboxSkillEntriesForPrompt,
+  resolveEmbeddedRunSkillsPrompt,
   resolveSandboxSkillRuntimeInputs,
 } from "./sandbox-skills.js";
 
@@ -182,16 +183,14 @@ describe("resolveSandboxSkillRuntimeInputs", () => {
         skillsSnapshot: skillsSnapshotForRun,
         workspaceOnly,
       });
-      const promptSkillEntries = mapSandboxSkillEntriesForPrompt({
+      const prompt = resolveEmbeddedRunSkillsPrompt({
+        agentId: "main",
+        config: {} as OpenClawConfig,
         entries: shouldLoadSkillEntries ? skillEntries : undefined,
-        skillsWorkspaceDir,
-        skillsPromptWorkspaceDir,
-      });
-      const prompt = await resolveSkillsPrompt({
-        skillsSnapshot: skillsSnapshotForRun,
-        entries: promptSkillEntries,
-        workspaceDir: skillsPromptWorkspaceDir,
         eligibility: skillsEligibilityForRun,
+        skillsPromptWorkspaceDir,
+        skillsSnapshot: skillsSnapshotForRun,
+        skillsWorkspaceDir,
       });
 
       if (skillsSnapshot === snapshot) {
