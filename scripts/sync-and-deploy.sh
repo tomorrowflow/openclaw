@@ -86,6 +86,9 @@ restore_gateway_if_down() {
 # through the gateway).
 on_exit() {
   local rc=$?
+  # Always undo the temporary workspace->file: dependency rewrite so a failed
+  # deploy never leaves the committed package.json mutated on disk (idempotent).
+  node "$REPO_DIR/scripts/prepare-global-install-package-json.mjs" --restore 2>/dev/null || true
   [ "$rc" -ne 0 ] || return 0
   restore_gateway_if_down
   notify_failure "$rc"
@@ -117,8 +120,15 @@ sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
 
 # Install from local repo globally — --install-links forces a real copy
 # (without it npm 7+ creates a symlink, which breaks cross-user access).
+#
+# Upstream ships internal packages (e.g. @openclaw/ai) as `workspace:*` runtime
+# deps of the root package. npm rejects that protocol; this fork installs from
+# source, not the npm registry, so rewrite those to absolute `file:` paths for
+# the install, then restore the committed `workspace:*` form immediately after.
 STAGE="deploy: npm i -g (gateway still up)"
+node scripts/prepare-global-install-package-json.mjs
 sudo npm i -g . --install-links
+node scripts/prepare-global-install-package-json.mjs --restore
 
 # Copy externalized extensions, reinstall supergateway, rebuild Control UI.
 # CI=true keeps pnpm non-interactive: the Control UI rebuild (scripts/ui.js)
