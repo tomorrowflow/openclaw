@@ -42,11 +42,11 @@ function createConfig(): OpenClawConfig {
           scope: "session",
           workspaceAccess: "none",
           docker: {
-            image: "openclaw-sandbox:bookworm-slim",
+            image: "openclaw-sandbox:trixie-slim",
           },
           browser: {
             enabled: true,
-            image: "openclaw-sandbox-browser:bookworm-slim",
+            image: "openclaw-sandbox-browser:trixie-slim",
           },
         },
       },
@@ -137,7 +137,7 @@ describe("docker sandbox backend manager", () => {
   it("matches ordinary sandbox runtimes against sandbox.docker.image", async () => {
     dockerMocks.execContainer.mockResolvedValueOnce({
       code: 0,
-      stdout: "openclaw-sandbox:bookworm-slim\n",
+      stdout: "openclaw-sandbox:trixie-slim\n",
       stderr: "",
     });
 
@@ -158,7 +158,7 @@ describe("docker sandbox backend manager", () => {
 
     expect(result).toEqual({
       running: true,
-      actualConfigLabel: "openclaw-sandbox:bookworm-slim",
+      actualConfigLabel: "openclaw-sandbox:trixie-slim",
       configLabelMatch: true,
     });
   });
@@ -166,7 +166,7 @@ describe("docker sandbox backend manager", () => {
   it("matches browser runtimes against sandbox.browser.image", async () => {
     dockerMocks.execContainer.mockResolvedValueOnce({
       code: 0,
-      stdout: "openclaw-sandbox-browser:bookworm-slim\n",
+      stdout: "openclaw-sandbox-browser:trixie-slim\n",
       stderr: "",
     });
 
@@ -187,7 +187,7 @@ describe("docker sandbox backend manager", () => {
 
     expect(result).toEqual({
       running: true,
-      actualConfigLabel: "openclaw-sandbox-browser:bookworm-slim",
+      actualConfigLabel: "openclaw-sandbox-browser:trixie-slim",
       configLabelMatch: true,
     });
   });
@@ -197,7 +197,7 @@ describe("docker sandbox backend manager", () => {
     // sandbox matching stable for those existing containers.
     dockerMocks.execContainer.mockResolvedValueOnce({
       code: 0,
-      stdout: "openclaw-sandbox:bookworm-slim\n",
+      stdout: "openclaw-sandbox:trixie-slim\n",
       stderr: "",
     });
 
@@ -217,7 +217,7 @@ describe("docker sandbox backend manager", () => {
 
     expect(result).toEqual({
       running: true,
-      actualConfigLabel: "openclaw-sandbox:bookworm-slim",
+      actualConfigLabel: "openclaw-sandbox:trixie-slim",
       configLabelMatch: true,
     });
   });
@@ -238,7 +238,7 @@ describe("docker sandbox backend manager", () => {
           sessionKey: "agent:coder:main",
           createdAtMs: 1,
           lastUsedAtMs: 1,
-          image: "openclaw-sandbox:bookworm-slim",
+          image: "openclaw-sandbox:trixie-slim",
         },
         config: createConfig(),
       }),
@@ -263,7 +263,7 @@ describe("docker sandbox backend manager", () => {
           sessionKey: "agent:coder:main",
           createdAtMs: 1,
           lastUsedAtMs: 1,
-          image: "openclaw-sandbox:bookworm-slim",
+          image: "openclaw-sandbox:trixie-slim",
         },
         config: createConfig(),
       }),

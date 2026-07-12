@@ -111,6 +111,11 @@ vi.mock("../agent-model-discovery.js", () => ({
   discoverModels: vi.fn(() => ({ find: vi.fn(() => null) })),
 }));
 
+vi.mock("../../plugins/synthetic-auth.runtime.js", () => ({
+  resolveRuntimeSyntheticAuthProviderRefs: vi.fn((): string[] => []),
+  resolveRuntimeExternalAuthProviderRefs: vi.fn((): string[] => []),
+}));
+
 import type { OpenClawConfig } from "../../config/config.js";
 import {
   expectResolvedForwardCompatFallbackResult,
@@ -127,6 +132,7 @@ import {
 
 beforeEach(() => {
   resetMockDiscoverModels(discoverModels);
+  resetModelDiscoveryCacheForTest();
 });
 
 function createRuntimeHooks() {

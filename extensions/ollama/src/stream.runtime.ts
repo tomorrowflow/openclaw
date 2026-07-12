@@ -12,7 +12,10 @@ import type {
   Usage,
 } from "openclaw/plugin-sdk/llm";
 import { createAssistantMessageEventStream } from "openclaw/plugin-sdk/llm";
-import type { ProviderRuntimeModel } from "openclaw/plugin-sdk/plugin-entry";
+import type {
+  ProviderRuntimeModel,
+  ProviderWrapStreamFnContext,
+} from "openclaw/plugin-sdk/plugin-entry";
 import { isNonSecretApiKeyMarker } from "openclaw/plugin-sdk/provider-auth";
 import { readResponseTextLimited } from "openclaw/plugin-sdk/provider-http";
 import { createPlainTextToolCallCompatWrapper } from "openclaw/plugin-sdk/provider-stream-shared";
@@ -32,6 +35,7 @@ import {
   sanitizeOllamaFinalVisibleContent,
 } from "./sanitizers/visible-content.js";
 import {
+  createConfiguredOllamaCompatStreamWrapper as createSharedOllamaCompatStreamWrapper,
   type OllamaThinkValue,
   resolveOllamaConfiguredNumCtx,
   resolveOllamaThinkParamValue,
@@ -41,7 +45,6 @@ import { OLLAMA_INCOMPLETE_STREAM_ERROR } from "./stream-contract.js";
 import { checkNdjsonRecordCap } from "./stream-ndjson-cap.js";
 
 export {
-  createConfiguredOllamaCompatStreamWrapper,
   isOllamaCompatProvider,
   resolveOllamaCompatNumCtxEnabled,
   shouldInjectOllamaCompatNumCtx,
@@ -154,6 +157,23 @@ export function resolveOllamaBaseUrlForRun(params: {
   return OLLAMA_NATIVE_BASE_URL;
 }
 
+function wrapOllamaCompatMessageToolArgs(baseFn: StreamFn | undefined): StreamFn {
+  const streamFn = baseFn ?? streamSimple;
+  return (model, context, options) =>
+    streamWithPayloadPatch(streamFn, model, context, options, (payloadRecord) => {
+      normalizeOllamaCompatMessageToolArgs(payloadRecord);
+    });
+}
+
+export function createConfiguredOllamaCompatStreamWrapper(
+  ctx: ProviderWrapStreamFnContext,
+): StreamFn | undefined {
+  const streamFn = createSharedOllamaCompatStreamWrapper(ctx);
+  if (ctx.model?.api === "openai-completions") {
+    return wrapOllamaCompatMessageToolArgs(streamFn);
+  }
+  return streamFn;
+}
 const OLLAMA_OPTION_PARAM_KEYS = new Set([
   "num_keep",
   "seed",
@@ -266,7 +286,6 @@ function resolveStreamingTextDelta(previousText: string, nextText: string): stri
   // re-emitting the latest complete text so downstream partial state converges.
   return nextText;
 }
-
 export function buildOllamaChatRequest(params: {
   modelId: string;
   providerId?: string;
@@ -556,6 +575,65 @@ function ensureArgsObject(value: unknown): Record<string, unknown> {
 
 function normalizeOllamaToolCallArguments(value: unknown): Record<string, unknown> {
   return ensureArgsObject(value);
+}
+
+// FORK PATCH (ollama tool-call args as string): the OpenAI-compatible
+// `/v1/chat/completions` endpoint Ollama serves requires
+// `tool_calls[].function.arguments` to be a STRING (stringified JSON); only the
+// native `/api/chat` transport takes an object. Core's openai transport already
+// emits the correct string, so keep it verbatim and only stringify a stray
+// object. Re-parsing to an object here (the upstream default) makes Ollama's Go
+// server reject the request with `cannot unmarshal object into Go struct field
+// .messages.tool_calls.function.arguments of type string`, which fails the whole
+// run on any turn that replays prior tool calls. See .sandcastle/sync-prompt.md.
+function ensureArgsString(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === undefined || value === null) {
+    return "{}";
+  }
+  return JSON.stringify(value);
+}
+
+function normalizeOllamaCompatMessageToolArgs(payloadRecord: Record<string, unknown>): void {
+  const messages = payloadRecord.messages;
+  if (!Array.isArray(messages)) {
+    return;
+  }
+
+  for (const message of messages) {
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      continue;
+    }
+    const messageRecord = message as Record<string, unknown>;
+
+    const functionCall = messageRecord.function_call;
+    if (functionCall && typeof functionCall === "object" && !Array.isArray(functionCall)) {
+      const functionCallRecord = functionCall as Record<string, unknown>;
+      if (Object.hasOwn(functionCallRecord, "arguments")) {
+        functionCallRecord.arguments = ensureArgsString(functionCallRecord.arguments);
+      }
+    }
+
+    const toolCalls = messageRecord.tool_calls;
+    if (!Array.isArray(toolCalls)) {
+      continue;
+    }
+    for (const toolCall of toolCalls) {
+      if (!toolCall || typeof toolCall !== "object" || Array.isArray(toolCall)) {
+        continue;
+      }
+      const functionSpec = (toolCall as Record<string, unknown>).function;
+      if (!functionSpec || typeof functionSpec !== "object" || Array.isArray(functionSpec)) {
+        continue;
+      }
+      const functionRecord = functionSpec as Record<string, unknown>;
+      if (Object.hasOwn(functionRecord, "arguments")) {
+        functionRecord.arguments = ensureArgsString(functionRecord.arguments);
+      }
+    }
+  }
 }
 
 function inferOllamaSchemaType(schema: Record<string, unknown>): string | undefined {

@@ -522,7 +522,7 @@ describe("openshell sandbox backend e2e", () => {
         workspaceRoot: path.join(rootDir, "sandboxes"),
         dockerTmpfsSource: "configured" as const,
         docker: {
-          image: "openclaw-sandbox:bookworm-slim",
+          image: "openclaw-sandbox:trixie-slim",
           containerPrefix: "openclaw-sbx-",
           workdir: "/workspace",
           readOnlyRoot: true,

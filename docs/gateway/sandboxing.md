@@ -87,7 +87,7 @@ and [Plugin execution model](/plugins/architecture#execution-model).
 
 The Docker backend runs tools locally through the `docker` CLI. Its selection and error behavior are unchanged; it does not probe or fall back to Podman.
 
-Defaults: `network: "none"` (no egress), `readOnlyRoot: true`, `capDrop: ["ALL"]`, image `openclaw-sandbox:bookworm-slim`.
+Defaults: `network: "none"` (no egress), `readOnlyRoot: true`, `capDrop: ["ALL"]`, image `openclaw-sandbox:trixie-slim`.
 
 This explicit configuration keeps the agent workspace read-only and preserves
 the default restricted runtime posture:
@@ -394,7 +394,7 @@ openclaw sandbox recreate --agent research
 
 ## Images and setup
 
-Default Docker image: `openclaw-sandbox:bookworm-slim`
+Default Docker image: `openclaw-sandbox:trixie-slim`
 
 <Note>
 **Source checkout vs npm install**
@@ -415,7 +415,7 @@ If you installed OpenClaw via `npm install -g openclaw`, use the inline `docker 
     From an npm install (no source checkout needed):
 
     ```bash
-    docker build -t openclaw-sandbox:bookworm-slim - <<'DOCKERFILE'
+    docker build -t openclaw-sandbox:trixie-slim - <<'DOCKERFILE'
     FROM debian:bookworm-slim
     ENV DEBIAN_FRONTEND=noninteractive
     RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -430,7 +430,7 @@ If you installed OpenClaw via `npm install -g openclaw`, use the inline `docker 
 
     The default image does **not** include Node. If a skill needs Node (or other runtimes), either bake a custom image or install via `sandbox.docker.setupCommand` (requires network egress + writable root + root user).
 
-    OpenClaw does not silently substitute plain `debian:bookworm-slim` when `openclaw-sandbox:bookworm-slim` is missing. Sandbox runs that target the default image fail fast with a build instruction until you build it, because the bundled image carries `python3` for the sandbox write/edit helpers.
+    OpenClaw does not silently substitute plain `debian:bookworm-slim` when `openclaw-sandbox:trixie-slim` is missing. Sandbox runs that target the default image fail fast with a build instruction until you build it, because the bundled image carries `python3` for the sandbox write/edit helpers.
 
   </Step>
   <Step title="Optional: build the common image">

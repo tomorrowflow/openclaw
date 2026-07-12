@@ -282,6 +282,13 @@ export function parseTtsDirectives(
     return visible;
   });
 
+  // Bare [[tts]] tag (no colon/content) — sets hasDirective without parameters.
+  // Runs after plainBlockRegex so paired [[tts]]...[[/tts]] blocks consume first.
+  cleanedText = replaceOutsideMarkdownCode(cleanedText, /\[\[\s*tts\s*\]\]/gi, () => {
+    hasDirective = true;
+    return "";
+  });
+
   const directiveRegex = /\[\[\s*tts\s*:\s*([^\]]+)\]\]/gi;
   cleanedText = replaceOutsideMarkdownCode(cleanedText, directiveRegex, (_match, [body = ""]) => {
     hasDirective = true;

@@ -225,7 +225,7 @@ describe("prepareAcpxCodexAuthConfig", () => {
     expect(wrapper).not.toContain("@zed-industries/codex-acp");
   });
 
-  it("falls back to the patched Claude ACP package when the local adapter is unavailable", async () => {
+  it("falls back to the pinned Claude ACP package when the local adapter is unavailable", async () => {
     const root = await makeTempDir();
     const stateDir = path.join(root, "state");
     const generated = generatedClaudePaths(stateDir);

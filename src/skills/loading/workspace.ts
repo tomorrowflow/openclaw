@@ -1908,7 +1908,7 @@ export async function syncSkillsToWorkspace(params: {
 
     const usedDirNames = new Set<string>();
     const skillUsagePaths: SkillUsagePath[] = [];
-    for (const entry of entries) {
+    for (const entry of filterSkillEntries(entries, params.config)) {
       let dest: string | null;
       try {
         dest = resolveSyncedSkillDestinationPath({

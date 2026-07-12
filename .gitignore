@@ -228,3 +228,9 @@ extensions/discord/assets/embedded-app-sdk.mjs
 /.opengrep-out/
 /.crabbox-artifacts
 .comux*
+.sandcastle/
+
+# Local sandbox/research tooling (host-specific Docker images and skills)
+Dockerfile.sandbox-research
+scripts/sandbox-research-setup.sh
+skills/research-sandbox/

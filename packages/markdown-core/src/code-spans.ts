@@ -23,7 +23,7 @@ type CodeSpanIndex = {
   /** Inline-code state to carry into the next streamed chunk. */
   inlineState: InlineCodeState;
   /** Fenced-code state to carry into the next streamed chunk. */
-  fenceState: FenceScanState;
+  fenceState?: FenceScanState;
   /** True when an offset is inside fenced code or inline code. */
   isInside: (index: number) => boolean;
 };
@@ -33,7 +33,22 @@ export function buildCodeSpanIndex(
   text: string,
   inlineState?: InlineCodeState,
   fenceState?: FenceScanState,
+): CodeSpanIndex;
+export function buildCodeSpanIndex(
+  text: string,
+  inlineState?: InlineCodeState,
+  options?: { closedOnly?: boolean },
+): CodeSpanIndex;
+export function buildCodeSpanIndex(
+  text: string,
+  inlineState?: InlineCodeState,
+  fenceStateOrOptions?: FenceScanState | { closedOnly?: boolean },
 ): CodeSpanIndex {
+  const closedOnly =
+    fenceStateOrOptions !== undefined &&
+    "closedOnly" in fenceStateOrOptions &&
+    fenceStateOrOptions.closedOnly === true;
+  const fenceState = closedOnly ? undefined : (fenceStateOrOptions as FenceScanState | undefined);
   const { spans: fenceSpans, state: nextFenceState } = scanFenceSpans(text, fenceState);
   const startState = inlineState
     ? { open: inlineState.open, ticks: inlineState.ticks }
@@ -42,6 +57,7 @@ export function buildCodeSpanIndex(
     text,
     fenceSpans,
     startState,
+    closedOnly,
   );
 
   return {
@@ -56,6 +72,7 @@ function parseInlineCodeSpans(
   text: string,
   fenceSpans: FenceSpan[],
   initialState: InlineCodeState,
+  closedOnly?: boolean,
 ): InlineCodeSpansResult {
   const spans: Array<[number, number]> = [];
   let open = initialState.open;
@@ -97,7 +114,7 @@ function parseInlineCodeSpans(
     }
   }
 
-  if (open) {
+  if (open && !closedOnly) {
     spans.push([openStart, text.length]);
   }
 

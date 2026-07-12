@@ -130,7 +130,7 @@ export function createSandbox(overrides?: Partial<SandboxContext>): SandboxConte
       ...overrides,
     },
     dockerOverrides: {
-      image: "openclaw-sandbox:bookworm-slim",
+      image: "openclaw-sandbox:trixie-slim",
       containerPrefix: "openclaw-sbx-",
     },
   });

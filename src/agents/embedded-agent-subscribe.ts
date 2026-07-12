@@ -194,6 +194,39 @@ function collectPendingMediaFromInternalEvents(
   return { mediaUrls: pending, attachments, trustByUrl: trustedByUrl };
 }
 
+export type { SubscribeEmbeddedAgentSessionParams } from "./embedded-agent-subscribe.types.js";
+
+function stripTrailingPartialTag(text: string): string {
+  if (!text) {
+    return text;
+  }
+  const lastOpen = text.lastIndexOf("<");
+  if (lastOpen === -1) {
+    return text;
+  }
+  if (text.includes(">", lastOpen)) {
+    return text;
+  }
+  const tail = text.slice(lastOpen).replace(/\s+/g, "").toLowerCase();
+  const tags = [
+    "<final>",
+    "</final>",
+    "<think>",
+    "</think>",
+    "<thinking>",
+    "</thinking>",
+    "<thought>",
+    "</thought>",
+    "<antthinking>",
+    "</antthinking>",
+  ];
+  for (const tag of tags) {
+    if (tag.startsWith(tail)) {
+      return text.slice(0, lastOpen);
+    }
+  }
+  return text;
+}
 export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSessionParams) {
   const log = resolveEmbeddedAgentSessionLogger(params.messageChannel);
   const reasoningMode = params.reasoningMode ?? "off";
@@ -1001,7 +1034,9 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
     if (!params.enforceFinalTag) {
       stateLocal.inlineCode = finalCodeSpans.inlineState;
       stateLocal.fence = finalCodeSpans.fenceState;
-      return stripFinalTagsOutsideCodeSpans(processed, finalCodeSpans.isInside);
+      return stripTrailingPartialTag(
+        stripFinalTagsOutsideCodeSpans(processed, finalCodeSpans.isInside),
+      );
     }
 
     // If enforcement is enabled, only return text that appeared inside a <final> block.
@@ -1069,7 +1104,9 @@ export function subscribeEmbeddedAgentSession(params: SubscribeEmbeddedAgentSess
     stateLocal.fence = finalCodeSpans.fenceState;
     stateLocal.finalInlineCode = inFinal ? resultCodeSpans.inlineState : undefined;
     stateLocal.finalFence = inFinal ? resultCodeSpans.fenceState : undefined;
-    return stripFinalTagsOutsideCodeSpans(result, resultCodeSpans.isInside);
+    return stripTrailingPartialTag(
+      stripFinalTagsOutsideCodeSpans(result, resultCodeSpans.isInside),
+    );
   };
 
   const stripFinalTagsOutsideCodeSpans = (text: string, isInside: (index: number) => boolean) => {

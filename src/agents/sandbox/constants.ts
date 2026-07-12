@@ -12,7 +12,7 @@ export { DEFAULT_SANDBOX_BROWSER_NETWORK } from "./browser-network.js";
 
 export const DEFAULT_SANDBOX_WORKSPACE_ROOT = path.join(STATE_DIR, "sandboxes");
 
-export const DEFAULT_SANDBOX_IMAGE = "openclaw-sandbox:bookworm-slim";
+export const DEFAULT_SANDBOX_IMAGE = "openclaw-sandbox:trixie-slim";
 export const DEFAULT_SANDBOX_CONTAINER_PREFIX = "openclaw-sbx-";
 export const DEFAULT_SANDBOX_WORKDIR = "/workspace";
 export const DEFAULT_SANDBOX_IDLE_HOURS = 24;
@@ -52,8 +52,8 @@ export const DEFAULT_TOOL_DENY = [
   ...CHANNEL_IDS,
 ] as const;
 
-export const DEFAULT_SANDBOX_BROWSER_IMAGE = "openclaw-sandbox-browser:bookworm-slim";
-export const DEFAULT_SANDBOX_COMMON_IMAGE = "openclaw-sandbox-common:bookworm-slim";
+export const DEFAULT_SANDBOX_BROWSER_IMAGE = "openclaw-sandbox-browser:trixie-slim";
+export const DEFAULT_SANDBOX_COMMON_IMAGE = "openclaw-sandbox-common:trixie-slim";
 export const SANDBOX_BROWSER_SECURITY_HASH_EPOCH = "2026-05-12-cdp-relay-auth";
 export const SANDBOX_BROWSER_IMAGE_CONTRACT_EPOCH = "2026-05-12-cdp-relay-auth";
 
@@ -68,6 +68,15 @@ export const DEFAULT_SANDBOX_BROWSER_NOVNC_PORT = 6080;
 export const DEFAULT_SANDBOX_BROWSER_AUTOSTART_TIMEOUT_MS = 12_000;
 
 export const SANDBOX_AGENT_WORKSPACE_MOUNT = "/agent";
+
+/** Hardcoded shared directory: STATE_DIR/shared mounted at /workspace/shared in sandbox containers. */
+export const SANDBOX_SHARED_HOST_DIR = path.join(STATE_DIR, "shared");
+export const SANDBOX_SHARED_MOUNT = "/workspace/shared";
+
+/** Hardcoded media directory: STATE_DIR/media mounted read-only at /media in sandbox containers.
+ *  Covers inbound (Signal/messaging attachments), browser screenshots, and outbound media. */
+export const SANDBOX_MEDIA_HOST_DIR = path.join(STATE_DIR, "media");
+export const SANDBOX_MEDIA_MOUNT = "/media";
 
 export const SANDBOX_STATE_DIR = path.join(STATE_DIR, "sandbox");
 export const SANDBOX_REGISTRY_PATH = path.join(SANDBOX_STATE_DIR, "containers.json");

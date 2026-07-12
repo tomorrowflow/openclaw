@@ -8,7 +8,7 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { isImageMediaFact, readPersistedMediaFacts } from "../media/media-facts.js";
 import { formatRawAssistantErrorForUi } from "../shared/assistant-error-format.js";
 import { extractAssistantVisibleText } from "../shared/chat-message-content.js";
-import { chunkTextByBreakResolver } from "../shared/text-chunking.js";
+import { stripReasoningTagsFromText } from "../shared/text/reasoning-tags.js";
 import { formatTokenCount } from "../utils/usage-format.js";
 import type { SessionInfo } from "./tui-types.js";
 
@@ -189,7 +189,7 @@ function normalizeLongTokenForDisplay(token: string): string {
   if (!ALPHANUMERIC_RE.test(token)) {
     return token;
   }
-  return chunkTextByBreakResolver(token, MAX_TOKEN_CHARS, () => MAX_TOKEN_CHARS).join(" ");
+  return chunkToken(token, MAX_TOKEN_CHARS).join(" ");
 }
 
 type Segment = { kind: "prose" | "code"; text: string };
@@ -522,15 +522,15 @@ export function extractContentFromMessage(message: unknown): string {
 
   if (record.role === "assistant") {
     if (typeof content === "string") {
-      return sanitizeRenderableText(content).trim();
+      return stripReasoningTagsFromText(sanitizeRenderableText(content).trim());
     }
     if (Array.isArray(content)) {
-      return extractAssistantRenderableContent(record);
+      return stripReasoningTagsFromText(extractAssistantRenderableContent(record));
     }
   }
 
   if (typeof content === "string") {
-    return sanitizeRenderableText(content).trim();
+    return stripReasoningTagsFromText(sanitizeRenderableText(content).trim());
   }
 
   const parts = collectSanitizedBlockStrings({
@@ -539,13 +539,15 @@ export function extractContentFromMessage(message: unknown): string {
     valueKey: "text",
   });
   if (parts.length > 0) {
-    return parts.join("\n").trim();
+    return stripReasoningTagsFromText(parts.join("\n").trim());
   }
   return formatAssistantErrorFromRecord(record);
 }
 
 function extractAssistantRenderableContent(record: Record<string, unknown>): string {
-  const visible = sanitizeRenderableText(extractAssistantVisibleText(record) ?? "").trim();
+  const visible = stripReasoningTagsFromText(
+    sanitizeRenderableText(extractAssistantVisibleText(record) ?? "").trim(),
+  );
   const pairingQr = extractPairingQrTerminalText(record);
   const content = [visible, pairingQr].filter(Boolean).join("\n\n").trim();
   if (content) {
@@ -580,7 +582,7 @@ function extractPairingQrTerminalText(record: Record<string, unknown>): string {
 
 function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean }): string {
   if (typeof content === "string") {
-    return sanitizeRenderableText(content).trim();
+    return stripReasoningTagsFromText(sanitizeRenderableText(content).trim());
   }
   if (!Array.isArray(content)) {
     return "";
@@ -602,7 +604,7 @@ function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean 
 
   return composeThinkingAndContent({
     thinkingText: thinkingParts.join("\n").trim(),
-    contentText: textParts.join("\n").trim(),
+    contentText: stripReasoningTagsFromText(textParts.join("\n").trim()),
     showThinking: opts?.includeThinking ?? false,
   });
 }
@@ -648,13 +650,15 @@ export function extractTextFromMessage(
   }
   if (record.role === "assistant") {
     const contentText = extractAssistantRenderableContent(record);
-    return composeThinkingAndContent({
-      thinkingText: extractThinkingFromMessage(record),
-      contentText:
-        contentText ||
-        (opts?.includeAttachments !== false ? extractAssistantAttachmentText(record) : ""),
-      showThinking: opts?.includeThinking ?? false,
-    });
+    return stripReasoningTagsFromText(
+      composeThinkingAndContent({
+        thinkingText: extractThinkingFromMessage(record),
+        contentText:
+          contentText ||
+          (opts?.includeAttachments !== false ? extractAssistantAttachmentText(record) : ""),
+        showThinking: opts?.includeThinking ?? false,
+      }),
+    );
   }
   const text = extractTextBlocks(record.content, opts);
   if (text) {

@@ -112,6 +112,12 @@
       "dbPath": {
         "type": "string"
       },
+      "storageOptions": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        }
+      },
       "autoCapture": {
         "type": "boolean"
       },

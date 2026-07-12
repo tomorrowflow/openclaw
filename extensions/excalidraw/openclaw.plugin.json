@@ -1,0 +1,23 @@
+{
+  "id": "excalidraw",
+  "name": "Excalidraw",
+  "version": "1.0.0",
+  "description": "Diagramming and whiteboard via Excalidraw canvas REST API (create, update, delete, query, batch, mermaid, export — 26 tools)",
+  "entry": "./index.ts",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "canvasUrl": {
+        "type": "string",
+        "default": "http://localhost:3010"
+      }
+    }
+  },
+  "uiHints": {
+    "canvasUrl": {
+      "label": "Excalidraw Canvas URL",
+      "placeholder": "http://host.docker.internal:3010"
+    }
+  }
+}

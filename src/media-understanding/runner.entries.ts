@@ -469,6 +469,9 @@ function resolveAudioProviderPrompt(params: {
   return undefined;
 }
 
+// Local providers that don't require API keys (e.g. Docker services).
+const LOCAL_KEYLESS_PROVIDERS = new Set(["whisper-asr"]);
+
 type ProviderExecutionAuth =
   | {
       kind: "api-key";
@@ -499,6 +502,13 @@ async function resolveProviderExecutionAuth(params: {
   workspaceDir?: string;
 }): Promise<ProviderExecutionAuth> {
   const providerConfig = params.cfg.models?.providers?.[params.providerId];
+  if (LOCAL_KEYLESS_PROVIDERS.has(params.providerId)) {
+    return {
+      kind: "none",
+      source: `provider:${params.providerId}`,
+      providerConfig,
+    };
+  }
   const modelApi = resolveProviderExecutionAuthModelApi({
     capability: params.capability,
     providerId: params.providerId,

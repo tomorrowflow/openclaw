@@ -124,7 +124,7 @@ function buildConfig(noVncEnabled: boolean): SandboxConfig {
     workspaceRoot: "/tmp/openclaw-sandboxes",
     dockerTmpfsSource: "default",
     docker: {
-      image: "openclaw-sandbox:bookworm-slim",
+      image: "openclaw-sandbox:trixie-slim",
       containerPrefix: "openclaw-sbx-",
       workdir: "/workspace",
       readOnlyRoot: true,
@@ -141,7 +141,7 @@ function buildConfig(noVncEnabled: boolean): SandboxConfig {
     },
     browser: {
       enabled: true,
-      image: "openclaw-sandbox-browser:bookworm-slim",
+      image: "openclaw-sandbox-browser:trixie-slim",
       containerPrefix: "openclaw-sbx-browser-",
       network: "openclaw-sandbox-browser",
       cdpPort: 9222,
@@ -310,7 +310,7 @@ describe("ensureSandboxBrowser create args", () => {
         cfg: buildConfig(false),
       }),
     ).rejects.toThrow(
-      "Sandbox browser image openclaw-sandbox-browser:bookworm-slim is stale or incompatible",
+      "Sandbox browser image openclaw-sandbox-browser:trixie-slim is stale or incompatible",
     );
 
     expect(findDockerArgsCall(dockerMocks.execDocker.mock.calls, "create")).toBeUndefined();

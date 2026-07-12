@@ -105,7 +105,7 @@ Sandbox settings live in `~/.openclaw/openclaw.json` under `agents.defaults.sand
         "backend": "docker", // docker, ssh, openshell (plugin-provided)
         "scope": "agent", // session, agent, shared
         "docker": {
-          "image": "openclaw-sandbox:bookworm-slim",
+          "image": "openclaw-sandbox:trixie-slim",
           "containerPrefix": "openclaw-sbx-",
           // ... more Docker options
         },
