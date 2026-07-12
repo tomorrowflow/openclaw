@@ -1775,6 +1775,7 @@
     "db:kysely:gen": "node --import ./scripts/tsx.mjs scripts/generate-kysely-types.mts",
     "db:worker-inventory:check": "node scripts/database-worker-inventory.mjs --check",
     "db:worker-inventory:gen": "node scripts/database-worker-inventory.mjs --write",
+    "deploy:globally": "node scripts/deploy-globally.mjs",
     "dev": "node scripts/run-node.mjs",
     "dev:ui:mock": "node --import ./scripts/tsx.mjs scripts/control-ui-mock-dev.ts",
     "docs:check-config-examples": "node scripts/check-docs-config-examples.mjs",
