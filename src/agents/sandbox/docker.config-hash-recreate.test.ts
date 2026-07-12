@@ -311,6 +311,132 @@ describe("ensureSandboxContainer config-hash recreation", () => {
     expect(registryUpdate?.configHash).toBe(newHash);
   });
 
+  it("applies custom binds after workspace mounts so overlapping binds can override", async () => {
+    const workspaceDir = tempDirs.make("openclaw-docker-mounts-");
+    const customRoot = tempDirs.make("openclaw-docker-mounts-");
+    const customUserFile = path.join(customRoot, "USER.md");
+    const cfg = createSandboxConfig(["1.1.1.1"], [`${customUserFile}:/workspace/USER.md:ro`]);
+    cfg.docker.dangerouslyAllowExternalBindSources = true;
+    const expectedHash = computeSandboxConfigHash({
+      docker: cfg.docker,
+      workspaceAccess: cfg.workspaceAccess,
+      workspaceDir,
+      agentWorkspaceDir: workspaceDir,
+      mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
+      createArgsEpoch: SANDBOX_DOCKER_CREATE_ARGS_EPOCH,
+      readOnlyWorkspaceSkillMounts: [],
+    });
+
+    spawnState.inspectRunning = false;
+    spawnState.labelHash = "stale-hash";
+    registryMocks.readRegistryEntry.mockResolvedValue({
+      containerName: "oc-test-shared",
+      sessionKey: "shared",
+      createdAtMs: 1,
+      lastUsedAtMs: 0,
+      image: cfg.docker.image,
+      configHash: "stale-hash",
+    });
+
+    const createCall = await ensureSandboxCreateCallForTest({ cfg, workspaceDir });
+    expect(createCall.args).toContain(`openclaw.configHash=${expectedHash}`);
+
+    const bindArgs = collectDockerFlagValues(createCall.args, "-v");
+    const workspaceMountIdx = bindArgs.indexOf(`${workspaceDir}:/workspace:z`);
+    const customMountIdx = bindArgs.indexOf(`${customUserFile}:/workspace/USER.md:ro`);
+    expect(workspaceMountIdx).toBeGreaterThanOrEqual(0);
+    expect(customMountIdx).toBeGreaterThan(workspaceMountIdx);
+  });
+
+  it.each(["docker", "podman"] as const)(
+    "skips user binds that conflict with protected skill overlays for %s",
+    async (backend) => {
+      // The protected overlay remains authoritative for both engines, avoiding
+      // duplicate mount rejection without making checked-in skills writable.
+      const workspaceDir = tempDirs.make("openclaw-docker-mounts-");
+      const customRoot = tempDirs.make("openclaw-docker-mounts-");
+      fs.mkdirSync(path.join(workspaceDir, "skills", "demo"), { recursive: true });
+      const customMount = `${customRoot}:/workspace/skills:rw`;
+      const cfg = createSandboxConfig([], [customMount]);
+      cfg.backend = backend;
+      cfg.docker.workdir = "/workspace/.";
+      cfg.docker.dangerouslyAllowExternalBindSources = true;
+      spawnState.inspectRunning = false;
+      registryMocks.readRegistryEntry.mockResolvedValue(null);
+
+      const engine = backend === "podman" ? PODMAN_SANDBOX_ENGINE : undefined;
+      const createCall = await ensureSandboxCreateCallForTest({ cfg, workspaceDir, engine });
+      const bindArgs = collectDockerFlagValues(createCall.args, "-v");
+
+      expect(createCall.command).toBe(backend);
+      expect(bindArgs).not.toContain(customMount);
+      expect(bindArgs).toContain(`${path.join(workspaceDir, "skills")}:/workspace/./skills:ro,z`);
+    },
+  );
+
+  it("mounts secret files read-only and injects their contents as env vars", async () => {
+    const workspaceDir = "/tmp/workspace";
+    const secretRoot = makeTempDir();
+    const secretFile = path.join(secretRoot, "anthropic-api-key");
+    fs.writeFileSync(secretFile, "sk-test-secret\n", "utf8");
+    const cfg = createSandboxConfig([]);
+    cfg.docker.secretMounts = {
+      ANTHROPIC_API_KEY: secretFile,
+    };
+
+    spawnState.inspectRunning = false;
+    spawnState.labelHash = "stale-hash";
+    registryMocks.readRegistryEntry.mockResolvedValue({
+      containerName: "oc-test-shared",
+      sessionKey: "shared",
+      createdAtMs: 1,
+      lastUsedAtMs: 0,
+      image: cfg.docker.image,
+      configHash: "stale-hash",
+    });
+
+    const createCall = await ensureSandboxCreateCallForTest({ cfg, workspaceDir });
+    const bindArgs = collectDockerFlagValues(createCall.args, "-v");
+    const envArgs = collectDockerFlagValues(createCall.args, "--env");
+
+    expect(bindArgs).toContain(`${secretFile}:/run/secrets/ANTHROPIC_API_KEY:ro`);
+    expect(envArgs).toContain("ANTHROPIC_API_KEY=sk-test-secret");
+  });
+
+  it.each([
+    { workspaceAccess: "rw" as const, expectedMainMount: "/tmp/workspace:/workspace:z" },
+    { workspaceAccess: "ro" as const, expectedMainMount: "/tmp/workspace:/workspace:ro,z" },
+    { workspaceAccess: "none" as const, expectedMainMount: "/tmp/workspace:/workspace:z" },
+  ])(
+    "uses expected main mount permissions when workspaceAccess=$workspaceAccess",
+    async ({ workspaceAccess, expectedMainMount }) => {
+      const workspaceDir = "/tmp/workspace";
+      const cfg = createSandboxConfig([], undefined, workspaceAccess);
+
+      spawnState.inspectRunning = false;
+      registryMocks.readRegistryEntry.mockResolvedValue(null);
+
+      const createCall = await ensureSandboxCreateCallForTest({ cfg, workspaceDir });
+
+      const bindArgs = collectDockerFlagValues(createCall.args, "-v");
+      expect(bindArgs).toContain(expectedMainMount);
+    },
+  );
+
+  it("stamps the mount format version label on created containers", async () => {
+    const workspaceDir = "/tmp/workspace";
+    const cfg = createSandboxConfig([]);
+
+    spawnState.inspectRunning = false;
+    spawnState.labelHash = "";
+    registryMocks.readRegistryEntry.mockResolvedValue(null);
+
+    const createCall = await ensureSandboxCreateCallForTest({ cfg, workspaceDir });
+    expect(createCall.args).toContain(
+      `openclaw.mountFormatVersion=${SANDBOX_MOUNT_FORMAT_VERSION}`,
+    );
+  });
+
   it("uses the shared lifecycle with rootless Podman workspace ownership", async () => {
     const workspaceDir = "/tmp/workspace";
     const cfg = createSandboxConfig([], []);
