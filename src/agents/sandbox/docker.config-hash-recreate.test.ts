@@ -614,6 +614,35 @@ describe("ensureSandboxContainer config-hash recreation", () => {
     },
   );
 
+  it("mounts secret files read-only and injects their contents as env vars", async () => {
+    const workspaceDir = "/tmp/workspace";
+    const secretRoot = makeTempDir();
+    const secretFile = path.join(secretRoot, "anthropic-api-key");
+    fs.writeFileSync(secretFile, "sk-test-secret\n", "utf8");
+    const cfg = createSandboxConfig([]);
+    cfg.docker.secretMounts = {
+      ANTHROPIC_API_KEY: secretFile,
+    };
+
+    spawnState.inspectRunning = false;
+    spawnState.labelHash = "stale-hash";
+    registryMocks.readRegistryEntry.mockResolvedValue({
+      containerName: "oc-test-shared",
+      sessionKey: "shared",
+      createdAtMs: 1,
+      lastUsedAtMs: 0,
+      image: cfg.docker.image,
+      configHash: "stale-hash",
+    });
+
+    const createCall = await ensureSandboxCreateCallForTest({ cfg, workspaceDir });
+    const bindArgs = collectDockerFlagValues(createCall.args, "-v");
+    const envArgs = collectDockerFlagValues(createCall.args, "--env");
+
+    expect(bindArgs).toContain(`${secretFile}:/run/secrets/ANTHROPIC_API_KEY:ro`);
+    expect(envArgs).toContain("ANTHROPIC_API_KEY=sk-test-secret");
+  });
+
   it.each([
     { workspaceAccess: "rw" as const, expectedMainMount: "/tmp/workspace:/workspace:z" },
     { workspaceAccess: "ro" as const, expectedMainMount: "/tmp/workspace:/workspace:ro,z" },
