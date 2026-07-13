@@ -150,6 +150,24 @@ sudo -u openclaw sed -i \
 sudo -u openclaw sed -i \
   "s/Description=OpenClaw Gateway (v.*)/Description=OpenClaw Gateway (v$NEW_VER)/" \
   /home/openclaw/.config/systemd/user/openclaw-gateway.service
+
+# Pin the Codex app-server binary. The fork bundles the codex plugin, so its
+# app-server code ends up in a dist-root chunk; the managed-binary resolver then
+# derives the wrong plugin root and misses the bundled @openai/codex binary,
+# failing every openai model (routed through Codex) with "app-server binary was
+# not found". Point the gateway at the deployed binary explicitly (the supported
+# OPENCLAW_CODEX_APP_SERVER_BIN override). Idempotent: update in place or append.
+UNIT_FILE=/home/openclaw/.config/systemd/user/openclaw-gateway.service
+CODEX_BIN="$(npm root -g)/openclaw/dist/extensions/codex/node_modules/.bin/codex"
+if grep -q OPENCLAW_CODEX_APP_SERVER_BIN "$UNIT_FILE"; then
+  sudo -u openclaw sed -i \
+    "s#Environment=OPENCLAW_CODEX_APP_SERVER_BIN=.*#Environment=OPENCLAW_CODEX_APP_SERVER_BIN=$CODEX_BIN#" \
+    "$UNIT_FILE"
+else
+  sudo -u openclaw sed -i \
+    "/Environment=OPENCLAW_SERVICE_VERSION=/a Environment=OPENCLAW_CODEX_APP_SERVER_BIN=$CODEX_BIN" \
+    "$UNIT_FILE"
+fi
 $OC_SYSTEMCTL daemon-reload
 
 # Validate config + run doctor. --non-interactive applies safe migrations only
