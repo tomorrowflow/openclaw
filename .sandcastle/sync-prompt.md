@@ -252,6 +252,38 @@ Both are deployed-behaviour bug fixes; dropping them re-breaks live agents.
      shape that excluded `rw`), sandboxed agents get an unreadable host path and the
      run fails with `Path escapes sandbox root ... /usr/lib/node_modules/openclaw/skills/.../SKILL.md`.
 
+### Step 5g: Root package.json fork customizations
+
+The rebase takes upstream's root `package.json` for the metadata/scripts blocks,
+which silently drops fork-only entries and adopts the release branch's in-dev
+version. Restore both after the rebase (idempotent):
+
+```bash
+# 1. Pin the deployed version to the clean release train, not the branch's
+#    -beta. release/$TARGET carries e.g. 2026.7.1-beta.6 mid-development; the fork
+#    deploys as $TARGET (2026.7.1). Otherwise OPENCLAW_SERVICE_VERSION reads as a
+#    downgrade from the running install.
+node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));if(p.version!==process.argv[1]){p.version=process.argv[1];fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');console.log('pinned version ->',process.argv[1]);}else{console.log('version already',p.version);}" "$TARGET"
+
+# 2. Re-add the fork's deploy:globally script if upstream's package.json dropped
+#    it (Step 5f flags it via docs/fork-features.txt). The script file
+#    scripts/deploy-globally.mjs survives the rebase; only the invocation entry
+#    is lost. The deploy lane calls `pnpm deploy:globally`, so a missing entry
+#    breaks the deploy after npm i -g.
+node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));if(!p.scripts['deploy:globally']){p.scripts['deploy:globally']='node scripts/deploy-globally.mjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');console.log('restored deploy:globally script');}else{console.log('deploy:globally present');}"
+```
+
+Rebuild after pinning the version so `dist/build-info` carries `$TARGET`
+(`OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 corepack pnpm build`), then commit both in
+Step 6.
+
+> The deploy lane (`scripts/sync-and-deploy.sh`, host step 8) separately handles
+> the `@openai/codex` `workspace:*` install break (via
+> `scripts/prepare-global-install-package-json.mjs`) and pins
+> `OPENCLAW_CODEX_APP_SERVER_BIN` in the systemd unit (the fork bundles codex, so
+> the managed-binary resolver misses the bundled binary and every openai model
+> fails). No sync-agent action needed for those; they run at deploy time.
+
 ### Step 6: Commit fixups
 
 If install, build, check, or fork-feature repair required file changes, commit them:

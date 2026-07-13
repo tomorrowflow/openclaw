@@ -53,6 +53,11 @@ deviceId | src/cli/devices-cli.ts | Device ID display in devices list
 # --- Ollama (provider compat patches) ---
 ensureArgsString | extensions/ollama/src/stream.ts | OpenAI-compat tool_call arguments kept as string (fixes ollama 400 "cannot unmarshal object ... arguments of type string" on tool-call replay; e.g. glm-5.2:cloud)
 
+# --- Deploy (root package.json fork scripts) ---
+# Dropped whenever the rebase takes upstream's root package.json wholesale; the
+# script FILE survives but becomes uninvokable. See sync-prompt Step 5g.
+deploy:globally | package.json | Fork deploy script (node scripts/deploy-globally.mjs) — bundles externalized plugins into the global install
+
 # --- Memory (LanceDB) ---
 storageOptions | extensions/memory-lancedb/config.ts | LanceDB storageOptions config
 nomic-embed-text | extensions/memory-lancedb/config.ts | Nomic embedding model dimension mapping
