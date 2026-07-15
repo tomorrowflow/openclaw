@@ -27,8 +27,10 @@ vi.mock("./whatsapp/adapter.runtime.js", () => ({
 import { discordQaCliRegistration } from "./discord/cli.js";
 import { matrixQaCliRegistration } from "./matrix/cli.js";
 import { slackQaCliRegistration } from "./slack/cli.js";
+import { SLACK_QA_DEFAULT_SCENARIO_IDS } from "./slack/profiles.js";
 import { telegramQaCliRegistration } from "./telegram/cli.js";
 import { whatsappQaCliRegistration } from "./whatsapp/cli.js";
+import { resolveWhatsAppQaScenarioIds } from "./whatsapp/profiles.js";
 
 const discordQaAdapterFactory = discordQaCliRegistration.adapterFactory;
 const matrixQaAdapterFactory = matrixQaCliRegistration.adapterFactory;
@@ -60,6 +62,16 @@ describe("live transport adapter factories", () => {
     expect(slackQaAdapterFactory.isolatesInstances).toBeUndefined();
     expect(telegramQaAdapterFactory.isolatesInstances).toBeUndefined();
     expect(whatsappQaAdapterFactory.isolatesInstances).toBeUndefined();
+  });
+
+  it("assigns the canonical live scenario defaults to Slack", () => {
+    expect(slackQaAdapterFactory.scenarioIds).toEqual(SLACK_QA_DEFAULT_SCENARIO_IDS);
+  });
+
+  it("assigns the canonical live-frontier scenario defaults to WhatsApp", () => {
+    expect(whatsappQaAdapterFactory.scenarioIds).toEqual(
+      resolveWhatsAppQaScenarioIds({ providerMode: "live-frontier" }),
+    );
   });
 
   it.each([
