@@ -106,6 +106,13 @@ vi.mock("openclaw/plugin-sdk/ssrf-runtime", async (importOriginal) => {
     resolvePinnedHostnameWithPolicy: resolvePinnedHostnameWithPolicyMock,
   };
 });
+vi.mock("openclaw/plugin-sdk/reply-runtime", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    createReplyDispatcherWithTyping: createReplyDispatcherWithTypingMock,
+  };
+});
 vi.mock("./client.js", () => ({ createFeishuClient: createFeishuClientMock }));
 vi.mock("./targets.js", () => ({ resolveReceiveIdType: resolveReceiveIdTypeMock }));
 vi.mock("./typing.js", () => ({
@@ -172,6 +179,7 @@ afterAll(() => {
   vi.doUnmock("./streaming-card.js");
   vi.doUnmock("openclaw/plugin-sdk/ssrf-runtime");
   vi.doUnmock("openclaw/plugin-sdk/plugin-runtime");
+  vi.doUnmock("openclaw/plugin-sdk/reply-runtime");
   vi.resetModules();
 });
 
