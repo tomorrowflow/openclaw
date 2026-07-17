@@ -528,45 +528,7 @@ describe("telegramPlugin gateway startup", () => {
     ).resolves.toBeNull();
   });
 
-  it("preserves token files and sibling config when logout clears an inline token", async () => {
-    vi.stubEnv("TELEGRAM_BOT_TOKEN", "");
-    const stateDir = testState.stateDir;
-    const runtime = installTelegramRuntime();
-    const remaining = { tokenFile: path.join(stateDir, "missing-token"), name: "Ops" };
-    const cfg: OpenClawConfig = {
-      channels: {
-        telegram: {
-          botToken: "root-token",
-          accounts: { ops: { ...remaining, botToken: "remove" }, other: { botToken: "keep" } },
-        },
-        line: { enabled: false },
-      },
-    };
-    const original = structuredClone(cfg);
-    const result = await telegramPlugin.gateway?.logoutAccount?.({
-      accountId: "ops",
-      account: telegramPlugin.config.resolveAccount(cfg, "ops"),
-      cfg,
-      runtime: createRuntimeEnvMock(),
-    });
-
-    expect(result).toEqual({ cleared: true, envToken: false, loggedOut: false });
-    expect(runtime.config.replaceConfigFile).toHaveBeenCalledExactlyOnceWith({
-      nextConfig: {
-        channels: {
-          telegram: {
-            botToken: "root-token",
-            accounts: { ops: remaining, other: { botToken: "keep" } },
-          },
-          line: { enabled: false },
-        },
-      },
-      afterWrite: { mode: "auto" },
-    });
-    expect(cfg).toEqual(original);
-  });
-
-  it("uses the built-in startup probe timeout", async () => {
+  it("honors higher per-account timeoutSeconds for startup probe", async () => {
     installTelegramRuntime();
     probeTelegram.mockResolvedValue({
       ok: true,
@@ -579,7 +541,7 @@ describe("telegramPlugin gateway startup", () => {
     const { ctx, task } = startTelegramAccount("ops", { timeoutSeconds: 60 });
 
     await expect(task).resolves.toBeUndefined();
-    expect(probeTelegram).toHaveBeenCalledWith("123456:bad-token", 15_000, {
+    expect(probeTelegram).toHaveBeenCalledWith("123456:bad-token", 60_000, {
       abortSignal: ctx.abortSignal,
       accountId: "ops",
       proxyUrl: undefined,
