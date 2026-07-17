@@ -114,10 +114,14 @@ export function prepareEmbeddedAttemptSkills(params: {
     });
     return {
       restoreSkillEnv,
+      skillEntries,
       skillUsagePaths,
       skillsPrompt,
+      skillsEligibility,
+      skillsPromptWorkspaceDir,
       skillsSnapshotForRun: skillsSnapshot,
       codeModeSkills,
+      skillsWorkspaceDir,
     };
   } catch (error) {
     restoreSkillEnv();

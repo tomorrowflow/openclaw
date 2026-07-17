@@ -22,6 +22,7 @@ import {
   type ToolSearchCatalogToolExecutor,
 } from "../../tool-search.js";
 import { log } from "../logger.js";
+import { resolveEmbeddedRunSkillsPrompt } from "../sandbox-skills.js";
 import {
   createEmbeddedAttemptExternalAbortController,
   type EmbeddedAttemptAbortStatePort,
@@ -169,7 +170,24 @@ export async function runEmbeddedAttempt(
       { config: params.config },
     );
     restoreSkillEnv = preparedSkills.restoreSkillEnv;
-    const { codeModeSkills, skillUsagePaths, skillsPrompt, skillsSnapshotForRun } = preparedSkills;
+    const {
+      codeModeSkills,
+      skillEntries,
+      skillUsagePaths,
+      skillsEligibility,
+      skillsPromptWorkspaceDir,
+      skillsSnapshotForRun,
+      skillsWorkspaceDir,
+    } = preparedSkills;
+    const skillsPrompt = resolveEmbeddedRunSkillsPrompt({
+      agentId: sessionAgentId,
+      config: params.config,
+      entries: skillEntries,
+      eligibility: skillsEligibility,
+      skillsPromptWorkspaceDir,
+      skillsSnapshot: skillsSnapshotForRun,
+      skillsWorkspaceDir,
+    });
     prepStages.mark("skills");
 
     const isRawModelRun = params.modelRun === true || params.promptMode === "none";

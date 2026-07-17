@@ -229,6 +229,10 @@ function resolveOwnerAllowFromList(
     if (!trimmed) {
       continue;
     }
+    if (trimmed === "*") {
+      filtered.push(trimmed);
+      continue;
+    }
     const separatorIndex = trimmed.indexOf(":");
     if (separatorIndex > 0) {
       const prefix = trimmed.slice(0, separatorIndex);
@@ -310,18 +314,30 @@ function resolveOwnerAuthorizationState(
   const allowAll =
     !params.hadResolutionError &&
     (params.allowFromList.length === 0 || hasWildcardAllowFrom(params.allowFromList));
-  const channelCommandOwners = resolveOwnerCandidatesForCommands({ ...params, allowAll });
-  const explicitOwners = Array.from(new Set(stripWildcardAllowFrom(configOwnerAllowFromList)));
-  const contextCommandOwners = stripWildcardAllowFrom(contextOwnerAllowFromList);
+  const channelCommandOwners = resolveOwnerCandidatesForCommands({
+    plugin: params.plugin,
+    cfg: params.cfg,
+    accountId: params.accountId,
+    to: params.to,
+    allowAll,
+    allowFromList: params.allowFromList,
+  });
+  const explicitOwners = Array.from(new Set(configOwnerAllowFromList));
+  const contextCommandOwners = contextOwnerAllowFromList;
   // Channel and context lists can authorize commands within one transport, but only the global
   // owner list grants owner-only command and action authority.
+  const ownerAllowAll =
+    hasWildcardAllowFrom(configOwnerAllowFromList) ||
+    hasWildcardAllowFrom(contextOwnerAllowFromList);
   const commandOwnerCandidates = Array.from(
     new Set(
-      explicitOwners.length > 0
-        ? explicitOwners
-        : contextCommandOwners.length > 0
-          ? contextCommandOwners
-          : channelCommandOwners,
+      ownerAllowAll
+        ? ["*"]
+        : explicitOwners.length > 0
+          ? explicitOwners
+          : contextCommandOwners.length > 0
+            ? contextCommandOwners
+            : channelCommandOwners,
     ),
   );
   return {
@@ -525,13 +541,16 @@ export function resolveCommandAuthorization(params: {
     Array.isArray(ctx.GatewayClientScopes) &&
     ctx.GatewayClientScopes.includes("operator.admin");
   const ownerAllowlistConfigured = ownerState.explicitOwners.length > 0;
-  const senderIsOwner = senderIsOwnerByIdentity || senderIsOwnerByScope;
-  const requireOwner = enforceOwner || ownerAllowlistConfigured;
+  const ownerAllowAll = ownerState.explicitOwners.includes("*");
+  const senderIsOwner = senderIsOwnerByIdentity || senderIsOwnerByScope || ownerAllowAll;
+  const requireOwner = enforceOwner || (ownerAllowlistConfigured && !ownerAllowAll);
   const isOwnerForCommands = !requireOwner
     ? true
-    : ownerAllowlistConfigured
-      ? senderIsOwner
-      : senderIsOwnerByScope || Boolean(matchedCommandOwner);
+    : ownerAllowAll
+      ? true
+      : ownerAllowlistConfigured
+        ? senderIsOwner
+        : senderIsOwnerByScope || Boolean(matchedCommandOwner);
   const nativeCommandAuthorized =
     commandAuthorized && isNativeCommandTurn(resolveCommandTurnContext(ctx)) && !requireOwner;
   const isAuthorizedSender = resolveCommandSenderAuthorization({
