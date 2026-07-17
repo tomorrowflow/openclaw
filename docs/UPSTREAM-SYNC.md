@@ -370,10 +370,10 @@ Stop the running gateway, install from the local repo globally, and restart.
 > `index.js`, causing the plugin discovery security check to reject them.
 
 > **Externalized plugins (`!dist/extensions/<id>/**`exclusions).** Upstream
-excludes a growing set of plugins from`package.json#files`because their
-intended distribution is one separate npm package per plugin (each plugin's`openclaw.install.npmSpec`, e.g. `@openclaw/memory-lancedb`). This fork
-deploys as a single host and wants those plugins bundled into the same
-global install, so `sudo npm i -g . --install-links` alone is no longer
+> excludes a growing set of plugins from`package.json#files`because their
+> intended distribution is one separate npm package per plugin (each plugin's`openclaw.install.npmSpec`, e.g. `@openclaw/memory-lancedb`). This fork
+> deploys as a single host and wants those plugins bundled into the same
+> global install, so `sudo npm i -g . --install-links` alone is no longer
 > sufficient — it copies only the non-excluded extensions.
 >
 > The fork-owned `pnpm deploy:globally` script

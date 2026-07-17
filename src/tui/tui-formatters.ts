@@ -8,6 +8,7 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { isImageMediaFact, readPersistedMediaFacts } from "../media/media-facts.js";
 import { formatRawAssistantErrorForUi } from "../shared/assistant-error-format.js";
 import { extractAssistantVisibleText } from "../shared/chat-message-content.js";
+import { chunkTextByBreakResolver } from "../shared/text-chunking.js";
 import { stripReasoningTagsFromText } from "../shared/text/reasoning-tags.js";
 import { formatTokenCount } from "../utils/usage-format.js";
 import type { SessionInfo } from "./tui-types.js";
@@ -35,6 +36,10 @@ const RTL_ISOLATE_END = "\u2069";
 const FENCED_CODE_RE = /(```|~~~)[^\n]*\n[\s\S]*?\n\1[^\n]*/g;
 // Inline code spans with balanced backtick run (`code`, ``co`de``, ...).
 const INLINE_CODE_RE = /(`+)(?:(?!\1).)+?\1/g;
+
+function stripReasoningTags(text: string): string {
+  return stripReasoningTagsFromText(text, { mode: "preserve", trim: "start" });
+}
 
 /** Keep routing/provider/profile details in session state, not the compact footer. */
 function formatModelFooter(params: {
@@ -189,7 +194,7 @@ function normalizeLongTokenForDisplay(token: string): string {
   if (!ALPHANUMERIC_RE.test(token)) {
     return token;
   }
-  return chunkToken(token, MAX_TOKEN_CHARS).join(" ");
+  return chunkTextByBreakResolver(token, MAX_TOKEN_CHARS, () => MAX_TOKEN_CHARS).join(" ");
 }
 
 type Segment = { kind: "prose" | "code"; text: string };

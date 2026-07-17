@@ -4,7 +4,6 @@
  * Wraps Docker spawn, environment sanitization, container inspection, creation, and exec behavior.
  */
 import { readFileSync } from "node:fs";
-import { spawn } from "node:child_process";
 import { createAbortError } from "../../infra/abort-signal.js";
 import { toErrorObject } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
@@ -102,7 +101,10 @@ function envRecordsEqual(left: Record<string, string>, right: Record<string, str
   });
 }
 
-function appendSecretMountArgs(args: string[], secretMounts: Record<string, string> | undefined): void {
+function appendSecretMountArgs(
+  args: string[],
+  secretMounts: Record<string, string> | undefined,
+): void {
   if (!secretMounts) {
     return;
   }

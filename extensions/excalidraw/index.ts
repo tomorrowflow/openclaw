@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
 // Excalidraw Canvas Plugin — diagramming and whiteboard via REST API
 // Calls the Excalidraw canvas server (mcp_excalidraw) HTTP endpoints directly.
 // All 26 tools registered synchronously; REST calls made on each invocation.
@@ -445,17 +446,21 @@ const TOOLS: ToolSpec[] = [
 
       if (dir === "horizontal") {
         elems.sort((a, b) => a.x - b.x);
-        const totalSpan = elems[elems.length - 1].x - elems[0].x;
+        const first = elems[0]!;
+        const last = elems[elems.length - 1]!;
+        const totalSpan = last.x - first.x;
         const gap = totalSpan / (elems.length - 1);
         for (let i = 1; i < elems.length - 1; i++) {
-          await api.put(`/api/elements/${elems[i].id}`, { x: elems[0].x + gap * i });
+          await api.put(`/api/elements/${elems[i]!.id}`, { x: first.x + gap * i });
         }
       } else {
         elems.sort((a, b) => a.y - b.y);
-        const totalSpan = elems[elems.length - 1].y - elems[0].y;
+        const first = elems[0]!;
+        const last = elems[elems.length - 1]!;
+        const totalSpan = last.y - first.y;
         const gap = totalSpan / (elems.length - 1);
         for (let i = 1; i < elems.length - 1; i++) {
-          await api.put(`/api/elements/${elems[i].id}`, { y: elems[0].y + gap * i });
+          await api.put(`/api/elements/${elems[i]!.id}`, { y: first.y + gap * i });
         }
       }
       return JSON.stringify({ success: true, direction: dir, distributed: elems.length });
