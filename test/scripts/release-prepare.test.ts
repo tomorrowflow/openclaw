@@ -4,10 +4,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 // Release prepare tests cover shadow planning, cutover commands, and candidate manifests.
 import { expectDefined } from "@openclaw/normalization-core";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildReleasePreparationManifest,
