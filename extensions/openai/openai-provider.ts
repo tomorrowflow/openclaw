@@ -88,10 +88,10 @@ const OPENAI_CODEX_CLIENT_VERSION = "0.147.0";
 const OPENAI_CODEX_MODELS_ENDPOINT = `${OPENAI_CODEX_RESPONSES_BASE_URL}/models?client_version=${OPENAI_CODEX_CLIENT_VERSION}`;
 const OPENAI_MODELS_CACHE_TTL_MS = 60_000;
 const OPENAI_CODEX_MODELS_CACHE_TTL_MS = 60_000;
-const OPENAI_GPT_56_DIRECT_CONTEXT_WINDOW = 1_050_000;
-const OPENAI_CODEX_GPT_56_CONTEXT_WINDOW = 372_000;
-const OPENAI_GPT_55_CONTEXT_WINDOW = 1_050_000;
-const OPENAI_GPT_55_PRO_CONTEXT_WINDOW = 1_050_000;
+const OPENAI_GPT_56_DIRECT_CONTEXT_TOKENS = 1_050_000;
+const OPENAI_CODEX_GPT_56_CONTEXT_TOKENS = 272_000;
+const OPENAI_GPT_55_CONTEXT_TOKENS = 272_000;
+const OPENAI_GPT_55_PRO_CONTEXT_TOKENS = 1_000_000;
 const OPENAI_GPT_54_CONTEXT_TOKENS = 1_050_000;
 const OPENAI_GPT_54_PRO_CONTEXT_TOKENS = 1_050_000;
 const OPENAI_GPT_54_MINI_CONTEXT_TOKENS = 400_000;
@@ -453,7 +453,7 @@ function normalizeOpenAICodexCatalogModel(
       : undefined;
     return {
       ...model,
-      contextWindow: OPENAI_CODEX_GPT_56_CONTEXT_WINDOW,
+      contextWindow: OPENAI_CODEX_GPT_56_CONTEXT_TOKENS,
       contextTokens: OPENAI_DEFAULT_RUNTIME_CONTEXT_TOKENS,
       thinkingLevelMap: { ...model.thinkingLevelMap, off: null },
       ...(model.compat
@@ -822,7 +822,7 @@ const OPENAI_GPT_FORWARD_COMPAT_CASES = [
             : id === OPENAI_GPT_56_TERRA_MODEL_ID
               ? OPENAI_GPT_56_TERRA_COST
               : OPENAI_GPT_56_LUNA_COST,
-        contextWindow: OPENAI_GPT_56_DIRECT_CONTEXT_WINDOW,
+        contextWindow: OPENAI_GPT_56_DIRECT_CONTEXT_TOKENS,
         contextTokens: OPENAI_DEFAULT_RUNTIME_CONTEXT_TOKENS,
         thinkingLevelMap: OPENAI_GPT_56_THINKING_LEVEL_MAP,
       }) satisfies Partial<ProviderRuntimeModel>,
@@ -833,7 +833,7 @@ const OPENAI_GPT_FORWARD_COMPAT_CASES = [
     patch: {
       mediaInput: OPENAI_GPT_55_MEDIA_INPUT,
       cost: OPENAI_GPT_55_COST,
-      contextWindow: OPENAI_GPT_55_CONTEXT_WINDOW,
+      contextWindow: OPENAI_GPT_55_CONTEXT_TOKENS,
       contextTokens: OPENAI_DEFAULT_RUNTIME_CONTEXT_TOKENS,
     },
   },
@@ -842,7 +842,7 @@ const OPENAI_GPT_FORWARD_COMPAT_CASES = [
     templateIds: OPENAI_GPT_55_PRO_TEMPLATE_MODEL_IDS,
     patch: {
       cost: OPENAI_GPT_55_PRO_COST,
-      contextWindow: OPENAI_GPT_55_PRO_CONTEXT_WINDOW,
+      contextWindow: OPENAI_GPT_55_PRO_CONTEXT_TOKENS,
       contextTokens: OPENAI_DEFAULT_RUNTIME_CONTEXT_TOKENS,
     },
   },
@@ -1095,7 +1095,7 @@ export function buildOpenAIProvider(): ProviderPlugin {
           id: OPENAI_GPT_55_PRO_MODEL_ID,
           reasoning: true,
           input: ["text", "image"],
-          contextWindow: OPENAI_GPT_55_PRO_CONTEXT_WINDOW,
+          contextWindow: OPENAI_GPT_55_PRO_CONTEXT_TOKENS,
           contextTokens: OPENAI_DEFAULT_RUNTIME_CONTEXT_TOKENS,
         }),
         buildOpenAISyntheticCatalogEntry(openAiGpt54Template, {

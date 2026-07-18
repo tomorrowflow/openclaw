@@ -827,7 +827,7 @@ describe("buildOpenAIProvider", () => {
         } as never)?.levels,
       ).not.toContainEqual({ id: "ultra" });
       expect(openai?.models.find((model) => model.id === "gpt-5.6-terra")).toMatchObject({
-        contextWindow: 372_000,
+        contextWindow: 272_000,
         contextTokens: 272_000,
       });
       expect(openai?.models.find((model) => model.id === "gpt-5.3-codex-spark")).toMatchObject({
@@ -1088,7 +1088,7 @@ describe("buildOpenAIProvider", () => {
     expect(provider.models.length).toBeGreaterThan(0);
     expect(provider.models.map((model) => model.id)).not.toContain("gpt-5.6");
     expect(provider.models.find((model) => model.id === "gpt-5.6-sol")).toMatchObject({
-      contextWindow: 372_000,
+      contextWindow: 272_000,
       contextTokens: 272_000,
       thinkingLevelMap: { off: null },
       compat: {

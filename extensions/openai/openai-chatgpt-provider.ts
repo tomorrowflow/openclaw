@@ -67,7 +67,7 @@ const OPENAI_CODEX_GPT_56_THINKING_LEVEL_MAP = {
   xhigh: "xhigh",
   max: "max",
 } as const;
-const OPENAI_CODEX_GPT_56_NATIVE_CONTEXT_TOKENS = 372_000;
+const OPENAI_CODEX_GPT_56_CONTEXT_TOKENS = 272_000;
 const OPENAI_CODEX_GPT_55_CODEX_CONTEXT_TOKENS = 400_000;
 const OPENAI_CODEX_GPT_55_PRO_NATIVE_CONTEXT_TOKENS = 1_000_000;
 const OPENAI_CODEX_GPT_54_NATIVE_CONTEXT_TOKENS = 1_050_000;
@@ -233,7 +233,7 @@ function resolveCodexForwardCompatModel(ctx: ProviderResolveDynamicModelContext)
       | undefined;
     const registeredModel = withDefaultCodexContextMetadata({
       model: withCodexTransport(model, synthBaseUrl),
-      contextWindow: OPENAI_CODEX_GPT_56_NATIVE_CONTEXT_TOKENS,
+      contextWindow: OPENAI_CODEX_GPT_56_CONTEXT_TOKENS,
       contextTokens: OPENAI_DEFAULT_RUNTIME_CONTEXT_TOKENS,
     });
     if (registeredModel) {
@@ -254,7 +254,7 @@ function resolveCodexForwardCompatModel(ctx: ProviderResolveDynamicModelContext)
       reasoning: true,
       input: ["text", "image"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: OPENAI_CODEX_GPT_56_NATIVE_CONTEXT_TOKENS,
+      contextWindow: OPENAI_CODEX_GPT_56_CONTEXT_TOKENS,
       contextTokens: OPENAI_DEFAULT_RUNTIME_CONTEXT_TOKENS,
       maxTokens: OPENAI_CODEX_GPT_54_MAX_TOKENS,
       thinkingLevelMap: OPENAI_CODEX_GPT_56_THINKING_LEVEL_MAP,
