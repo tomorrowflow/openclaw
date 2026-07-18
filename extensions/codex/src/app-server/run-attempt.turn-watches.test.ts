@@ -1185,7 +1185,10 @@ describe("runCodexAppServerAttempt turn watches", () => {
     const preRequestIdleMs = 500;
     const pendingHoldMs = 700;
     const harness = createStartedThreadHarness();
-    const params = createTestParams();
+    const params = createParams(
+      path.join(tempDir, "session.jsonl"),
+      path.join(tempDir, "workspace"),
+    );
     params.timeoutMs = attemptIdleTimeoutMs;
     params.onBlockReply = vi.fn();
     const onRunProgress = vi.fn();
@@ -1234,6 +1237,9 @@ describe("runCodexAppServerAttempt turn watches", () => {
       },
     });
     await vi.waitFor(() => expect(params.onBlockReply).toHaveBeenCalledTimes(1), fastWait);
+    expect(onRunProgress).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "request:item/tool/requestUserInput:start" }),
+    );
     const pendingStartedAt = Date.now();
     await new Promise((resolve) => {
       setTimeout(resolve, pendingHoldMs);
