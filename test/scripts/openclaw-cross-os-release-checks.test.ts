@@ -1743,6 +1743,35 @@ describe("scripts/openclaw-cross-os-release-checks", () => {
     ]);
   });
 
+  it("keeps the Windows installer runtime on the manual gateway after managed lifecycle checks", () => {
+    expect(shouldExerciseManagedGatewayLifecycleAfterInstall("win32")).toBe(true);
+    expect(shouldUseManagedGatewayForInstallerRuntime("win32")).toBe(false);
+    expect(shouldExerciseManagedGatewayLifecycleAfterInstall("darwin")).toBe(false);
+    expect(shouldUseManagedGatewayForInstallerRuntime("darwin")).toBe(false);
+  });
+
+  it("stops the managed gateway before the manual fallback only on Windows", () => {
+    expect(shouldStopManagedGatewayBeforeManualFallback("win32")).toBe(true);
+    expect(shouldStopManagedGatewayBeforeManualFallback("darwin")).toBe(false);
+    expect(shouldStopManagedGatewayBeforeManualFallback("linux")).toBe(false);
+  });
+
+  it("forces isolated managed gateway stops in non-interactive release checks", () => {
+    for (const sourcePath of [
+      "scripts/lib/cross-os-release-checks/runtime.ts",
+      "scripts/lib/cross-os-release-checks/lanes.ts",
+    ]) {
+      expect(readFileSync(sourcePath, "utf8")).toContain(
+        'args: ["gateway", "stop", "--force"]',
+      );
+    }
+  });
+
+  it("skips daemon health during installed onboarding only on native Windows", () => {
+    expect(shouldSkipInstallerDaemonHealthCheck("win32")).toBe(true);
+    expect(shouldSkipInstallerDaemonHealthCheck("darwin")).toBe(false);
+    expect(shouldSkipInstallerDaemonHealthCheck("linux")).toBe(false);
+  });
   it("runs the installed browser override import smoke only on native Windows", () => {
     expect(shouldRunWindowsInstalledBrowserOverrideImportSmoke("win32")).toBe(true);
     expect(shouldRunWindowsInstalledBrowserOverrideImportSmoke("darwin")).toBe(false);
