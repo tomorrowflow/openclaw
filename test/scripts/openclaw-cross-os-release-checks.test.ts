@@ -1761,7 +1761,9 @@ describe("scripts/openclaw-cross-os-release-checks", () => {
       "scripts/lib/cross-os-release-checks/runtime.ts",
       "scripts/lib/cross-os-release-checks/lanes.ts",
     ]) {
-      expect(readFileSync(sourcePath, "utf8")).toContain('args: ["gateway", "stop", "--force"]');
+      expect(readFileSync(sourcePath, "utf8")).toContain(
+        'args: ["gateway", "stop", "--force"]',
+      );
     }
   });
 
