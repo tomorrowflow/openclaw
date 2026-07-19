@@ -1,39 +1,43 @@
-// Npm Package Lock Generator tests cover transient npm package-lock behavior.
+// Generate Npm Shrinkwrap tests cover generate npm shrinkwrap script behavior.
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   applyPackageExtensionPeerMetadata,
+  collectCurrentShrinkwrapOverrides,
   collectOverrideViolations,
   collectPnpmLockViolations,
-  createNpmPackageLockInstallStrategyArgs,
-  createNpmLockExecOptions,
-  createNpmLockCommand,
-  disableDependencyShrinkwrapOverrideConflictSources,
+  createNpmShrinkwrapExecOptions,
+  createNpmShrinkwrapCommand,
+  disableShrinkwrappedOverrideConflictSources,
   exactOverrideRulesFromOverrides,
   exactVersionFromOverrideSpec,
   normalizeNpmVersionDrift,
   normalizeOverrides,
-  packageJsonForNpmLock,
+  packageJsonForShrinkwrap,
+  packageDependencyInputsChanged,
   pnpmLockOverrideVersionForVersions,
   parsePnpmPackageKey,
   parseLockPackagePath,
   resolvePnpmLockOverridePlan,
   resolvePackageDirs,
-  resolveNpmLockJobs,
-  shouldUseLegacyPeerDepsForNpmLock,
-  npmLockPackageDirsForChangedPaths,
-} from "../../scripts/generate-npm-package-lock.mjs";
+  resolveShrinkwrapJobs,
+  restoreCurrentPnpmLockedPackages,
+  promotePackageLockToShrinkwrap,
+  shouldUseLegacyPeerDepsForShrinkwrap,
+  stageShrinkwrapAsPackageLock,
+  shrinkwrapPackageDirsForChangedPaths,
+} from "../../scripts/generate-npm-shrinkwrap.mjs";
 
-describe("generate-npm-package-lock", () => {
+describe("generate-npm-shrinkwrap", () => {
   function repoRelativePath(value: string): string {
     return path.relative(process.cwd(), value).replaceAll("\\", "/");
   }
 
   it("omits workspace packages that are published beside the package", () => {
-    const normalized = packageJsonForNpmLock(
+    const normalized = packageJsonForShrinkwrap(
       {
-        bundleDependencies: ["chalk"],
-        bundledDependencies: ["chalk"],
         dependencies: { "@openclaw/ai": "workspace:2026.6.11", chalk: "5.6.2" },
         devDependencies: { local: "workspace:*" },
         peerDependencies: { host: "workspace:^1.2.3" },
@@ -41,19 +45,17 @@ describe("generate-npm-package-lock", () => {
       {},
     );
 
-    expect(normalized).not.toHaveProperty("bundleDependencies");
-    expect(normalized).not.toHaveProperty("bundledDependencies");
     expect(normalized).not.toHaveProperty("devDependencies");
     expect(normalized.dependencies).toEqual({ chalk: "5.6.2" });
     expect(normalized.peerDependencies).toEqual({});
   });
 
-  it("runs npm package-lock generation through cmd.exe for Windows npm shims", () => {
+  it("runs npm shrinkwrap through cmd.exe for Windows npm shims", () => {
     const execPath = "C:\\nodejs\\node.exe";
     const npmCmdPath = path.win32.resolve(path.win32.dirname(execPath), "npm.cmd");
 
     expect(
-      createNpmLockCommand(["install", "--package-lock-only"], {
+      createNpmShrinkwrapCommand(["shrinkwrap", "--ignore-scripts"], {
         comSpec: "C:\\Windows\\System32\\cmd.exe",
         env: {},
         execPath,
@@ -61,16 +63,16 @@ describe("generate-npm-package-lock", () => {
         platform: "win32",
       }),
     ).toEqual({
-      args: ["/d", "/s", "/c", `${npmCmdPath} install --package-lock-only`],
+      args: ["/d", "/s", "/c", `${npmCmdPath} shrinkwrap --ignore-scripts`],
       command: "C:\\Windows\\System32\\cmd.exe",
       shell: false,
       windowsVerbatimArguments: true,
     });
   });
 
-  it("bounds npm-lock command runtime and captured output by default", () => {
+  it("bounds npm shrinkwrap command runtime and captured output by default", () => {
     expect(
-      createNpmLockExecOptions({ command: "npm", args: ["install"] }, "/tmp/package", {}),
+      createNpmShrinkwrapExecOptions({ command: "npm", args: ["install"] }, "/tmp/package", {}),
     ).toMatchObject({
       cwd: "/tmp/package",
       maxBuffer: 64 * 1024 * 1024,
@@ -79,17 +81,34 @@ describe("generate-npm-package-lock", () => {
     });
   });
 
-  it("adds explicit npm install strategies for package-lock generation", () => {
-    expect(createNpmPackageLockInstallStrategyArgs({ installStrategy: "shallow" })).toEqual([
-      "--install-strategy=shallow",
-    ]);
-    expect(createNpmPackageLockInstallStrategyArgs({})).toEqual([]);
-    expect(() =>
-      createNpmPackageLockInstallStrategyArgs({ installStrategy: "global" as never }),
-    ).toThrow("invalid npm package-lock install strategy: global");
+  it("round-trips publish locks through npm 12's supported package-lock filename", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "openclaw-shrinkwrap-test-"));
+    try {
+      const shrinkwrap = JSON.stringify({ lockfileVersion: 3, packages: {} });
+      writeFileSync(path.join(root, "npm-shrinkwrap.json"), shrinkwrap);
+
+      expect(stageShrinkwrapAsPackageLock(root)).toBe(true);
+      expect(readFileSync(path.join(root, "package-lock.json"), "utf8")).toBe(shrinkwrap);
+
+      promotePackageLockToShrinkwrap(root);
+      expect(readFileSync(path.join(root, "npm-shrinkwrap.json"), "utf8")).toBe(shrinkwrap);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
-  it("normalizes pnpm scoped override selectors for npm package locks", () => {
+  it("fails clearly when npm package-lock-only produces no lockfile", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "openclaw-shrinkwrap-test-"));
+    try {
+      expect(() => promotePackageLockToShrinkwrap(root)).toThrow(
+        "npm package-lock-only install did not create package-lock.json",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("normalizes pnpm scoped override selectors for npm shrinkwrap", () => {
     expect(
       normalizeOverrides({
         "openclaw@2026.5.28>undici": "8.5.0",
@@ -103,7 +122,7 @@ describe("generate-npm-package-lock", () => {
     });
   });
 
-  it("rejects short flag package selectors before resolving npm-lock targets", () => {
+  it("rejects short flag package selectors before resolving shrinkwrap targets", () => {
     expect(() => resolvePackageDirs(["--package-dir", "-h"])).toThrow(
       "--package-dir requires a package directory.",
     );
@@ -118,18 +137,18 @@ describe("generate-npm-package-lock", () => {
     );
   });
 
-  it("validates npm-lock worker counts from flags and environment", () => {
-    expect(resolveNpmLockJobs("3", {})).toBe(3);
-    expect(resolveNpmLockJobs(undefined, { OPENCLAW_NPM_LOCK_JOBS: "2" })).toBe(2);
-    expect(() => resolveNpmLockJobs("0", {})).toThrow("invalid OPENCLAW_NPM_LOCK_JOBS: 0");
-    expect(() => resolveNpmLockJobs("17", {})).toThrow("maximum is 16");
+  it("validates shrinkwrap worker counts from flags and environment", () => {
+    expect(resolveShrinkwrapJobs("3", {})).toBe(3);
+    expect(resolveShrinkwrapJobs(undefined, { OPENCLAW_NPM_SHRINKWRAP_JOBS: "2" })).toBe(2);
+    expect(() => resolveShrinkwrapJobs("0", {})).toThrow("invalid OPENCLAW_NPM_SHRINKWRAP_JOBS: 0");
+    expect(() => resolveShrinkwrapJobs("17", {})).toThrow("maximum is 16");
   });
 
-  it("accepts strict npm-lock command timeout and buffer overrides", () => {
+  it("accepts strict npm shrinkwrap command timeout and buffer overrides", () => {
     expect(
-      createNpmLockExecOptions({ command: "npm", args: ["install"] }, "/tmp/package", {
-        OPENCLAW_NPM_LOCK_COMMAND_MAX_BUFFER_BYTES: "1048576",
-        OPENCLAW_NPM_LOCK_COMMAND_TIMEOUT_MS: "30000",
+      createNpmShrinkwrapExecOptions({ command: "npm", args: ["install"] }, "/tmp/package", {
+        OPENCLAW_NPM_SHRINKWRAP_COMMAND_MAX_BUFFER_BYTES: "1048576",
+        OPENCLAW_NPM_SHRINKWRAP_COMMAND_TIMEOUT_MS: "30000",
       }),
     ).toMatchObject({
       maxBuffer: 1024 * 1024,
@@ -137,17 +156,17 @@ describe("generate-npm-package-lock", () => {
     });
   });
 
-  it("rejects loose npm-lock command timeout and buffer overrides", () => {
+  it("rejects loose npm shrinkwrap command timeout and buffer overrides", () => {
     expect(() =>
-      createNpmLockExecOptions({ command: "npm", args: ["install"] }, "/tmp/package", {
-        OPENCLAW_NPM_LOCK_COMMAND_TIMEOUT_MS: "30s",
+      createNpmShrinkwrapExecOptions({ command: "npm", args: ["install"] }, "/tmp/package", {
+        OPENCLAW_NPM_SHRINKWRAP_COMMAND_TIMEOUT_MS: "30s",
       }),
-    ).toThrow("invalid OPENCLAW_NPM_LOCK_COMMAND_TIMEOUT_MS: 30s");
+    ).toThrow("invalid OPENCLAW_NPM_SHRINKWRAP_COMMAND_TIMEOUT_MS: 30s");
     expect(() =>
-      createNpmLockExecOptions({ command: "npm", args: ["install"] }, "/tmp/package", {
-        OPENCLAW_NPM_LOCK_COMMAND_MAX_BUFFER_BYTES: "64mb",
+      createNpmShrinkwrapExecOptions({ command: "npm", args: ["install"] }, "/tmp/package", {
+        OPENCLAW_NPM_SHRINKWRAP_COMMAND_MAX_BUFFER_BYTES: "64mb",
       }),
-    ).toThrow("invalid OPENCLAW_NPM_LOCK_COMMAND_MAX_BUFFER_BYTES: 64mb");
+    ).toThrow("invalid OPENCLAW_NPM_SHRINKWRAP_COMMAND_MAX_BUFFER_BYTES: 64mb");
   });
 
   it("extracts exact versions from npm override specs", () => {
@@ -156,9 +175,8 @@ describe("generate-npm-package-lock", () => {
     expect(exactVersionFromOverrideSpec("^8.4.0")).toBeNull();
   });
 
-  it("keeps every multi-version pnpm lock fork scoped to its parent", () => {
-    expect(pnpmLockOverrideVersionForVersions(new Set(["3.972.38"]))).toBe("3.972.38");
-    expect(pnpmLockOverrideVersionForVersions(new Set(["3.972.38", "3.972.39"]))).toBeNull();
+  it("pins same-line pnpm lock versions to the newest locked patch", () => {
+    expect(pnpmLockOverrideVersionForVersions(new Set(["3.972.38", "3.972.39"]))).toBe("3.972.39");
     expect(pnpmLockOverrideVersionForVersions(new Set(["3.972.39", "3.973.0"]))).toBeNull();
     expect(pnpmLockOverrideVersionForVersions(new Set(["3.972.39", "4.0.0"]))).toBeNull();
   });
@@ -228,7 +246,7 @@ describe("generate-npm-package-lock", () => {
     expect(parsePnpmPackageKey("invalid")).toBeNull();
   });
 
-  it("disables embedded shrinkwraps that hide workspace overrides under npm 11", () => {
+  it("disables embedded shrinkwraps that hide workspace overrides", () => {
     const lockfile = {
       packages: {
         "": {
@@ -257,7 +275,7 @@ describe("generate-npm-package-lock", () => {
     });
 
     expect(collectOverrideViolations(lockfile, overrideRules)).toHaveLength(2);
-    expect(disableDependencyShrinkwrapOverrideConflictSources(lockfile, overrideRules)).toEqual([
+    expect(disableShrinkwrappedOverrideConflictSources(lockfile, overrideRules)).toEqual([
       "node_modules/@openclaw/codex",
     ]);
     expect(lockfile.packages["node_modules/@openclaw/codex"]).not.toHaveProperty("hasShrinkwrap");
@@ -266,7 +284,7 @@ describe("generate-npm-package-lock", () => {
     ).toBeUndefined();
   });
 
-  it("detects npm package-lock entries that bypass the pnpm lock", () => {
+  it("detects shrinkwrap packages that bypass the pnpm lock", () => {
     const lockfile = {
       packages: {
         "": {},
@@ -280,7 +298,7 @@ describe("generate-npm-package-lock", () => {
     };
     const pnpmPackages = new Set(["react@19.2.4", "@nolyfill/domexception@1.0.28"]);
 
-    expect(collectPnpmLockViolations(lockfile, pnpmPackages, new Map())).toEqual([
+    expect(collectPnpmLockViolations(lockfile, pnpmPackages)).toEqual([
       {
         packageKey: "react@19.2.6",
         path: "node_modules/react",
@@ -288,29 +306,145 @@ describe("generate-npm-package-lock", () => {
     ]);
   });
 
-  it("detects npm package-lock integrity drift from the pnpm lock", () => {
-    const packageKey = "react@19.2.4";
-    expect(
-      collectPnpmLockViolations(
-        {
-          packages: {
-            "node_modules/react": {
-              version: "19.2.4",
-              integrity: "sha512-unreviewed",
-            },
+  it("restores current shrinkwrap entries when npm floats past pnpm's lock", () => {
+    const generated = {
+      packages: {
+        "": {
+          dependencies: {
+            "lru-cache": "^11.5.0",
           },
         },
-        new Set([packageKey]),
-        new Map([[packageKey, new Set(["sha512-reviewed"])]]),
-      ),
-    ).toEqual([
-      {
-        path: "node_modules/react",
-        packageKey,
-        actualIntegrity: "sha512-unreviewed",
-        expectedIntegrities: ["sha512-reviewed"],
+        "node_modules/lru-cache": {
+          version: "11.5.1",
+          resolved: "https://registry.npmjs.org/lru-cache/-/lru-cache-11.5.1.tgz",
+          integrity: "sha512-new",
+        },
+        "node_modules/lru-memoizer/node_modules/lru-cache": {
+          version: "6.0.0",
+          resolved: "https://registry.npmjs.org/lru-cache/-/lru-cache-6.0.0.tgz",
+          integrity: "sha512-old-major",
+        },
       },
+    };
+    const current = {
+      packages: {
+        "": {},
+        "node_modules/lru-cache": {
+          version: "11.5.0",
+          resolved: "https://registry.npmjs.org/lru-cache/-/lru-cache-11.5.0.tgz",
+          integrity: "sha512-current",
+        },
+        "node_modules/lru-memoizer/node_modules/lru-cache": {
+          version: "6.0.0",
+          resolved: "https://registry.npmjs.org/lru-cache/-/lru-cache-6.0.0.tgz",
+          integrity: "sha512-old-major",
+        },
+      },
+    };
+    const pnpmPackages = new Set(["lru-cache@11.5.0", "lru-cache@6.0.0"]);
+
+    expect(restoreCurrentPnpmLockedPackages(generated, current, pnpmPackages)).toEqual({
+      packages: {
+        "": {
+          dependencies: {
+            "lru-cache": "^11.5.0",
+          },
+        },
+        "node_modules/lru-cache": current.packages["node_modules/lru-cache"],
+        "node_modules/lru-memoizer/node_modules/lru-cache":
+          current.packages["node_modules/lru-memoizer/node_modules/lru-cache"],
+      },
+    });
+  });
+
+  it("does not restore versions that no longer satisfy the dependency edge", () => {
+    const generated = {
+      packages: {
+        "": {
+          dependencies: {
+            "lru-cache": "^11.5.1",
+          },
+        },
+        "node_modules/lru-cache": {
+          version: "11.5.1",
+        },
+      },
+    };
+    const current = {
+      packages: {
+        "": {},
+        "node_modules/lru-cache": {
+          version: "11.5.0",
+        },
+      },
+    };
+
+    expect(
+      restoreCurrentPnpmLockedPackages(generated, current, new Set(["lru-cache@11.5.0"])),
+    ).toEqual(generated);
+  });
+
+  it("does not restore incompatible generated shrinkwrap versions", () => {
+    const generated = {
+      packages: {
+        "": {},
+        "node_modules/lru-cache": {
+          version: "12.0.0",
+        },
+      },
+    };
+    const current = {
+      packages: {
+        "": {},
+        "node_modules/lru-cache": {
+          version: "11.5.0",
+        },
+      },
+    };
+
+    expect(
+      restoreCurrentPnpmLockedPackages(generated, current, new Set(["lru-cache@11.5.0"])),
+    ).toEqual(generated);
+  });
+
+  it("pins current shrinkwrap versions that are still in the pnpm lock", () => {
+    const lockfile = {
+      packages: {
+        "": {},
+        "node_modules/@aws-sdk/core": {
+          version: "3.974.13",
+        },
+        "node_modules/@aws-sdk/core/node_modules/fast-xml-parser": {
+          version: "5.2.5",
+        },
+        "node_modules/react": {
+          version: "19.2.4",
+        },
+        "node_modules/react-dom": {
+          version: "19.2.4",
+        },
+        "node_modules/react-dom/node_modules/react": {
+          version: "19.2.5",
+        },
+        "node_modules/zod": {
+          version: "4.4.4",
+        },
+      },
+    };
+    const pnpmPackages = new Set([
+      "@aws-sdk/core@3.974.13",
+      "fast-xml-parser@5.2.5",
+      "react@19.2.4",
+      "react@19.2.5",
+      "react-dom@19.2.4",
     ]);
+
+    expect(
+      collectCurrentShrinkwrapOverrides(lockfile, new Set(["@aws-sdk/core"]), pnpmPackages),
+    ).toEqual({
+      "fast-xml-parser": "5.2.5",
+      "react-dom": "19.2.4",
+    });
   });
 
   it("normalizes npm patch-version metadata drift", () => {
@@ -356,13 +490,13 @@ describe("generate-npm-package-lock", () => {
 
   it("uses legacy peer resolution when package extensions mark dependency peers optional", () => {
     expect(
-      shouldUseLegacyPeerDepsForNpmLock(
+      shouldUseLegacyPeerDepsForShrinkwrap(
         { dependencies: { baileys: "7.0.0-rc13" } },
         { baileys: { peerDependenciesMeta: { sharp: { optional: true } } } },
       ),
     ).toBe(true);
     expect(
-      shouldUseLegacyPeerDepsForNpmLock(
+      shouldUseLegacyPeerDepsForShrinkwrap(
         { dependencies: { "not-baileys": "1.0.0" } },
         { baileys: { peerDependenciesMeta: { sharp: { optional: true } } } },
       ),
@@ -371,7 +505,7 @@ describe("generate-npm-package-lock", () => {
 
   it("uses legacy peer resolution when the package has optional peers", () => {
     expect(
-      shouldUseLegacyPeerDepsForNpmLock({
+      shouldUseLegacyPeerDepsForShrinkwrap({
         dependencies: { zod: "4.4.3" },
         peerDependencies: { openclaw: ">=2026.5.30" },
         peerDependenciesMeta: { openclaw: { optional: true } },
@@ -379,7 +513,7 @@ describe("generate-npm-package-lock", () => {
     ).toBe(true);
   });
 
-  it("applies package extension peer metadata to generated npm package locks", () => {
+  it("applies package extension peer metadata to generated shrinkwrap packages", () => {
     expect(
       applyPackageExtensionPeerMetadata(
         {
@@ -415,42 +549,53 @@ describe("generate-npm-package-lock", () => {
     });
   });
 
-  it("targets changed publishable plugin manifests", () => {
+  it("targets changed publishable plugin shrinkwraps", () => {
     expect(
-      npmLockPackageDirsForChangedPaths([
+      shrinkwrapPackageDirsForChangedPaths([
         "extensions/acpx/package.json",
-        "extensions/acpx/deps/local-runtime/package.json",
+        "extensions/acpx/npm-shrinkwrap.json",
       ]).map(repoRelativePath),
     ).toEqual(["extensions/acpx"]);
   });
 
-  it("targets the changed publishable gateway protocol manifest", () => {
+  it("targets the changed publishable gateway protocol shrinkwrap", () => {
     expect(
-      npmLockPackageDirsForChangedPaths(["packages/gateway-protocol/package.json"]).map(
-        repoRelativePath,
-      ),
+      shrinkwrapPackageDirsForChangedPaths([
+        "packages/gateway-protocol/package.json",
+        "packages/gateway-protocol/npm-shrinkwrap.json",
+      ]).map(repoRelativePath),
     ).toEqual(["packages/gateway-protocol"]);
   });
 
-  it("targets the changed publishable gateway client manifest", () => {
+  it("targets the changed publishable gateway client shrinkwrap", () => {
     expect(
-      npmLockPackageDirsForChangedPaths(["packages/gateway-client/package.json"]).map(
-        repoRelativePath,
-      ),
+      shrinkwrapPackageDirsForChangedPaths([
+        "packages/gateway-client/package.json",
+        "packages/gateway-client/npm-shrinkwrap.json",
+      ]).map(repoRelativePath),
     ).toEqual(["packages/gateway-client"]);
   });
 
-  it("falls back to every npm lock when lockfile ownership is ambiguous", () => {
-    const packageDirs = npmLockPackageDirsForChangedPaths(["pnpm-lock.yaml"]).map(repoRelativePath);
+  it("targets changed tracked shrinkwraps for private packages", () => {
+    expect(
+      shrinkwrapPackageDirsForChangedPaths(["extensions/vault/package.json"]).map(repoRelativePath),
+    ).toEqual(["extensions/vault"]);
+  });
+
+  it("falls back to every shrinkwrap when lockfile ownership is ambiguous", () => {
+    const packageDirs = shrinkwrapPackageDirsForChangedPaths(["pnpm-lock.yaml"]).map(
+      repoRelativePath,
+    );
 
     expect(packageDirs).toContain("");
     expect(packageDirs).toContain("packages/gateway-client");
     expect(packageDirs).toContain("packages/gateway-protocol");
     expect(packageDirs).toContain("extensions/acpx");
+    expect(packageDirs).toContain("extensions/vault");
   });
 
-  it("falls back to every npm lock when mixed lockfile changes do not map to packages", () => {
-    const packageDirs = npmLockPackageDirsForChangedPaths([
+  it("falls back to every shrinkwrap when mixed lockfile changes do not map to packages", () => {
+    const packageDirs = shrinkwrapPackageDirsForChangedPaths([
       "extensions/acpx/package.json",
       "pnpm-lock.yaml",
     ]).map(repoRelativePath);
@@ -458,5 +603,23 @@ describe("generate-npm-package-lock", () => {
     expect(packageDirs).toContain("");
     expect(packageDirs).toContain("extensions/acpx");
     expect(packageDirs.length).toBeGreaterThan(1);
+  });
+
+  it("detects package dependency inputs that make current shrinkwrap pins unsafe", () => {
+    expect(
+      packageDependencyInputsChanged(process.cwd(), ["scripts/generate-npm-shrinkwrap.mjs"]),
+    ).toBe(true);
+    expect(packageDependencyInputsChanged(process.cwd(), ["pnpm-lock.yaml"])).toBe(true);
+    expect(packageDependencyInputsChanged(process.cwd(), ["package.json"])).toBe(true);
+    expect(
+      packageDependencyInputsChanged(path.join(process.cwd(), "extensions/acpx"), [
+        "extensions/acpx/npm-shrinkwrap.json",
+      ]),
+    ).toBe(true);
+    expect(
+      packageDependencyInputsChanged(path.join(process.cwd(), "extensions/acpx"), [
+        "extensions/brave/package.json",
+      ]),
+    ).toBe(false);
   });
 });
