@@ -129,4 +129,8 @@ export function shouldUseLegacyPeerDepsForNpmLock(
   packageJson: unknown,
   packageExtensions?: unknown,
 ): boolean;
-export function npmLockPackageDirsForChangedPaths(changedPaths: string[]): string[];
+export function shrinkwrapPackageDirsForChangedPaths(changedPaths: string[]): string[];
+/** Stage npm-shrinkwrap.json as package-lock.json for npm 12. */
+export function stageShrinkwrapAsPackageLock(tempDir: string): boolean;
+/** Promote generated package-lock.json back to npm-shrinkwrap.json. */
+export function promotePackageLockToShrinkwrap(tempDir: string): void;
