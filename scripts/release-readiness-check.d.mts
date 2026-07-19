@@ -15,11 +15,11 @@ export interface ReleaseReadinessStageResult {
 
 export const RELEASE_READINESS_STAGES: ReleaseReadinessStage[];
 
-export function runReleaseReadiness<TStage extends ReleaseReadinessStage = ReleaseReadinessStage>(
-  stages?: TStage[],
+export function runReleaseReadiness(
+  stages?: ReleaseReadinessStage[],
   options?: {
     concurrency?: number;
-    runStage?: (stage: TStage) => Promise<ReleaseReadinessStageResult>;
+    runStage?: (stage: ReleaseReadinessStage) => Promise<ReleaseReadinessStageResult>;
   },
 ): Promise<{
   schemaVersion: 1;
