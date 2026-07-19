@@ -168,26 +168,22 @@ describe("release preparation plan", () => {
 
 describe("release preparation manifest", () => {
   it("fingerprints generated diffs larger than Node's default child buffer", () => {
-    const rootDir = mkdtempSync(path.join(tmpdir(), "openclaw-release-prepare-"));
-    try {
-      execFileSync("git", ["init", "-q"], { cwd: rootDir });
-      execFileSync("git", ["config", "user.email", "release-test@openclaw.invalid"], {
-        cwd: rootDir,
-      });
-      execFileSync("git", ["config", "user.name", "OpenClaw Release Test"], { cwd: rootDir });
-      writeFileSync(path.join(rootDir, "package.json"), '{"version":"2026.7.2"}\n');
-      writeFileSync(path.join(rootDir, "generated.txt"), `${"a".repeat(2 * 1024 * 1024)}\n`);
-      execFileSync("git", ["add", "."], { cwd: rootDir });
-      execFileSync("git", ["commit", "-q", "-m", "test fixture"], { cwd: rootDir });
-      writeFileSync(path.join(rootDir, "generated.txt"), `${"b".repeat(2 * 1024 * 1024)}\n`);
+    const rootDir = tempDirs.make("openclaw-release-prepare-");
+    execFileSync("git", ["init", "-q"], { cwd: rootDir });
+    execFileSync("git", ["config", "user.email", "release-test@openclaw.invalid"], {
+      cwd: rootDir,
+    });
+    execFileSync("git", ["config", "user.name", "OpenClaw Release Test"], { cwd: rootDir });
+    writeFileSync(path.join(rootDir, "package.json"), '{"version":"2026.7.2"}\n');
+    writeFileSync(path.join(rootDir, "generated.txt"), `${"a".repeat(2 * 1024 * 1024)}\n`);
+    execFileSync("git", ["add", "."], { cwd: rootDir });
+    execFileSync("git", ["commit", "-q", "-m", "test fixture"], { cwd: rootDir });
+    writeFileSync(path.join(rootDir, "generated.txt"), `${"b".repeat(2 * 1024 * 1024)}\n`);
 
-      const state = readWorktreeState(rootDir);
+    const state = readWorktreeState(rootDir);
 
-      expect(state.changedFiles).toEqual(["generated.txt"]);
-      expect(state.fingerprint).toMatch(/^[0-9a-f]{64}$/u);
-    } finally {
-      rmSync(rootDir, { force: true, recursive: true });
-    }
+    expect(state.changedFiles).toEqual(["generated.txt"]);
+    expect(state.fingerprint).toMatch(/^[0-9a-f]{64}$/u);
   });
 
   it("binds the plan to the exact source and worktree fingerprint", () => {
