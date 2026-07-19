@@ -112,9 +112,9 @@ describe("check-workflows", () => {
     });
 
     expect(result.status).toBe(0);
-    expect(readFileSync(markerPath, "utf8")).toContain(
-      "github.com/rhysd/actionlint/cmd/actionlint@011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7",
-    );
+    const goArgs = readFileSync(markerPath, "utf8");
+    expect(goArgs).toContain("github.com/rhysd/actionlint/cmd/actionlint@v1.7.11");
+    expect(goArgs).toContain("-shellcheck=");
     const preCommitArgs = readFileSync(preCommitMarkerPath, "utf8");
     expect(preCommitArgs).toContain("run --config .pre-commit-config.yaml zizmor --files");
     expect(preCommitArgs).toContain(".github/workflows/ci.yml");
