@@ -933,6 +933,85 @@ export async function validateNpmPreflightRunSource(
   return { status: "passed", headSha: workflowRun.headSha, workflowRef: ref };
 }
 
+function expectedPublishCompletionState(expected) {
+  return expected.waitForEcosystem
+    ? "ecosystem-converged"
+    : expected.tag.includes("-alpha.") || expected.tag.includes("-beta.")
+      ? "beta-live"
+      : "stable-ready";
+}
+
+function canonicalPluginNames(value) {
+  const names = Array.isArray(value) ? value : String(value ?? "").split(",");
+  return names
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .toSorted((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
+function canonicalStringMap(value, label) {
+  let parsed = value;
+  if (typeof value === "string") {
+    parsed = value.trim() ? JSON.parse(value) : {};
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON object`);
+  }
+  return Object.fromEntries(
+    Object.entries(parsed)
+      .map(([key, entryValue]) => [key, String(entryValue)])
+      .toSorted(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+export function validatePublishEvidence(evidence, expected) {
+  const expectedState = expectedPublishCompletionState(expected);
+  const exactFields = [
+    ["releaseTag", expected.tag],
+    ["releaseSha", expected.targetSha],
+    ["npmDistTag", expected.npmDistTag],
+    ["pluginPublishScope", expected.pluginPublishScope],
+    ["releaseProfile", expected.releaseProfile],
+    ["windowsNodeTag", expected.windowsNodeTag],
+    ["releasePublishRunId", expected.publishRunId],
+    ["npmPreflightRunId", expected.npmPreflightRunId],
+    ["fullReleaseValidationRunId", expected.fullReleaseRunId],
+    ["fullReleaseValidationRunAttempt", String(expected.fullReleaseRunAttempt)],
+  ];
+  for (const [key, value] of exactFields) {
+    if (String(evidence?.[key] ?? "") !== String(value)) {
+      throw new Error(
+        `publish evidence mismatch for ${key}: expected ${String(value)}, got ${String(evidence?.[key] ?? "")}`,
+      );
+    }
+  }
+  const actualPlugins = canonicalPluginNames(evidence.plugins);
+  const expectedPlugins = canonicalPluginNames(expected.plugins);
+  if (JSON.stringify(actualPlugins) !== JSON.stringify(expectedPlugins)) {
+    throw new Error("publish evidence mismatch for plugins");
+  }
+  const actualWindowsDigests = canonicalStringMap(
+    evidence.windowsNodeInstallerDigests ?? {},
+    "publish evidence windowsNodeInstallerDigests",
+  );
+  const expectedWindowsDigests = canonicalStringMap(
+    expected.windowsNodeInstallerDigests,
+    "expected windowsNodeInstallerDigests",
+  );
+  if (JSON.stringify(actualWindowsDigests) !== JSON.stringify(expectedWindowsDigests)) {
+    throw new Error("publish evidence mismatch for windowsNodeInstallerDigests");
+  }
+  if (
+    !Array.isArray(evidence.completionStates) ||
+    !evidence.completionStates.includes(expectedState)
+  ) {
+    throw new Error(`publish evidence does not prove completion state ${expectedState}`);
+  }
+  if (expected.waitForEcosystem && evidence.ecosystemConverged !== true) {
+    throw new Error("publish evidence does not prove plugin ecosystem convergence");
+  }
+  return { status: "passed", completionState: expectedState };
+}
 function candidateContributionRecordPullRequests(
   section: string,
   label: string,
