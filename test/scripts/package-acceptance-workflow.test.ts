@@ -617,6 +617,9 @@ describe("package acceptance workflow", () => {
     const pluginNpmWait = orchestration.indexOf(
       'wait_for_run plugin-npm-release.yml "${plugin_npm_run_id}"',
     );
+    const continuationDispatch = orchestration.indexOf(
+      "dispatch_workflow plugin-release-continue.yml",
+    );
     const clawHubDispatch = orchestration.indexOf(
       'plugin_clawhub_run_id="$(dispatch_workflow_at_ref',
     );
@@ -625,6 +628,8 @@ describe("package acceptance workflow", () => {
     );
 
     expect(pluginNpmDispatch).toBeGreaterThan(-1);
+    expect(continuationDispatch).toBeGreaterThan(pluginNpmDispatch);
+    expect(continuationDispatch).toBeLessThan(pluginNpmWait);
     expect(pluginNpmWait).toBeGreaterThan(pluginNpmDispatch);
     expect(clawHubDispatch).toBeGreaterThan(pluginNpmWait);
     expect(clawHubBootstrapDispatch).toBeGreaterThan(pluginNpmWait);
@@ -647,12 +652,17 @@ describe("package acceptance workflow", () => {
     const pluginNpmWait = orchestration.indexOf(
       'wait_for_run plugin-npm-release.yml "${plugin_npm_run_id}"',
     );
+    const continuationDispatch = orchestration.indexOf(
+      "dispatch_workflow plugin-release-continue.yml",
+    );
     const prereleaseCoreStart = orchestration.indexOf(
       'if ! is_stable_release && [[ "${PUBLISH_OPENCLAW_NPM}" == "true" ]]; then',
     );
 
     expect(prereleaseCoreStart).toBeGreaterThan(-1);
     expect(prereleaseCoreStart).toBeLessThan(pluginNpmWait);
+    expect(continuationDispatch).toBeGreaterThan(prereleaseCoreStart);
+    expect(continuationDispatch).toBeLessThan(pluginNpmWait);
     expect(orchestration).toContain(
       "ClawHub convergence failed; beta core release remains publishable.",
     );
@@ -667,6 +677,12 @@ describe("package acceptance workflow", () => {
     expect(orchestration).toContain(
       "ClawHub release planning step failed; prerelease ecosystem repair is required.",
     );
+    expect(orchestration).toContain(
+      '[[ "${PUBLISH_OPENCLAW_NPM}" == "true" && "${WAIT_FOR_CLAWHUB}" != "true" ]]',
+    );
+    expect(orchestration).toContain('if [[ "${plugin_ecosystem_detached}" != "true" ]]; then');
+    expect(orchestration).toContain("Plugin ecosystem continuation dispatch failed");
+    expect(orchestration).toContain("return_run_details: true");
     expect(orchestration).toContain('[[ "${WAIT_FOR_CLAWHUB}" == "true" ]]');
     expect(orchestration).toMatch(
       /plugin_ecosystem_is_required\(\) \{\n\s+is_stable_release \|\|\n\s+\[\[ "\$\{PUBLISH_OPENCLAW_NPM\}" != "true" \]\]/,
@@ -688,6 +704,60 @@ describe("package acceptance workflow", () => {
       ".windowsNodeInstallerDigests = $windows_node_installer_digests",
     );
     expect(orchestration).toContain("windows_node_installer_digests='{}'");
+  });
+
+  it("continues prerelease plugin publication outside the beta-live critical path", () => {
+    const job = workflowJob(PLUGIN_RELEASE_CONTINUE_WORKFLOW, "continue_plugin_release");
+    const identity = workflowStep(job, "Validate continuation identity");
+    const download = workflowStep(job, "Download parent ClawHub release plan");
+    const wait = workflowStep(job, "Wait for plugin npm");
+    const handoff = workflowStep(job, "Download plugin npm release handoff");
+    const continuation = workflowStep(job, "Continue ClawHub release");
+    const continuationRun = continuation.run;
+    if (!continuationRun) {
+      throw new Error("Expected plugin release continuation script");
+    }
+
+    expect(job.permissions?.actions).toBe("write");
+    expect(job["timeout-minutes"]).toBe(300);
+    expect(identity.run).toContain(
+      '[[ "${PARENT_WORKFLOW_SHA}" =~ ^[a-f0-9]{40}$ && "${GITHUB_SHA}" == "${PARENT_WORKFLOW_SHA}" ]]',
+    );
+    expect(download.uses).toBe(DOWNLOAD_ARTIFACT_V8);
+    expect(download.with?.["run-id"]).toBe("${{ inputs.release_publish_run_id }}");
+    expect(wait.run).toContain(
+      'gh run watch --repo "${GITHUB_REPOSITORY}" "${PLUGIN_NPM_RUN_ID}" --exit-status',
+    );
+    expect(handoff.uses).toBe(DOWNLOAD_ARTIFACT_V8);
+    expect(handoff.with?.name).toContain("plugin-npm-release-handoff-");
+    expect(handoff.with?.["run-id"]).toBe("${{ inputs.plugin_npm_run_id }}");
+    expect(continuationRun).toContain('.kind == "openclaw-plugin-npm-release-handoff"');
+    expect(continuationRun).toContain(".releasePublishRunId == $parent_run_id");
+    expect(continuationRun).toContain(".sourceSha == $release_sha");
+    expect(continuationRun).toContain(".pluginNpm.inputs == $handoff[0].inputs");
+    expect(continuationRun).toContain("dispatch_target normal");
+    expect(continuationRun).toContain("dispatch_target bootstrap");
+    expect(continuationRun).toContain("return_run_details: true");
+    expect(continuationRun).toContain('status: "ecosystem-converged"');
+  });
+
+  it("emits an immutable parent-bound plugin npm handoff", () => {
+    const job = workflowJob(PLUGIN_NPM_RELEASE_WORKFLOW, "record_release_handoff");
+    const write = workflowStep(job, "Write immutable release handoff");
+    const upload = workflowStep(job, "Upload immutable release handoff");
+
+    expect(job.if).toContain("inputs.release_publish_run_id != ''");
+    expect(job.if).toContain("needs.publish_plugins_npm.result == 'success'");
+    expectTextToIncludeAll(write.run, [
+      'kind: "openclaw-plugin-npm-release-handoff"',
+      "releasePublishRunId: $release_publish_run_id",
+      "sourceSha: $source_sha",
+      "workflowSha: $workflow_sha",
+      "npm_dist_tag: $npm_dist_tag",
+      "preflight_only: $preflight_only",
+    ]);
+    expect(upload.uses).toBe(UPLOAD_ARTIFACT_V7);
+    expect(upload.with?.name).toContain("plugin-npm-release-handoff-");
   });
 
   it("compares dependency evidence zip contents independently of archive timestamps", () => {
