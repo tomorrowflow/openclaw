@@ -4131,6 +4131,61 @@ NODE
     }
   });
 
+  it("starts prerelease core publication before plugin npm convergence", () => {
+    const publishStep = workflowStep(
+      workflowJob(RELEASE_PUBLISH_WORKFLOW, "publish"),
+      "Dispatch publish workflows",
+    );
+    const orchestration = publishStep.run;
+    if (!orchestration) {
+      throw new Error("Expected release publish orchestration script");
+    }
+
+    const pluginNpmWait = orchestration.indexOf(
+      'wait_for_run plugin-npm-release.yml "${plugin_npm_run_id}"',
+    );
+    const prereleaseCoreStart = orchestration.indexOf(
+      'if ! is_stable_release && [[ "${PUBLISH_OPENCLAW_NPM}" == "true" ]]; then',
+    );
+
+    expect(prereleaseCoreStart).toBeGreaterThan(-1);
+    expect(prereleaseCoreStart).toBeLessThan(pluginNpmWait);
+    expect(orchestration).toContain(
+      "ClawHub convergence failed; beta core release remains publishable.",
+    );
+    expect(orchestration).toContain(
+      "Release state: beta-live; plugin ecosystem convergence remains asynchronous",
+    );
+    expect(orchestration).toContain(
+      "Core prerelease publication starts before every fallible plugin",
+    );
+    expect(publishStep.env?.CLAWHUB_PLAN_OUTCOME).toBe("${{ steps.clawhub_plan.outcome }}");
+    expect(orchestration).toContain('if [[ "${CLAWHUB_PLAN_OUTCOME}" != "success" ]]; then');
+    expect(orchestration).toContain(
+      "ClawHub release planning step failed; prerelease ecosystem repair is required.",
+    );
+    expect(orchestration).toContain('[[ "${WAIT_FOR_CLAWHUB}" == "true" ]]');
+    expect(orchestration).toMatch(
+      /plugin_ecosystem_is_required\(\) \{\n\s+is_stable_release \|\|\n\s+\[\[ "\$\{PUBLISH_OPENCLAW_NPM\}" != "true" \]\]/,
+    );
+    expect(orchestration).toContain(
+      'if should_wait_for_plugin_ecosystem && [[ "${ecosystem_failed}" == "0" && "${clawhub_failed}" == "0" && "${plugin_npm_succeeded}" == "true" ]]; then',
+    );
+    expect(orchestration).toContain('if ! plugin_clawhub_run_id="$(dispatch_workflow_at_ref');
+    expect(orchestration).toContain(
+      "Plugin ecosystem did not converge; prerelease core and GitHub publication completed at beta-live.",
+    );
+    expect(orchestration).toMatch(
+      /upload_release_evidence_assets\n\s+publish_github_release\n\s+mark_release_completion\n\s+upload_release_evidence_assets/,
+    );
+    expect(orchestration).toContain('.releaseState = "verification-passed"');
+    expect(orchestration).toContain(".pluginPublishScope = $plugin_publish_scope");
+    expect(orchestration).toContain(".releaseProfile = $release_profile");
+    expect(orchestration).toContain(
+      ".windowsNodeInstallerDigests = $windows_node_installer_digests",
+    );
+    expect(orchestration).toContain("windows_node_installer_digests='{}'");
+  });
   it("compares dependency evidence zip contents independently of archive timestamps", () => {
     const orchestration = releasePublishOrchestration(
       workflowJob(RELEASE_PUBLISH_WORKFLOW, "publish"),
