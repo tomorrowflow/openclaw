@@ -760,10 +760,17 @@ describe("package acceptance workflow", () => {
     expect(continuationRun).toContain("did not reach a terminal state during cleanup");
     expect(continuationRun).toContain("continuation_id");
     expect(continuationRun).toContain("display_title == $expected_title");
-    expect(continuationRun).toContain('echo "${RELEASE_PUBLISH_RUN_ID}-${RELEASE_SHA}-${target}"');
-    expect(continuationRun).toContain('reconcile_target "${target}" 12');
+    expect(continuationRun).toContain(
+      'echo "$(target_base_correlation "${target}")-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"',
+    );
+    expect(continuationRun).toContain('reconcile_latest_target "${target}" 12');
     expect(continuationRun).toContain("lookup was indeterminate");
-    expect(continuationRun).toContain("Reusing ClawHub");
+    expect(continuationRun).toContain("Reusing successful or active ClawHub");
+    expect(continuationRun).toContain("failed before or after identity");
+    expect(continuationRun).toContain('.actor == "github-actions[bot]"');
+    expect(continuationRun).toContain("Identity upload is first");
+    expect(continuationRun).toContain("authenticate_target_run");
+    expect(continuationRun).toContain("openclaw-clawhub-continuation-identity");
     expect(continuationRun).not.toContain(".head_sha == $expected_sha");
     expect(continuationRun).toContain("Unable to reconcile ClawHub");
     expect(continuationRun).toContain('echo "UNRESOLVED:${target}"');
