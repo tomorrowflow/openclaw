@@ -7,7 +7,8 @@ import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const ACTIONLINT_REVISION = "011a6d15e749bb3f2d771eed9c7aa0e7e3e10ee7";
+const ACTIONLINT_VERSION = "1.7.11";
+const ACTIONLINT_ARGS = ["-shellcheck="];
 const PRE_COMMIT_VERSION = "4.6.2";
 const WORKFLOW_DIR = ".github/workflows";
 
@@ -116,9 +117,13 @@ function runPreCommitHook(hook: string, files: string[]): void {
 const workflows = workflowFiles();
 
 if (commandExists("actionlint")) {
-  run("actionlint", workflows);
+  run("actionlint", [...ACTIONLINT_ARGS, ...workflows]);
 } else if (commandExists("go", ["version"])) {
-  run("go", ["run", `github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_REVISION}`]);
+  run("go", [
+    "run",
+    `github.com/rhysd/actionlint/cmd/actionlint@v${ACTIONLINT_VERSION}`,
+    ...ACTIONLINT_ARGS,
+  ]);
 } else if (
   commandExists("pre-commit") ||
   commandExists("python3", ["-m", "pre_commit", "--version"]) ||
@@ -127,7 +132,7 @@ if (commandExists("actionlint")) {
   runPreCommitHook("actionlint", workflows);
 } else {
   console.error(
-    `[check-workflows] missing workflow linter: install actionlint, Go for actionlint@${ACTIONLINT_REVISION}, or pre-commit.`,
+    `[check-workflows] missing workflow linter: install actionlint, Go ${ACTIONLINT_VERSION} fallback support, or pre-commit.`,
   );
   process.exit(1);
 }
