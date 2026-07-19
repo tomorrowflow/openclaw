@@ -4175,6 +4175,9 @@ NODE
     expect(orchestration).toContain(
       "Plugin ecosystem did not converge; prerelease core and GitHub publication completed at beta-live.",
     );
+    expect(orchestration).toContain(
+      "no plugin npm child dispatched; repair from the release publish run",
+    );
     expect(orchestration).toMatch(
       /upload_release_evidence_assets\n\s+publish_github_release\n\s+mark_release_completion\n\s+upload_release_evidence_assets/,
     );
