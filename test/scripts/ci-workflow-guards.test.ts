@@ -7148,7 +7148,7 @@ server.listen(0, "127.0.0.1", () => {
       execFileSync("git", ["add", "package.json", "pnpm-lock.yaml"], { cwd: root });
 
       const baseline = fingerprint();
-      expect(baseline).toMatch(/^v2-[a-f0-9]{64}$/);
+      expect(baseline).toMatch(/^v3-[a-f0-9]{64}$/);
 
       // Presence is part of the record type, so a real file cannot collide
       // with the representation of an absent optional install input.
