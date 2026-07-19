@@ -21,6 +21,8 @@ export function parseArgs(argv: unknown): {
     tarballSha256: string;
   }>;
   skipDispatch: boolean;
+  dispatchPublish: boolean;
+  waitForEcosystem: boolean;
   skipLocalGeneratedCheck: boolean;
   skipParallels: boolean;
   skipTelegram: boolean;
@@ -32,6 +34,7 @@ export function parseArgs(argv: unknown): {
   npmPreflightRunId: string;
   windowsNodeTag: string;
   windowsNodeInstallerDigests: string;
+  publishRunId: string;
   outputDir: string;
 };
 export function releaseBranchForTag(tag: string): string;
