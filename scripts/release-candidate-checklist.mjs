@@ -774,7 +774,7 @@ function canonicalPluginNames(value) {
   return names
     .map((name) => name.trim())
     .filter(Boolean)
-    .toSorted((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+    .toSorted();
 }
 
 function canonicalStringMap(value, label) {
