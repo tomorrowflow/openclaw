@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, win32 } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { normalizeNpmPackJson } from "../scripts/lib/npm-pack-json-compat.mjs";
 import {
   generatePluginNpmPackageLockWithRetry,
   resolveAugmentedPluginNpmPackageJson,
@@ -72,16 +73,11 @@ function listNpmPackDryRunFiles(packageDir: string): string[] {
   if (result.status !== 0) {
     throw new Error(result.stderr.trim() || `npm pack failed with exit ${result.status}`);
   }
-  const parsed = JSON.parse(result.stdout) as unknown;
-  const packResult = (
-    Array.isArray(parsed)
-      ? parsed[0]
-      : parsed && typeof parsed === "object" && "files" in parsed
-        ? parsed
-        : parsed && typeof parsed === "object"
-          ? Object.values(parsed)[0]
-          : undefined
-  ) as { files?: { path?: string }[] } | undefined;
+  const [packResult] = normalizeNpmPackJson(result.stdout) as [
+    {
+      files?: { path?: string }[];
+    },
+  ];
   return (packResult?.files ?? []).flatMap((entry) =>
     typeof entry.path === "string" ? [entry.path] : [],
   );
@@ -624,7 +620,9 @@ describe("plugin npm package manifest staging", () => {
 
     const originalText = readFileSync(join(packageDir, "package.json"), "utf8");
     const nodeModulesPath = join(packageDir, "node_modules");
+    const packageLockPath = join(packageDir, "package-lock.json");
     expect(existsSync(nodeModulesPath)).toBe(false);
+    expect(existsSync(packageLockPath)).toBe(false);
 
     withAugmentedPluginNpmManifestForPackage(
       { repoRoot: repoDir, packageDir, bundleDependencies: true },
@@ -645,7 +643,7 @@ describe("plugin npm package manifest staging", () => {
     );
 
     expect(existsSync(nodeModulesPath)).toBe(false);
-    expect(existsSync(join(packageDir, "package-lock.json"))).toBe(false);
+    expect(existsSync(packageLockPath)).toBe(false);
     expect(readFileSync(join(packageDir, "package.json"), "utf8")).toBe(originalText);
   });
 

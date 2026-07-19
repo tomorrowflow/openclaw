@@ -471,6 +471,11 @@ function installPackageLocalBundledDependencies(params) {
 
   console.error(`[plugin-npm-publish] installing bundled dependencies for ${params.pluginDir}`);
   const packageJsonPath = resolvePackageJsonPath(params.packageDir);
+  const packageLockPath = path.join(params.packageDir, "package-lock.json");
+  const shrinkwrapPath = path.join(params.packageDir, "npm-shrinkwrap.json");
+  const originalPackageLock = fs.existsSync(packageLockPath)
+    ? fs.readFileSync(packageLockPath)
+    : undefined;
   const packedPackageJsonText = fs.readFileSync(packageJsonPath, "utf8");
   const installPackageJsonBase = {
     ...params.packageJson,
@@ -486,7 +491,7 @@ function installPackageLocalBundledDependencies(params) {
   }
   try {
     fs.writeFileSync(
-      packageLockPath,
+      shrinkwrapPath,
       generatePluginNpmPackageLockWithRetry(
         params.packageDir,
         { installStrategy: "shallow" },
@@ -494,7 +499,10 @@ function installPackageLocalBundledDependencies(params) {
       ),
       "utf8",
     );
-    const result = runPluginNpmCiWithRetry(
+    // npm 12 no longer reads npm-shrinkwrap.json. Stage its identical lockfile shape
+    // under the supported name only for the temporary dependency install.
+    fs.copyFileSync(shrinkwrapPath, packageLockPath);
+    const result = spawnNpmSync(
       [
         "ci",
         "--install-strategy=shallow",
@@ -528,7 +536,12 @@ function installPackageLocalBundledDependencies(params) {
     installMissingOptionalBundledDependencies(params);
   } finally {
     fs.writeFileSync(packageJsonPath, packedPackageJsonText, "utf8");
-    fs.rmSync(packageLockPath, { force: true });
+    if (originalPackageLock) {
+      fs.writeFileSync(packageLockPath, originalPackageLock);
+    } else {
+      fs.rmSync(packageLockPath, { force: true });
+    }
+    fs.rmSync(shrinkwrapPath, { force: true });
   }
   return () => {
     fs.rmSync(nodeModulesPath, { recursive: true, force: true });
