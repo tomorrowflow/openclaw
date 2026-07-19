@@ -190,29 +190,26 @@ describe("full-release-validation-at-sha", () => {
     );
   });
 
-  it("retains a failed parent workflow ref for GitHub reruns", () => {
+  it("keeps the temporary workflow ref until parent completion is confirmed", () => {
     expect(
       shouldDeleteTemporaryWorkflowRef({
         dryRun: false,
-        evidenceVerified: false,
         keepBranch: false,
-        parentConclusion: "failure",
+        parentRunCompleted: false,
       }),
     ).toBe(false);
     expect(
       shouldDeleteTemporaryWorkflowRef({
         dryRun: false,
-        evidenceVerified: true,
         keepBranch: false,
-        parentConclusion: "success",
+        parentRunCompleted: true,
       }),
     ).toBe(true);
     expect(
       shouldDeleteTemporaryWorkflowRef({
         dryRun: true,
-        evidenceVerified: false,
         keepBranch: false,
-        parentConclusion: "",
+        parentRunCompleted: false,
       }),
     ).toBe(true);
     expect(

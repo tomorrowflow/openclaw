@@ -30,6 +30,7 @@ const DEFAULT_INPUTS = {
   reuse_evidence: "true",
   fail_fast: "false",
 };
+const MAX_CONSECUTIVE_STATUS_ERRORS = 12;
 
 function usage() {
   console.error(`Usage: node scripts/full-release-validation-at-sha.mjs [--sha <target-sha>] [--target-ref <canonical-release-branch-or-tag>] [--workflow-sha <trusted-main-ref>] [--keep-branch] [--dry-run] [-- -f key=value ...]
@@ -307,7 +308,7 @@ function waitForWorkflowRun(parentRunId, workflowSha) {
       consecutiveErrors = 0;
     } catch (error) {
       consecutiveErrors += 1;
-      if (consecutiveErrors >= 3) {
+      if (consecutiveErrors >= MAX_CONSECUTIVE_STATUS_ERRORS) {
         throw error;
       }
       const message = error instanceof Error ? error.message : String(error);
@@ -320,18 +321,17 @@ function waitForWorkflowRun(parentRunId, workflowSha) {
       lastSummary = summary;
     }
     if (suite?.status === "completed") {
-      if (suite.conclusion === "success") {
-        return suite;
-      }
-      throw new Error(
-        `Full Release Validation concluded ${String(suite.conclusion).toLowerCase()}: https://github.com/openclaw/openclaw/actions/runs/${parentRunId}`,
-      );
+      return suite;
     }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 45_000);
   }
   throw new Error(
     `Timed out waiting for Full Release Validation: https://github.com/openclaw/openclaw/actions/runs/${parentRunId}`,
   );
+}
+
+export function shouldDeleteTemporaryWorkflowRef(params) {
+  return !params.keepBranch && (params.dryRun || params.parentRunCompleted);
 }
 
 export function releaseEvidenceVerificationArgs(parentRunId) {
@@ -342,10 +342,7 @@ export function releaseEvidenceVerificationArgs(parentRunId) {
 }
 
 export function shouldDeleteTemporaryWorkflowRef(params) {
-  return (
-    !params.keepBranch &&
-    (params.dryRun || (params.parentConclusion === "success" && params.evidenceVerified))
-  );
+  return !params.keepBranch && (params.dryRun || params.parentRunCompleted);
 }
 
 export function assertTrustedWorkflowHarness(
@@ -433,8 +430,7 @@ function main() {
   });
 
   let parentRunId;
-  let parentConclusion = "";
-  let evidenceVerified = false;
+  let parentRunCompleted = false;
   try {
     const dispatchArgs = ["workflow", "run", WORKFLOW, "--ref", branch];
     for (const [key, value] of Object.entries(dispatchInputs)) {
@@ -464,36 +460,30 @@ function main() {
 
     console.log(`Parent run: https://github.com/openclaw/openclaw/actions/runs/${parentRunId}`);
     const completedRun = waitForWorkflowRun(parentRunId, workflowSha);
-    parentConclusion = String(completedRun.conclusion ?? "");
-    if (parentConclusion !== "success") {
+    parentRunCompleted = true;
+    if (completedRun.conclusion !== "success") {
       throw new Error(
-        `Full Release Validation concluded ${parentConclusion.toLowerCase() || "without a conclusion"}: https://github.com/openclaw/openclaw/actions/runs/${parentRunId}`,
+        `Full Release Validation concluded ${String(completedRun.conclusion).toLowerCase()}: https://github.com/openclaw/openclaw/actions/runs/${parentRunId}`,
       );
     }
     verifyReleaseEvidence(parentRunId, workflowSha);
-    evidenceVerified = true;
   } finally {
     if (
       shouldDeleteTemporaryWorkflowRef({
         keepBranch: args.keepBranch,
         dryRun: args.dryRun,
-        parentConclusion,
-        evidenceVerified,
+        parentRunCompleted,
       })
     ) {
       run("git", ["push", "origin", `:${remoteBranchRef}`], {
         dryRun: args.dryRun,
         stdio: "inherit",
       });
+    } else if (args.keepBranch) {
+      console.log(`Kept ${remoteBranchRef}`);
     } else {
       console.warn(
-        args.keepBranch
-          ? `Kept ${remoteBranchRef}`
-          : `Kept ${remoteBranchRef}: ${
-              parentConclusion === "success"
-                ? "release evidence was not verified"
-                : `parent concluded ${parentConclusion || "without a conclusion"}`
-            }. Keep it through GitHub reruns or evidence diagnosis; delete it after verified success.`,
+        `Kept ${remoteBranchRef}: parent completion was not confirmed. Delete it only after the run finishes.`,
       );
     }
   }
