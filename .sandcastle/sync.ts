@@ -88,7 +88,11 @@ const { output } = await run({
 
   promptFile: "./.sandcastle/sync-prompt.md",
 
-  maxIterations: 1,
+  // A large sync replays hundreds of commits and can stop on a dozen conflicts;
+  // one iteration leaves no headroom to finish (the 2026.7.2 run exhausted its
+  // budget mid-rebase and aborted). Raise only this — the stop-gate rules in
+  // sync-prompt.md, not the iteration count, are what bound risky resolutions.
+  maxIterations: 4,
 
   // "head" = agent writes directly to the host working directory (no temp branch).
   // Required for upstream sync: rebase modifies main, force-push goes to origin.
