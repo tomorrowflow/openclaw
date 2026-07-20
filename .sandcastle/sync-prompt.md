@@ -131,6 +131,15 @@ resolves the large majority of stops on a release→release bump.
   check above rules the commit out; a "semantic" conflict on an already-released
   commit is not a stop gate, it is a skip.
 
+  Evaluate this gate on the files still conflicted **after** applying every
+  mechanical rule above, not on the commit as a whole. Resolve the always-delete
+  and always-accept classes first (workflows, changelogs, generated baselines,
+  lockfile, iOS release metadata), then re-inspect `git diff --name-only
+  --diff-filter=U`. A large upstream commit that touches deleted CI workflows
+  alongside docs, scripts, and tests is not a stop gate: strip the workflow files
+  per the rule above and resolve the remainder normally. Escalate only if real
+  source files are still conflicted once the mechanical classes are gone.
+
 ### Step 5a: Install
 
 Already done by `onSandboxReady`. If pnpm-lock.yaml changed during rebase, re-run:
