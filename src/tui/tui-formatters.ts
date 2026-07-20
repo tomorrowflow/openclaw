@@ -139,7 +139,6 @@ export function isTerminalSafeAutocompleteValue(value: string): boolean {
   }
   return true;
 }
-
 function isCopySensitiveToken(token: string): boolean {
   const coreToken = token.replace(EDGE_PUNCTUATION_RE, "");
   const candidate = coreToken || token;
