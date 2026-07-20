@@ -77,3 +77,5 @@ fonts-noto-cjk | scripts/docker/sandbox/Dockerfile.browser | CJK/Unicode fonts i
 1920x1080 | scripts/sandbox-browser-entrypoint.sh | Default screen resolution bump
 SingletonLock | scripts/sandbox-browser-entrypoint.sh | Clear stale Chrome locks on startup
 X11-unix | scripts/sandbox-browser-entrypoint.sh | Recreate X11-unix dir for tmpfs resilience
+fs-safe.*0\.4\.4 | package.json | Upstream dep pin the rebase keeps dropping — src/infra/boundary-file-read.ts needs readFileDescriptorBounded* which 0.4.1 lacks (build fails MISSING_EXPORT)
+question-gateway-runtime | package.json | Upstream plugin-sdk export the rebase keeps dropping — signal plugin fails to register with ERR_PACKAGE_PATH_NOT_EXPORTED without it
