@@ -5104,6 +5104,8 @@ export const tr: TranslationMap = {
       detail: "Ayrıntılar",
       close: "{panel} panelini kapat",
       drag: "{panel} panelini sürükle",
+      dropOnEmptyLeft: "{panel} panelini boş sol kenar çubuğuna taşı",
+      dropOnEmptyRight: "{panel} panelini boş sağ kenar çubuğuna taşı",
       resize: "{panel} panelini yeniden boyutlandır",
     },
     thread: {

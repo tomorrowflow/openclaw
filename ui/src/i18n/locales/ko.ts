@@ -5048,6 +5048,8 @@ export const ko: TranslationMap = {
       detail: "세부 정보",
       close: "{panel} 닫기",
       drag: "{panel} 드래그",
+      dropOnEmptyLeft: "{panel}을(를) 비어 있는 왼쪽 사이드바로 이동",
+      dropOnEmptyRight: "{panel}을(를) 비어 있는 오른쪽 사이드바로 이동",
       resize: "{panel} 크기 조절",
     },
     thread: {

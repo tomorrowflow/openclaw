@@ -5122,6 +5122,8 @@ export const nl: TranslationMap = {
       detail: "Details",
       close: "Sluit {panel}",
       drag: "Sleep {panel}",
+      dropOnEmptyLeft: "Verplaats {panel} naar de lege linkerzijbalk",
+      dropOnEmptyRight: "Verplaats {panel} naar de lege rechterzijbalk",
       resize: "Wijzig de grootte van {panel}",
     },
     thread: {

@@ -5162,6 +5162,8 @@ export const de: TranslationMap = {
       detail: "Details",
       close: "{panel} schließen",
       drag: "{panel} ziehen",
+      dropOnEmptyLeft: "{panel} in die leere linke Seitenleiste verschieben",
+      dropOnEmptyRight: "{panel} in die leere rechte Seitenleiste verschieben",
       resize: "Größe von {panel} ändern",
     },
     thread: {
