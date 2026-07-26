@@ -1356,14 +1356,24 @@ describe("config io write", () => {
   });
 
   itWithHome("forwards explicitly authorized agent roster removals", async (home) => {
-    const { configPath } = await writeConfigFixture(home, {
-      agents: {
-        entries: {
-          main: { default: true, workspace: "/srv/shared" },
-          ops: { workspace: "/srv/shared" },
+    const configPath = configPathForHome(home);
+    await fs.mkdir(path.dirname(configPath), { recursive: true });
+    await fs.writeFile(
+      configPath,
+      `${JSON.stringify(
+        {
+          agents: {
+            entries: {
+              main: { default: true, workspace: "/srv/shared" },
+              ops: { workspace: "/srv/shared" },
+            },
+          },
         },
-      },
-    });
+        null,
+        2,
+      )}\n`,
+      "utf-8",
+    );
 
     await withEnvAsync(
       {
