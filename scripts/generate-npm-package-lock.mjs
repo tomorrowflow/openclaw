@@ -31,7 +31,7 @@ const SHRINKWRAP_WORKER_KIND = "openclaw-shrinkwrap-package";
 
 function usage() {
   return [
-    "Usage: node scripts/generate-npm-shrinkwrap.mjs [--check] [--all|--plugins|--changed|--package-dir <dir>] [--base <ref>] [--head <ref>] [--staged] [--jobs <count>]",
+    "Usage: node scripts/generate-npm-package-lock.mjs [--check] [--all|--plugins|--changed|--package-dir <dir>] [--base <ref>] [--head <ref>] [--staged] [--jobs <count>]",
     "  default: root package only",
   ].join("\n");
 }
@@ -1231,7 +1231,7 @@ function shrinkwrapPackageDirsForChangedPaths(changedPaths) {
     }
     if (
       changedPath === "pnpm-workspace.yaml" ||
-      changedPath === "scripts/generate-npm-shrinkwrap.mjs"
+      changedPath === "scripts/generate-npm-package-lock.mjs"
     ) {
       hasAmbiguousDependencyPolicyChange = true;
     }
@@ -1275,7 +1275,7 @@ function packageDependencyInputsChanged(packageDir, changedPaths) {
     return (
       changedPath === "pnpm-lock.yaml" ||
       changedPath === "pnpm-workspace.yaml" ||
-      changedPath === "scripts/generate-npm-shrinkwrap.mjs" ||
+      changedPath === "scripts/generate-npm-package-lock.mjs" ||
       changedPath === packageManifestPath ||
       changedPath === shrinkwrapPath
     );

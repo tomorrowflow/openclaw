@@ -56,6 +56,11 @@
       "import": "./dist/event-stream.mjs",
       "default": "./dist/event-stream.mjs"
     },
+    "./transports": {
+      "types": "./dist/transports.d.mts",
+      "import": "./dist/transports.mjs",
+      "default": "./dist/transports.mjs"
+    },
     "./types": {
       "types": "./dist/types.d.mts",
       "import": "./dist/types.mjs",

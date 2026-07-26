@@ -5,9 +5,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import JSON5 from "json5";
 import {
-  generateNpmPackageLock,
-  packageJsonForNpmLock,
-  readNpmLockOverrides,
+  packageJsonForShrinkwrap,
+  readShrinkwrapOverrides,
 } from "../generate-npm-package-lock.mjs";
 import { resolveNpmRunner } from "../npm-runner.mjs";
 import {
@@ -482,7 +481,10 @@ function installPackageLocalBundledDependencies(params) {
   };
   delete installPackageJsonBase.peerDependencies;
   delete installPackageJsonBase.peerDependenciesMeta;
-  const installPackageJson = packageJsonForNpmLock(installPackageJsonBase, readNpmLockOverrides());
+  const installPackageJson = packageJsonForShrinkwrap(
+    installPackageJsonBase,
+    readShrinkwrapOverrides(),
+  );
   const installPackageJsonText = `${JSON.stringify(installPackageJson, null, 2)}\n`;
   if (installPackageJsonText !== packedPackageJsonText) {
     // npm validates peer edges against the package lock during ci even when peers are omitted.

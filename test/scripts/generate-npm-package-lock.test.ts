@@ -28,7 +28,7 @@ import {
   shouldUseLegacyPeerDepsForShrinkwrap,
   stageShrinkwrapAsPackageLock,
   shrinkwrapPackageDirsForChangedPaths,
-} from "../../scripts/generate-npm-shrinkwrap.mjs";
+} from "../../scripts/generate-npm-package-lock.mjs";
 
 describe("generate-npm-shrinkwrap", () => {
   function repoRelativePath(value: string): string {
@@ -576,10 +576,10 @@ describe("generate-npm-shrinkwrap", () => {
     ).toEqual(["packages/gateway-client"]);
   });
 
-  it("targets changed tracked shrinkwraps for private packages", () => {
+  it("skips private packages without tracked shrinkwraps", () => {
     expect(
       shrinkwrapPackageDirsForChangedPaths(["extensions/vault/package.json"]).map(repoRelativePath),
-    ).toEqual(["extensions/vault"]);
+    ).toEqual([]);
   });
 
   it("falls back to every shrinkwrap when lockfile ownership is ambiguous", () => {
@@ -591,7 +591,6 @@ describe("generate-npm-shrinkwrap", () => {
     expect(packageDirs).toContain("packages/gateway-client");
     expect(packageDirs).toContain("packages/gateway-protocol");
     expect(packageDirs).toContain("extensions/acpx");
-    expect(packageDirs).toContain("extensions/vault");
   });
 
   it("falls back to every shrinkwrap when mixed lockfile changes do not map to packages", () => {
@@ -607,7 +606,7 @@ describe("generate-npm-shrinkwrap", () => {
 
   it("detects package dependency inputs that make current shrinkwrap pins unsafe", () => {
     expect(
-      packageDependencyInputsChanged(process.cwd(), ["scripts/generate-npm-shrinkwrap.mjs"]),
+      packageDependencyInputsChanged(process.cwd(), ["scripts/generate-npm-package-lock.mjs"]),
     ).toBe(true);
     expect(packageDependencyInputsChanged(process.cwd(), ["pnpm-lock.yaml"])).toBe(true);
     expect(packageDependencyInputsChanged(process.cwd(), ["package.json"])).toBe(true);
