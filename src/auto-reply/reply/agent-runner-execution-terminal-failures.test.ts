@@ -431,6 +431,70 @@ describe("executeAgentTurn: terminal failures", () => {
     ).toBe(false);
   });
 
+  it("hands a restart-armed lease loss to the replacement without old-owner fallback", async () => {
+    const agentEvents = await import("../../infra/agent-events.js");
+    const emitAgentEvent = vi.mocked(agentEvents.emitAgentEvent);
+    const { replyOperation, failMock } = createMockReplyOperation();
+    const abortForRestart = vi.spyOn(replyOperation, "abortForRestart");
+    abortForRestart.mockImplementationOnce(() => {
+      Object.defineProperty(replyOperation, "result", {
+        value: { kind: "aborted", code: "aborted_for_restart" } as const,
+        configurable: true,
+      });
+      return true;
+    });
+    state.runEmbeddedAgentMock.mockRejectedValueOnce(
+      new SessionWriteLockStaleError({
+        lockPath: "sqlite:session-write:agent:main:main",
+        owner: "replacement gateway",
+        staleReasons: ["lease-lost"],
+      }),
+    );
+
+    const executeAgentTurn = await getExecuteAgentTurnForTest();
+    const result = await executeAgentTurn({
+      commandBody: "hello",
+      followupRun: createFollowupRun(),
+      sessionCtx: {
+        Provider: "whatsapp",
+        MessageSid: "msg",
+      } as unknown as TemplateContext,
+      replyOperation,
+      opts: {},
+      typingSignals: createMockTypingSignaler(),
+      blockReplyPipeline: null,
+      blockStreamingEnabled: false,
+      resolvedBlockStreamingBreak: "message_end",
+      applyReplyToMode: (payload) => payload,
+      shouldEmitToolResult: () => true,
+      shouldEmitToolOutput: () => false,
+      pendingToolTasks: new Set(),
+      resetSessionAfterRoleOrderingConflict: async () => false,
+      isHeartbeat: false,
+      sessionKey: "main",
+      getActiveSessionEntry: () => undefined,
+      resolvedVerboseLevel: "off",
+      isRestartRecoveryArmed: () => true,
+    });
+
+    expect(result).toEqual({ kind: "final", payload: { text: SILENT_REPLY_TOKEN } });
+    expect(abortForRestart).toHaveBeenCalledOnce();
+    expect(failMock).not.toHaveBeenCalled();
+    expect(
+      emitAgentEvent.mock.calls.filter(
+        ([event]) =>
+          event.stream === "lifecycle" &&
+          event.data.phase === "end" &&
+          event.data.stopReason === "restart",
+      ),
+    ).toHaveLength(1);
+    expect(
+      emitAgentEvent.mock.calls.some(
+        ([event]) => event.stream === "lifecycle" && event.data.phase === "error",
+      ),
+    ).toBe(false);
+  });
+
   it("preserves restart ownership when an aborted embedded runner resolves normally", async () => {
     const agentEvents = await import("../../infra/agent-events.js");
     const emitAgentEvent = vi.mocked(agentEvents.emitAgentEvent);

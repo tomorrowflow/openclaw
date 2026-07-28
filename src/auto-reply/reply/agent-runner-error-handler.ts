@@ -255,13 +255,16 @@ export async function handleAgentExecutionError(params: {
   }
   if (
     isSessionLeaseLoss(err) &&
-    (await turn.confirmRestartRecoveryArmedAfterLeaseLoss?.()) === true
+    (turn.isRestartRecoveryArmed?.() === true ||
+      (await turn.confirmRestartRecoveryArmedAfterLeaseLoss?.()) === true)
   ) {
     // The replacement owns recovery only after the latest SQLite row confirms
     // the active claim or its terminal marker. The old owner then exits silently.
     turn.replyOperation?.abortForRestart();
-    takePendingLifecycleTerminal()?.emit("end", err);
-    return { kind: "final", payload: { text: SILENT_REPLY_TOKEN } };
+    const handoffAction = resolveReplyOperationAbortAction(err);
+    if (handoffAction) {
+      return handoffAction;
+    }
   }
   const restartLifecycleError = resolveRestartLifecycleError(err);
   if (
