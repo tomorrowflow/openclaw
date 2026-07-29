@@ -252,7 +252,7 @@ describe("qa scenario catalog", () => {
     });
   });
 
-  it("uses graceful restart and isolation for Matrix replay dedupe", () => {
+  it("uses graceful restart and isolated config for Matrix replay dedupe", () => {
     const scenario = requireFlowScenario(readQaScenarioById("matrix-restart-replay-dedupe"));
     const staleSync = requireFlowScenario(readQaScenarioById("matrix-stale-sync-replay-dedupe"));
 
