@@ -776,7 +776,7 @@ describeBrowserLayout.concurrent("chat responsive browser layout", () => {
         `<!doctype html><html><head><style>${readUiCss()}\n${splitViewCss}</style></head><body>
           <wa-dropdown class="chat-pane__gateway-menu">
             <template shadowrootmode="open"><div part="menu">Gateways</div></template>
-            <div class="chat-pane__gateway-menu-item">Local Gateway</div>
+            <wa-dropdown-item class="chat-pane__gateway-menu-item">Local Gateway</wa-dropdown-item>
           </wa-dropdown>
         </body></html>`,
       );
