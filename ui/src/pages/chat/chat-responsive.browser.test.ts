@@ -1156,6 +1156,7 @@ describeBrowserLayout.concurrent("chat responsive browser layout", () => {
           </wa-dropdown>
         </body></html>`,
       );
+      await waitForLayoutSettled(page);
 
       const readGatewayMenuStyles = () =>
         page.evaluate(() => {
