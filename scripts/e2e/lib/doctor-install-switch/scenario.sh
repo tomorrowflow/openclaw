@@ -62,7 +62,8 @@ update_doctor_env+=" OPENCLAW_UPDATE_PARENT_ALLOWS_GATEWAY_ACTIVATION=0"
 
 use_default_service_identity() {
   local account_home
-  account_home="$(node -p 'require("node:os").userInfo().homedir')"
+  account_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+  test -n "$account_home"
 
   # Service mutation is intentionally restricted to the OS account home. Keep
   # these disposable-container flows isolated without pretending a temp HOME owns it.
