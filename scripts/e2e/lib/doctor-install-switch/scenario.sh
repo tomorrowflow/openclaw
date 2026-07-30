@@ -145,6 +145,15 @@ assert_no_env_key() {
   fi
 }
 
+use_default_service_identity() {
+  local account_home
+  account_home="$(getent passwd "$(id -u)" | cut -d: -f6)"
+  test -n "$account_home"
+  export HOME="$account_home"
+  export USERPROFILE="$account_home"
+  unset OPENCLAW_HOME OPENCLAW_STATE_DIR OPENCLAW_CONFIG_PATH
+}
+
 # Each flow: install service with one variant, run doctor from the other,
 # and verify ExecStart entrypoint switches accordingly.
 run_flow() {
