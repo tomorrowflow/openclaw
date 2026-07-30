@@ -2288,6 +2288,10 @@ fi
     expect(updateRestartAuth).toContain(
       'openclaw_e2e_wait_gateway_ready "$gateway_pid" "$log_file" 360 "$port"',
     );
+    expect(runner).toContain(
+      'export HOME="$account_home"\n  export USERPROFILE="$account_home"\n  unset OPENCLAW_HOME\n  export OPENCLAW_STATE_DIR="$account_home/.openclaw"',
+    );
+    expect(runner).toContain('export OPENCLAW_CONFIG_PATH="$OPENCLAW_STATE_DIR/openclaw.json"');
   });
 
   it("keeps upgrade survivor auto-auth success summary set -u safe", () => {
