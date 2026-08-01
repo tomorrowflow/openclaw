@@ -213,6 +213,9 @@ function declarativeFields(job: CronJob, includeEnabled: boolean) {
   };
 }
 
+/** Maximum number of active (non-deleted) cron jobs per agent. */
+const MAX_JOBS_PER_AGENT = 100;
+
 /** Adds or converges a declaration-keyed cron job inside one store lock and write transaction. */
 export async function add(state: CronServiceState, input: CronJobCreate, opts?: CronAddOptions) {
   return await locked(state, async () => {
@@ -289,6 +292,17 @@ export async function add(state: CronServiceState, input: CronJobCreate, opts?: 
 
     if (normalizedId && state.store?.jobs.some((job) => job.id === normalizedId)) {
       throw new Error(`cron job already exists: ${normalizedId}`);
+    }
+    // Only new jobs are capped; declarative upserts above already returned, so an
+    // agent at the limit can still converge the jobs it owns.
+    const defaultAgentId = resolveCurrentDefaultAgentId(state);
+    const agentJobCount = (state.store?.jobs ?? []).filter(
+      (job) => resolveEffectiveJobAgentId(job, defaultAgentId) === agentId,
+    ).length;
+    if (agentJobCount >= MAX_JOBS_PER_AGENT) {
+      throw new Error(
+        `agent has reached the maximum of ${MAX_JOBS_PER_AGENT} cron jobs — remove unused jobs before adding new ones`,
+      );
     }
     const snapshot = snapshotStoreForRollback(state);
     const job = createJob(state, normalizedInput, {

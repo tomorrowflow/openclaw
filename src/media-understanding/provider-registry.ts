@@ -3,7 +3,11 @@ import { resolvePluginCapabilityProviders } from "../plugins/capability-provider
 import { resolveImageCapableConfigProviderIds } from "./config-provider-models.js";
 import { describeImageWithModel, describeImagesWithModel } from "./image-runtime.js";
 import { normalizeMediaProviderId } from "./provider-id.js";
+import { whisperAsrProvider } from "./providers/whisper-asr/index.js";
 import type { MediaUnderstandingProvider } from "./types.js";
+
+/** Built-in providers that are always available (not plugin-provided). */
+const BUILTIN_PROVIDERS: MediaUnderstandingProvider[] = [whisperAsrProvider];
 
 function mergeProviderIntoRegistry(
   registry: Map<string, MediaUnderstandingProvider>,
@@ -53,6 +57,10 @@ export function buildMediaUnderstandingRegistry(
   preparedProviders?: readonly MediaUnderstandingProvider[],
 ): Map<string, MediaUnderstandingProvider> {
   const registry = new Map<string, MediaUnderstandingProvider>();
+  // Register built-in providers first; plugins and overrides can replace them.
+  for (const provider of BUILTIN_PROVIDERS) {
+    mergeProviderIntoRegistry(registry, provider);
+  }
   const providers =
     preparedProviders ??
     resolvePluginCapabilityProviders({
