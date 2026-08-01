@@ -147,6 +147,16 @@ Already done by `onSandboxReady`. If pnpm-lock.yaml changed during rebase, re-ru
 CI=true corepack pnpm install --no-frozen-lockfile
 ```
 
+**If install stops making progress, kill it and rerun once.** A re-resolving
+install can wedge on the pnpm store index: the process stays alive but idle, so
+it looks like a slow install rather than a hang. Distinguish them by CPU, not by
+elapsed time — `ps -o pid,stat,etime,%cpu,cmd -p <pid>` plus a second sample.
+Steady 0% CPU with no new writes under `node_modules/` is wedged; kill it and run
+the same command again, which normally converges in seconds because resolution is
+already cached. Do not sit through repeated quiet intervals waiting for it, and do
+not report the sync as blocked on a build that never started: the lockfile work
+usually completed before the stall.
+
 ### Step 5b: Build
 
 ```bash
@@ -208,6 +218,14 @@ OPENCLAW_VITEST_MAX_WORKERS=4 corepack pnpm vitest run \
   <test-file-for-each-conflicted-source-file>
 ```
 
+**Always pass explicit `.test.ts` paths, never a bare directory or path prefix.**
+A directory-shaped filter can select files into the wrong Vitest lane, where that
+lane's setup and mocks do not apply and tests fall through to real network calls.
+The result is a large, noisy, run-to-run-varying failure count that has nothing to
+do with the rebase. If a suite fails, rerun the exact failing files by full path
+before believing the failure — if they pass that way, it was lane misrouting.
+Failures whose reported paths begin with `../../` are the tell.
+
 ### Step 5f: Fork features
 
 ```bash
@@ -222,7 +240,39 @@ done < <(grep -v '^#\|^$' docs/fork-features.txt)
 [ "$MISSING" -eq 1 ] && echo "STOP: fork features missing"
 ```
 
-If any are missing: **stop gate** — set `status: "failed"`.
+#### Triage every MISSING before treating it as a stop gate
+
+A MISSING line means "this grep no longer matches" — **not** automatically "the
+fork feature was lost". Upstream refactors move and rename things, and upstream
+sometimes absorbs a fork feature outright. Classify each MISSING by reading the
+code before you decide, because the two outcomes need opposite actions:
+
+1. **Genuinely lost** — the behaviour is gone. Confirm by searching the whole
+   repo for the symbol *and* for whatever replaced it (`rg -n '<symbol>' src/`),
+   and by checking the feature is still reachable. A symbol that still exists but
+   which nothing imports is also "lost" — it is dead code, and the feature is off.
+   → Re-apply the patch, keep the entry, continue.
+2. **Moved / renamed / split** — the behaviour is intact under a new symbol or in
+   a new file (upstream splitting `ops.ts` into `ops-*.ts`, or extracting a schema
+   into its own module). Verify by reading the new site.
+   → **Update `docs/fork-features.txt`** to point at the new symbol/file. Do not
+   re-add the old code; that would duplicate upstream.
+3. **Upstreamed** — upstream now implements the feature itself. Verify with
+   `git show upstream/release/$TARGET:<file> | grep <symbol>`.
+   → Update the entry to the upstream location and note `(upstreamed $TARGET)` in
+   the description. Do not re-apply the fork patch on top of upstream's version.
+
+Only case 1 that you could not repair is a stop gate. Cases 2 and 3 are checklist
+maintenance: fix the file, commit it in Step 6, and continue the sync.
+
+If you leave a stale entry unfixed, it fails again on *every* future sync and
+trains the next run to "restore" code upstream already has. Treat a checklist that
+has been failing across multiple syncs as a bug in the checklist, not the code.
+
+**Never encode a dependency version literal as a fork feature.** Version pins must
+track upstream (see Step 5g); a literal like `fs-safe.*0\.4\.4` turns a correct
+upstream bump into a permanent false failure and invites a downgrade that breaks
+the build.
 
 #### Fork patches on upstream code (re-apply if Step 5f flags them)
 
@@ -250,13 +300,17 @@ Both are deployed-behaviour bug fixes; dropping them re-breaks live agents.
 
 2. **Sandbox skill prompts must use in-container paths, not host paths**
    - Files: `src/agents/embedded-agent-runner/sandbox-skills.ts` (helper
-     `resolveEmbeddedRunSkillsPrompt`), wired in `run/attempt.ts` and `compact.ts`.
+     `resolveEmbeddedRunSkillsPrompt`), wired in `run/attempt.ts`. As of 2026.7.2
+     upstream owns this: the compaction side lives in
+     `prepared-compaction-runtime.ts`, which composes `mapSandboxSkillEntriesForPrompt`
+     directly, and `compact.ts` is now a thin facade with no skill wiring. Check the
+     compaction path there, not in `compact.ts`.
    - Contract: for any enabled sandbox (**including `workspaceAccess: "rw"`**), the
      skills prompt must be rebuilt from freshly-loaded entries whose paths are
      remapped to the container copies (`mapSandboxSkillEntriesForPrompt`), never the
      host snapshot's absolute paths. `resolveSandboxSkillRuntimeInputs` already
      returns `skillsSnapshot: undefined` for every sandbox; both runners must feed
-     that through `resolveEmbeddedRunSkillsPrompt`.
+     that through the remapped entries.
    - If upstream re-inlines the old per-runner logic (the prior `sandboxNeedsOwnSkills`
      shape that excluded `rw`), sandboxed agents get an unreadable host path and the
      run fails with `Path escapes sandbox root ... /usr/lib/node_modules/openclaw/skills/.../SKILL.md`.
@@ -266,6 +320,20 @@ Both are deployed-behaviour bug fixes; dropping them re-breaks live agents.
 The rebase takes upstream's root `package.json` for the metadata/scripts blocks,
 which silently drops fork-only entries and adopts the release branch's in-dev
 version. Restore both after the rebase (idempotent):
+
+> **Dependency versions are upstream's, not the fork's.** Only the fork's *own*
+> entries are restored here — `version`, `deploy:globally`, and the plugin-sdk
+> export. For any third-party dependency the rebase touches, **take upstream's
+> version**; never re-pin the value the fork happened to carry in. Upstream bumps
+> deps because its own code needs the new API, so a "restored" older pin breaks
+> the build in a way that looks unrelated: `@openclaw/fs-safe` 0.4.4 was correct
+> for the pre-2026.7.2 base, and force-carrying it onto 2026.7.2 removed
+> `configureFsSafeNative` and broke every import of `src/utils.ts`.
+>
+> Cross-check before accepting a pin: if an `extensions/*/package.json` asks for a
+> newer version than root, root is the stale outlier, not the plugin.
+> `grep -rn '<dep>' package.json extensions/*/package.json pnpm-workspace.yaml`
+> should agree.
 
 ```bash
 # 1. Pin the deployed version to the clean release train, not the branch's
@@ -313,7 +381,12 @@ git push origin main --force-with-lease
 1. Semantic rebase conflicts where both sides changed the same logic differently.
 2. `git rebase --abort` was needed — rebase could not be completed.
 3. Build or typecheck failures after conflict resolution (may indicate bad merge).
-4. Fork features missing after rebase (`docs/fork-features.txt` check failed).
+4. A fork feature that is **genuinely lost** (Step 5f case 1) and could not be
+   re-applied. A MISSING line alone is not a stop gate — triage it first.
+
+Not a stop gate: a MISSING fork feature that turned out to be moved, renamed, or
+upstreamed (Step 5f cases 2 and 3). Fix `docs/fork-features.txt`, commit it, and
+continue. Report the repointed entries in `notes`.
 
 Not a stop gate: untracked files (`??` in `git status`) — these are local-only
 additions. Set `rebased: true` as long as `git diff HEAD` shows no unstaged
