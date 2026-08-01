@@ -687,6 +687,10 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.authInheritance.agentId": "Auth Inheritance Owner",
   "agents.defaults.sessionStore": "Legacy Session Store Target",
   "agents.defaults.sessionStore.agentId": "Legacy Session Store Owner",
+  "agents.list.*.heartbeat.timeoutSeconds": "Heartbeat Timeout (Seconds)",
+  "agents.defaults.heartbeat.skipWhenBusy": "Heartbeat Skip When Busy",
+  "agents.list.*.heartbeat.skipWhenBusy": "Heartbeat Skip When Busy",
+  "agents.defaults.sandbox.docker.secretMounts": "Sandbox Secret Mounts",
   "agents.defaults.sandbox.browser.network": "Sandbox Browser Network",
   "agents.defaults.sandbox.browser.cdpSourceRange": "Sandbox Browser CDP Source Port Range",
   "agents.defaults.sandbox.docker.dangerouslyAllowContainerNamespaceJoin":
