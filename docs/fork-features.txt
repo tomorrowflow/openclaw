@@ -26,8 +26,7 @@ closedOnly | packages/markdown-core/src/code-spans.ts | Code-span closedOnly opt
 
 # --- Sandbox ---
 resolveEmbeddedRunSkillsPrompt | src/agents/embedded-agent-runner/sandbox-skills.ts | Sandbox skill prompt rebuild from in-container paths (shared helper; fixes host-path SKILL.md leak incl. rw sandboxes)
-resolveEmbeddedRunSkillsPrompt | src/agents/embedded-agent-runner/run/attempt.ts | Sandbox skill prompt rebuild wired into attempt runner
-resolveEmbeddedRunSkillsPrompt | src/agents/embedded-agent-runner/compact.ts | Sandbox skill prompt rebuild wired into compaction runner
+mapSandboxSkillEntriesForPrompt | src/agents/embedded-agent-runner/prepared-compaction-runtime.ts | Sandbox skill prompt rebuild wired into compaction runner (upstreamed 2026.7.2; compact.ts is now a thin facade)
 dangerouslyAllowPrivateNetwork | src/agents/sandbox/browser.ts | Allow private-network navigation in sandbox browser
 SANDBOX_MEDIA_MOUNT | src/agents/sandbox/constants.ts | Media dir mount (STATE_DIR/media read-only)
 SANDBOX_SHARED_MOUNT | src/agents/sandbox/constants.ts | Shared dir mount (STATE_DIR/shared)
@@ -38,9 +37,9 @@ secretMounts | src/agents/sandbox/config.ts | Secret mounts config merge logic
 secretMounts | src/agents/sandbox/docker.ts | Secret mounts injected as env vars in container
 
 # --- Cron Hardening ---
-MAX_JOBS_PER_AGENT | src/cron/service/ops.ts | Per-agent cron job count limit
+MAX_JOBS_PER_AGENT | src/cron/service/ops-mutations.ts | Per-agent cron job count limit
 configuredTimeoutMs <= 0 | src/cron/service/timeout-policy.ts | Timeout hardening (<=0 falls back to default)
-ScheduleSchema | src/agents/tools/cron-tool.ts | Explicit TypeBox schema for cron job/patch objects
+createCronScheduleSchema | src/agents/tools/cron-tool-schema.ts | Explicit TypeBox schema for cron job/patch objects (upstreamed 2026.7.2; schema split out of cron-tool.ts)
 
 # --- Auth ---
 ownerAllowAll | src/auto-reply/command-auth.ts | Wildcard (*) support for ownerAllowFrom
@@ -77,5 +76,9 @@ fonts-noto-cjk | scripts/docker/sandbox/Dockerfile.browser | CJK/Unicode fonts i
 1920x1080 | scripts/sandbox-browser-entrypoint.sh | Default screen resolution bump
 SingletonLock | scripts/sandbox-browser-entrypoint.sh | Clear stale Chrome locks on startup
 X11-unix | scripts/sandbox-browser-entrypoint.sh | Recreate X11-unix dir for tmpfs resilience
-fs-safe.*0\.4\.4 | package.json | Upstream dep pin the rebase keeps dropping — src/infra/boundary-file-read.ts needs readFileDescriptorBounded* which 0.4.1 lacks (build fails MISSING_EXPORT)
+# Presence check only — never pin a version literal here. This entry exists because
+# the release-rebase restore step drops the dep from root package.json entirely. The
+# version itself must always TAKE UPSTREAM's value: 2026.7.2 needs 0.5.0 for
+# configureFsSafeNative, and carrying the old 0.4.4 pin forward breaks every build.
+@openclaw/fs-safe | package.json | Upstream dep pin the rebase keeps dropping from root package.json (take upstream's version, never the fork's)
 question-gateway-runtime | package.json | Upstream plugin-sdk export the rebase keeps dropping — signal plugin fails to register with ERR_PACKAGE_PATH_NOT_EXPORTED without it

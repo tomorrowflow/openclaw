@@ -1,8 +1,11 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
+import { STATE_DIR } from "../../config/paths.js";
 import { deriveDefaultBrowserCdpPortRange } from "../../config/port-defaults.js";
 import { withContainerEnvFile } from "../../infra/container-env-file.js";
 import { isSameSsrFPolicy, type SsrFPolicy } from "../../infra/net/ssrf.js";
@@ -60,6 +63,12 @@ import { validateNetworkMode } from "./validate-sandbox-security.js";
 import { SANDBOX_MOUNT_FORMAT_VERSION } from "./workspace-mounts.js";
 
 const HOT_BROWSER_WINDOW_MS = 5 * 60 * 1000;
+// Browser home comes from STATE_DIR, not user config, so it bypasses the
+// bind-source-root validation in buildSandboxCreateArgs. Without it the
+// container's Chrome user-data-dir (see scripts/sandbox-browser-entrypoint.sh,
+// HOME=/tmp/openclaw-home) is lost on every container replacement.
+const SANDBOX_BROWSER_HOME_DIR = path.join(STATE_DIR, "browser-home");
+const SANDBOX_BROWSER_HOME_MOUNT = "/tmp/openclaw-home";
 const CDP_SOURCE_RANGE_ENV_KEY = "OPENCLAW_BROWSER_CDP_SOURCE_RANGE";
 const CDP_AUTH_TOKEN_ENV_KEY = "OPENCLAW_BROWSER_CDP_AUTH_TOKEN";
 const SANDBOX_BROWSER_IMAGE_CONTRACT_LABEL = "org.openclaw.sandbox-browser.contract";
@@ -278,10 +287,27 @@ export async function ensureSandboxBrowser(
   }
 }
 
+/**
+ * The sandbox browser runs inside its own Docker network, so private-network
+ * navigation (host services, LAN apps) is the useful default there even though
+ * the host browser fails closed. An operator policy — any explicit
+ * dangerouslyAllowPrivateNetwork or allowedHostnames — always wins; only the
+ * unconfigured empty policy is widened.
+ */
+function resolveSandboxBrowserSsrFPolicy(policy: SsrFPolicy | undefined): SsrFPolicy {
+  if (policy && Object.keys(policy).length > 0) {
+    return policy;
+  }
+  return { dangerouslyAllowPrivateNetwork: true };
+}
+
 async function ensureSandboxBrowserContainer(
   params: EnsureSandboxBrowserParams,
   containerName: string,
 ): Promise<SandboxBrowserContext> {
+  // Resolve once: the reuse comparison below and the bridge config must agree,
+  // or every ensure would see a policy change and recreate the bridge.
+  const ssrfPolicy = resolveSandboxBrowserSsrFPolicy(params.ssrfPolicy);
   let existing = BROWSER_BRIDGES.get(params.scopeKey);
   const stopExistingForContainer = async () => {
     await stopCachedBrowserBridgesForContainer(containerName);
@@ -435,6 +461,8 @@ async function ensureSandboxBrowserContainer(
     for (const bind of mountPlan.binds) {
       args.push("-v", bind);
     }
+    fs.mkdirSync(SANDBOX_BROWSER_HOME_DIR, { recursive: true });
+    args.push("-v", `${SANDBOX_BROWSER_HOME_DIR}:${SANDBOX_BROWSER_HOME_MOUNT}`);
     args.push("-p", `127.0.0.1::${params.cfg.browser.cdpPort}`);
     if (noVncEnabled) {
       args.push("-p", `127.0.0.1::${params.cfg.browser.noVncPort}`);
@@ -499,6 +527,13 @@ async function ensureSandboxBrowserContainer(
     }
   }
 
+  const policyMatches =
+    !existing || isSameSsrFPolicy(existing.bridge.state.resolved.ssrfPolicy, ssrfPolicy);
+  const authMatches =
+    !existing ||
+    (existing.authToken === desiredAuthToken && existing.authPassword === desiredAuthPassword);
+  const evaluateMatches =
+    !existing || existing.bridge.state.resolved.evaluateEnabled === desiredEvaluateEnabled;
   const canReuse = Boolean(
     // Managed restart callbacks retain one admitted turn, not a later turn's authority.
     !params.withWorkspace &&
@@ -507,10 +542,9 @@ async function ensureSandboxBrowserContainer(
     existing.containerName === containerName &&
     existingProfile?.cdpPort === mappedCdp &&
     existingProfile?.cdpUrl === cdpUrl &&
-    isSameSsrFPolicy(existing.bridge.state.resolved.ssrfPolicy, params.ssrfPolicy) &&
-    existing.authToken === desiredAuthToken &&
-    existing.authPassword === desiredAuthPassword &&
-    existing.bridge.state.resolved.evaluateEnabled === desiredEvaluateEnabled,
+    policyMatches &&
+    authMatches &&
+    evaluateMatches,
   );
   if (existing && !canReuse) {
     await stopCachedBrowserBridge(params.scopeKey, existing);
@@ -548,7 +582,7 @@ async function ensureSandboxBrowserContainer(
         cdpAuthToken,
         headless: params.cfg.browser.headless,
         evaluateEnabled: desiredEvaluateEnabled,
-        ssrfPolicy: params.ssrfPolicy,
+        ssrfPolicy,
       }),
       authToken: desiredAuthToken,
       authPassword: desiredAuthPassword,

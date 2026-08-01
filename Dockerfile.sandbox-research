@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1.7
+
+# Research agent sandbox: web extraction, document processing, media tools,
+# and a headless Playwright browser for JS-rendered content.
+
+ARG BASE_IMAGE=openclaw-sandbox:trixie-slim
+FROM ${BASE_IMAGE}
+
+USER root
+
+ENV DEBIAN_FRONTEND=noninteractive
+# Playwright installs its own browser; skip the system Chromium prompt.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+# Let Node require() find globally-installed packages (playwright, etc.).
+ENV NODE_PATH=/usr/local/lib/node_modules
+
+# ── System packages ──────────────────────────────────────────────────────────
+# Grouped: web/net | doc processing | media | data | archive | headless deps
+ARG APT_PACKAGES="\
+  aria2 lynx httpie wget \
+  pandoc poppler-utils tesseract-ocr catdoc \
+  ffmpeg imagemagick exiftool \
+  sqlite3 xmlstarlet miller \
+  p7zip-full unzip \
+  python3-pip python3-venv pipx \
+  nodejs npm \
+  fonts-freefont-ttf fonts-liberation fonts-noto-cjk fonts-noto-color-emoji \
+  libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxcomposite1 \
+  libxdamage1 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2"
+
+RUN --mount=type=cache,id=openclaw-sandbox-research-apt-cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,id=openclaw-sandbox-research-apt-lists,target=/var/lib/apt,sharing=locked \
+  apt-get update \
+  && apt-get upgrade -y --no-install-recommends \
+  && apt-get install -y --no-install-recommends ${APT_PACKAGES}
+
+# ── Python research tools (installed via pipx into a shared location) ────────
+ENV PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin
+RUN pipx install yt-dlp \
+  && pipx install trafilatura \
+  && pipx install csvkit
+
+# crawl4ai needs its own venv because it pulls heavy deps (playwright, etc.)
+RUN python3 -m venv /opt/crawl4ai \
+  && /opt/crawl4ai/bin/pip install --no-cache-dir crawl4ai \
+  && /opt/crawl4ai/bin/crawl4ai-setup
+
+# yq (Go binary, not the Python wrapper)
+RUN curl -fsSL "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$(dpkg --print-architecture)" \
+  -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
+
+# ── Playwright headless Chromium ─────────────────────────────────────────────
+RUN npm install -g playwright \
+  && npx playwright install --with-deps chromium
+
+# ── Make shared tool dirs readable and symlink into PATH ─────────────────────
+RUN chmod -R a+rX /opt/crawl4ai /opt/pipx /opt/playwright-browsers \
+  && ln -sf /opt/crawl4ai/bin/crwl /usr/local/bin/crwl
+
+# ── Drop back to unprivileged user ───────────────────────────────────────────
+ARG FINAL_USER=sandbox
+USER ${FINAL_USER}
+WORKDIR /home/sandbox
+
+CMD ["sleep", "infinity"]
