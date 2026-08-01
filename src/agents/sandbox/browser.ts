@@ -76,13 +76,21 @@ const HOT_BROWSER_WINDOW_MS = 5 * 60 * 1000;
 // bind-source-root validation in buildSandboxCreateArgs. Without it the
 // container's Chrome user-data-dir (see scripts/sandbox-browser-entrypoint.sh,
 // HOME=/tmp/openclaw-home) is lost on every container replacement.
-const SANDBOX_BROWSER_HOME_DIR = path.join(STATE_DIR, "browser-home");
+const SANDBOX_BROWSER_HOME_ROOT = path.join(STATE_DIR, "browser-home");
 const SANDBOX_BROWSER_HOME_MOUNT = "/tmp/openclaw-home";
 const CDP_SOURCE_RANGE_ENV_KEY = "OPENCLAW_BROWSER_CDP_SOURCE_RANGE";
 const CDP_AUTH_TOKEN_ENV_KEY = "OPENCLAW_BROWSER_CDP_AUTH_TOKEN";
 const SANDBOX_BROWSER_IMAGE_CONTRACT_LABEL = "org.openclaw.sandbox-browser.contract";
 const browserContainerLifecycleQueue = new KeyedAsyncQueue();
 const browserNetworkLifecycleQueue = new KeyedAsyncQueue();
+
+// Keyed by container name so the profile follows one browser's identity: it
+// survives that container being replaced, but session/agent scopes never share
+// Chrome cookies, history, or profile locks. Docker names are already
+// filesystem-safe and carry no path separators.
+function resolveSandboxBrowserHomeDir(containerName: string): string {
+  return path.join(SANDBOX_BROWSER_HOME_ROOT, containerName);
+}
 
 function buildSandboxCdpAuthHeader(token: string): string {
   return `Basic ${Buffer.from(`openclaw:${token}`).toString("base64")}`;
@@ -272,27 +280,10 @@ export async function ensureSandboxBrowser(
   });
 }
 
-/**
- * The sandbox browser runs inside its own Docker network, so private-network
- * navigation (host services, LAN apps) is the useful default there even though
- * the host browser fails closed. An operator policy — any explicit
- * dangerouslyAllowPrivateNetwork or allowedHostnames — always wins; only the
- * unconfigured empty policy is widened.
- */
-function resolveSandboxBrowserSsrFPolicy(policy: SsrFPolicy | undefined): SsrFPolicy {
-  if (policy && Object.keys(policy).length > 0) {
-    return policy;
-  }
-  return { dangerouslyAllowPrivateNetwork: true };
-}
-
 async function ensureSandboxBrowserContainer(
   params: EnsureSandboxBrowserParams,
   containerName: string,
 ): Promise<SandboxBrowserContext> {
-  // Resolve once: the reuse comparison below and the bridge config must agree,
-  // or every ensure would see a policy change and recreate the bridge.
-  const ssrfPolicy = resolveSandboxBrowserSsrFPolicy(params.ssrfPolicy);
   let existing = BROWSER_BRIDGES.get(params.scopeKey);
   const stopExistingForContainer = async () => {
     await stopCachedBrowserBridgesForContainer(containerName);
@@ -429,8 +420,9 @@ async function ensureSandboxBrowserContainer(
       readOnlyWorkspaceSkillMounts,
       includeReadOnlyWorkspaceSkillMounts: false,
     });
-    fs.mkdirSync(SANDBOX_BROWSER_HOME_DIR, { recursive: true });
-    args.push("-v", `${SANDBOX_BROWSER_HOME_DIR}:${SANDBOX_BROWSER_HOME_MOUNT}`);
+    const browserHomeDir = resolveSandboxBrowserHomeDir(containerName);
+    fs.mkdirSync(browserHomeDir, { recursive: true });
+    args.push("-v", `${browserHomeDir}:${SANDBOX_BROWSER_HOME_MOUNT}`);
     if (browserDockerCfg.binds?.length) {
       // Skip user binds that conflict with protected skill mount container paths so
       // the read-only skill overlay remains authoritative.
@@ -515,7 +507,7 @@ async function ensureSandboxBrowserContainer(
   }
 
   const policyMatches =
-    !existing || isSameSsrFPolicy(existing.bridge.state.resolved.ssrfPolicy, ssrfPolicy);
+    !existing || isSameSsrFPolicy(existing.bridge.state.resolved.ssrfPolicy, params.ssrfPolicy);
   const authMatches =
     !existing ||
     (existing.authToken === desiredAuthToken && existing.authPassword === desiredAuthPassword);
@@ -569,7 +561,7 @@ async function ensureSandboxBrowserContainer(
         cdpAuthToken,
         headless: params.cfg.browser.headless,
         evaluateEnabled: desiredEvaluateEnabled,
-        ssrfPolicy,
+        ssrfPolicy: params.ssrfPolicy,
       }),
       authToken: desiredAuthToken,
       authPassword: desiredAuthPassword,

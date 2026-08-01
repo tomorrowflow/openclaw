@@ -26,9 +26,15 @@ closedOnly | packages/markdown-core/src/code-spans.ts | Code-span closedOnly opt
 
 # --- Sandbox ---
 resolveEmbeddedRunSkillsPrompt | src/agents/embedded-agent-runner/sandbox-skills.ts | Sandbox skill prompt rebuild from in-container paths (shared helper; fixes host-path SKILL.md leak incl. rw sandboxes)
-resolveEmbeddedRunSkillsPrompt | src/agents/embedded-agent-runner/run/attempt.ts | Sandbox skill prompt rebuild wired into attempt runner
+mapSandboxSkillEntriesForPrompt | src/agents/embedded-agent-runner/run/attempt-startup.ts | Sandbox skill prompt rebuild wired into attempt runner (upstreamed 2026.7.2; prepareEmbeddedAttemptSkills now builds skillsPrompt itself, attempt.ts just consumes it)
 mapSandboxSkillEntriesForPrompt | src/agents/embedded-agent-runner/prepared-compaction-runtime.ts | Sandbox skill prompt rebuild wired into compaction runner (upstreamed 2026.7.2; compact.ts is now a thin facade)
-dangerouslyAllowPrivateNetwork | src/agents/sandbox/browser.ts | Allow private-network navigation in sandbox browser
+# Private-network navigation in the sandbox browser is NO LONGER a code patch.
+# Upstream 2026.7.2 plumbs browser.ssrfPolicy from config into the sandbox bridge
+# (context.ts -> ensureSandboxBrowser -> buildSandboxBrowserResolvedConfig), and
+# core stays fail-closed by design. The fork enables it in the operator's
+# openclaw.json instead: browser.ssrfPolicy.dangerouslyAllowPrivateNetwork: true.
+# Nothing to grep for in the repo — verify on the deployed install, not here.
+ssrfPolicy | src/agents/sandbox/browser.ts | Sandbox bridge accepts an operator SSRF policy (the seam the fork's private-network access depends on — if this plumbing disappears, config can no longer reach the sandbox browser)
 SANDBOX_MEDIA_MOUNT | src/agents/sandbox/constants.ts | Media dir mount (STATE_DIR/media read-only)
 SANDBOX_SHARED_MOUNT | src/agents/sandbox/constants.ts | Shared dir mount (STATE_DIR/shared)
 SANDBOX_BROWSER_HOME | src/agents/sandbox/browser.ts | Persistent browser home dir mount

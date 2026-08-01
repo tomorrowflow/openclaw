@@ -656,9 +656,6 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.heartbeat.skipWhenBusy": "Heartbeat Skip When Busy",
   "agents.list.*.heartbeat.skipWhenBusy": "Heartbeat Skip When Busy",
   "agents.defaults.sandbox.docker.secretMounts": "Sandbox Secret Mounts",
-  "agents.list[].heartbeat.timeoutSeconds": "Agent Heartbeat Timeout (Seconds)",
-  "agents.list[].heartbeat.skipWhenBusy": "Agent Heartbeat Skip When Busy",
-  "agents.list[].sandbox.docker.secretMounts": "Agent Sandbox Secret Mounts",
   "agents.defaults.sandbox.browser.network": "Sandbox Browser Network",
   "agents.defaults.sandbox.browser.cdpSourceRange": "Sandbox Browser CDP Source Port Range",
   "agents.defaults.sandbox.docker.dangerouslyAllowContainerNamespaceJoin":
