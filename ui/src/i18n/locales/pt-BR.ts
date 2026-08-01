@@ -2319,8 +2319,8 @@ export const pt_BR: TranslationMap = {
     targetInvalid:
       "Insira uma URL para transportes HTTP ou uma linha de comando válida para stdio.",
     sessionEnableFailed:
-      "O servidor foi salvo como desativado globalmente, mas a ativação para esta sessão falhou: {error}",
-    sessionChanged: "A sessão ativa mudou antes que pudesse ser ativada.",
+      "O servidor foi salvo como desativado globalmente, mas não foi possível ativá-lo para esta sessão: {error}",
+    sessionChanged: "A sessão ativa mudou antes que ele pudesse ser ativado.",
     sessionUnavailable: "A sessão ativa está indisponível; atualize e tente novamente.",
     nameTaken: "Já existe um servidor MCP chamado “{name}”.",
     missing: "O servidor MCP “{name}” não foi encontrado na configuração.",
@@ -2491,7 +2491,7 @@ export const pt_BR: TranslationMap = {
       description:
         "Exatamente um plugin de memória ocupa o slot de memória. Selecionar um motor o ativa e desativa os outros.",
       rowTitle: "Motor de memória",
-      openClawMemory: "OpenClaw Memory",
+      openClawMemory: "Memória do OpenClaw",
       off: "Desativado",
       unavailable: "Indisponível",
       autoHint:
@@ -2809,9 +2809,9 @@ export const pt_BR: TranslationMap = {
         "Mantenha um diretório de ferramentas limitado visível e adie o restante atrás da busca, para que grandes catálogos de MCP e plugins parem de sobrecarregar o prompt.",
     },
     loopDetection: {
-      title: "Detecção de loop de ferramentas",
+      title: "Detecção de loops de ferramentas",
       description:
-        "Ative proteções de histórico contínuo que avisam ou bloqueiam chamadas repetidas de ferramentas quando um agente para de progredir.",
+        "Ative proteções de histórico contínuo que alertam ou bloqueiam chamadas repetidas de ferramentas quando um agente para de avançar.",
     },
     localModelLean: {
       title: "Ferramentas enxutas para modelos locais",
@@ -3847,7 +3847,7 @@ export const pt_BR: TranslationMap = {
       loadingPage: "Carregando página wiki…",
       dreamsTab: "Sonhos",
       insightsTab: "Insights Importados",
-      wikiTab: "Wiki de Memória",
+      wikiTab: "Wiki de memória",
       dreamsExplainer:
         "Este é o diário de sonhos bruto que o sistema escreve enquanto reproduz e consolida a memória; use-o para inspecionar o que o sistema de memória está percebendo e onde ainda parece ruidoso ou insuficiente.",
       insightsExplainer:
@@ -3948,7 +3948,7 @@ export const pt_BR: TranslationMap = {
       tidyingKnowledgeGraph: "organizando o grafo de conhecimento…",
       replayingConversations: "repassando as conversas de hoje…",
       weavingShortTerm: "entrelaçando o curto prazo com o longo prazo…",
-      defragmentingMemoryLane: "desfragmentando os caminhos da memória…",
+      defragmentingMemoryLane: "desfragmentando o caminho da memória…",
       filingLooseThoughts: "arquivando pensamentos soltos…",
       connectingDots: "conectando pontos distantes…",
       compostingContext: "compostando janelas de contexto antigas…",
@@ -5114,14 +5114,6 @@ export const pt_BR: TranslationMap = {
       dropOnEmptyRight: "Mover {panel} para a barra lateral direita vazia",
       resize: "Redimensionar {panel}",
     },
-    sidebarColumns: {
-      chat: "Chat",
-      discussion: "Discussão",
-      detail: "Detalhes",
-      close: "Fechar {panel}",
-      drag: "Arrastar {panel}",
-      resize: "Redimensionar {panel}",
-    },
     thread: {
       search: "Pesquisar mensagens",
       searchPlaceholder: "Pesquisar mensagens...",
@@ -5180,20 +5172,20 @@ export const pt_BR: TranslationMap = {
         browseConnectors: "Explorar conectores",
         addMcpServer: "Adicionar servidor MCP…",
         addMcpServerTitle: "Adicionar servidor MCP",
-        addMcpServerDescription: "Configure o servidor e escolha onde ele fica ativo.",
+        addMcpServerDescription: "Configure o servidor e escolha onde ele será ativado.",
         scopeLabel: "Disponibilidade",
         scopeSession: "Esta sessão",
         scopeEverywhere: "Em todos os lugares",
         scopeSessionHint:
-          "O servidor é salvo globalmente desativado e ativado somente para esta sessão.",
+          "O servidor é salvo como desativado globalmente e ativado apenas para esta sessão.",
         scopeEverywhereHint: "O servidor é salvo e ativado para todas as sessões.",
         toolAccess: {
           label: "Acesso a ferramentas",
           loading: "Carregando ferramentas…",
           loadFailed: "Não foi possível carregar as ferramentas.",
           noTools: "Nenhuma ferramenta disponível para este conector.",
-          summary: "{enabled} de {total} ferramentas ativadas",
-          summaryOne: "{enabled} de {total} ferramenta ativada",
+          summary: "{enabled} de {total} ferramentas ativas",
+          summaryOne: "{enabled} de {total} ferramenta ativa",
         },
         enabledCount: "{count} ativos",
         loadingSkills: "Carregando Skills…",

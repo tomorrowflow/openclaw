@@ -2321,9 +2321,10 @@ export const nl: TranslationMap = {
     nameInvalid: "Servernamen gebruiken letters, cijfers, punten, streepjes of underscores.",
     targetInvalid: "Voer een URL in voor HTTP-transporten of een geldige opdrachtregel voor stdio.",
     sessionEnableFailed:
-      "De server is globaal opgeslagen als uitgeschakeld, maar het inschakelen voor deze sessie is mislukt: {error}",
-    sessionChanged: "De actieve sessie is gewijzigd voordat deze kon worden ingeschakeld.",
-    sessionUnavailable: "De actieve sessie is niet beschikbaar; vernieuw en probeer het opnieuw.",
+      "De server is globaal uitgeschakeld opgeslagen, maar het inschakelen voor deze sessie is mislukt: {error}",
+    sessionChanged: "De actieve sessie is gewijzigd voordat de server kon worden ingeschakeld.",
+    sessionUnavailable:
+      "De actieve sessie is niet beschikbaar; vernieuw de pagina en probeer het opnieuw.",
     nameTaken: "Er bestaat al een MCP-server met de naam “{name}”.",
     missing: "MCP-server “{name}” is niet gevonden in de configuratie.",
     missingTransport: "transport ontbreekt",
@@ -2494,7 +2495,7 @@ export const nl: TranslationMap = {
       description:
         "Precies één geheugenplug-in bezit de geheugenslot. Een engine selecteren schakelt deze in en de andere uit.",
       rowTitle: "Geheugenengine",
-      openClawMemory: "OpenClaw Memory",
+      openClawMemory: "OpenClaw-geheugen",
       off: "Uit",
       unavailable: "Niet beschikbaar",
       autoHint:
@@ -2809,9 +2810,9 @@ export const nl: TranslationMap = {
         "Houd een begrensde toolmap zichtbaar en stel de rest uit achter zoeken, zodat grote MCP- en plugincatalogi de prompt niet langer overspoelen.",
     },
     loopDetection: {
-      title: "Detectie van tool-loops",
+      title: "Detectie van toollussen",
       description:
-        "Schakel bewakingen op basis van voortschrijdende geschiedenis in die waarschuwen voor of herhaalde tool-aanroepen blokkeren wanneer een agent geen voortgang meer boekt.",
+        "Schakel controles op basis van voortschrijdende geschiedenis in die waarschuwen of herhaalde toolaanroepen blokkeren wanneer een agent geen voortgang meer boekt.",
     },
     localModelLean: {
       title: "Slanke tools voor lokale modellen",
@@ -3848,7 +3849,7 @@ export const nl: TranslationMap = {
       loadingPage: "Wiki-pagina laden…",
       dreamsTab: "Dromen",
       insightsTab: "Geïmporteerde inzichten",
-      wikiTab: "Memory Wiki",
+      wikiTab: "Geheugenwiki",
       dreamsExplainer:
         "Dit is het ruwe droomdagboek dat het systeem schrijft tijdens het opnieuw afspelen en consolideren van geheugen; gebruik het om te inspecteren wat het geheugensysteem opmerkt en waar het nog rommelig of dun oogt.",
       insightsExplainer:
@@ -3869,8 +3870,8 @@ export const nl: TranslationMap = {
       riskReasons: "Risicoredenen:",
       labels: "Labels:",
       openSourcePage: "Bronpagina openen",
-      loadingWiki: "Memory wiki laden…",
-      emptyWiki: "Memory wiki is nog niet gevuld",
+      loadingWiki: "Geheugenwiki laden…",
+      emptyWiki: "De geheugenwiki is nog niet gevuld",
       emptyWikiHint:
         "Op dit moment bevat de wiki vooral ruwe bronimports en operationele rapporten. Dit tabblad wordt nuttig zodra syntheses, entiteiten of concepten worden geschreven.",
       claims: "Beweringen",
@@ -5110,16 +5111,6 @@ export const nl: TranslationMap = {
       chat: "Chat",
       discussion: "Discussie",
       detail: "Details",
-      close: "{panel} sluiten",
-      drag: "{panel} slepen",
-      dropOnEmptyLeft: "Verplaats {panel} naar de lege linkerzijbalk",
-      dropOnEmptyRight: "Verplaats {panel} naar de lege rechterzijbalk",
-      resize: "Grootte van {panel} aanpassen",
-    },
-    sidebarColumns: {
-      chat: "Chat",
-      discussion: "Discussie",
-      detail: "Details",
       close: "Sluit {panel}",
       drag: "Sleep {panel}",
       dropOnEmptyLeft: "Verplaats {panel} naar de lege linkerzijbalk",
@@ -5184,20 +5175,20 @@ export const nl: TranslationMap = {
         browseConnectors: "Connectors doorbladeren",
         addMcpServer: "MCP-server toevoegen…",
         addMcpServerTitle: "MCP-server toevoegen",
-        addMcpServerDescription: "Configureer de server en kies waar deze is ingeschakeld.",
+        addMcpServerDescription: "Configureer de server en kies waar deze wordt ingeschakeld.",
         scopeLabel: "Beschikbaarheid",
         scopeSession: "Deze sessie",
         scopeEverywhere: "Overal",
         scopeSessionHint:
-          "De server wordt globaal uitgeschakeld opgeslagen en alleen voor deze sessie ingeschakeld.",
-        scopeEverywhereHint: "De server wordt opgeslagen en ingeschakeld voor elke sessie.",
+          "De server is globaal uitgeschakeld opgeslagen en wordt alleen voor deze sessie ingeschakeld.",
+        scopeEverywhereHint: "De server wordt opgeslagen en voor elke sessie ingeschakeld.",
         toolAccess: {
           label: "Toegang tot tools",
           loading: "Tools laden…",
-          loadFailed: "Kon tools niet laden.",
+          loadFailed: "Kan tools niet laden.",
           noTools: "Geen tools beschikbaar voor deze connector.",
-          summary: "{enabled} van {total} tools aan",
-          summaryOne: "{enabled} van {total} tool aan",
+          summary: "{enabled} van {total} tools ingeschakeld",
+          summaryOne: "{enabled} van {total} tool ingeschakeld",
         },
         enabledCount: "{count} aan",
         loadingSkills: "Skills laden…",

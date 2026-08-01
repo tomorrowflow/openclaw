@@ -2288,8 +2288,8 @@ export const ko: TranslationMap = {
     nameInvalid: "서버 이름에는 문자, 숫자, 점, 대시, 밑줄을 사용할 수 있습니다.",
     targetInvalid: "HTTP 전송의 경우 URL을, stdio의 경우 유효한 명령줄을 입력하세요.",
     sessionEnableFailed:
-      "서버가 전역적으로 비활성화된 상태로 저장되었지만, 이 세션에 대해 활성화하는 데 실패했습니다: {error}",
-    sessionChanged: "활성화되기 전에 활성 세션이 변경되었습니다.",
+      "서버가 전역적으로 비활성화된 상태로 저장되었지만, 이 세션에서 활성화하지 못했습니다: {error}",
+    sessionChanged: "활성화하기 전에 활성 세션이 변경되었습니다.",
     sessionUnavailable: "활성 세션을 사용할 수 없습니다. 새로 고침한 후 다시 시도하세요.",
     nameTaken: "이름이 “{name}”인 MCP 서버가 이미 있습니다.",
     missing: "구성에서 MCP 서버 “{name}”을(를) 찾을 수 없습니다.",
@@ -2458,7 +2458,7 @@ export const ko: TranslationMap = {
       description:
         "정확히 하나의 메모리 플러그인이 메모리 슬롯을 소유합니다. 엔진을 선택하면 해당 엔진이 활성화되고 나머지는 비활성화됩니다.",
       rowTitle: "메모리 엔진",
-      openClawMemory: "OpenClaw Memory",
+      openClawMemory: "OpenClaw 메모리",
       off: "끔",
       unavailable: "사용 불가",
       autoHint: "config에 고정된 엔진이 없으므로 슬롯이 기본 소유자로 폴백됩니다.",
@@ -2766,7 +2766,7 @@ export const ko: TranslationMap = {
     loopDetection: {
       title: "도구 루프 감지",
       description:
-        "에이전트가 진행을 멈췄을 때 반복적인 도구 호출을 경고하거나 차단하는 롤링 히스토리 가드를 활성화합니다.",
+        "에이전트가 더 이상 진전을 보이지 않을 때 반복되는 도구 호출을 경고하거나 차단하는 최근 기록 기반 보호 기능을 활성화합니다.",
     },
     localModelLean: {
       title: "로컬 모델용 경량 도구",
@@ -3791,7 +3791,7 @@ export const ko: TranslationMap = {
       loadingPage: "위키 페이지 로드 중…",
       dreamsTab: "Dreams",
       insightsTab: "가져온 인사이트",
-      wikiTab: "Memory Wiki",
+      wikiTab: "메모리 위키",
       dreamsExplainer:
         "이것은 시스템이 메모리를 재생하고 통합하는 동안 작성하는 원본 꿈 일기입니다. 메모리 시스템이 무엇을 인식하고 있는지, 그리고 어디가 아직 노이즈가 많거나 빈약해 보이는지 살펴보는 데 사용하세요.",
       insightsExplainer:
@@ -3812,8 +3812,8 @@ export const ko: TranslationMap = {
       riskReasons: "위험 사유:",
       labels: "라벨:",
       openSourcePage: "소스 페이지 열기",
-      loadingWiki: "memory wiki 로드 중…",
-      emptyWiki: "memory wiki가 아직 채워지지 않았습니다",
+      loadingWiki: "메모리 위키를 불러오는 중…",
+      emptyWiki: "메모리 위키에 아직 내용이 없습니다",
       emptyWikiHint:
         "현재 위키에는 대부분 원시 소스 가져오기와 운영 보고서만 있습니다. 이 탭은 종합, 엔터티 또는 개념이 작성되기 시작하면 유용해집니다.",
       claims: "주장",
@@ -3890,7 +3890,7 @@ export const ko: TranslationMap = {
       tidyingKnowledgeGraph: "지식 그래프를 정리하는 중…",
       replayingConversations: "오늘의 대화를 다시 살펴보는 중…",
       weavingShortTerm: "단기 기억을 장기 기억으로 엮는 중…",
-      defragmentingMemoryLane: "기억의 길 조각 모음 중…",
+      defragmentingMemoryLane: "메모리 경로 조각 모음 중…",
       filingLooseThoughts: "흩어진 생각을 정리하는 중…",
       connectingDots: "멀리 떨어진 점들을 연결하는 중…",
       compostingContext: "오래된 컨텍스트 창을 퇴비화하는 중…",
@@ -5040,16 +5040,6 @@ export const ko: TranslationMap = {
       drag: "{panel} 드래그",
       dropOnEmptyLeft: "{panel}을(를) 비어 있는 왼쪽 사이드바로 이동",
       dropOnEmptyRight: "{panel}을(를) 비어 있는 오른쪽 사이드바로 이동",
-      resize: "{panel} 크기 조정",
-    },
-    sidebarColumns: {
-      chat: "채팅",
-      discussion: "토론",
-      detail: "세부 정보",
-      close: "{panel} 닫기",
-      drag: "{panel} 드래그",
-      dropOnEmptyLeft: "{panel}을(를) 비어 있는 왼쪽 사이드바로 이동",
-      dropOnEmptyRight: "{panel}을(를) 비어 있는 오른쪽 사이드바로 이동",
       resize: "{panel} 크기 조절",
     },
     thread: {
@@ -5108,20 +5098,20 @@ export const ko: TranslationMap = {
         browseConnectors: "커넥터 찾아보기",
         addMcpServer: "MCP 서버 추가…",
         addMcpServerTitle: "MCP 서버 추가",
-        addMcpServerDescription: "서버를 구성하고 활성화할 위치를 선택하세요.",
+        addMcpServerDescription: "서버를 구성하고 활성화할 범위를 선택하세요.",
         scopeLabel: "사용 가능 범위",
         scopeSession: "이 세션",
-        scopeEverywhere: "모든 곳",
+        scopeEverywhere: "모든 위치",
         scopeSessionHint:
           "서버는 전역적으로 비활성화된 상태로 저장되며 이 세션에서만 활성화됩니다.",
-        scopeEverywhereHint: "서버가 저장되어 모든 세션에서 활성화됩니다.",
+        scopeEverywhereHint: "서버가 저장되고 모든 세션에서 활성화됩니다.",
         toolAccess: {
           label: "도구 액세스",
-          loading: "도구 로드 중…",
-          loadFailed: "도구를 로드할 수 없습니다.",
-          noTools: "이 커넥터에 사용 가능한 도구가 없습니다.",
-          summary: "도구 {total}개 중 {enabled}개 켜짐",
-          summaryOne: "도구 {total}개 중 {enabled}개 켜짐",
+          loading: "도구를 불러오는 중…",
+          loadFailed: "도구를 불러올 수 없습니다.",
+          noTools: "이 커넥터에 사용할 수 있는 도구가 없습니다.",
+          summary: "도구 {total}개 중 {enabled}개 사용 중",
+          summaryOne: "도구 {total}개 중 {enabled}개 사용 중",
         },
         enabledCount: "{count}개 켜짐",
         loadingSkills: "Skills 로드 중…",

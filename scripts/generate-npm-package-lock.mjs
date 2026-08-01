@@ -90,6 +90,16 @@ function readWorkspacePackageExtensions() {
     : {};
 }
 
+function readPnpmLockVersionOverrides() {
+  const lockfile = parseYaml(readFileSync(path.join(ROOT_DIR, "pnpm-lock.yaml"), "utf8"));
+  return resolvePnpmLockOverridePlan(lockfile).versionOverrides;
+}
+
+function readPnpmLockScopedVersionOverrides() {
+  const lockfile = parseYaml(readFileSync(path.join(ROOT_DIR, "pnpm-lock.yaml"), "utf8"));
+  return resolvePnpmLockOverridePlan(lockfile).scopedVersionOverrides;
+}
+
 function parsePnpmPackageKey(packageKey) {
   if (typeof packageKey !== "string") {
     return null;
@@ -429,6 +439,10 @@ function readShrinkwrapOverrides() {
       mergeOverrides(readPnpmLockVersionOverrides(), readPnpmLockScopedVersionOverrides(), {}),
     ),
   );
+}
+
+export function readNpmLockOverrides() {
+  return readShrinkwrapOverrides();
 }
 
 function packageJsonForShrinkwrap(packageJson, shrinkwrapOverrides) {

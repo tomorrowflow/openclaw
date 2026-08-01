@@ -2327,8 +2327,8 @@ export const pl: TranslationMap = {
     targetInvalid:
       "Wprowadź adres URL dla transportów HTTP lub prawidłowy wiersz poleceń dla stdio.",
     sessionEnableFailed:
-      "Serwer został zapisany jako wyłączony globalnie, ale włączenie go dla tej sesji nie powiodło się: {error}",
-    sessionChanged: "Aktywna sesja zmieniła się, zanim można było ją włączyć.",
+      "Serwer został zapisany jako globalnie wyłączony, ale nie udało się go włączyć dla tej sesji: {error}",
+    sessionChanged: "Aktywna sesja zmieniła się, zanim można było włączyć serwer.",
     sessionUnavailable: "Aktywna sesja jest niedostępna; odśwież i spróbuj ponownie.",
     nameTaken: "Serwer MCP o nazwie „{name}” już istnieje.",
     missing: "Nie znaleziono serwera MCP „{name}” w konfiguracji.",
@@ -5122,14 +5122,6 @@ export const pl: TranslationMap = {
       dropOnEmptyRight: "Przenieś {panel} na pusty prawy pasek boczny",
       resize: "Zmień rozmiar {panel}",
     },
-    sidebarColumns: {
-      chat: "Czat",
-      discussion: "Dyskusja",
-      detail: "Szczegóły",
-      close: "Zamknij {panel}",
-      drag: "Przeciągnij {panel}",
-      resize: "Zmień rozmiar {panel}",
-    },
     thread: {
       search: "Szukaj wiadomości",
       searchPlaceholder: "Szukaj wiadomości...",
@@ -5193,8 +5185,8 @@ export const pl: TranslationMap = {
         scopeSession: "Ta sesja",
         scopeEverywhere: "Wszędzie",
         scopeSessionHint:
-          "Serwer jest zapisywany jako globalnie wyłączony i włączony tylko dla tej sesji.",
-        scopeEverywhereHint: "Serwer jest zapisywany i włączony dla każdej sesji.",
+          "Serwer jest zapisany jako globalnie wyłączony i włączony tylko dla tej sesji.",
+        scopeEverywhereHint: "Serwer jest zapisany i włączony dla każdej sesji.",
         toolAccess: {
           label: "Dostęp do narzędzi",
           loading: "Ładowanie narzędzi…",

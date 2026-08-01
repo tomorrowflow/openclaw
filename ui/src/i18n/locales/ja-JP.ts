@@ -2319,9 +2319,10 @@ export const ja_JP: TranslationMap = {
     targetInvalid:
       "HTTP トランスポートの場合は URL を、stdio の場合は有効なコマンドラインを入力してください。",
     sessionEnableFailed:
-      "サーバーはグローバルで無効の状態で保存されましたが、このセッションで有効にできませんでした: {error}",
-    sessionChanged: "有効にする前にアクティブなセッションが変更されました。",
-    sessionUnavailable: "アクティブなセッションが利用できません。更新して再試行してください。",
+      "サーバーはグローバルでは無効として保存されましたが、このセッションでの有効化に失敗しました: {error}",
+    sessionChanged: "有効化する前に、アクティブなセッションが変更されました。",
+    sessionUnavailable:
+      "アクティブなセッションを利用できません。更新してからもう一度お試しください。",
     nameTaken: "「{name}」という名前の MCP サーバーは既に存在します。",
     missing: "MCP サーバー「{name}」が設定内に見つかりませんでした。",
     missingTransport: "トランスポートがありません",
@@ -2488,7 +2489,7 @@ export const ja_JP: TranslationMap = {
       description:
         "メモリスロットを所有できるメモリプラグインは常に1つだけです。エンジンを選択すると、それが有効になり、他は無効になります。",
       rowTitle: "メモリエンジン",
-      openClawMemory: "OpenClaw Memory",
+      openClawMemory: "OpenClaw メモリ",
       off: "オフ",
       unavailable: "利用不可",
       autoHint:
@@ -2801,7 +2802,7 @@ export const ja_JP: TranslationMap = {
     loopDetection: {
       title: "ツールループ検出",
       description:
-        "エージェントが進捗しなくなったときに、繰り返しのツール呼び出しを警告またはブロックするローリング履歴ガードを有効にします。",
+        "エージェントの進行が止まったときに、繰り返されるツール呼び出しを警告またはブロックするローリング履歴ガードを有効にします。",
     },
     localModelLean: {
       title: "ローカルモデル向けの軽量ツール",
@@ -3837,7 +3838,7 @@ export const ja_JP: TranslationMap = {
       loadingPage: "wikiページを読み込み中…",
       dreamsTab: "ドリーム",
       insightsTab: "インポートされたインサイト",
-      wikiTab: "Memory Wiki",
+      wikiTab: "メモリ Wiki",
       dreamsExplainer:
         "これは、システムがメモリを再生・統合しながら書き込む生のドリーム日記です。メモリシステムが何に気づいているか、また、どこがまだノイズが多いか希薄に見えるかを調べるのに使用します。",
       insightsExplainer:
@@ -3859,7 +3860,7 @@ export const ja_JP: TranslationMap = {
       labels: "ラベル:",
       openSourcePage: "ソースページを開く",
       loadingWiki: "メモリ Wiki を読み込み中…",
-      emptyWiki: "メモリ Wiki はまだ作成されていません",
+      emptyWiki: "メモリ Wiki にはまだデータがありません",
       emptyWikiHint:
         "現在、このwikiには主に生のソースインポートと運用レポートのみが含まれています。統合・エンティティ・概念が書き込まれ始めると、このタブが役立つようになります。",
       claims: "主張",
@@ -3936,7 +3937,7 @@ export const ja_JP: TranslationMap = {
       tidyingKnowledgeGraph: "ナレッジグラフを整頓中…",
       replayingConversations: "今日の会話を再生中…",
       weavingShortTerm: "短期記憶を長期記憶に織り込み中…",
-      defragmentingMemoryLane: "記憶の小道をデフラグ中…",
+      defragmentingMemoryLane: "メモリレーンをデフラグ中…",
       filingLooseThoughts: "散らばった思考を整理中…",
       connectingDots: "離れた点をつなぎ合わせ中…",
       compostingContext: "古いコンテキストウィンドウを堆肥化中…",
@@ -5102,14 +5103,6 @@ export const ja_JP: TranslationMap = {
       dropOnEmptyRight: "{panel}を空の右サイドバーに移動",
       resize: "{panel}のサイズを変更",
     },
-    sidebarColumns: {
-      chat: "チャット",
-      discussion: "ディスカッション",
-      detail: "詳細",
-      close: "{panel}を閉じる",
-      drag: "{panel}をドラッグ",
-      resize: "{panel}のサイズを変更",
-    },
     thread: {
       search: "メッセージを検索",
       searchPlaceholder: "メッセージを検索...",
@@ -5166,11 +5159,11 @@ export const ja_JP: TranslationMap = {
         manageSkills: "Skills を管理",
         browseConnectors: "コネクタを参照",
         addMcpServer: "MCP サーバーを追加…",
-        addMcpServerTitle: "MCP サーバーを追加",
-        addMcpServerDescription: "サーバーを構成し、有効にする場所を選択します。",
-        scopeLabel: "利用可能な範囲",
+        addMcpServerTitle: "MCPサーバーを追加",
+        addMcpServerDescription: "サーバーを設定し、有効にする範囲を選択します。",
+        scopeLabel: "利用範囲",
         scopeSession: "このセッション",
-        scopeEverywhere: "すべての場所",
+        scopeEverywhere: "すべてのセッション",
         scopeSessionHint:
           "サーバーはグローバルでは無効として保存され、このセッションでのみ有効になります。",
         scopeEverywhereHint: "サーバーは保存され、すべてのセッションで有効になります。",
@@ -5179,8 +5172,8 @@ export const ja_JP: TranslationMap = {
           loading: "ツールを読み込み中…",
           loadFailed: "ツールを読み込めませんでした。",
           noTools: "このコネクターで利用できるツールはありません。",
-          summary: "{total} 個中 {enabled} 個のツールが有効",
-          summaryOne: "{total} 個中 {enabled} 個のツールが有効",
+          summary: "{total} 個中 {enabled} 個のツールがオン",
+          summaryOne: "{total} 個中 {enabled} 個のツールがオン",
         },
         enabledCount: "{count} 個有効",
         loadingSkills: "Skills を読み込み中…",

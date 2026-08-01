@@ -2309,8 +2309,8 @@ export const vi: TranslationMap = {
     nameInvalid: "Tên máy chủ chỉ dùng chữ cái, số, dấu chấm, dấu gạch ngang hoặc dấu gạch dưới.",
     targetInvalid: "Nhập URL cho các giao thức HTTP hoặc một dòng lệnh hợp lệ cho stdio.",
     sessionEnableFailed:
-      "Máy chủ đã được lưu ở trạng thái tắt trên toàn hệ thống, nhưng việc bật nó cho phiên này đã thất bại: {error}",
-    sessionChanged: "Phiên đang hoạt động đã thay đổi trước khi có thể được bật.",
+      "Máy chủ đã được lưu ở trạng thái tắt trên toàn hệ thống, nhưng không thể bật cho phiên này: {error}",
+    sessionChanged: "Phiên đang hoạt động đã thay đổi trước khi máy chủ có thể được bật.",
     sessionUnavailable: "Phiên đang hoạt động không khả dụng; hãy làm mới và thử lại.",
     nameTaken: "Đã tồn tại một máy chủ MCP có tên “{name}”.",
     missing: "Không tìm thấy máy chủ MCP “{name}” trong cấu hình.",
@@ -5076,14 +5076,6 @@ export const vi: TranslationMap = {
       dropOnEmptyRight: "Di chuyển {panel} sang thanh bên phải trống",
       resize: "Thay đổi kích thước {panel}",
     },
-    sidebarColumns: {
-      chat: "Trò chuyện",
-      discussion: "Thảo luận",
-      detail: "Chi tiết",
-      close: "Đóng {panel}",
-      drag: "Kéo {panel}",
-      resize: "Thay đổi kích thước {panel}",
-    },
     thread: {
       search: "Tìm kiếm tin nhắn",
       searchPlaceholder: "Tìm kiếm tin nhắn...",
@@ -5140,11 +5132,12 @@ export const vi: TranslationMap = {
         browseConnectors: "Duyệt trình kết nối",
         addMcpServer: "Thêm máy chủ MCP…",
         addMcpServerTitle: "Thêm máy chủ MCP",
-        addMcpServerDescription: "Cấu hình máy chủ và chọn nơi bật.",
-        scopeLabel: "Khả dụng",
+        addMcpServerDescription: "Định cấu hình máy chủ và chọn nơi bật máy chủ.",
+        scopeLabel: "Phạm vi khả dụng",
         scopeSession: "Phiên này",
         scopeEverywhere: "Mọi nơi",
-        scopeSessionHint: "Máy chủ được lưu ở trạng thái tắt toàn cục và chỉ bật cho phiên này.",
+        scopeSessionHint:
+          "Máy chủ được lưu ở trạng thái tắt trên toàn hệ thống và chỉ được bật cho phiên này.",
         scopeEverywhereHint: "Máy chủ được lưu và bật cho mọi phiên.",
         toolAccess: {
           label: "Quyền truy cập công cụ",

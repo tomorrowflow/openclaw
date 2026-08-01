@@ -2335,8 +2335,8 @@ export const it: TranslationMap = {
     nameInvalid: "I nomi dei server usano lettere, numeri, punti, trattini o trattini bassi.",
     targetInvalid: "Inserisci un URL per i trasporti HTTP o una riga di comando valida per stdio.",
     sessionEnableFailed:
-      "Il server è stato salvato come disabilitato globalmente, ma l'attivazione per questa sessione non è riuscita: {error}",
-    sessionChanged: "La sessione attiva è cambiata prima che potesse essere attivata.",
+      "Il server è stato salvato come disabilitato a livello globale, ma non è stato possibile abilitarlo per questa sessione: {error}",
+    sessionChanged: "La sessione attiva è cambiata prima che fosse possibile abilitarlo.",
     sessionUnavailable: "La sessione attiva non è disponibile; aggiorna e riprova.",
     nameTaken: "Esiste già un server MCP chiamato “{name}”.",
     missing: "Il server MCP “{name}” non è stato trovato nella configurazione.",
@@ -2508,7 +2508,7 @@ export const it: TranslationMap = {
       description:
         "Esattamente un plugin di memoria occupa lo slot memoria. Selezionando un motore lo si abilita e si disabilitano gli altri.",
       rowTitle: "Motore di memoria",
-      openClawMemory: "OpenClaw Memory",
+      openClawMemory: "Memoria OpenClaw",
       off: "Disattivato",
       unavailable: "Non disponibile",
       autoHint:
@@ -2833,9 +2833,9 @@ export const it: TranslationMap = {
         "Mantieni visibile una directory di strumenti limitata e rimanda il resto dietro la ricerca, così i grandi cataloghi MCP e plugin smettono di affollare il prompt.",
     },
     loopDetection: {
-      title: "Rilevamento loop degli strumenti",
+      title: "Rilevamento dei loop degli strumenti",
       description:
-        "Abilita le protezioni sulla cronologia progressiva che avvisano o bloccano le chiamate ripetute agli strumenti quando un agente smette di fare progressi.",
+        "Abilita controlli basati sulla cronologia recente che avvisano o bloccano le chiamate ripetute agli strumenti quando un agente smette di fare progressi.",
     },
     localModelLean: {
       title: "Strumenti essenziali per modelli locali",
@@ -3871,7 +3871,7 @@ export const it: TranslationMap = {
       loadingPage: "Caricamento della pagina wiki…",
       dreamsTab: "Sogni",
       insightsTab: "Insight importati",
-      wikiTab: "Memory Wiki",
+      wikiTab: "Wiki della memoria",
       dreamsExplainer:
         "Questo è il diario grezzo dei sogni che il sistema scrive mentre riproduce e consolida la memoria; usalo per esaminare ciò che il sistema di memoria sta notando e dove risulta ancora rumoroso o scarno.",
       insightsExplainer:
@@ -3892,8 +3892,8 @@ export const it: TranslationMap = {
       riskReasons: "Motivi di rischio:",
       labels: "Etichette:",
       openSourcePage: "Apri pagina di origine",
-      loadingWiki: "Caricamento della memory wiki…",
-      emptyWiki: "La memory wiki non è ancora popolata",
+      loadingWiki: "Caricamento della wiki della memoria…",
+      emptyWiki: "La wiki della memoria non contiene ancora dati",
       emptyWikiHint:
         "Al momento il wiki contiene principalmente importazioni di origine grezze e report operativi. Questa scheda diventa utile quando iniziano a essere scritte sintesi, entità o concetti.",
       claims: "Affermazioni",
@@ -3971,7 +3971,7 @@ export const it: TranslationMap = {
       tidyingKnowledgeGraph: "riordino del grafo della conoscenza…",
       replayingConversations: "replay delle conversazioni di oggi…",
       weavingShortTerm: "intreccio del breve termine nel lungo termine…",
-      defragmentingMemoryLane: "deframmentazione dei ricordi…",
+      defragmentingMemoryLane: "deframmentazione del viale dei ricordi…",
       filingLooseThoughts: "archiviazione dei pensieri sparsi…",
       connectingDots: "collegamento di punti lontani…",
       compostingContext: "compostaggio delle vecchie finestre di contesto…",
@@ -5144,14 +5144,6 @@ export const it: TranslationMap = {
       dropOnEmptyRight: "Sposta {panel} nella barra laterale destra vuota",
       resize: "Ridimensiona {panel}",
     },
-    sidebarColumns: {
-      chat: "Chat",
-      discussion: "Discussione",
-      detail: "Dettagli",
-      close: "Chiudi {panel}",
-      drag: "Trascina {panel}",
-      resize: "Ridimensiona {panel}",
-    },
     thread: {
       search: "Cerca messaggi",
       searchPlaceholder: "Cerca messaggi...",
@@ -5215,15 +5207,15 @@ export const it: TranslationMap = {
         scopeSession: "Questa sessione",
         scopeEverywhere: "Ovunque",
         scopeSessionHint:
-          "Il server viene salvato disabilitato a livello globale e abilitato solo per questa sessione.",
+          "Il server viene salvato come disabilitato a livello globale e abilitato solo per questa sessione.",
         scopeEverywhereHint: "Il server viene salvato e abilitato per ogni sessione.",
         toolAccess: {
           label: "Accesso agli strumenti",
-          loading: "Caricamento strumenti…",
+          loading: "Caricamento degli strumenti…",
           loadFailed: "Impossibile caricare gli strumenti.",
           noTools: "Nessuno strumento disponibile per questo connettore.",
-          summary: "{enabled} di {total} strumenti attivi",
-          summaryOne: "{enabled} di {total} strumento attivo",
+          summary: "{enabled} strumenti su {total} attivi",
+          summaryOne: "{enabled} strumento su {total} attivo",
         },
         enabledCount: "{count} attivi",
         loadingSkills: "Caricamento skill…",

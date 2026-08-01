@@ -96,6 +96,11 @@ export function mergeOverrides(
   workspaceOverrides: unknown,
   pnpmLockOverrides: unknown,
 ): unknown;
+export function resolvePnpmLockOverridePlan(lockfile: unknown): {
+  conflictingPackageNames: string[];
+  scopedVersionOverrides: unknown;
+  versionOverrides: Record<string, string>;
+};
 export function applyPackageExtensionPeerMetadata(
   lockfile: unknown,
   packageExtensions?: unknown,
@@ -119,6 +124,7 @@ export function parseLockPackagePath(lockPath: unknown): {
   name: unknown;
   path: string;
 }[];
+export function readNpmLockOverrides(): unknown;
 export function readShrinkwrapOverrides(): unknown;
 export function shouldUseLegacyPeerDepsForShrinkwrap(
   packageJson: unknown,
@@ -128,13 +134,18 @@ export function shrinkwrapPackageDirsForChangedPaths(changedPaths: string[]): st
 export function collectCurrentShrinkwrapOverrides(
   shrinkwrap: unknown,
   packageExtensions?: unknown,
+  pnpmLockPackages?: Set<unknown>,
 ): unknown;
 export function packageDependencyInputsChanged(
   packageDir: string,
   packageJson: unknown,
   packageLockPath?: string,
 ): boolean;
-export function restoreCurrentPnpmLockedPackages(tempDir: string): void;
+export function restoreCurrentPnpmLockedPackages(
+  generated: unknown,
+  current: unknown,
+  pnpmLockPackages?: Set<unknown>,
+): unknown;
 /** Stage npm-shrinkwrap.json as package-lock.json for npm 12. */
 export function stageShrinkwrapAsPackageLock(tempDir: string): boolean;
 /** Promote generated package-lock.json back to npm-shrinkwrap.json. */

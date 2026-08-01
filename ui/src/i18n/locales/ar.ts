@@ -2442,7 +2442,7 @@ export const ar: TranslationMap = {
       title: "المحرك",
       description: "إضافة ذاكرة واحدة فقط تملك خانة الذاكرة. اختيار محرك يُفعّله ويعطّل الآخرين.",
       rowTitle: "محرك الذاكرة",
-      openClawMemory: "OpenClaw Memory",
+      openClawMemory: "ذاكرة OpenClaw",
       off: "إيقاف",
       unavailable: "غير متاح",
       autoHint: "لا يوجد محرك مثبّت في الإعدادات، لذا تعود الخانة إلى مالكها الافتراضي.",
@@ -2742,7 +2742,7 @@ export const ar: TranslationMap = {
     loopDetection: {
       title: "اكتشاف حلقات الأدوات",
       description:
-        "فعّل حراس السجل المتجدد الذين يحذّرون أو يحظرون استدعاءات الأدوات المتكررة عندما يتوقف الوكيل عن إحراز تقدّم.",
+        "فعّل وسائل حماية تعتمد على السجل المتجدد لتحذير المستخدم من استدعاءات الأدوات المتكررة أو حظرها عندما يتوقف الوكيل عن إحراز تقدم.",
     },
     localModelLean: {
       title: "أدوات مبسّطة للنماذج المحلية",
@@ -3788,7 +3788,7 @@ export const ar: TranslationMap = {
       labels: "التسميات:",
       openSourcePage: "فتح صفحة المصدر",
       loadingWiki: "جارٍ تحميل ويكي الذاكرة…",
-      emptyWiki: "لم تُملأ ويكي الذاكرة بعد",
+      emptyWiki: "لم تتم تعبئة ويكي الذاكرة بعد",
       emptyWikiHint:
         "تحتوي الويكي حاليًا في الغالب على عمليات استيراد المصادر الخام والتقارير التشغيلية. ستصبح علامة التبويب هذه مفيدة بمجرد البدء في كتابة التوليفات أو الكيانات أو المفاهيم.",
       claims: "الادعاءات",
@@ -3865,7 +3865,7 @@ export const ar: TranslationMap = {
       tidyingKnowledgeGraph: "جارٍ ترتيب الرسم البياني للمعرفة…",
       replayingConversations: "جارٍ إعادة تشغيل محادثات اليوم…",
       weavingShortTerm: "جارٍ نسج قصير الأجل في طويل الأجل…",
-      defragmentingMemoryLane: "جارٍ إلغاء تجزئة مسار الذاكرة…",
+      defragmentingMemoryLane: "إلغاء تجزئة مسار الذاكرة…",
       filingLooseThoughts: "جارٍ أرشفة الأفكار المتناثرة…",
       connectingDots: "جارٍ وصل النقاط البعيدة…",
       compostingContext: "جارٍ تدوير نوافذ السياق القديمة…",
@@ -5011,14 +5011,6 @@ export const ar: TranslationMap = {
       dropOnEmptyRight: "نقل {panel} إلى الشريط الجانبي الأيمن الفارغ",
       resize: "تغيير حجم {panel}",
     },
-    sidebarColumns: {
-      chat: "المحادثة",
-      discussion: "المناقشة",
-      detail: "التفاصيل",
-      close: "إغلاق {panel}",
-      drag: "سحب {panel}",
-      resize: "تغيير حجم {panel}",
-    },
     thread: {
       search: "البحث في الرسائل",
       searchPlaceholder: "البحث في الرسائل...",
@@ -5085,9 +5077,9 @@ export const ar: TranslationMap = {
           label: "الوصول إلى الأدوات",
           loading: "جارٍ تحميل الأدوات…",
           loadFailed: "تعذّر تحميل الأدوات.",
-          noTools: "لا توجد أدوات متاحة لهذا الموصّل.",
-          summary: "{enabled} من {total} أداة مفعّلة",
-          summaryOne: "{enabled} من {total} أداة مفعّلة",
+          noTools: "لا تتوفر أدوات لهذا الموصّل.",
+          summary: "{enabled} من أصل {total} من الأدوات مفعّلة",
+          summaryOne: "{enabled} من أصل {total} من الأدوات مفعّلة",
         },
         enabledCount: "{count} مُفعَّل",
         loadingSkills: "جارٍ تحميل المهارات…",

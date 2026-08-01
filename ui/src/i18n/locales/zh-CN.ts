@@ -637,7 +637,7 @@ export const zh_CN: TranslationMap = {
     incognito: "隐身",
     incognitoDescription: "仅在 Gateway 重启前保留此会话",
     draft: "草稿",
-    draftDescription: "在发布之前，将此话题保留给自己",
+    draftDescription: "在发布之前，仅你自己可见此会话",
     messagePlaceholder: "此会话应处理什么？",
     readingAttachment: "正在读取附件",
     start: "启动会话",
@@ -773,7 +773,7 @@ export const zh_CN: TranslationMap = {
     runErrorTimedOut: "已超时",
     runErrorUnknown: "未知错误",
     attentionRequired: "会话需要关注",
-    openSession: "打开话题",
+    openSession: "打开对话",
     model: "模型",
     provider: "提供商",
     runtime: "运行时",
@@ -2683,7 +2683,8 @@ export const zh_CN: TranslationMap = {
     },
     loopDetection: {
       title: "工具循环检测",
-      description: "启用滚动历史保护，当代理停止取得进展时，对重复的工具调用发出警告或加以阻止。",
+      description:
+        "启用滚动历史防护机制，在智能体停止取得进展时，对重复的工具调用发出警告或进行阻止。",
     },
     localModelLean: {
       title: "为本地模型精简工具",
@@ -3697,7 +3698,7 @@ export const zh_CN: TranslationMap = {
       loadingPage: "正在加载 wiki 页面…",
       dreamsTab: "梦境",
       insightsTab: "已导入的洞察",
-      wikiTab: "记忆维基",
+      wikiTab: "记忆 Wiki",
       dreamsExplainer:
         "这是系统在回放和整合记忆时所写的原始梦境日记；用它来检查记忆系统正在注意到什么，以及哪些地方仍然显得杂乱或稀疏。",
       insightsExplainer:
@@ -3717,8 +3718,8 @@ export const zh_CN: TranslationMap = {
       riskReasons: "风险原因：",
       labels: "标签：",
       openSourcePage: "打开源页面",
-      loadingWiki: "正在加载记忆维基…",
-      emptyWiki: "记忆维基尚未填充内容",
+      loadingWiki: "正在加载记忆 Wiki…",
+      emptyWiki: "记忆 Wiki 尚无内容",
       emptyWikiHint:
         "目前 wiki 中主要是原始来源导入和运行报告。一旦开始编写综合内容、实体或概念，此选项卡才会变得有用。",
       claims: "主张",
@@ -4675,7 +4676,7 @@ export const zh_CN: TranslationMap = {
       noSessionsForAgent: "未找到此代理的会话",
       catalogViewOptions: "视图选项",
       catalogGroupByProject: "项目",
-      catalogGroupByPerson: "人员",
+      catalogGroupByPerson: "联系人",
       openSessionMenu: "Open session menu",
       sortBy: "排序方式",
       sortCreated: "创建时间",
@@ -4916,14 +4917,6 @@ export const zh_CN: TranslationMap = {
       drag: "拖动{panel}",
       dropOnEmptyLeft: "将{panel}移动到空的左侧边栏",
       dropOnEmptyRight: "将{panel}移动到空的右侧边栏",
-      resize: "调整{panel}大小",
-    },
-    sidebarColumns: {
-      chat: "聊天",
-      discussion: "讨论",
-      detail: "详情",
-      close: "关闭{panel}",
-      drag: "拖动{panel}",
       resize: "调整{panel}的大小",
     },
     thread: {

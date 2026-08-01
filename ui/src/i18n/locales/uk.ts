@@ -683,7 +683,7 @@ export const uk: TranslationMap = {
     incognito: "Інкогніто",
     incognitoDescription: "Зберігати цей потік лише до перезапуску Gateway",
     draft: "Чернетка",
-    draftDescription: "Тримайте цю гілку для себе, доки не опублікуєте її",
+    draftDescription: "Зберігайте цю гілку приватною, доки не опублікуєте її",
     messagePlaceholder: "Над чим має працювати цей сеанс?",
     readingAttachment: "Читання вкладення",
     start: "Почати сеанс",
@@ -5095,14 +5095,6 @@ export const uk: TranslationMap = {
       drag: "Перетягнути {panel}",
       dropOnEmptyLeft: "Перемістити {panel} на порожню ліву бічну панель",
       dropOnEmptyRight: "Перемістити {panel} на порожню праву бічну панель",
-      resize: "Змінити розмір {panel}",
-    },
-    sidebarColumns: {
-      chat: "Чат",
-      discussion: "Обговорення",
-      detail: "Деталі",
-      close: "Закрити {panel}",
-      drag: "Перетягнути {panel}",
       resize: "Змінити розмір {panel}",
     },
     thread: {

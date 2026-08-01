@@ -3997,7 +3997,7 @@ heartbeat_elapsed="\${BASH_REMATCH[1]}"
       "use_default_service_identity() {",
       "local account_home",
       'account_home="$(getent passwd "$(id -u)" | cut -d: -f6)"',
-      "test -n \"$account_home\"",
+      'test -n "$account_home"',
       'export HOME="$account_home"',
       'export USERPROFILE="$account_home"',
       "unset OPENCLAW_HOME OPENCLAW_STATE_DIR OPENCLAW_CONFIG_PATH",

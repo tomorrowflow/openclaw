@@ -2311,8 +2311,8 @@ export const tr: TranslationMap = {
     nameInvalid: "Sunucu adları harf, rakam, nokta, tire veya alt çizgi kullanır.",
     targetInvalid: "HTTP aktarımları için bir URL veya stdio için geçerli bir komut satırı girin.",
     sessionEnableFailed:
-      "Sunucu global olarak devre dışı kaydedildi, ancak bu oturum için etkinleştirilmesi başarısız oldu: {error}",
-    sessionChanged: "Etkin oturum, etkinleştirilmeden önce değişti.",
+      "Sunucu genel olarak devre dışı biçimde kaydedildi ancak bu oturum için etkinleştirilemedi: {error}",
+    sessionChanged: "Etkinleştirilemeden önce etkin oturum değişti.",
     sessionUnavailable: "Etkin oturum kullanılamıyor; yenileyip tekrar deneyin.",
     nameTaken: "“{name}” adlı bir MCP sunucusu zaten var.",
     missing: "MCP sunucusu “{name}” yapılandırmada bulunamadı.",
@@ -2482,7 +2482,7 @@ export const tr: TranslationMap = {
       description:
         "Bellek yuvasına tam olarak bir bellek eklentisi sahip olur. Bir motor seçmek onu etkinleştirir ve diğerlerini devre dışı bırakır.",
       rowTitle: "Bellek motoru",
-      openClawMemory: "OpenClaw Memory",
+      openClawMemory: "OpenClaw Belleği",
       off: "Kapalı",
       unavailable: "Kullanılamıyor",
       autoHint:
@@ -2806,7 +2806,7 @@ export const tr: TranslationMap = {
     loopDetection: {
       title: "Araç döngüsü algılama",
       description:
-        "Bir aracı ilerleme kaydetmeyi bıraktığında tekrarlanan araç çağrılarını uyaran veya engelleyen ilerleyen geçmiş korumalarını etkinleştirin.",
+        "Bir aracı ilerleme kaydetmeyi bıraktığında tekrarlanan araç çağrıları için uyarı veren veya bunları engelleyen hareketli geçmiş korumalarını etkinleştirin.",
     },
     localModelLean: {
       title: "Yerel modeller için sade araçlar",
@@ -3935,7 +3935,7 @@ export const tr: TranslationMap = {
       tidyingKnowledgeGraph: "bilgi grafiği düzenleniyor…",
       replayingConversations: "bugünün konuşmaları yeniden oynatılıyor…",
       weavingShortTerm: "kısa vadeli hafıza uzun vadeli hafızaya işleniyor…",
-      defragmentingMemoryLane: "bellek yolu birleştiriliyor…",
+      defragmentingMemoryLane: "anı yolu birleştiriliyor…",
       filingLooseThoughts: "dağınık düşünceler dosyalanıyor…",
       connectingDots: "uzaktaki noktalar birleştiriliyor…",
       compostingContext: "eski bağlam pencereleri kompost ediliyor…",
@@ -5098,16 +5098,6 @@ export const tr: TranslationMap = {
       dropOnEmptyRight: "{panel} panelini boş sağ kenar çubuğuna taşı",
       resize: "{panel} panelini yeniden boyutlandır",
     },
-    sidebarColumns: {
-      chat: "Sohbet",
-      discussion: "Tartışma",
-      detail: "Ayrıntılar",
-      close: "{panel} panelini kapat",
-      drag: "{panel} panelini sürükle",
-      dropOnEmptyLeft: "{panel} panelini boş sol kenar çubuğuna taşı",
-      dropOnEmptyRight: "{panel} panelini boş sağ kenar çubuğuna taşı",
-      resize: "{panel} panelini yeniden boyutlandır",
-    },
     thread: {
       search: "Mesajlarda ara",
       searchPlaceholder: "Mesajlarda ara...",
@@ -5170,8 +5160,8 @@ export const tr: TranslationMap = {
         scopeSession: "Bu oturum",
         scopeEverywhere: "Her yerde",
         scopeSessionHint:
-          "Sunucu genel olarak devre dışı kaydedilir ve yalnızca bu oturum için etkinleştirilir.",
-        scopeEverywhereHint: "Sunucu kaydedilir ve her oturum için etkinleştirilir.",
+          "Sunucu genel olarak devre dışı biçimde kaydedilir ve yalnızca bu oturum için etkinleştirilir.",
+        scopeEverywhereHint: "Sunucu her oturum için kaydedilir ve etkinleştirilir.",
         toolAccess: {
           label: "Araç erişimi",
           loading: "Araçlar yükleniyor…",

@@ -2334,9 +2334,10 @@ export const es: TranslationMap = {
     targetInvalid:
       "Introduce una URL para transportes HTTP o una línea de comandos válida para stdio.",
     sessionEnableFailed:
-      "El servidor se guardó deshabilitado globalmente, pero no se pudo habilitar para esta sesión: {error}",
-    sessionChanged: "La sesión activa cambió antes de que pudiera habilitarse.",
-    sessionUnavailable: "La sesión activa no está disponible; actualiza e inténtalo de nuevo.",
+      "El servidor se guardó como deshabilitado globalmente, pero no se pudo habilitar para esta sesión: {error}",
+    sessionChanged: "La sesión activa cambió antes de que se pudiera habilitar.",
+    sessionUnavailable:
+      "La sesión activa no está disponible; actualiza la página e inténtalo de nuevo.",
     nameTaken: "Ya existe un servidor MCP llamado “{name}”.",
     missing: "No se encontró el servidor MCP “{name}” en la configuración.",
     missingTransport: "falta el transporte",
@@ -2508,7 +2509,7 @@ export const es: TranslationMap = {
       description:
         "Exactamente un plugin de memoria posee el espacio de memoria. Seleccionar un motor lo activa y desactiva los demás.",
       rowTitle: "Motor de memoria",
-      openClawMemory: "OpenClaw Memory",
+      openClawMemory: "Memoria de OpenClaw",
       off: "Desactivada",
       unavailable: "No disponible",
       autoHint:
@@ -2835,7 +2836,7 @@ export const es: TranslationMap = {
     loopDetection: {
       title: "Detección de bucles de herramientas",
       description:
-        "Habilita las protecciones de historial continuo que advierten o bloquean llamadas repetidas a herramientas cuando un agente deja de avanzar.",
+        "Activa protecciones de historial continuo que avisan o bloquean las llamadas repetidas a herramientas cuando un agente deja de avanzar.",
     },
     localModelLean: {
       title: "Herramientas ligeras para modelos locales",
@@ -3973,7 +3974,7 @@ export const es: TranslationMap = {
       tidyingKnowledgeGraph: "ordenando el grafo de conocimiento…",
       replayingConversations: "reproduciendo las conversaciones de hoy…",
       weavingShortTerm: "entretejiendo el corto plazo con el largo plazo…",
-      defragmentingMemoryLane: "desfragmentando el pasillo de la memoria…",
+      defragmentingMemoryLane: "desfragmentando la memoria…",
       filingLooseThoughts: "archivando pensamientos sueltos…",
       connectingDots: "conectando puntos distantes…",
       compostingContext: "convirtiendo en compost las ventanas de contexto antiguas…",
@@ -4894,7 +4895,7 @@ export const es: TranslationMap = {
       groups: "Grupos",
       coding: "Programación",
       noSessionsForAgent: "No se encontraron sesiones para este agente",
-      catalogViewOptions: "Opciones de vista",
+      catalogViewOptions: "Opciones de visualización",
       catalogGroupByProject: "Proyecto",
       catalogGroupByPerson: "Persona",
       openSessionMenu: "Open session menu",
@@ -5142,14 +5143,6 @@ export const es: TranslationMap = {
       drag: "Arrastrar {panel}",
       dropOnEmptyLeft: "Mover {panel} a la barra lateral izquierda vacía",
       dropOnEmptyRight: "Mover {panel} a la barra lateral derecha vacía",
-      resize: "Redimensionar {panel}",
-    },
-    sidebarColumns: {
-      chat: "Chat",
-      discussion: "Debate",
-      detail: "Detalles",
-      close: "Cerrar {panel}",
-      drag: "Arrastrar {panel}",
       resize: "Cambiar el tamaño de {panel}",
     },
     thread: {
@@ -5215,7 +5208,7 @@ export const es: TranslationMap = {
         scopeSession: "Esta sesión",
         scopeEverywhere: "En todas partes",
         scopeSessionHint:
-          "El servidor se guarda deshabilitado globalmente y solo se habilita para esta sesión.",
+          "El servidor se guarda como deshabilitado globalmente y se habilita solo para esta sesión.",
         scopeEverywhereHint: "El servidor se guarda y se habilita para todas las sesiones.",
         toolAccess: {
           label: "Acceso a herramientas",

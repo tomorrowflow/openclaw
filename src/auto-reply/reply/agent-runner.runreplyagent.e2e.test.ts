@@ -6,7 +6,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { SessionWriteLockStaleError } from "../../agents/session-write-lock-error.js";
 import { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } from "../../config/config.js";
-import { SessionWriteLockStaleError } from "../../agents/session-write-lock-error.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import {
   applySessionEntryLifecycleMutation,
