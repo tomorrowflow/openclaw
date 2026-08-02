@@ -25,7 +25,7 @@ stripTrailingPartialFinalTag | src/agents/embedded-agent-helpers/sanitize-user-f
 closedOnly | packages/markdown-core/src/code-spans.ts | Code-span closedOnly option (partial tag support)
 
 # --- Sandbox ---
-resolveEmbeddedRunSkillsPrompt | src/agents/embedded-agent-runner/sandbox-skills.ts | Sandbox skill prompt rebuild from in-container paths (shared helper; fixes host-path SKILL.md leak incl. rw sandboxes)
+mapSandboxSkillEntriesForPrompt | src/agents/embedded-agent-runner/sandbox-skills.ts | Sandbox skill prompt rebuild from in-container paths (upstreamed 2026.7.2; fixes host-path SKILL.md leak incl. rw sandboxes)
 mapSandboxSkillEntriesForPrompt | src/agents/embedded-agent-runner/run/attempt-startup.ts | Sandbox skill prompt rebuild wired into attempt runner (upstreamed 2026.7.2; prepareEmbeddedAttemptSkills now builds skillsPrompt itself, attempt.ts just consumes it)
 mapSandboxSkillEntriesForPrompt | src/agents/embedded-agent-runner/prepared-compaction-runtime.ts | Sandbox skill prompt rebuild wired into compaction runner (upstreamed 2026.7.2; compact.ts is now a thin facade)
 # Private-network navigation in the sandbox browser is NO LONGER a code patch.
