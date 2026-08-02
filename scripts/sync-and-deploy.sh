@@ -170,12 +170,45 @@ else
 fi
 $OC_SYSTEMCTL daemon-reload
 
-# Validate config + run doctor. --non-interactive applies safe migrations only
-# and never prompts (a destructive config change would otherwise block here
-# waiting for confirmation). Runs against the still-live gateway; the cutover
-# restart below picks up any migrated config.
-sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw config validate 2>&1 || true
+# Run doctor first so its safe migrations land before the preflight judges the
+# config. --non-interactive applies safe migrations only and never prompts (a
+# destructive config change would otherwise block here waiting for
+# confirmation). Best-effort: doctor reports some invalid configs without
+# repairing them, so the gate below — not doctor's exit code — is the authority.
 sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw doctor --fix --non-interactive 2>&1 || true
+
+# Config preflight — the last gate before the gateway is stopped.
+#
+# The new build validates config at startup and exits 78/CONFIG when it fails,
+# so cutting over with an invalid config kills a working gateway and leaves it
+# down. This is a real upgrade hazard, not a hypothetical: a key core still
+# writes and reads can be rejected by a newer channel plugin's manifest schema
+# (openclaw/openclaw#117965), and `doctor --fix` reports that case without
+# repairing it.
+#
+# Fail here, while the old gateway is still serving. GATEWAY_TOUCHED is still 0,
+# so the EXIT trap skips restore_gateway_if_down, and the failure alert can
+# still route through the live gateway — a post-cutover failure cannot alert,
+# because the gateway it sends through is the one that is down.
+STAGE="deploy: config preflight (gateway still up)"
+if ! sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw config validate 2>&1; then
+  echo ""
+  echo "  ✗ Config is invalid for the newly installed build — skipping cutover."
+  echo "    The gateway keeps running the previous version and stays up."
+  echo ""
+  echo "    NOTE: the running process is the only thing still serving. The new"
+  echo "    dist is already installed, so a restart, crash, or reboot starts the"
+  echo "    new build and fails with 78/CONFIG. Treat this as urgent."
+  echo ""
+  echo "    The doctor run above may itself have migrated the config into the"
+  echo "    invalid shape; compare against its backup before hand-editing:"
+  echo "      ls -t /home/openclaw/.openclaw/openclaw.json*.bak | head -1"
+  echo ""
+  echo "    Then repair, confirm, and restart:"
+  echo "      sudo -u openclaw openclaw config validate"
+  echo "      systemctl --user restart openclaw-gateway.service"
+  exit 1
+fi
 
 # ── Cutover ────────────────────────────────────────────────────────────────
 # Everything above kept the old gateway serving. From here we swap to the new
