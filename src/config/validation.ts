@@ -29,6 +29,7 @@ import {
   tryGetLegacyDefaultAgentId,
 } from "./legacy.default-agent-owner.js";
 import { materializeLegacyDefaultAgentRoles } from "./legacy.default-agent-roles.js";
+import { resolveChannelSchemaWithCoreOwnedKeys } from "./channel-schema-core-keys.js";
 import { migratePersistedImplicitMainRoster } from "./legacy.roster.js";
 import { materializeRuntimeConfig } from "./materialize.js";
 import type { ConfigValidationIssue, OpenClawConfig } from "./types.js";
@@ -366,7 +367,9 @@ function validateConfigObjectWithPluginsBase(
         const current = info.channelSchemas.get(entry.id);
         if (entry.configSchema) {
           info.channelSchemas.set(entry.id, {
-            schema: entry.configSchema,
+            // Widen once here, not per validation call, so the AJV cache key
+            // below keeps mapping to exactly one schema per channel.
+            schema: resolveChannelSchemaWithCoreOwnedKeys(entry.configSchema),
             pluginId: entry.schemaPluginOrigin === "bundled" ? undefined : entry.schemaPluginId,
             origin: entry.schemaPluginOrigin,
           });
