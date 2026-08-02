@@ -9,8 +9,8 @@ import { resolveSkillsPrompt } from "../../skills/loading/workspace-skill-prompt
 import { resolveEmbeddedRunSkillEntries } from "../../skills/runtime/embedded-run-entries.js";
 import type { SkillSnapshot } from "../../skills/types.js";
 import {
+  mapSandboxSkillEntriesForPrompt,
   mapSandboxSkillUsagePaths,
-  resolveEmbeddedRunSkillsPrompt,
   resolveSandboxSkillRuntimeInputs,
 } from "./sandbox-skills.js";
 
@@ -179,14 +179,21 @@ describe("resolveSandboxSkillRuntimeInputs", () => {
         skillsSnapshot: skillsSnapshotForRun,
         workspaceOnly,
       });
-      const prompt = resolveEmbeddedRunSkillsPrompt({
-        agentId: "main",
-        config: {} as OpenClawConfig,
+      // Mirrors the production composition in prepareEmbeddedAttemptSkills and
+      // prepared-compaction-runtime: remap entries to container paths, then
+      // build the prompt against the in-container workspace.
+      const promptSkillEntries = mapSandboxSkillEntriesForPrompt({
         entries: shouldLoadSkillEntries ? skillEntries : undefined,
-        eligibility: skillsEligibilityForRun,
-        skillsPromptWorkspaceDir,
-        skillsSnapshot: skillsSnapshotForRun,
         skillsWorkspaceDir,
+        skillsPromptWorkspaceDir,
+      });
+      const prompt = resolveSkillsPromptForRun({
+        skillsSnapshot: skillsSnapshotForRun,
+        entries: promptSkillEntries,
+        config: {} as OpenClawConfig,
+        agentId: "main",
+        workspaceDir: skillsPromptWorkspaceDir,
+        eligibility: skillsEligibilityForRun,
       });
 
       if (skillsSnapshot === snapshot) {
