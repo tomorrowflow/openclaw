@@ -57,7 +57,7 @@ enablePositionalOptions | src/cli/gateway-cli/register.ts | Positional options f
 deviceId | src/cli/devices-cli.ts | Device ID display in devices list
 
 # --- Ollama (provider compat patches) ---
-ensureArgsString | extensions/ollama/src/stream.ts | OpenAI-compat tool_call arguments kept as string (fixes ollama 400 "cannot unmarshal object ... arguments of type string" on tool-call replay; e.g. glm-5.2:cloud)
+ensureArgsString | extensions/ollama/src/stream.runtime.ts | OpenAI-compat tool_call arguments kept as string (fixes ollama 400 "cannot unmarshal object ... arguments of type string" on tool-call replay; e.g. glm-5.2:cloud)
 
 # --- Deploy (root package.json fork scripts) ---
 # Dropped whenever the rebase takes upstream's root package.json wholesale; the
