@@ -26,7 +26,6 @@ import {
   buildReleaseCandidateState,
   buildPublishCommand,
   buildTelegramArtifactInputs,
-  assertPlannedReleaseTagIsAbsent,
   candidateCumulativeShippedPullRequests,
   candidateParallelsArgs,
   candidateParallelsShellCommand,
@@ -564,10 +563,7 @@ describe("release candidate checklist", () => {
     const options = parseArgs(["--tag", "v2026.7.1-beta.4", "--target-sha", "a".repeat(40)]);
 
     expect(options.targetSha).toBe("a".repeat(40));
-    expect(() => assertPlannedReleaseTagIsAbsent("v2026.7.1-beta.4", () => true)).toThrow(
-      "already exists",
-    );
-    expect(() => assertPlannedReleaseTagIsAbsent("v2026.7.1-beta.4", () => false)).not.toThrow();
+    expect(releaseBranchForTag("v2026.7.1-beta.4")).toBe("release/2026.7.1");
     expect(() => parseArgs(["--tag", "v2026.7.1-beta.4", "--target-sha", "not-a-sha"])).toThrow(
       "--target-sha must be a full lowercase commit SHA",
     );
