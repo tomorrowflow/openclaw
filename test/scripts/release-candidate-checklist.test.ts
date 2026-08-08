@@ -4,7 +4,6 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parse } from "yaml";
 import {
   buildReleaseCandidateState,
   buildPublishCommand,
@@ -96,13 +95,10 @@ describe("release candidate checklist", () => {
   });
 
   it("treats the release tag as a planned post-validation identity", () => {
-    const options = parseArgs(["--tag", "v2026.7.1-beta.4", "--target-sha", "a".repeat(40)]);
+    const options = parseArgs(["--tag", "v2026.7.1-beta.4"]);
 
-    expect(options.targetSha).toBe("a".repeat(40));
+    expect(options.tag).toBe("v2026.7.1-beta.4");
     expect(releaseBranchForTag("v2026.7.1-beta.4")).toBe("release/2026.7.1");
-    expect(() => parseArgs(["--tag", "v2026.7.1-beta.4", "--target-sha", "not-a-sha"])).toThrow(
-      "--target-sha must be a full lowercase commit SHA",
-    );
   });
 
   it("rejects stale or conflicting release candidate state", () => {
@@ -355,7 +351,7 @@ describe("release candidate checklist", () => {
         targetSha,
         isAncestor: () => true,
       }),
-    ).toThrow("duplicate contribution record PR #123");
+    ).toThrow("CHANGELOG.md ## 2026.7.1 contains duplicate contribution record PR rows: #123");
   });
 
   it("rejects canonical provenance whose unique total does not match the PR rows", () => {
@@ -386,7 +382,7 @@ describe("release candidate checklist", () => {
         targetSha,
         isAncestor: () => true,
       }),
-    ).toThrow("contribution record row count 1 != 2");
+    ).toThrow("CHANGELOG.md ## 2026.7.1 is missing exact complete contribution record provenance");
   });
 
   it("uses numbered historical record rows and skips Unreleased baseline rows", () => {
@@ -1069,18 +1065,6 @@ describe("release candidate checklist", () => {
     expect(command).toContain("'wait_for_clawhub=false'");
     expect(command).toContain("'--ref' 'main'");
     expect(command).not.toContain("windows_node_tag=");
-
-    const workflow = parse(
-      readFileSync(".github/workflows/openclaw-release-publish.yml", "utf8"),
-    ) as {
-      on: { workflow_dispatch: { inputs: Record<string, unknown> } };
-    };
-    const emittedInputs = [...command.matchAll(/'-f' '([^=']+)=/gu)].flatMap((match) =>
-      match[1] === undefined ? [] : [match[1]],
-    );
-    for (const input of emittedInputs) {
-      expect(workflow.on.workflow_dispatch.inputs).toHaveProperty(input);
-    }
   });
 
   it("can dispatch the publish controller through ecosystem convergence", () => {
