@@ -1,0 +1,12 @@
+{
+  "name": "@openclaw/comfy-provider",
+  "version": "2026.8.1-beta.1",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "@openclaw/comfy-provider",
+      "version": "2026.8.1-beta.1"
+    }
+  }
+}
