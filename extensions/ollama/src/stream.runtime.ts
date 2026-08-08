@@ -12,6 +12,7 @@ import type {
   Usage,
 } from "openclaw/plugin-sdk/llm";
 import { createAssistantMessageEventStream } from "openclaw/plugin-sdk/llm";
+import { streamSimple } from "openclaw/plugin-sdk/llm";
 import type {
   ProviderRuntimeModel,
   ProviderWrapStreamFnContext,
@@ -19,6 +20,7 @@ import type {
 import { isNonSecretApiKeyMarker } from "openclaw/plugin-sdk/provider-auth";
 import { readResponseTextLimited } from "openclaw/plugin-sdk/provider-http";
 import { createPlainTextToolCallCompatWrapper } from "openclaw/plugin-sdk/provider-stream-shared";
+import { streamWithPayloadPatch } from "openclaw/plugin-sdk/provider-stream-shared";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { isRecord, readStringValue } from "openclaw/plugin-sdk/string-coerce-runtime";

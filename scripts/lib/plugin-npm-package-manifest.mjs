@@ -470,7 +470,6 @@ function installPackageLocalBundledDependencies(params) {
 
   console.error(`[plugin-npm-publish] installing bundled dependencies for ${params.pluginDir}`);
   const packageJsonPath = resolvePackageJsonPath(params.packageDir);
-  const packageLockPath = path.join(params.packageDir, "package-lock.json");
   const shrinkwrapPath = path.join(params.packageDir, "npm-shrinkwrap.json");
   const originalPackageLock = fs.existsSync(packageLockPath)
     ? fs.readFileSync(packageLockPath)

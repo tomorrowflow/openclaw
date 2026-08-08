@@ -1,21 +1,21 @@
 {
   "name": "@openclaw/tlon",
-  "version": "2026.7.2-beta.7",
+  "version": "2026.8.1-beta.1",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@openclaw/tlon",
-      "version": "2026.7.2-beta.7",
+      "version": "2026.8.1-beta.1",
       "dependencies": {
         "@aws-sdk/client-s3": "3.1095.0",
         "@aws-sdk/s3-request-presigner": "3.1095.0",
-        "@tloncorp/tlon-skill": "0.4.4",
+        "@tloncorp/tlon-skill": "0.4.5",
         "@urbit/aura": "3.0.0",
         "zod": "4.4.3"
       },
       "peerDependencies": {
-        "openclaw": ">=2026.7.2-beta.7"
+        "openclaw": ">=2026.8.1-beta.1"
       },
       "peerDependenciesMeta": {
         "openclaw": {
@@ -430,25 +430,25 @@
       }
     },
     "node_modules/@tloncorp/tlon-skill": {
-      "version": "0.4.4",
-      "resolved": "https://registry.npmjs.org/@tloncorp/tlon-skill/-/tlon-skill-0.4.4.tgz",
-      "integrity": "sha512-kjFEqZNieQZR7aSgdM54GRWfMYtukuZlMzlW6ThNWKwrX2YDl8ieOZ7dA0gGcp2TpPHbtTpj83Ro1DMPlcGZ5A==",
+      "version": "0.4.5",
+      "resolved": "https://registry.npmjs.org/@tloncorp/tlon-skill/-/tlon-skill-0.4.5.tgz",
+      "integrity": "sha512-rsQ4Qqm1oCGLz7rW/TFyVc+8KANifGNrY8jTEu4AbIgFfGR9m3I8tdRjSdAkVW7ZCZ7VDI/RlZhCN8s/dNz+Kw==",
       "hasInstallScript": true,
       "license": "MIT",
       "bin": {
         "tlon": "bin/tlon.js"
       },
       "optionalDependencies": {
-        "@tloncorp/tlon-skill-darwin-arm64": "0.4.4",
-        "@tloncorp/tlon-skill-darwin-x64": "0.4.4",
-        "@tloncorp/tlon-skill-linux-arm64": "0.4.4",
-        "@tloncorp/tlon-skill-linux-x64": "0.4.4"
+        "@tloncorp/tlon-skill-darwin-arm64": "0.4.5",
+        "@tloncorp/tlon-skill-darwin-x64": "0.4.5",
+        "@tloncorp/tlon-skill-linux-arm64": "0.4.5",
+        "@tloncorp/tlon-skill-linux-x64": "0.4.5"
       }
     },
     "node_modules/@tloncorp/tlon-skill-darwin-arm64": {
-      "version": "0.4.4",
-      "resolved": "https://registry.npmjs.org/@tloncorp/tlon-skill-darwin-arm64/-/tlon-skill-darwin-arm64-0.4.4.tgz",
-      "integrity": "sha512-yr7Lg4KJPWInBFarXhJV+Z8LxFFLGJAgoBY6d6sc7zVW40oKUM+OQjKomKaNy8H4aYk0CnZkXlN+CTOn3/LD6g==",
+      "version": "0.4.5",
+      "resolved": "https://registry.npmjs.org/@tloncorp/tlon-skill-darwin-arm64/-/tlon-skill-darwin-arm64-0.4.5.tgz",
+      "integrity": "sha512-urM3HnsoQR/yqT8qxs4DZu/B6bWS0EdNKcJXme5FdTsuX4NfOhbMAdjl+aasu2G86GF3q/fgH00g75DNiIFB9w==",
       "cpu": [
         "arm64"
       ],
@@ -462,9 +462,9 @@
       }
     },
     "node_modules/@tloncorp/tlon-skill-darwin-x64": {
-      "version": "0.4.4",
-      "resolved": "https://registry.npmjs.org/@tloncorp/tlon-skill-darwin-x64/-/tlon-skill-darwin-x64-0.4.4.tgz",
-      "integrity": "sha512-h9yL4fwkLa2zXqROWV6QuqVB4FlQOA9iQfahST15MAjyQRBqJEt2zxjuXHbkvlZ9SKm4vS5J7YLXI6yXLvULGA==",
+      "version": "0.4.5",
+      "resolved": "https://registry.npmjs.org/@tloncorp/tlon-skill-darwin-x64/-/tlon-skill-darwin-x64-0.4.5.tgz",
+      "integrity": "sha512-w+pr1NwiD6524WAIHwpQ0IjtqV1K7SUw2aqaG27lvluPukzolYWl3fcliJzY2AOeCwe2r3JkCq5JD1oiZGkLjQ==",
       "cpu": [
         "x64"
       ],
@@ -478,9 +478,9 @@
       }
     },
     "node_modules/@tloncorp/tlon-skill-linux-arm64": {
-      "version": "0.4.4",
-      "resolved": "https://registry.npmjs.org/@tloncorp/tlon-skill-linux-arm64/-/tlon-skill-linux-arm64-0.4.4.tgz",
-      "integrity": "sha512-OBzY/ACHo9/wecN0XTkepK2mGwDnqcs+T7vEhjHPKr4aD+YGBvdgA0abeXcSsz9EXKVnRnaDMo9QDYcROy4DIw==",
+      "version": "0.4.5",
+      "resolved": "https://registry.npmjs.org/@tloncorp/tlon-skill-linux-arm64/-/tlon-skill-linux-arm64-0.4.5.tgz",
+      "integrity": "sha512-t/N4nUF2abzQA22ONbjSdOEyQ0k6nWaA/wZ3OZ0Gzmsfa4caEbMwiHS/nY9po9p3Gb8IFXW7ZTMwMe7w2E3XlA==",
       "cpu": [
         "arm64"
       ],
@@ -494,9 +494,9 @@
       }
     },
     "node_modules/@tloncorp/tlon-skill-linux-x64": {
-      "version": "0.4.4",
-      "resolved": "https://registry.npmjs.org/@tloncorp/tlon-skill-linux-x64/-/tlon-skill-linux-x64-0.4.4.tgz",
-      "integrity": "sha512-KCSfVFDBvR/oaDoa/C4Zyvw8eZTq0GDEcaWfn0tbLF3oWDNziSG1a/VFsQzDhHQWI4n0oq2402/HEbMMAI0Fvw==",
+      "version": "0.4.5",
+      "resolved": "https://registry.npmjs.org/@tloncorp/tlon-skill-linux-x64/-/tlon-skill-linux-x64-0.4.5.tgz",
+      "integrity": "sha512-1u5cdmnjSeYGhgTSMTDrpenPOxCu7B5Q62cuviBeYaS7lvvNTNwynIwuO9QR3Q98r7rMMyzWExhDHJ+sRlSbsw==",
       "cpu": [
         "x64"
       ],

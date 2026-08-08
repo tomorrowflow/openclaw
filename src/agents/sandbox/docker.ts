@@ -4,9 +4,8 @@
  * Wraps Docker spawn, environment sanitization, container inspection, creation, and exec behavior.
  */
 import { readFileSync } from "node:fs";
-import { createAbortError } from "../../infra/abort-signal.js";
-import { toErrorObject } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
+import { SANDBOX_DOCKER_EXPLICIT_ENV_POLICY_EPOCH } from "./config-hash.js";
 import {
   DOCKER_SANDBOX_ENGINE,
   execContainer,
@@ -25,10 +24,7 @@ import {
   resolvePodmanSandboxRuntimeInfo,
   type PodmanSandboxRuntimeInfo,
 } from "./podman-runtime.js";
-import {
-  resolveDockerEnvPolicyEpoch,
-  sanitizeExplicitSandboxEnvVars,
-} from "./sanitize-env-vars.js";
+import { sanitizeEnvVars, sanitizeExplicitSandboxEnvVars } from "./sanitize-env-vars.js";
 
 export {
   DOCKER_SANDBOX_ENGINE,
@@ -47,7 +43,6 @@ export {
   validateSandboxContainerEngineTarget,
 } from "./podman-runtime.js";
 export type { PodmanSandboxRuntimeInfo } from "./podman-runtime.js";
-export { resolveDockerEnvPolicyEpoch } from "./sanitize-env-vars.js";
 
 type ExecDockerRawOptions = ExecContainerRawOptions;
 

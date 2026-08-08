@@ -341,10 +341,6 @@ export function releaseEvidenceVerificationArgs(parentRunId) {
   return ["--validate-run", String(parentRunId), "--trusted-workflow-ref", "main", "--json"];
 }
 
-export function shouldDeleteTemporaryWorkflowRef(params) {
-  return !params.keepBranch && (params.dryRun || params.parentRunCompleted);
-}
-
 export function assertTrustedWorkflowHarness(
   workflowSha,
   pathExists = (relativePath) =>

@@ -46,16 +46,6 @@ export function resolvePackageDirs(args: string[]): {
   jobs: number;
   packageDirs: unknown[];
 };
-export function createNpmPackageLockInstallStrategyArgs(options?: {
-  installStrategy?: "hoisted" | "nested" | "shallow" | "linked" | "" | null;
-}): string[];
-export function generateNpmPackageLock(
-  packageDir: string,
-  options?: {
-    env?: NodeJS.ProcessEnv;
-    installStrategy?: "hoisted" | "nested" | "shallow" | "linked" | "" | null;
-  },
-): string;
 export function resolveShrinkwrapJobs(
   rawValue: unknown,
   env?: NodeJS.ProcessEnv,

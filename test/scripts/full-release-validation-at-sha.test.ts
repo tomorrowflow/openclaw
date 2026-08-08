@@ -215,9 +215,8 @@ describe("full-release-validation-at-sha", () => {
     expect(
       shouldDeleteTemporaryWorkflowRef({
         dryRun: false,
-        evidenceVerified: false,
         keepBranch: false,
-        parentConclusion: "success",
+        parentRunCompleted: false,
       }),
     ).toBe(false);
   });

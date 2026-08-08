@@ -36,11 +36,6 @@ const RTL_ISOLATE_END = "\u2069";
 const FENCED_CODE_RE = /(```|~~~)[^\n]*\n[\s\S]*?\n\1[^\n]*/g;
 // Inline code spans with balanced backtick run (`code`, ``co`de``, ...).
 const INLINE_CODE_RE = /(`+)(?:(?!\1).)+?\1/g;
-
-function stripReasoningTags(text: string): string {
-  return stripReasoningTagsFromText(text, { mode: "preserve", trim: "start" });
-}
-
 /** Keep routing/provider/profile details in session state, not the compact footer. */
 function formatModelFooter(params: {
   model?: string | null;
