@@ -177,6 +177,101 @@ $OC_SYSTEMCTL daemon-reload
 # repairing them, so the gate below — not doctor's exit code — is the authority.
 sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw doctor --fix --non-interactive 2>&1 || true
 
+# Config invariants — settings whose loss is silent.
+#
+# `config validate` below only proves the config is well-formed for the new
+# build; it cannot know which values this host depends on. Every key asserted
+# here fails invisibly when it drifts: the gateway starts, the channel reports
+# healthy, and voice replies simply stop. The doctor run above is itself allowed
+# to rewrite config, so this runs after it, not before.
+STAGE="deploy: config invariants (gateway still up)"
+CFG_SNAPSHOT="$(mktemp)"
+sudo cat /home/openclaw/.openclaw/openclaw.json > "$CFG_SNAPSHOT"
+python3 - "$CFG_SNAPSHOT" <<'PY'
+import json, sys
+
+cfg = json.load(open(sys.argv[1]))
+bad = []
+
+def get(path):
+    node = cfg
+    for key in path.split("."):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    return node
+
+def want(path, expected):
+    actual = get(path)
+    if actual != expected:
+        bad.append(f"{path}: expected {expected!r}, got {actual!r}")
+
+# The Codex harness declares deliveryDefaults.visibleReplies="message_tool"
+# (extensions/codex/harness.ts). That routes replies through the message tool,
+# which sends directly and never produces the payload the gateway TTS stage
+# speaks. Only an explicit config value outranks the harness default.
+want("messages.visibleReplies", "automatic")
+
+# `localhost` resolves to ::1 first on this host, and the IPv6 docker-proxy
+# forward to both speech containers resets on connect. The IPv4 literals are
+# load-bearing; without them TTS and transcription fail closed.
+want("tts.providers.kokoro.url", "http://127.0.0.1:9007")
+
+models = get("tools.media.models") or []
+asr = models[0] if models else {}
+if asr.get("baseUrl") != "http://127.0.0.1:9009":
+    bad.append(f"tools.media.models[0].baseUrl: expected 'http://127.0.0.1:9009', got {asr.get('baseUrl')!r}")
+
+# cliPath is a retired top-level key; it lives under transport now. Losing it
+# leaves signal-cli unresolvable.
+want("channels.signal.transport.cliPath", "/home/openclaw/bin/signal-cli")
+
+# The agent's own tts tool synthesizes audio outside the gateway pipeline and
+# strands it on disk. Speech is the gateway's job.
+if "tts" not in (get("tools.deny") or []):
+    bad.append('tools.deny: must contain "tts"')
+
+if bad:
+    print("  ✗ config invariants drifted — skipping cutover:")
+    for item in bad:
+        print(f"    - {item}")
+    sys.exit(1)
+print("  ✓ config invariants intact")
+PY
+rm -f "$CFG_SNAPSHOT"
+
+# Plugin contract — core/plugin drift that config validation cannot see.
+#
+# Core requires the inbound-debounce `admission` contract; a signal plugin that
+# predates it throws "Cannot read properties of undefined (reading 'catch')" on
+# every inbound message. The gateway still starts and still listens, so nothing
+# downstream catches it — the channel is simply dead. Assert the contract is
+# present in the plugin build this deploy will actually load.
+STAGE="deploy: plugin contract (gateway still up)"
+SIGNAL_PLUGIN_DIR="$(sudo python3 -c "
+import json, sqlite3
+db = 'file:/home/openclaw/.openclaw/state/openclaw.sqlite?mode=ro'
+row = sqlite3.connect(db, uri=True).execute(
+    'select install_records_json from installed_plugin_index').fetchone()
+print(json.loads(row[0]).get('signal', {}).get('installPath', '') if row else '')
+" 2>/dev/null || true)"
+
+if [ -z "$SIGNAL_PLUGIN_DIR" ]; then
+  echo "  ! signal plugin install record not found — skipping contract check"
+elif ! sudo grep -rqs "admission" "$SIGNAL_PLUGIN_DIR/dist"; then
+  echo ""
+  echo "  ✗ Active signal plugin does not implement the inbound 'admission'"
+  echo "    contract — every inbound message would fail silently."
+  echo "    Plugin: $SIGNAL_PLUGIN_DIR"
+  echo "    Upgrade it before cutover; note that installing over a retired"
+  echo "    config key aborts before the install record is written, so remove"
+  echo "    channels.signal, update, then restore it in the new shape."
+  echo ""
+  exit 1
+else
+  echo "  ✓ signal plugin implements the inbound admission contract"
+fi
+
 # Config preflight — the last gate before the gateway is stopped.
 #
 # The new build validates config at startup and exits 78/CONFIG when it fails,
@@ -239,6 +334,60 @@ else
     journalctl --user -u openclaw-gateway.service -n 40 --no-pager
   STAGE="deploy: gateway not listening after restart"
   exit 1
+fi
+
+# ── Post-cutover smoke ─────────────────────────────────────────────────────
+# A listening port only proves the process is alive. On 2026-08-09 the gateway
+# listened for nine hours while every inbound Signal message died in the drain
+# and the DM lane stayed head-of-line blocked — nothing here noticed. These two
+# checks are deliberately generic: they detect any inbound path that fails
+# repeatedly, not just the contract break that motivated them.
+#
+# Advisory by design. The new build is already live and healthy enough to serve;
+# aborting now would not undo the cutover. Alert and let the operator decide.
+STAGE="deploy: post-cutover smoke"
+echo ""
+echo "  Post-cutover smoke (settling 45s)..."
+sleep 45
+
+SMOKE_PROBLEMS=""
+
+# 1. Crash signatures. Both indicate a turn that ended with nothing delivered.
+CRASH_HITS=$(sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID \
+  journalctl --user -u openclaw-gateway.service --since "-3 min" --no-pager 2>/dev/null \
+  | grep -cE "reading 'catch'|no queued reply payloads" || true)
+if [ "${CRASH_HITS:-0}" -gt 0 ]; then
+  SMOKE_PROBLEMS="${SMOKE_PROBLEMS}\n  - ${CRASH_HITS} inbound crash/zero-payload log line(s) since restart"
+fi
+
+# 2. Stuck ingress. Retries are normal; a retry that keeps failing is not. This
+#    is the signal that reached nobody today: rows pile up pending with an error
+#    while the channel reports healthy.
+STUCK=$(sudo python3 -c "
+import sqlite3
+db = 'file:/home/openclaw/.openclaw/state/openclaw.sqlite?mode=ro'
+try:
+    print(sqlite3.connect(db, uri=True).execute(
+        \"select count(*) from channel_ingress_events \"
+        \"where status='pending' and last_error is not null\").fetchone()[0])
+except Exception:
+    print(0)
+" 2>/dev/null || echo 0)
+if [ "${STUCK:-0}" -gt 0 ]; then
+  SMOKE_PROBLEMS="${SMOKE_PROBLEMS}\n  - ${STUCK} inbound event(s) stuck pending with an error"
+fi
+
+if [ -n "$SMOKE_PROBLEMS" ]; then
+  echo ""
+  echo "  ⚠ Gateway is up but inbound processing looks unhealthy:"
+  printf "%b\n" "$SMOKE_PROBLEMS"
+  echo "    Channel may be silently dead — check before relying on it."
+  sudo -u openclaw XDG_RUNTIME_DIR="/run/user/$OC_UID" \
+    openclaw message send --channel "$NOTIFY_CHANNEL" --target "$NOTIFY_TARGET" \
+    --message "⚠ OpenClaw deploy v$NEW_VER: gateway is up but inbound processing looks unhealthy.$(printf "%b" "$SMOKE_PROBLEMS")
+Log: $LOG_FILE" 2>&1 | tail -3 || echo "  (smoke alert send failed — inbound may be down both ways)"
+else
+  echo "  ✓ No inbound crash signatures or stuck ingress events"
 fi
 
 echo ""
