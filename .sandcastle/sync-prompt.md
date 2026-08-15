@@ -125,11 +125,33 @@ resolves the large majority of stops on a release→release bump.
   After rebase also delete any new workflow files added by upstream (no conflict, just new):
   `git rm .github/workflows/*.yml .github/actions/ .github/codeql/ .github/dependabot.yml .github/actionlint.yaml 2>/dev/null || true`
 - **Source code — trivial** (adjacent additions, import ordering, whitespace): resolve and continue.
+- **Fork patch whose upstream premise was deleted — drop it.** A fork commit can
+  patch a code path that upstream has since removed outright. There is nothing to
+  merge: the patch edits lines that no longer exist, and re-applying it would
+  resurrect a contract the release deleted. Drop the commit (`git rebase --skip`)
+  only when **all four** hold — otherwise it is a stop gate:
+  1. The symbol or contract the patch depends on is gone from the release:
+     `git grep -q '<symbol>' "upstream/release/$TARGET" -- src/` returns nothing.
+  2. No entry in `docs/fork-features.txt` covers the behaviour (a tracked fork
+     feature is never dropped — see "Fork patches on upstream code" below).
+  3. Upstream still covers the user-visible behaviour by another route, or the
+     behaviour is meaningless without the deleted contract. Name the upstream
+     file and line that carries it now.
+  4. Upstream has regression coverage for that behaviour, or the fork's own test
+     for it is unreproducible because its trigger type no longer exists.
+
+  Report every dropped commit in `notes` with the four findings, so the drop is a
+  recorded decision rather than a silent loss. Precedent: `35b9ccfac7d`
+  ("hand off restart lease loss") was dropped for the 2026.8.1 sync after
+  upstream `ce53f7e82e2` removed the session write lease; the silent-handoff
+  behaviour it added now lives in `resolveReplyOperationAbortAction`, gated on
+  `turn.isRestartRecoveryArmed?.()`, in `agent-runner-error-handler.ts`.
 - **Genuine fork-only source — semantic** (commit is NOT an ancestor of the
   release AND both sides changed the same logic differently): **stop gate** — set
   `status: "failed"` and report details. This applies only after the redundant
-  check above rules the commit out; a "semantic" conflict on an already-released
-  commit is not a stop gate, it is a skip.
+  check and the deleted-premise check above both rule the commit out; a
+  "semantic" conflict on an already-released commit is not a stop gate, it is a
+  skip, and one on a patch whose premise upstream deleted is a drop.
 
   Evaluate this gate on the files still conflicted **after** applying every
   mechanical rule above, not on the commit as a whole. Resolve the always-delete
