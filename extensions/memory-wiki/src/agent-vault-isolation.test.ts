@@ -141,7 +141,7 @@ describe("agent-scoped memory-wiki tools", () => {
             sourceIds: [`source.${agent.id}`],
           },
         );
-        const pagePath = asRecord(result.details).pagePath;
+        const pagePath = assertToolDetailsRecord(result.details).pagePath;
         if (typeof pagePath !== "string") {
           throw new Error("Expected wiki_apply to return pagePath");
         }
@@ -221,20 +221,6 @@ describe("agent-scoped memory-wiki tools", () => {
             throw new Error("Expected both agent synthesis paths");
           }
 
-<<<<<<< HEAD
-        const memorySearch = createMemoryCoreTool({
-          factories: memoryCoreFactories,
-          name: "memory_search",
-          appConfig,
-          agentId: agent.id,
-        });
-        const ownMemorySearch = await memorySearch.execute(`memory-search-own-${agent.id}`, {
-          query: agent.sentinel,
-          corpus: "wiki",
-        });
-        expect(assertToolDetailsRecord(ownMemorySearch.details).results).toEqual([
-          expect.objectContaining({
-=======
           const memorySearch = createMemoryCoreTool({
             factories: memoryCoreFactories,
             name: "memory_search",
@@ -245,7 +231,7 @@ describe("agent-scoped memory-wiki tools", () => {
             query: agent.sentinel,
             corpus: "wiki",
           });
-          expect(asRecord(ownMemorySearch.details).results).toEqual([
+          expect(assertToolDetailsRecord(ownMemorySearch.details).results).toEqual([
             expect.objectContaining({
               corpus: "wiki",
               path: agent.pagePath,
@@ -260,7 +246,7 @@ describe("agent-scoped memory-wiki tools", () => {
               corpus: "wiki",
             },
           );
-          expect(asRecord(foreignMemorySearch.details).results).toEqual([]);
+          expect(assertToolDetailsRecord(foreignMemorySearch.details).results).toEqual([]);
 
           const memoryGet = createMemoryCoreTool({
             factories: memoryCoreFactories,
@@ -272,8 +258,7 @@ describe("agent-scoped memory-wiki tools", () => {
             path: agent.pagePath,
             corpus: "wiki",
           });
-          expect(asRecord(ownMemoryGet.details)).toMatchObject({
->>>>>>> dc655169864 (test(memory-wiki): parallelize vault isolation proof)
+          expect(assertToolDetailsRecord(ownMemoryGet.details)).toMatchObject({
             corpus: "wiki",
             path: agent.pagePath,
             text: expect.stringContaining(agent.sentinel),
@@ -282,50 +267,15 @@ describe("agent-scoped memory-wiki tools", () => {
           const foreignMemoryGet = await memoryGet.execute(`memory-get-foreign-${agent.id}`, {
             path: foreignAgent.pagePath,
             corpus: "wiki",
-<<<<<<< HEAD
-          },
-        );
-        expect(assertToolDetailsRecord(foreignMemorySearch.details).results).toEqual([]);
-
-        const memoryGet = createMemoryCoreTool({
-          factories: memoryCoreFactories,
-          name: "memory_get",
-          appConfig,
-          agentId: agent.id,
-        });
-        const ownMemoryGet = await memoryGet.execute(`memory-get-own-${agent.id}`, {
-          path: agent.pagePath,
-          corpus: "wiki",
-        });
-        expect(assertToolDetailsRecord(ownMemoryGet.details)).toMatchObject({
-          status: "ok",
-          corpus: "wiki",
-          path: agent.pagePath,
-          text: expect.stringContaining(agent.sentinel),
-        });
-
-        const foreignMemoryGet = await memoryGet.execute(`memory-get-foreign-${agent.id}`, {
-          path: foreignAgent.pagePath,
-          corpus: "wiki",
-        });
-        expect(assertToolDetailsRecord(foreignMemoryGet.details)).toMatchObject({
-          path: foreignAgent.pagePath,
-          text: "",
-          status: "not_found",
-          corpora: [{ corpus: "wiki", outcome: "ok" }],
-        });
-      }
-=======
           });
-          expect(asRecord(foreignMemoryGet.details)).toMatchObject({
+          expect(assertToolDetailsRecord(foreignMemoryGet.details)).toMatchObject({
             path: foreignAgent.pagePath,
             text: "",
-            disabled: true,
-            error: "wiki corpus result not found",
+            status: "not_found",
+            corpora: [{ corpus: "wiki", outcome: "ok" }],
           });
         }),
       );
->>>>>>> dc655169864 (test(memory-wiki): parallelize vault isolation proof)
     } finally {
       clearMemoryPluginState();
     }
