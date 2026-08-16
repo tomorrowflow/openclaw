@@ -80,17 +80,6 @@ vi.mock("./client.js", async (importOriginal) => {
   };
 });
 
-vi.mock("openclaw/plugin-sdk/reply-runtime", async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  return {
-    ...actual,
-    createReplyDispatcherWithTyping: (options: FeishuDispatcherOptions) => {
-      traceState.dispatcherOptions = options;
-      return { dispatcher: {}, replyOptions: {}, markDispatchIdle: () => {} };
-    },
-  };
-});
-
 // Module-scoped runtime stub (not the shared global runtime slot) so
 // isolate=false workers never leak this stub into other feishu test files.
 // channel.text uses the real chunking/table helpers because overflow
@@ -163,7 +152,6 @@ afterAll(() => {
   vi.doUnmock("./client.js");
   vi.doUnmock("./runtime.js");
   vi.doUnmock("./streaming-card.js");
-  vi.doUnmock("openclaw/plugin-sdk/reply-runtime");
   vi.resetModules();
 });
 

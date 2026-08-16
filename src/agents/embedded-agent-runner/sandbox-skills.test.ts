@@ -3,7 +3,6 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createSyntheticSourceInfo } from "../../skills/loading/skill-contract.js";
 import { resolveSkillsPrompt } from "../../skills/loading/workspace-skill-prompt.js";
 import { resolveEmbeddedRunSkillEntries } from "../../skills/runtime/embedded-run-entries.js";
@@ -179,19 +178,14 @@ describe("resolveSandboxSkillRuntimeInputs", () => {
         skillsSnapshot: skillsSnapshotForRun,
         workspaceOnly,
       });
-      // Mirrors the production composition in prepareEmbeddedAttemptSkills and
-      // prepared-compaction-runtime: remap entries to container paths, then
-      // build the prompt against the in-container workspace.
       const promptSkillEntries = mapSandboxSkillEntriesForPrompt({
         entries: shouldLoadSkillEntries ? skillEntries : undefined,
         skillsWorkspaceDir,
         skillsPromptWorkspaceDir,
       });
-      const prompt = resolveSkillsPromptForRun({
+      const prompt = resolveSkillsPrompt({
         skillsSnapshot: skillsSnapshotForRun,
         entries: promptSkillEntries,
-        config: {} as OpenClawConfig,
-        agentId: "main",
         workspaceDir: skillsPromptWorkspaceDir,
         eligibility: skillsEligibilityForRun,
       });

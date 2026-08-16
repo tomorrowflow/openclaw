@@ -24,6 +24,9 @@ import { runQaTestFileScenarios } from "./test-file-scenario-runner.js";
 
 describe("qa scenario catalog", () => {
   const twoPartCoverageIdPattern = /^[a-z0-9][a-z0-9-]*\.[a-z0-9][a-z0-9-]*$/;
+  const agentRuntime = "agent-runtime";
+  const browserUi = "control-ui";
+  const cli = "cli";
   const codex = "openai";
   const memory = "session-memory";
   const otel = "observability";
@@ -248,7 +251,7 @@ describe("qa scenario catalog", () => {
     });
   });
 
-  it("uses graceful restart and isolated config for Matrix replay dedupe", () => {
+  it("uses graceful restart and isolation for Matrix replay dedupe", () => {
     const scenario = requireFlowScenario(readQaScenarioById("matrix-restart-replay-dedupe"));
     const staleSync = requireFlowScenario(readQaScenarioById("matrix-stale-sync-replay-dedupe"));
 
@@ -349,7 +352,7 @@ describe("qa scenario catalog", () => {
       "sends a chat turn through the GUI and renders the final Gateway event",
     );
     expect(scenario.execution.flow).toBeUndefined();
-    expect(scenario.coverage?.secondary).toContain("control-ui.gateway-hosted-ui-control");
+    expect(scenario.coverage?.secondary).toContain(`${browserUi}.gateway-hosted-ui-control`);
     expect(otelSmoke.execution.kind).toBe("script");
     if (otelSmoke.execution.kind !== "script") {
       throw new Error(`expected script scenario, got ${otelSmoke.execution.kind}`);
@@ -364,7 +367,7 @@ describe("qa scenario catalog", () => {
   });
 
   it("reserves Gateway-hosted Control UI proof for the real Gateway flow", () => {
-    const coverageId = "control-ui.gateway-hosted-ui-control";
+    const coverageId = `${browserUi}.gateway-hosted-ui-control`;
     const primaryOwnerIds = readQaScenarioPack()
       .scenarios.filter((scenario) => scenario.coverage?.primary.includes(coverageId))
       .map((scenario) => scenario.id);
@@ -398,18 +401,18 @@ describe("qa scenario catalog", () => {
   it("loads helper-backed HTTP API scenarios as supporting taxonomy coverage", () => {
     expect(readQaScenarioById("openai-compatible-chat-tools").coverage?.secondary).toStrictEqual([
       "gateway.openai-compatible-apis",
-      "agent-runtime.hosted-tool-use",
+      `${agentRuntime}.hosted-tool-use`,
     ]);
     expect(readQaScenarioById("openai-web-search-minimal").coverage?.secondary).toEqual(
       expect.arrayContaining([
-        "agent-runtime.reasoning-and-cache-controls",
+        `${agentRuntime}.reasoning-and-cache-controls`,
         "web-search.openai-native-web-search",
         "plugins.web-search-and-fetch",
       ]),
     );
     const webuiCoverage = readQaScenarioById("openwebui-openai-compatible").coverage?.secondary;
     expect(webuiCoverage).toContain("gateway.openai-compatible-apis");
-    expect(webuiCoverage).toContain("agent-runtime.hosted-provider-turns");
+    expect(webuiCoverage).toContain(`${agentRuntime}.hosted-provider-turns`);
   });
 
   it("routes Docker runtime scenarios through the shared lane adapter", () => {
@@ -753,7 +756,7 @@ describe("qa scenario catalog", () => {
     });
     expect(scenario.coverage?.primary).toEqual([`${codex}.codex-oauth-profiles-codex-plugin-auth`]);
     expect(scenario.coverage?.secondary).toEqual([
-      "agent-runtime.auth-profile-selection-provider-selection",
+      `${agentRuntime}.auth-profile-selection-provider-selection`,
       `${codex}.codex-oauth-profiles-doctor-repair`,
     ]);
   });

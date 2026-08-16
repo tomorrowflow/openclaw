@@ -11,6 +11,18 @@ import type { PreparedModelRuntimeSnapshot } from "../prepared-model-runtime.js"
 import { buildConfiguredFallbackModel } from "./model.configured-fallback.js";
 import { buildInlineProviderModels } from "./model.inline-provider.js";
 import { createProviderRuntimeTestMock } from "./model.provider-runtime.test-support.js";
+import {
+  expectResolvedForwardCompatFallbackResult,
+  expectUnknownModelErrorResult,
+} from "./model.forward-compat.test-support.js";
+import { resolveModel } from "./model.js";
+import {
+  buildOpenAICodexForwardCompatExpectation,
+  makeModel,
+  mockDiscoveredModel,
+  mockOpenAICodexTemplateModel,
+  resetMockDiscoverModels,
+} from "./model.test-harness.js";
 
 vi.mock("../../plugins/provider-runtime.js", () => ({
   applyProviderResolvedTransportWithPlugin: () => undefined,
