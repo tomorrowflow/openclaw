@@ -296,6 +296,35 @@ track upstream (see Step 5g); a literal like `fs-safe.*0\.4\.4` turns a correct
 upstream bump into a permanent false failure and invites a downgrade that breaks
 the build.
 
+#### Never fix a build break with a compatibility shim
+
+When the build fails on a missing export or module after a rebase, the cause is
+almost always that a conflict was resolved by keeping the fork's whole copy of a
+file, which reverted an upstream rename or module split. Upstream callers then
+reference names the fork's copy no longer has.
+
+Do **not** create an alias export, a re-export file at the old path, or any
+other shim to satisfy the build. That leaves two spellings of one concept, hides
+the stale file, and the next sync inherits both. Repair the resolution instead:
+
+```bash
+# 1. Confirm which side is stale.
+git diff --numstat "upstream/release/$TARGET" -- <file>
+git show "upstream/release/$TARGET":<file> | grep -nE '^export'
+# 2. Take upstream's file, then re-apply ONLY the fork feature on top,
+#    using upstream's current names.
+git checkout "upstream/release/$TARGET" -- <file>
+```
+
+Then re-verify with `pnpm tsgo` and `pnpm check:test-types` — the remaining
+errors are the rest of the stale set, not new breakage. Fix them the same way.
+A test file that is upstream-owned and carries no fork-feature assertions is
+taken from upstream wholesale; one that carries fork coverage is rebuilt from
+upstream's version with the fork's assertions re-added.
+
+If a fork-touched file's guard, branch, or helper vanished during the rebase,
+restore it — a dropped upstream guard is a silent regression, not a cleanup.
+
 #### Fork patches on upstream code (re-apply if Step 5f flags them)
 
 Most fork features are fork-only *additions* that simply replant during rebase.
