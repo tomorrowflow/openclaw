@@ -12,8 +12,6 @@ import type {
   SkillUsagePath,
   SkillEntry,
 } from "../../skills/types.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { resolveSkillsPromptForRun } from "../../skills/loading/workspace.js";
 import type { SandboxContext } from "../sandbox/types.js";
 
 const MATERIALIZED_SKILLS_WORKSPACE_CONTAINER_PARTS = [".openclaw", "sandbox-skills"] as const;
