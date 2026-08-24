@@ -2,6 +2,8 @@
 /**
  * Parses release-candidate validation options and enforces publish-scope policy.
  */
+import type { ShippedBaselineExclusion } from "./render-github-release-notes.mjs";
+
 export function parseArgs(argv: unknown): {
   repo: string;
   provider: string;
@@ -282,4 +284,3 @@ declare function loadCandidateShippedBaseline(ref: unknown): {
   ref: unknown;
   pullRequests: Set<unknown>;
 };
-import type { ShippedBaselineExclusion } from "./render-github-release-notes.mjs";
