@@ -23,10 +23,17 @@ import {
 import { resolveReleaseContextIdentity } from "../../scripts/lib/release-context.mjs";
 
 const SCRIPT_PATH = resolve("scripts/full-release-validation-at-sha.mjs");
-const CURRENT_WORKFLOW_SOURCE = readFileSync(
-  ".github/workflows/full-release-validation.yml",
-  "utf8",
-);
+// This fork deletes every GitHub Actions workflow (docs/UPSTREAM-SYNC.md), so the
+// workflow this script is a contract against exists only on the upstream ref we
+// rebase onto. Read it from there rather than from disk. The pin must be bumped
+// to the new release branch on each upstream sync; a stale pin fails loudly here
+// rather than silently validating an old contract.
+const UPSTREAM_WORKFLOW_REF = "upstream/release/2026.9.1";
+const CURRENT_WORKFLOW_SOURCE = execFileSync(
+  "git",
+  ["show", `${UPSTREAM_WORKFLOW_REF}:.github/workflows/full-release-validation.yml`],
+  { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+).trim();
 const CONTRACT_ONE_WORKFLOW_SOURCE = CURRENT_WORKFLOW_SOURCE.replace(
   'RELEASE_ISOLATION_TOOLING_CONTRACT: "2"',
   'RELEASE_ISOLATION_TOOLING_CONTRACT: "1"',

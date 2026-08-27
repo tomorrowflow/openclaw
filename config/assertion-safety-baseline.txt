@@ -873,7 +873,7 @@ extensions/ollama/src/provider-models.ts	1
 extensions/ollama/src/setup-pull.ts	1
 extensions/ollama/src/setup.runtime.ts	1
 extensions/ollama/src/stream-compat.ts	1
-extensions/ollama/src/stream.runtime.ts	4
+extensions/ollama/src/stream.runtime.ts	1
 extensions/onepassword/index.ts	2
 extensions/onepassword/src/op-client.ts	2
 extensions/onepassword/src/tool.ts	1

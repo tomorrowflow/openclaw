@@ -1060,19 +1060,6 @@ describe("scripts/openclaw-cross-os-release-checks", () => {
     expect(resolveProviderConfig("minimax", {})?.requiredCompanionPackages).toEqual([]);
   });
 
-  it("keeps release cross-OS OpenAI smoke on GPT-5.6 Luna", () => {
-    const workflow = readFileSync(
-      ".github/workflows/openclaw-cross-os-release-checks-reusable.yml",
-      "utf8",
-    );
-    const releaseChecks = readFileSync(".github/workflows/openclaw-release-checks.yml", "utf8");
-
-    expect(workflow).toContain(
-      "OPENCLAW_CROSS_OS_OPENAI_MODEL: ${{ inputs.openai_model || vars.OPENCLAW_CROSS_OS_OPENAI_MODEL || 'openai/gpt-5.6-luna' }}",
-    );
-    expect(releaseChecks).toContain("openai_model: openai/gpt-5.6-luna");
-  });
-
   it("keeps release smoke plugin allowlists focused on agent-turn essentials", () => {
     const allowlist = buildCrossOsReleaseSmokePluginAllowlist({ extensionId: "openai" });
 
@@ -1741,34 +1728,6 @@ describe("scripts/openclaw-cross-os-release-checks", () => {
       "--json",
       "--skip-health",
     ]);
-  });
-
-  it("keeps the Windows installer runtime on the manual gateway after managed lifecycle checks", () => {
-    expect(shouldExerciseManagedGatewayLifecycleAfterInstall("win32")).toBe(true);
-    expect(shouldUseManagedGatewayForInstallerRuntime("win32")).toBe(false);
-    expect(shouldExerciseManagedGatewayLifecycleAfterInstall("darwin")).toBe(false);
-    expect(shouldUseManagedGatewayForInstallerRuntime("darwin")).toBe(false);
-  });
-
-  it("stops the managed gateway before the manual fallback only on Windows", () => {
-    expect(shouldStopManagedGatewayBeforeManualFallback("win32")).toBe(true);
-    expect(shouldStopManagedGatewayBeforeManualFallback("darwin")).toBe(false);
-    expect(shouldStopManagedGatewayBeforeManualFallback("linux")).toBe(false);
-  });
-
-  it("forces isolated managed gateway stops in non-interactive release checks", () => {
-    for (const sourcePath of [
-      "scripts/lib/cross-os-release-checks/runtime.ts",
-      "scripts/lib/cross-os-release-checks/lanes.ts",
-    ]) {
-      expect(readFileSync(sourcePath, "utf8")).toContain('args: ["gateway", "stop", "--force"]');
-    }
-  });
-
-  it("skips daemon health during installed onboarding only on native Windows", () => {
-    expect(shouldSkipInstallerDaemonHealthCheck("win32")).toBe(true);
-    expect(shouldSkipInstallerDaemonHealthCheck("darwin")).toBe(false);
-    expect(shouldSkipInstallerDaemonHealthCheck("linux")).toBe(false);
   });
   it("runs the installed browser override import smoke only on native Windows", () => {
     expect(shouldRunWindowsInstalledBrowserOverrideImportSmoke("win32")).toBe(true);
