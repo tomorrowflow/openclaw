@@ -281,18 +281,42 @@ rm -f "$CFG_SNAPSHOT"
 # every inbound message. The gateway still starts and still listens, so nothing
 # downstream catches it — the channel is simply dead. Assert the contract is
 # present in the plugin build this deploy will actually load.
+#
+# 2026.9.1 moved the plugin records from `install_records_json` (an object keyed
+# by plugin id) to `plugins_json` (an array of records). The old query kept
+# returning an empty object, so this gate reported "skipping" and stopped
+# checking anything — a check that silently stops checking is the failure mode
+# it exists to catch. Read the current shape, and treat "configured but not
+# found" as a failure rather than a skip.
 STAGE="deploy: plugin contract (gateway still up)"
 SIGNAL_PLUGIN_DIR="$(sudo python3 -c "
 import json, sqlite3
 db = 'file:/home/openclaw/.openclaw/state/openclaw.sqlite?mode=ro'
 row = sqlite3.connect(db, uri=True).execute(
-    'select install_records_json from installed_plugin_index').fetchone()
-print(json.loads(row[0]).get('signal', {}).get('installPath', '') if row else '')
+    'select plugins_json from installed_plugin_index').fetchone()
+plugins = json.loads(row[0]) if row and row[0] else []
+print(next((p.get('rootDir', '') for p in plugins if p.get('pluginId') == 'signal'), ''))
 " 2>/dev/null || true)"
 
+SIGNAL_CONFIGURED="$(sudo python3 -c "
+import json
+cfg = json.load(open('/home/openclaw/.openclaw/openclaw.json'))
+print('yes' if (cfg.get('channels') or {}).get('signal') else 'no')
+" 2>/dev/null || echo unknown)"
+
 if [ -z "$SIGNAL_PLUGIN_DIR" ]; then
-  echo "  ! signal plugin install record not found — skipping contract check"
-elif ! sudo grep -rqs "admission" "$SIGNAL_PLUGIN_DIR/dist"; then
+  if [ "$SIGNAL_CONFIGURED" = "no" ]; then
+    echo "  · signal channel not configured — contract check not applicable"
+  else
+    echo ""
+    echo "  ✗ channels.signal is configured but no signal plugin record exists"
+    echo "    in the installed-plugin index — the channel would be dead after"
+    echo "    cutover, or this gate is reading a stale index shape."
+    echo "    Inspect: sudo -u openclaw openclaw plugins list"
+    echo ""
+    exit 1
+  fi
+elif ! sudo grep -rqs "admission" "$SIGNAL_PLUGIN_DIR"; then
   echo ""
   echo "  ✗ Active signal plugin does not implement the inbound 'admission'"
   echo "    contract — every inbound message would fail silently."
