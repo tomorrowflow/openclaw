@@ -27,6 +27,14 @@ LOG_DIR="$HOME/logs"
 NOTIFY_CHANNEL="signal"
 NOTIFY_TARGET="+491755252288"
 
+# Direct signal-cli fallback for the case the gateway cannot deliver the alert.
+# NOTIFY_SENDER is the registered signal-cli account (E.164) that owns the store.
+SIGNAL_CLI="/home/openclaw/bin/signal-cli"
+NOTIFY_SENDER="+493055464974"
+
+# Gateway listen port, used by every readiness/liveness probe below.
+GATEWAY_PORT=18789
+
 mkdir -p "$LOG_DIR"
 
 # ── Single-instance guard ──────────────────────────────────────────────────
@@ -55,16 +63,42 @@ STAGE="startup"
 # and needs no restore. After cutover the EXIT trap uses this to bring it back.
 GATEWAY_TOUCHED=0
 
-# Send a Signal alert as the openclaw user. Best-effort: runs after
-# restore_gateway_if_down, but if the gateway still cannot come up the send
-# fails and we just log it — the per-run log file remains the source of truth.
+# Send an alert as the openclaw user.
+#
+# The gateway is the canonical send path, but it is also the thing most likely
+# to be broken when this fires: a failed cutover leaves it down, and the alert
+# then dies with it. That is exactly how the 2026-08-24 outage went unreported
+# for three days — the deploy detected "gateway not listening", tried to alert
+# through the gateway, and lost the message.
+#
+# So fall back to signal-cli directly. Normally that is forbidden (the gateway
+# owns the signal-cli daemon, and the daemon holds an exclusive lock on the
+# account store — a direct send would hang). Here the precondition is inverted
+# and checked: we only take this path when nothing is listening on the gateway
+# port, which means the daemon that would hold the lock is not running either.
+notify_send() {
+  local msg="$1"
+  echo "$msg"
+  if sudo -u openclaw XDG_RUNTIME_DIR="/run/user/$OC_UID" \
+    openclaw message send --channel "$NOTIFY_CHANNEL" --target "$NOTIFY_TARGET" \
+    --message "$msg" 2>&1 | tail -3; then
+    return 0
+  fi
+  if ss -ltn 2>/dev/null | grep -q ":${GATEWAY_PORT}\b"; then
+    echo "[sync] (alert send failed while the gateway is up — not risking the signal-cli account lock)"
+    return 1
+  fi
+  echo "[sync] gateway is down — sending the alert through signal-cli directly"
+  if sudo -u openclaw "$SIGNAL_CLI" -a "$NOTIFY_SENDER" send -m "$msg" "$NOTIFY_TARGET" 2>&1 | tail -3; then
+    return 0
+  fi
+  echo "[sync] (direct signal-cli send failed too — this run is only recorded in $LOG_FILE)"
+  return 1
+}
+
 notify_failure() {
   local rc="$1"
-  local msg="⚠ OpenClaw sync FAILED on $(hostname) — stage: ${STAGE} (exit ${rc}). Log: ${LOG_FILE}"
-  echo "$msg"
-  sudo -u openclaw XDG_RUNTIME_DIR="/run/user/$OC_UID" \
-    openclaw message send --channel "$NOTIFY_CHANNEL" --target "$NOTIFY_TARGET" \
-    --message "$msg" 2>&1 | tail -3 || echo "[sync] (alert send failed — gateway may be down)"
+  notify_send "⚠ OpenClaw sync FAILED on $(hostname) — stage: ${STAGE} (exit ${rc}). Log: ${LOG_FILE}" || true
 }
 
 # Best-effort recovery: if a cutover failure left the gateway down, restart it
@@ -72,11 +106,11 @@ notify_failure() {
 # (the gateway was never stopped) or if it is already listening.
 restore_gateway_if_down() {
   [ "$GATEWAY_TOUCHED" -eq 1 ] || return 0
-  ss -ltnp 2>/dev/null | grep -q 18789 && return 0
+  ss -ltnp 2>/dev/null | grep -q ":${GATEWAY_PORT}\b" && return 0
   echo "[sync] gateway down after failure — attempting restart"
   $OC_SYSTEMCTL restart openclaw-gateway.service 2>&1 | tail -3 || true
   for _ in $(seq 1 12); do
-    ss -ltnp 2>/dev/null | grep -q 18789 && break
+    ss -ltnp 2>/dev/null | grep -q ":${GATEWAY_PORT}\b" && break
     sleep 5
   done
 }
@@ -272,6 +306,50 @@ else
   echo "  ✓ signal plugin implements the inbound admission contract"
 fi
 
+# Managed ingress preflight.
+#
+# When gateway.tailscale.mode is serve/funnel, the gateway claims a Tailscale
+# route during startup and treats any failure there as fatal — it is the
+# Gateway's own ingress, so it fails closed rather than starting degraded.
+# `config validate` cannot see this: the config is perfectly valid, the tailnet
+# is simply not usable.
+#
+# That is the 2026-08-24 outage exactly. The node key had expired three days
+# earlier; nothing noticed because the old gateway was already running and only
+# claims the route at startup. The cutover restarted it, `tailscale serve`
+# returned "Logged out.", and the service crash-looped for three days.
+#
+# So check the tailnet the same way the gateway will, while the old gateway is
+# still serving. BackendState must be "Running" — "NeedsLogin"/"Stopped" mean
+# the cutover would restart into a gateway that cannot start.
+STAGE="deploy: managed ingress preflight (gateway still up)"
+TS_MODE=$(sudo python3 -c "
+import json
+cfg = json.load(open('/home/openclaw/.openclaw/openclaw.json'))
+print(((cfg.get('gateway') or {}).get('tailscale') or {}).get('mode') or 'off')
+" 2>/dev/null || echo off)
+if [ "$TS_MODE" != "off" ]; then
+  TS_STATE=$(tailscale status --json 2>/dev/null \
+    | python3 -c "import json,sys; print(json.load(sys.stdin).get('BackendState') or 'unknown')" \
+    2>/dev/null || echo unknown)
+  if [ "$TS_STATE" != "Running" ]; then
+    echo ""
+    echo "  ✗ gateway.tailscale.mode=$TS_MODE but the tailnet is not usable"
+    echo "    (BackendState: $TS_STATE) — skipping cutover."
+    echo "    The gateway keeps running the previous version and stays up."
+    echo ""
+    echo "    The new build would claim a Tailscale route at startup, fail, and"
+    echo "    crash-loop. Re-authenticate, confirm, then deploy again:"
+    echo "      sudo tailscale up"
+    echo "      tailscale status"
+    echo ""
+    echo "    A node key expires every ~6 months. Disable key expiry for this"
+    echo "    machine in the Tailscale admin console to stop this recurring."
+    exit 1
+  fi
+  echo "  ✓ tailnet is up (mode: $TS_MODE, BackendState: $TS_STATE)"
+fi
+
 # Config preflight — the last gate before the gateway is stopped.
 #
 # The new build validates config at startup and exits 78/CONFIG when it fails,
@@ -320,14 +398,14 @@ docker rm -f \
 $OC_SYSTEMCTL restart openclaw-gateway.service
 
 # Poll up to 60 s for the gateway to start listening.
-echo "  Waiting for gateway on :18789..."
+echo "  Waiting for gateway on :${GATEWAY_PORT}..."
 for i in $(seq 1 12); do
-  ss -ltnp | grep -q 18789 && break
+  ss -ltnp | grep -q ":${GATEWAY_PORT}\b" && break
   sleep 5
 done
 
-if ss -ltnp | grep -q 18789; then
-  echo "  ✓ Gateway listening on :18789"
+if ss -ltnp | grep -q ":${GATEWAY_PORT}\b"; then
+  echo "  ✓ Gateway listening on :${GATEWAY_PORT}"
 else
   echo "  ✗ Gateway not listening after 60s — check logs:"
   sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID \
