@@ -51,6 +51,7 @@ import { normalizeOllamaWireModelId } from "./model-id.js";
 import { applyOllamaThinkingFloor } from "./model-reasoning.js";
 import { resolveOllamaBaseUrlForRun } from "./provider-base-url.js";
 import { buildOllamaBaseUrlSsrFPolicy, isOllamaCloudModel } from "./provider-models.js";
+import { readOllamaResponseErrorText } from "./request-header-redaction.js";
 import {
   createOllamaVisibleContentSanitizer,
   sanitizeOllamaFinalVisibleContent,
@@ -933,7 +934,7 @@ function createRawOllamaStreamFn(
         try {
           await notifyProviderHttpResponse({ options, response, model });
           if (!response.ok) {
-            const errorText = await readProviderResponseErrorText(
+            const errorText = await readOllamaResponseErrorText(
               response,
               OLLAMA_STREAM_ERROR_BODY_LIMIT_BYTES,
               headers,
