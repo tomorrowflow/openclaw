@@ -282,21 +282,34 @@ rm -f "$CFG_SNAPSHOT"
 # downstream catches it — the channel is simply dead. Assert the contract is
 # present in the plugin build this deploy will actually load.
 #
-# 2026.9.1 moved the plugin records from `install_records_json` (an object keyed
-# by plugin id) to `plugins_json` (an array of records). The old query kept
-# returning an empty object, so this gate reported "skipping" and stopped
-# checking anything — a check that silently stops checking is the failure mode
-# it exists to catch. Read the current shape, and treat "configured but not
-# found" as a failure rather than a skip.
+# This gate has now broken twice by binding to the state DB's internal shape:
+# first when the records moved from `install_records_json` to `plugins_json`,
+# then when `installed_plugin_index` was dropped altogether. Both times the
+# query returned nothing and the gate stopped checking — the exact failure mode
+# it exists to catch. The registry, not the database, owns "which plugin will
+# load", so ask the freshly installed build directly: `plugins list` enumerates
+# the installed dist, and its `--json` output is a stable CLI contract.
 STAGE="deploy: plugin contract (gateway still up)"
-SIGNAL_PLUGIN_DIR="$(sudo python3 -c "
-import json, sqlite3
-db = 'file:/home/openclaw/.openclaw/state/openclaw.sqlite?mode=ro'
-row = sqlite3.connect(db, uri=True).execute(
-    'select plugins_json from installed_plugin_index').fetchone()
-plugins = json.loads(row[0]) if row and row[0] else []
-print(next((p.get('rootDir', '') for p in plugins if p.get('pluginId') == 'signal'), ''))
-" 2>/dev/null || true)"
+
+# Emits exactly one of `ok:<rootDir>`, `missing`, or `error:<reason>` so a probe
+# that cannot answer fails the gate instead of reading as "no plugin".
+SIGNAL_PLUGIN_PROBE="$(sudo -u openclaw XDG_RUNTIME_DIR="/run/user/$OC_UID" \
+  openclaw plugins list --json 2>/dev/null | python3 -c '
+import json, sys
+
+try:
+    plugins = json.load(sys.stdin).get("plugins") or []
+except Exception as exc:
+    print(f"error:cannot read the plugin registry ({exc})")
+    sys.exit(0)
+
+record = next((p for p in plugins if p.get("id") == "signal"), None)
+if record is None:
+    print("missing")
+else:
+    root = record.get("rootDir") or ""
+    print("ok:" + root if root else "error:signal plugin record carries no rootDir")
+' || echo "error:plugins list probe failed")"
 
 SIGNAL_CONFIGURED="$(sudo python3 -c "
 import json
@@ -304,31 +317,44 @@ cfg = json.load(open('/home/openclaw/.openclaw/openclaw.json'))
 print('yes' if (cfg.get('channels') or {}).get('signal') else 'no')
 " 2>/dev/null || echo unknown)"
 
-if [ -z "$SIGNAL_PLUGIN_DIR" ]; then
-  if [ "$SIGNAL_CONFIGURED" = "no" ]; then
-    echo "  · signal channel not configured — contract check not applicable"
-  else
+case "$SIGNAL_PLUGIN_PROBE" in
+  ok:*)
+    SIGNAL_PLUGIN_DIR="${SIGNAL_PLUGIN_PROBE#ok:}"
+    if ! sudo grep -rqs "admission" "$SIGNAL_PLUGIN_DIR"; then
+      echo ""
+      echo "  ✗ Active signal plugin does not implement the inbound 'admission'"
+      echo "    contract — every inbound message would fail silently."
+      echo "    Plugin: $SIGNAL_PLUGIN_DIR"
+      echo "    Upgrade it before cutover; note that installing over a retired"
+      echo "    config key aborts before the install record is written, so remove"
+      echo "    channels.signal, update, then restore it in the new shape."
+      echo ""
+      exit 1
+    fi
+    echo "  ✓ signal plugin implements the inbound admission contract"
+    ;;
+  missing)
+    if [ "$SIGNAL_CONFIGURED" = "no" ]; then
+      echo "  · signal channel not configured — contract check not applicable"
+    else
+      echo ""
+      echo "  ✗ channels.signal is configured but the installed build resolves no"
+      echo "    signal plugin — the channel would be dead after cutover."
+      echo "    Inspect: sudo -u openclaw openclaw plugins list"
+      echo ""
+      exit 1
+    fi
+    ;;
+  *)
+    # A probe that cannot answer is not evidence of a healthy plugin.
     echo ""
-    echo "  ✗ channels.signal is configured but no signal plugin record exists"
-    echo "    in the installed-plugin index — the channel would be dead after"
-    echo "    cutover, or this gate is reading a stale index shape."
-    echo "    Inspect: sudo -u openclaw openclaw plugins list"
+    echo "  ✗ Could not determine which signal plugin this deploy would load."
+    echo "    ${SIGNAL_PLUGIN_PROBE#error:}"
+    echo "    Inspect: sudo -u openclaw openclaw plugins list --json"
     echo ""
     exit 1
-  fi
-elif ! sudo grep -rqs "admission" "$SIGNAL_PLUGIN_DIR"; then
-  echo ""
-  echo "  ✗ Active signal plugin does not implement the inbound 'admission'"
-  echo "    contract — every inbound message would fail silently."
-  echo "    Plugin: $SIGNAL_PLUGIN_DIR"
-  echo "    Upgrade it before cutover; note that installing over a retired"
-  echo "    config key aborts before the install record is written, so remove"
-  echo "    channels.signal, update, then restore it in the new shape."
-  echo ""
-  exit 1
-else
-  echo "  ✓ signal plugin implements the inbound admission contract"
-fi
+    ;;
+esac
 
 # Managed ingress preflight.
 #
