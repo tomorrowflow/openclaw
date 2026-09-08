@@ -65,6 +65,16 @@ cd "$REPO_DIR"
 OC_UID=$(id -u openclaw)
 OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID systemctl --user"
 
+# Run an openclaw CLI command as the service user from a neutral directory.
+# This script works from $REPO_DIR under /home/frogger, which is mode 750 and
+# not traversable by openclaw. A child process spawned with an unreadable cwd
+# fails EACCES, so `openclaw doctor` reported "systemctl is-enabled unavailable"
+# and left the service verdict "unknown" — which is exactly what made it refuse
+# maintenance during cutover, leaving schema migrations unapplied.
+oc_openclaw() {
+  (cd /tmp && sudo -u openclaw XDG_RUNTIME_DIR="/run/user/$OC_UID" openclaw "$@")
+}
+
 # Tracks the current phase so the failure alert can say where it broke.
 STAGE="startup"
 
@@ -192,13 +202,26 @@ ls -l "$(npm root -g)/openclaw/dist/reply-"*.js
 ls "$(npm root -g)/openclaw/dist/control-ui/index.html"
 
 # Update OPENCLAW_SERVICE_VERSION in the systemd unit.
+UNIT_FILE=/home/openclaw/.config/systemd/user/openclaw-gateway.service
 NEW_VER=$(node -p "require('$(npm root -g)/openclaw/package.json').version")
+
+# Set an Environment= line whether or not it is already present. `openclaw
+# gateway install --force` regenerates the unit from the stock template and
+# drops every fork-added Environment line, so a substitute-only edit silently
+# restores nothing and the settings below stay missing until someone notices.
+set_unit_env() {
+  local key="$1" value="$2"
+  if sudo grep -q "^Environment=$key=" "$UNIT_FILE"; then
+    sudo -u openclaw sed -i "s#^Environment=$key=.*#Environment=$key=$value#" "$UNIT_FILE"
+  else
+    sudo -u openclaw sed -i "/^\[Service\]/a Environment=$key=$value" "$UNIT_FILE"
+  fi
+}
+
+set_unit_env OPENCLAW_SERVICE_VERSION "$NEW_VER"
 sudo -u openclaw sed -i \
-  "s/OPENCLAW_SERVICE_VERSION=.*/OPENCLAW_SERVICE_VERSION=$NEW_VER/" \
-  /home/openclaw/.config/systemd/user/openclaw-gateway.service
-sudo -u openclaw sed -i \
-  "s/Description=OpenClaw Gateway (v.*)/Description=OpenClaw Gateway (v$NEW_VER)/" \
-  /home/openclaw/.config/systemd/user/openclaw-gateway.service
+  "s/Description=OpenClaw Gateway.*/Description=OpenClaw Gateway (v$NEW_VER)/" \
+  "$UNIT_FILE"
 
 # Pin the Codex app-server binary. The fork bundles the codex plugin, so its
 # app-server code ends up in a dist-root chunk; the managed-binary resolver then
@@ -206,17 +229,8 @@ sudo -u openclaw sed -i \
 # failing every openai model (routed through Codex) with "app-server binary was
 # not found". Point the gateway at the deployed binary explicitly (the supported
 # OPENCLAW_CODEX_APP_SERVER_BIN override). Idempotent: update in place or append.
-UNIT_FILE=/home/openclaw/.config/systemd/user/openclaw-gateway.service
 CODEX_BIN="$(npm root -g)/openclaw/dist/extensions/codex/node_modules/.bin/codex"
-if grep -q OPENCLAW_CODEX_APP_SERVER_BIN "$UNIT_FILE"; then
-  sudo -u openclaw sed -i \
-    "s#Environment=OPENCLAW_CODEX_APP_SERVER_BIN=.*#Environment=OPENCLAW_CODEX_APP_SERVER_BIN=$CODEX_BIN#" \
-    "$UNIT_FILE"
-else
-  sudo -u openclaw sed -i \
-    "/Environment=OPENCLAW_SERVICE_VERSION=/a Environment=OPENCLAW_CODEX_APP_SERVER_BIN=$CODEX_BIN" \
-    "$UNIT_FILE"
-fi
+set_unit_env OPENCLAW_CODEX_APP_SERVER_BIN "$CODEX_BIN"
 $OC_SYSTEMCTL daemon-reload
 
 # Run doctor first so its safe migrations land before the preflight judges the
@@ -224,7 +238,7 @@ $OC_SYSTEMCTL daemon-reload
 # destructive config change would otherwise block here waiting for
 # confirmation). Best-effort: doctor reports some invalid configs without
 # repairing them, so the gate below — not doctor's exit code — is the authority.
-sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw doctor --fix --non-interactive 2>&1 || true
+oc_openclaw doctor --fix --non-interactive 2>&1 || true
 
 # Config invariants — settings whose loss is silent.
 #
@@ -308,8 +322,7 @@ STAGE="deploy: plugin contract (gateway still up)"
 
 # Emits exactly one of `ok:<rootDir>`, `missing`, or `error:<reason>` so a probe
 # that cannot answer fails the gate instead of reading as "no plugin".
-SIGNAL_PLUGIN_PROBE="$(sudo -u openclaw XDG_RUNTIME_DIR="/run/user/$OC_UID" \
-  openclaw plugins list --json 2>/dev/null | python3 -c '
+SIGNAL_PLUGIN_PROBE="$(oc_openclaw plugins list --json 2>/dev/null | python3 -c '
 import json, sys
 
 try:
@@ -429,7 +442,7 @@ fi
 # still route through the live gateway — a post-cutover failure cannot alert,
 # because the gateway it sends through is the one that is down.
 STAGE="deploy: config preflight (gateway still up)"
-if ! sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID openclaw config validate 2>&1; then
+if ! oc_openclaw config validate 2>&1; then
   echo ""
   echo "  ✗ Config is invalid for the newly installed build — skipping cutover."
   echo "    The gateway keeps running the previous version and stays up."
@@ -475,8 +488,7 @@ done
 
 STAGE="deploy: cutover (agent database migration)"
 echo "  Migrating agent databases while the gateway is stopped..."
-sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID \
-  openclaw doctor --fix --non-interactive 2>&1 | tail -5 || true
+oc_openclaw doctor --fix --non-interactive 2>&1 | tail -5 || true
 
 STAGE="deploy: cutover (gateway start)"
 $OC_SYSTEMCTL start openclaw-gateway.service
