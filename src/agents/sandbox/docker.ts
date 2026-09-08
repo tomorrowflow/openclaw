@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { withContainerEnvFile } from "../../infra/container-env-file.js";
 import { markOpenClawExecEnv } from "../../infra/openclaw-exec-env.js";
@@ -206,6 +207,17 @@ function formatUlimitValue(
   return limits.length ? `${name}=${limits.join(":")}` : null;
 }
 
+function appendSecretMountArgs(args: string[], secretMounts: Record<string, string> | undefined): void {
+  if (!secretMounts) {
+    return;
+  }
+  for (const [name, filePath] of Object.entries(secretMounts)) {
+    const secretValue = readFileSync(filePath, "utf8").trimEnd();
+    args.push("-v", `${filePath}:/run/secrets/${name}:ro`);
+    args.push("--env", `${name}=${secretValue}`);
+  }
+}
+
 export function buildSandboxCreateArgs(params: {
   name: string;
   cfg: SandboxDockerConfig;
@@ -276,6 +288,7 @@ export function buildSandboxCreateArgs(params: {
     );
   }
   const env = markOpenClawExecEnv(envSanitization.allowed);
+  appendSecretMountArgs(args, params.cfg.secretMounts);
   for (const cap of params.cfg.capDrop) {
     args.push("--cap-drop", cap);
   }
