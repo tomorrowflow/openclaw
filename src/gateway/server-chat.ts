@@ -40,6 +40,7 @@ import {
   parseCronRunScopeSuffix,
 } from "../sessions/session-key-utils.js";
 import { resolveAssistantEventPhase } from "../shared/chat-message-content.js";
+import { stripReasoningTagsFromText } from "../shared/text/reasoning-tags.js";
 import { setSafeTimeout } from "../utils/timer-delay.js";
 import { mergeAssistantText, resolveAssistantTextInput } from "./agent-event-assistant-text.js";
 import {
@@ -157,6 +158,11 @@ function resolveHeartbeatContext(runId: string, sourceRunId?: string) {
     }
   }
   return primary;
+}
+
+/** Defensive strip: remove <final>, <think>, etc. tags before broadcasting to clients. */
+function stripChatText(text: string): string {
+  return stripReasoningTagsFromText(text, { mode: "preserve", trim: "start" });
 }
 
 /**
@@ -1176,10 +1182,17 @@ export function createAgentEventHandler({
       errorObservation?: unknown;
     },
   ) => {
-    const { text, shouldSuppressSilent } = resolveBufferedChatTextState(clientRunId, sourceRunId, {
-      final: true,
-      suppressLeadFragments: false,
-    });
+    const { text: rawFinalText, shouldSuppressSilent } = resolveBufferedChatTextState(
+      clientRunId,
+      sourceRunId,
+      {
+        final: true,
+        suppressLeadFragments: false,
+      },
+    );
+    // Strip only on the final broadcast: deltas keep their partial-tag handling in
+    // the subscribe stream, so stripping here would cut tags mid-stream.
+    const text = stripChatText(rawFinalText);
     // Flush any paced delta so streaming clients receive the complete text
     // before the final event.
     // Only flush if the buffered text differs from the last broadcast to avoid duplicates.

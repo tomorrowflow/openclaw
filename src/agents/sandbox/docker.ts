@@ -1,14 +1,11 @@
-import { withContainerEnvFile } from "../../infra/container-env-file.js";
-import { markOpenClawExecEnv } from "../../infra/openclaw-exec-env.js";
 /**
  * Low-level Docker command helpers for sandbox runtimes.
  *
  * Wraps Docker spawn, environment sanitization, container inspection, creation, and exec behavior.
  */
 import { readFileSync } from "node:fs";
-import { spawn } from "node:child_process";
-import { createAbortError } from "../../infra/abort-signal.js";
-import { toErrorObject } from "../../infra/errors.js";
+import { withContainerEnvFile } from "../../infra/container-env-file.js";
+import { markOpenClawExecEnv } from "../../infra/openclaw-exec-env.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { KeyedAsyncQueue } from "../../plugin-sdk/keyed-async-queue.js";
 import {
@@ -36,10 +33,7 @@ import {
   type PodmanSandboxRuntimeInfo,
 } from "./podman-runtime.js";
 import { readRegistryEntry, removeRegistryEntry, updateRegistry } from "./registry.js";
-import {
-  resolveDockerEnvPolicyEpoch,
-  sanitizeExplicitSandboxEnvVars,
-} from "./sanitize-env-vars.js";
+import { sanitizeEnvVars, sanitizeExplicitSandboxEnvVars } from "./sanitize-env-vars.js";
 import { buildSandboxContainerName, slugifySessionKey } from "./shared.js";
 import type { SandboxConfig, SandboxDockerConfig, SandboxWorkspaceAccess } from "./types.js";
 import { validateSandboxSecurity } from "./validate-sandbox-security.js";
@@ -71,7 +65,6 @@ export {
   validateSandboxContainerEngineTarget,
 } from "./podman-runtime.js";
 export type { PodmanSandboxRuntimeInfo } from "./podman-runtime.js";
-export { resolveDockerEnvPolicyEpoch } from "./sanitize-env-vars.js";
 
 type ExecDockerRawOptions = ExecContainerRawOptions;
 
@@ -105,7 +98,10 @@ function envRecordsEqual(left: Record<string, string>, right: Record<string, str
   });
 }
 
-function appendSecretMountArgs(args: string[], secretMounts: Record<string, string> | undefined): void {
+function appendSecretMountArgs(
+  args: string[],
+  secretMounts: Record<string, string> | undefined,
+): void {
   if (!secretMounts) {
     return;
   }

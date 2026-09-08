@@ -1,8 +1,8 @@
+import { normalizeMediaProviderId } from "../../packages/media-understanding-common/src/provider-id.js";
 import type { OpenClawConfig } from "../config/types.js";
 import { resolvePluginCapabilityProviders } from "../plugins/capability-provider-runtime.js";
 import { resolveImageCapableConfigProviderIds } from "./config-provider-models.js";
 import { describeImageWithModel, describeImagesWithModel } from "./image-runtime.js";
-import { normalizeMediaProviderId } from "./provider-id.js";
 import { whisperAsrProvider } from "./providers/whisper-asr/index.js";
 import type { MediaUnderstandingProvider } from "./types.js";
 
