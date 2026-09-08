@@ -9,7 +9,9 @@ import {
   type CronActiveJobMarker,
   noteActiveCronJobRemoval,
   onCronJobInactive,
+  requestActiveCronJobCancellation,
 } from "../active-jobs.js";
+import { resolveCronJobConfigRevision } from "../config-revision.js";
 import { removeCronJobBaseSession } from "../session-reaper.js";
 import { removeStaleCronJobFamilyRows } from "../store.js";
 import {
