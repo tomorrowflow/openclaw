@@ -48,7 +48,6 @@ import {
 import { normalizeOllamaWireModelId } from "./model-id.js";
 import { resolveOllamaBaseUrlForRun } from "./provider-base-url.js";
 import { buildOllamaBaseUrlSsrFPolicy, isOllamaCloudModel } from "./provider-models.js";
-import { readOllamaResponseErrorText } from "./request-header-redaction.js";
 import {
   createOllamaVisibleContentSanitizer,
   sanitizeOllamaFinalVisibleContent,
@@ -534,6 +533,43 @@ function ensureArgsObject(value: unknown): Record<string, unknown> {
   return parseJsonObjectPreservingUnsafeIntegers(value) ?? {};
 }
 
+function ensureArgsString(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === undefined || value === null) {
+    return "{}";
+  }
+  return JSON.stringify(value);
+}
+
+function normalizeOllamaCompatMessageToolArgs(payloadRecord: Record<string, unknown>): void {
+  const messages = payloadRecord.messages;
+  if (!Array.isArray(messages)) {
+    return;
+  }
+  for (const message of messages) {
+    if (!isRecord(message)) {
+      continue;
+    }
+    const functionCall = message.function_call;
+    if (isRecord(functionCall) && Object.hasOwn(functionCall, "arguments")) {
+      functionCall.arguments = ensureArgsString(functionCall.arguments);
+    }
+    if (!Array.isArray(message.tool_calls)) {
+      continue;
+    }
+    for (const toolCall of message.tool_calls) {
+      if (!isRecord(toolCall) || !isRecord(toolCall.function)) {
+        continue;
+      }
+      if (Object.hasOwn(toolCall.function, "arguments")) {
+        toolCall.function.arguments = ensureArgsString(toolCall.function.arguments);
+      }
+    }
+  }
+}
+
 type OllamaToolCallNameOptions = {
   availableToolNames?: ReadonlySet<string>;
 };
@@ -1007,7 +1043,7 @@ function createRawOllamaStreamFn(
         try {
           await notifyProviderHttpResponse({ options, response, model });
           if (!response.ok) {
-            const errorText = await readOllamaResponseErrorText(
+            const errorText = await readProviderResponseErrorText(
               response,
               OLLAMA_STREAM_ERROR_BODY_LIMIT_BYTES,
               headers,
