@@ -14,7 +14,7 @@ buildKokoroSpeechProvider | src/tts/provider-registry.ts | Kokoro registered as 
 whisperAsrProvider | src/media-understanding/provider-registry.ts | Whisper ASR registered in provider list
 whisper-asr | src/media-understanding/providers/whisper-asr/index.ts | Whisper ASR native provider module
 transcribeWhisperAsr | src/media-understanding/providers/whisper-asr/audio.ts | Whisper ASR transcription implementation
-whisper-asr | src/media-understanding/defaults.ts | Whisper ASR default model mapping (faster-whisper)
+"faster-whisper" | src/media-understanding/providers/whisper-asr/audio.ts | Whisper ASR default model. 2026.9.3 dissolved the central DEFAULT_AUDIO_MODELS map (upstream keeps per-provider defaults in the providers), so this now asserts the provider fallback that actually resolves the model.
 LOCAL_KEYLESS_PROVIDERS | src/media-understanding/runner.entries.ts | Whisper ASR keyless provider bypass
 DEFAULT_FFMPEG_API_URL | src/media-understanding/providers/whisper-asr/audio.ts | FFmpeg API URL default (localhost:9008)
 
@@ -29,8 +29,8 @@ closedOnly | packages/markdown-core/src/code-spans.ts | Code-span closedOnly opt
 
 # --- Sandbox ---
 mapSandboxSkillEntriesForPrompt | src/agents/embedded-agent-runner/sandbox-skills.ts | Sandbox skill prompt rebuild from in-container paths (upstreamed 2026.7.2; fixes host-path SKILL.md leak incl. rw sandboxes)
-mapSandboxSkillEntriesForPrompt | src/agents/embedded-agent-runner/run/attempt-setup.ts | Sandbox skill prompt rebuild wired into attempt setup (upstreamed 2026.7.2; attempt.ts now just consumes prepared skillsPrompt)
-mapSandboxSkillEntriesForPrompt | src/agents/embedded-agent-runner/prepared-compaction-runtime.ts | Sandbox skill prompt rebuild wired into compaction runner (upstreamed 2026.7.2; compact.ts is now a thin facade)
+mapSandboxSkillEntriesForPrompt\( | src/agents/embedded-agent-runner/skill-runtime.ts | Sandbox skill prompt rebuild wired into the skill runtime (upstreamed 2026.7.2; 2026.9.3 moved the call here from run/attempt-setup.ts). Matches the call, not the import.
+mapSandboxSkillEntriesForPrompt\( | src/auto-reply/reply/commands-system-prompt.ts | Sandbox skill prompt rebuild wired into the command system prompt (upstreamed 2026.7.2; 2026.9.3 moved the call here from prepared-compaction-runtime.ts). Matches the call, not the import.
 # Private-network navigation in the sandbox browser is NO LONGER a code patch.
 # Upstream 2026.7.2 plumbs browser.ssrfPolicy from config into the sandbox bridge
 # (context.ts -> ensureSandboxBrowser -> buildSandboxBrowserResolvedConfig), and
