@@ -12,7 +12,13 @@ import { isPathInside } from "../../infra/path-guards.js";
 import { resolveSandboxInputPath, resolveSandboxPath } from "../sandbox-paths.js";
 import type { SandboxFsBridgeContext } from "./backend-handle.types.js";
 import { splitSandboxBindSpec } from "./bind-spec.js";
-import { SANDBOX_AGENT_WORKSPACE_MOUNT } from "./constants.js";
+import {
+  SANDBOX_AGENT_WORKSPACE_MOUNT,
+  SANDBOX_MEDIA_HOST_DIR,
+  SANDBOX_MEDIA_MOUNT,
+  SANDBOX_SHARED_HOST_DIR,
+  SANDBOX_SHARED_MOUNT,
+} from "./constants.js";
 import { resolveSandboxHostPathViaExistingAncestor } from "./host-paths.js";
 import {
   isPathInsideContainerRoot,
@@ -92,6 +98,14 @@ export function buildSandboxFsMounts(sandbox: SandboxFsBridgeContext): SandboxFs
     });
   }
 
+  // Hardcoded shared directory mount (STATE_DIR/shared -> /workspace/shared).
+  mounts.push({
+    hostRoot: path.resolve(SANDBOX_SHARED_HOST_DIR),
+    containerRoot: normalizeContainerPathCore(SANDBOX_SHARED_MOUNT),
+    writable: true,
+    source: "bind",
+  });
+
   const protectedSkillMounts = resolveReadOnlyWorkspaceSkillMounts({
     workspaceDir: sandbox.workspaceDir,
     agentWorkspaceDir: sandbox.agentWorkspaceDir,
@@ -108,6 +122,14 @@ export function buildSandboxFsMounts(sandbox: SandboxFsBridgeContext): SandboxFs
       source: "protectedSkill",
     });
   }
+
+  // Hardcoded media directory mount (STATE_DIR/media -> /media, read-only).
+  mounts.push({
+    hostRoot: path.resolve(SANDBOX_MEDIA_HOST_DIR),
+    containerRoot: normalizeContainerPathCore(SANDBOX_MEDIA_MOUNT),
+    writable: false,
+    source: "bind",
+  });
 
   // Protected skill mounts are authoritative; skip user binds that target the
   // same container path to avoid duplicate entries in the mount table.
