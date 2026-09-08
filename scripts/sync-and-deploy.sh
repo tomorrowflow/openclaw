@@ -22,6 +22,16 @@ set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$HOME/logs"
 
+# --deploy-only runs stage 2 alone. The sync stage is a separate concern: when a
+# release bump is too large for the agent's single iteration it gets rebased by
+# hand, and the deploy still needs the tested path rather than hand-run steps.
+RUN_SYNC=1
+case "${1:-}" in
+  --deploy-only) RUN_SYNC=0 ;;
+  "") ;;
+  *) echo "usage: $(basename "$0") [--deploy-only]" >&2; exit 2 ;;
+esac
+
 # Where failure alerts go. openclaw runs as the openclaw user, so the send is
 # wrapped in `sudo -u openclaw`. Signal target is an E.164 number.
 NOTIFY_CHANNEL="signal"
@@ -138,9 +148,14 @@ echo "    log  : $LOG_FILE"
 # ── 1. Sync via Codex agent ────────────────────────────────────────────────
 # The agent handles steps 1–7: fetch → rebase → install → build → check →
 # fork-feature verification → push.  Exits 1 on non-success.
-STAGE="sync (Codex agent, steps 1–7)"
-step "1/2  Sync (Codex agent — steps 1–7)"
-npx tsx .sandcastle/sync.ts
+if [ "$RUN_SYNC" -eq 1 ]; then
+  STAGE="sync (Codex agent, steps 1–7)"
+  step "1/2  Sync (Codex agent — steps 1–7)"
+  npx tsx .sandcastle/sync.ts
+else
+  step "1/2  Sync — skipped (--deploy-only)"
+  echo "  Deploying the working tree as-is: $(git -C "$REPO_DIR" rev-parse --short HEAD)"
+fi
 
 # ── 2. Deploy ─────────────────────────────────────────────────────────────
 # The gateway stays up (old version) through install + bundle + migrations so a
@@ -445,7 +460,26 @@ docker rm -f \
   $(docker ps -a --filter "name=openclaw-sbx" --format "{{.Names}}" 2>/dev/null) \
   2>/dev/null || true
 
-$OC_SYSTEMCTL restart openclaw-gateway.service
+# Stop, migrate, start — deliberately not `restart`. Agent database schema
+# migrations need exclusive access to the files, so the doctor run above (taken
+# while the gateway was still serving) reports them pending and repairs nothing.
+# A plain restart then comes up on the old schema and keeps failing silently:
+# that is how the agent databases sat on schema 17 while every outbound delivery
+# failed to mirror into its session transcript. This stopped window is the only
+# point in the deploy where the migration can actually run.
+$OC_SYSTEMCTL stop openclaw-gateway.service
+for _ in $(seq 1 15); do
+  ss -ltn 2>/dev/null | grep -q ":${GATEWAY_PORT}\b" || break
+  sleep 2
+done
+
+STAGE="deploy: cutover (agent database migration)"
+echo "  Migrating agent databases while the gateway is stopped..."
+sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID \
+  openclaw doctor --fix --non-interactive 2>&1 | tail -5 || true
+
+STAGE="deploy: cutover (gateway start)"
+$OC_SYSTEMCTL start openclaw-gateway.service
 
 # Poll up to 60 s for the gateway to start listening.
 echo "  Waiting for gateway on :${GATEWAY_PORT}..."
@@ -503,6 +537,31 @@ except Exception:
 " 2>/dev/null || echo 0)
 if [ "${STUCK:-0}" -gt 0 ]; then
   SMOKE_PROBLEMS="${SMOKE_PROBLEMS}\n  - ${STUCK} inbound event(s) stuck pending with an error"
+fi
+
+# 3. Schema agreement. The migration above runs in the stopped window, but a
+#    doctor that reports without repairing leaves the databases behind the build.
+#    That failure is silent at runtime — the gateway serves normally and only
+#    transcript mirroring dies — so compare the declared schema against disk.
+WANT_AGENT_SCHEMA=$(python3 -c "import json; print(json.load(open('$REPO_DIR/package.json'))['openclaw']['schemaVersions']['agent'])" 2>/dev/null || echo "")
+if [ -n "$WANT_AGENT_SCHEMA" ]; then
+  BEHIND=$(sudo python3 -c "
+import glob, sqlite3, sys
+want = int(sys.argv[1])
+behind = []
+for path in sorted(glob.glob('/home/openclaw/.openclaw/agents/*/agent/openclaw-agent.sqlite')):
+    try:
+        con = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+        row = con.execute(\"select schema_version from schema_meta where meta_key='primary'\").fetchone()
+        if row and int(row[0]) < want:
+            behind.append(path.split('/agents/')[1].split('/')[0])
+    except Exception:
+        pass
+print(','.join(behind))
+" "$WANT_AGENT_SCHEMA" 2>/dev/null || echo "")
+  if [ -n "$BEHIND" ]; then
+    SMOKE_PROBLEMS="${SMOKE_PROBLEMS}\n  - agent database(s) still below schema ${WANT_AGENT_SCHEMA}: ${BEHIND}"
+  fi
 fi
 
 if [ -n "$SMOKE_PROBLEMS" ]; then
