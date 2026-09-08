@@ -15,17 +15,50 @@ export function createInlineCodeState(): InlineCodeState {
 
 type CodeSpan = Pick<FenceSpan, "start" | "end">;
 
+type InlineCodeSpansResult = {
+  spans: CodeSpan[];
+  state: InlineCodeState;
+};
+
+type CodeSpanIndex = {
+  /** Inline-code state to carry into the next streamed chunk. */
+  inlineState: InlineCodeState;
+  /** Fenced-code state to carry into the next streamed chunk. */
+  fenceState?: FenceScanState;
+  /** True when an offset is inside fenced code or inline code. */
+  isInside: (index: number) => boolean;
+};
 /** Builds a lookup for fenced and inline code spans while preserving scanner state. */
 export function buildCodeSpanIndex(
   text: string,
   inlineState?: InlineCodeState,
   fenceState?: FenceScanState,
-) {
+): CodeSpanIndex;
+export function buildCodeSpanIndex(
+  text: string,
+  inlineState?: InlineCodeState,
+  options?: { closedOnly?: boolean },
+): CodeSpanIndex;
+export function buildCodeSpanIndex(
+  text: string,
+  inlineState?: InlineCodeState,
+  fenceStateOrOptions?: FenceScanState | { closedOnly?: boolean },
+): CodeSpanIndex {
+  const closedOnly =
+    fenceStateOrOptions !== undefined &&
+    "closedOnly" in fenceStateOrOptions &&
+    fenceStateOrOptions.closedOnly === true;
+  // SAFETY: the caller-supplied fence-state object is only threaded through when it is not the closed-only sentinel.
+  const fenceState = closedOnly ? undefined : (fenceStateOrOptions as FenceScanState | undefined);
+  const startState = inlineState
+    ? { open: inlineState.open, ticks: inlineState.ticks }
+    : createInlineCodeState();
   const { spans: fenceSpans, state: nextFenceState } = scanFenceSpans(text, fenceState);
   const { spans: inlineSpans, state: nextInlineState } = parseInlineCodeSpans(
     text,
     fenceSpans,
-    inlineState ?? createInlineCodeState(),
+    startState,
+    closedOnly,
   );
 
   return {
@@ -42,7 +75,8 @@ function parseInlineCodeSpans(
   text: string,
   fenceSpans: FenceSpan[],
   initialState: InlineCodeState,
-) {
+  closedOnly?: boolean,
+): InlineCodeSpansResult {
   const spans: CodeSpan[] = [];
   let open = initialState.open;
   let ticks = initialState.ticks;
@@ -87,7 +121,7 @@ function parseInlineCodeSpans(
     }
   }
 
-  if (open) {
+  if (open && !closedOnly) {
     spans.push({ start: openStart, end: text.length });
   }
 

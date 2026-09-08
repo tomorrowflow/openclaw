@@ -65,6 +65,8 @@ export function resolveSandboxBrowserDockerCreateConfig(params: {
     // For hashing and consistency, treat browser image as the docker image even though we
     // pass it separately as the final `docker create` argument.
     image: params.browser.image,
+    // Inherit the main sandbox user so file ownership matches the host.
+    // The entrypoint pre-creates /tmp/.X11-unix for Xvfb.
   };
   return params.browser.binds !== undefined ? { ...base, binds: params.browser.binds } : base;
 }
@@ -87,6 +89,11 @@ function resolveSandboxDockerConfig(
     : globalDocker?.ulimits;
 
   const binds = [...(globalDocker?.binds ?? []), ...(agentDocker?.binds ?? [])];
+
+  // Secret mounts: shallow merge (agent overrides global per-key).
+  const secretMounts = agentDocker?.secretMounts
+    ? { ...globalDocker?.secretMounts, ...agentDocker.secretMounts }
+    : globalDocker?.secretMounts;
 
   return {
     image: agentDocker?.image ?? globalDocker?.image ?? DEFAULT_SANDBOX_IMAGE,
@@ -113,6 +120,7 @@ function resolveSandboxDockerConfig(
     dns: agentDocker?.dns ?? globalDocker?.dns,
     extraHosts: agentDocker?.extraHosts ?? globalDocker?.extraHosts,
     binds: binds.length ? binds : undefined,
+    secretMounts: secretMounts && Object.keys(secretMounts).length ? secretMounts : undefined,
     ...resolveDangerousSandboxDockerBooleans(agentDocker, globalDocker),
   };
 }
