@@ -120,6 +120,16 @@ function stripDevDependencies(packageJsonPath) {
 }
 
 function npmInstallExtensionDeps(extDir) {
+  // pnpm's workspace node_modules is a symlink farm pointing into the repo's
+  // node_modules/.pnpm store, and `cp -r` copies those links verbatim. Every
+  // target dangles once the tree lands in the global install — including
+  // node_modules/.bin, where npm's own mkdir then fails ENOENT and aborts the
+  // whole deploy. npm repopulates this directory below, so drop the copied farm
+  // instead of installing on top of broken links.
+  const stalePnpmLinks = path.join(extDir, "node_modules");
+  if (fs.lstatSync(stalePnpmLinks, { throwIfNoEntry: false })) {
+    sh(`sudo rm -rf ${JSON.stringify(stalePnpmLinks)}`, { silent: true });
+  }
   const packageJsonPath = path.join(extDir, "package.json");
   if (!fs.existsSync(packageJsonPath)) {
     return;
