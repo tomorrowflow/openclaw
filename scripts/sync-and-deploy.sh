@@ -45,6 +45,10 @@ NOTIFY_SENDER="+493055464974"
 # Gateway listen port, used by every readiness/liveness probe below.
 GATEWAY_PORT=18789
 
+# The managed unit. Defined here because the engine preflight reads ExecStart
+# from it before anything is installed, well before the version/env edits below.
+UNIT_FILE=/home/openclaw/.config/systemd/user/openclaw-gateway.service
+
 mkdir -p "$LOG_DIR"
 
 # ── Single-instance guard ──────────────────────────────────────────────────
@@ -174,6 +178,46 @@ fi
 # memory (open inodes), so overwriting dist on disk does not disturb it.
 step "2/2  Deploy (host — step 8)"
 
+# Runtime engine preflight — the gateway's node, not this shell's.
+#
+# A release can raise engines.node (2026.9.3 moved to ">=24.16.0 <25 || >=26.1.0"
+# and dropped Node 22). Installing it against an older runtime leaves the global
+# install unrunnable: the old gateway keeps serving from memory, and the next
+# restart — a crash, a reboot, or the cutover below — fails to start. Check
+# before anything is written, while a failure costs nothing.
+#
+# The unit's ExecStart is what actually runs the gateway, so test that binary
+# rather than whatever node this script happens to use. Reuse the repo's own
+# engine guard instead of reimplementing semver ranges here.
+STAGE="deploy: runtime engine preflight (nothing installed yet)"
+GATEWAY_NODE="$(sudo grep -m1 '^ExecStart=' "$UNIT_FILE" 2>/dev/null | sed 's/^ExecStart=//' | awk '{print $1}')"
+if [ -z "$GATEWAY_NODE" ] || [ ! -x "$GATEWAY_NODE" ]; then
+  echo ""
+  echo "  ✗ Could not determine the gateway's Node runtime from $UNIT_FILE."
+  echo "    Parsed ExecStart binary: ${GATEWAY_NODE:-<none>}"
+  echo "    Refusing to install a build whose runtime cannot be checked."
+  echo ""
+  exit 1
+fi
+if ! "$GATEWAY_NODE" "$REPO_DIR/scripts/preinstall-package-manager-warning.mjs" 2>&1; then
+  echo ""
+  echo "  ✗ The gateway's Node runtime does not satisfy this release's engines."
+  echo "    gateway node: $GATEWAY_NODE ($("$GATEWAY_NODE" --version 2>/dev/null))"
+  echo "    required:     $(python3 -c "import json;print(json.load(open('$REPO_DIR/package.json'))['engines']['node'])" 2>/dev/null)"
+  echo ""
+  echo "    Nothing was installed; the gateway keeps running the previous version."
+  echo "    Upgrade Node first (this fork provisions the Linux LTS line):"
+  echo "      curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -"
+  echo "      sudo apt-get install -y nodejs"
+  echo "    Then re-test every native addon — a Node major bump breaks raw V8"
+  echo "    addons (better-sqlite3 and friends) that N-API modules survive:"
+  echo "      find \$(npm root -g) -name '*.node' -exec \\"
+  echo "        node -e \"process.dlopen({exports:{}}, process.argv[1])\" {} \\;"
+  echo ""
+  exit 1
+fi
+echo "  ✓ gateway node $("$GATEWAY_NODE" --version 2>/dev/null) satisfies this release's engines"
+
 # Clear stale npm temp symlinks that block the atomic rename during install.
 sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
 
@@ -202,7 +246,6 @@ ls -l "$(npm root -g)/openclaw/dist/reply-"*.js
 ls "$(npm root -g)/openclaw/dist/control-ui/index.html"
 
 # Update OPENCLAW_SERVICE_VERSION in the systemd unit.
-UNIT_FILE=/home/openclaw/.config/systemd/user/openclaw-gateway.service
 NEW_VER=$(node -p "require('$(npm root -g)/openclaw/package.json').version")
 
 # Set an Environment= line whether or not it is already present. `openclaw
@@ -574,6 +617,23 @@ print(','.join(behind))
   if [ -n "$BEHIND" ]; then
     SMOKE_PROBLEMS="${SMOKE_PROBLEMS}\n  - agent database(s) still below schema ${WANT_AGENT_SCHEMA}: ${BEHIND}"
   fi
+fi
+
+# 4. Plugin load failures. A plugin that throws while loading leaves the gateway
+#    listening and healthy with that plugin simply absent — no crash, no stuck
+#    ingress, nothing the checks above can see. memory-lancedb died this way on
+#    an ESM/CJS interop break: the gateway served fine, the memory slot had no
+#    provider, and recall was never registered. `plugins list` is not a witness
+#    here, because the CLI loads plugins in its own process without the
+#    gateway's resolver hooks and reports them healthy.
+PLUGIN_FAILURES=$(sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID \
+  journalctl --user -u openclaw-gateway.service --since "-3 min" --no-pager -o cat 2>/dev/null \
+  | grep -cE "failed to load from|failed during register|plugin\(s\) failed to initialize" || true)
+if [ "${PLUGIN_FAILURES:-0}" -gt 0 ]; then
+  FAILED_PLUGINS=$(sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID \
+    journalctl --user -u openclaw-gateway.service --since "-3 min" --no-pager -o cat 2>/dev/null \
+    | grep -oE "\[plugins\] [a-z0-9-]+ failed to (load|register)" | awk '{print $2}' | sort -u | tr '\n' ' ')
+  SMOKE_PROBLEMS="${SMOKE_PROBLEMS}\n  - plugin load failure(s) since restart: ${FAILED_PLUGINS:-see log}"
 fi
 
 if [ -n "$SMOKE_PROBLEMS" ]; then
