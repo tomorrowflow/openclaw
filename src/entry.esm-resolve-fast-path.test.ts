@@ -96,6 +96,19 @@ describe("installDistEsmResolveFastPath resolve hook", () => {
   it("defers relative targets that escape the dist root", () => {
     expect(runHook(hook, "../outside/chunk.js").deferred).toBe(true);
   });
+
+  it("defers vendored node_modules under dist, which may be CommonJS", () => {
+    // A deploy that installs an extension's dependencies under dist puts
+    // third-party packages below the dist root. They keep their own package
+    // scope, so forcing format "module" parses CommonJS as ESM: tslib's ESM
+    // wrapper does `import tslib from "../tslib.js"` and the CJS target then
+    // reports no default export, taking the whole plugin down at load.
+    expect(
+      runHook(hook, "../tslib.js", {
+        parentURL: `${DIST_ROOT}extensions/memory-lancedb/node_modules/tslib/modules/index.js`,
+      }).deferred,
+    ).toBe(true);
+  });
 });
 
 describe("installDistEsmResolveFastPath gating", () => {

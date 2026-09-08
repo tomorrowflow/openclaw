@@ -64,6 +64,13 @@ function resolveDistEsmFastPathUrl(params: {
     !specifier.endsWith(".js") ||
     parentUrl === undefined ||
     !parentUrl.startsWith(params.distRootUrl) ||
+    // Vendored dependencies keep their own package scope even under dist. A
+    // deploy that installs an extension's node_modules there can place
+    // CommonJS below the dist root (tslib ships tslib.js as CJS), and forcing
+    // format "module" makes Node parse it as ESM — `import x from
+    // "../tslib.js"` then fails with "does not provide an export named
+    // 'default'". Only first-party dist chunks are guaranteed ESM.
+    parentUrl.includes("/node_modules/") ||
     params.conditions?.includes("require") === true ||
     (specifier.charCodeAt(1) !== 47 /* "/" */ &&
       (specifier.charCodeAt(1) !== 46 /* "." */ || specifier.charCodeAt(2) !== 47))
