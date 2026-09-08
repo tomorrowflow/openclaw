@@ -11,6 +11,7 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { isImageMediaFact, readPersistedMediaFacts } from "../media/media-facts.js";
 import { formatRawAssistantErrorForUi } from "../shared/assistant-error-format.js";
 import { extractAssistantPhaseText } from "../shared/chat-message-content.js";
+import { stripReasoningTagsFromText } from "../shared/text/reasoning-tags.js";
 import { formatTokenCount } from "../utils/token-format.js";
 import type { SessionInfo } from "./tui-types.js";
 
@@ -325,30 +326,28 @@ export function extractContentFromMessage(message: unknown): string {
 
   if (record.role === "assistant") {
     if (typeof content === "string") {
-      return content.trim();
+      return stripReasoningTagsFromText(sanitizeRenderableText(content).trim());
     }
     if (Array.isArray(content)) {
-      const text = (extractAssistantPhaseText(record) ?? "").trim();
-      const pairingQr = extractPairingQrTerminalText(record);
-      return (
-        [text, pairingQr].filter(Boolean).join("\n\n") || formatAssistantErrorFromRecord(record)
-      );
+      return stripReasoningTagsFromText(extractAssistantRenderableContent(record));
     }
   }
 
   if (typeof content === "string") {
-    return sanitizeRenderableText(content).trim();
+    return stripReasoningTagsFromText(sanitizeRenderableText(content).trim());
   }
 
   const parts = collectBlockStrings(content, "text").map(sanitizeRenderableText);
   if (parts.length > 0) {
-    return parts.join("\n").trim();
+    return stripReasoningTagsFromText(parts.join("\n").trim());
   }
   return formatAssistantErrorFromRecord(record);
 }
 
 function extractAssistantRenderableContent(record: Record<string, unknown>): string {
-  const visible = sanitizeRenderableText(extractAssistantPhaseText(record) ?? "").trim();
+  const visible = stripReasoningTagsFromText(
+    sanitizeRenderableText(extractAssistantPhaseText(record) ?? "").trim(),
+  );
   const pairingQr = extractPairingQrTerminalText(record);
   const content = [visible, pairingQr].filter(Boolean).join("\n\n").trim();
   if (content) {
@@ -383,7 +382,7 @@ function extractPairingQrTerminalText(record: Record<string, unknown>): string {
 
 function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean }): string {
   if (typeof content === "string") {
-    return sanitizeRenderableText(content).trim();
+    return stripReasoningTagsFromText(sanitizeRenderableText(content).trim());
   }
   if (!Array.isArray(content)) {
     return "";
@@ -397,7 +396,7 @@ function extractTextBlocks(content: unknown, opts?: { includeThinking?: boolean 
 
   return composeThinkingAndContent({
     thinkingText: thinkingParts.join("\n").trim(),
-    contentText: textParts.join("\n").trim(),
+    contentText: stripReasoningTagsFromText(textParts.join("\n").trim()),
     showThinking: opts?.includeThinking ?? false,
   });
 }
@@ -443,15 +442,17 @@ export function extractTextFromMessage(
   }
   if (record.role === "assistant") {
     const contentText = extractAssistantRenderableContent(record);
-    return composeThinkingAndContent({
-      // History is stateless; the stream assembler retains hidden thinking for later toggles.
-      thinkingText: opts?.includeThinking ? extractThinkingFromMessage(record) : "",
-      contentText:
-        opts?.includeAttachments !== false
-          ? formatTuiAssistantContent(record, contentText)
-          : contentText,
-      showThinking: opts?.includeThinking ?? false,
-    });
+    return stripReasoningTagsFromText(
+      composeThinkingAndContent({
+        // History is stateless; the stream assembler retains hidden thinking for later toggles.
+        thinkingText: opts?.includeThinking ? extractThinkingFromMessage(record) : "",
+        contentText:
+          opts?.includeAttachments !== false
+            ? formatTuiAssistantContent(record, contentText)
+            : contentText,
+        showThinking: opts?.includeThinking ?? false,
+      }),
+    );
   }
   const text = extractTextBlocks(record.content, opts);
   if (text) {

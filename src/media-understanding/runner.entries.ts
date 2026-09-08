@@ -442,6 +442,9 @@ async function resolveProviderExecutionAuth(params: {
     params.cfg.models?.providers,
     params.providerId,
   );
+  if (LOCAL_KEYLESS_PROVIDERS.has(params.providerId)) {
+    return { kind: "none", source: `provider:${params.providerId}` };
+  }
   const literalApiKey = normalizeNullableString(
     params.cfg.models?.providers?.[params.providerId]?.apiKey,
   );
