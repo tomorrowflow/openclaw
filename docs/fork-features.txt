@@ -59,6 +59,9 @@ enablePositionalOptions | src/cli/program/build-program.ts | Positional options 
 enablePositionalOptions | src/cli/gateway-cli/register.ts | Positional options fix for gateway register
 deviceId | src/cli/devices-cli.ts | Device ID display in devices list
 
+# --- ESM resolve fast path (deploy-layout compat) ---
+parentUrl\.includes\("/node_modules/"\) | src/entry.esm-resolve-fast-path.ts | Dist ESM resolve fast path skips vendored node_modules. scripts/deploy-globally.mjs installs each externalized extension's dependencies under dist/extensions/*/node_modules, which breaks the hook's assumption that everything below the dist root is ESM: it forced format "module" onto CommonJS (tslib.js), so memory-lancedb died at load with "'../tslib.js' does not provide an export named 'default'" and the memory slot lost its provider. Upstream's own layout has no node_modules under dist, so this only bites the fork's deploy.
+
 # --- Ollama (provider compat patches) ---
 ensureArgsString | extensions/ollama/src/stream.runtime.ts | OpenAI-compat tool_call arguments kept as string (fixes ollama 400 "cannot unmarshal object ... arguments of type string" on tool-call replay; e.g. glm-5.2:cloud)
 
