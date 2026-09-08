@@ -1,9 +1,9 @@
-FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
+FROM debian:trixie-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN --mount=type=cache,id=openclaw-sandbox-bookworm-apt-cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,id=openclaw-sandbox-bookworm-apt-lists,target=/var/lib/apt,sharing=locked \
+RUN --mount=type=cache,id=openclaw-sandbox-trixie-apt-cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,id=openclaw-sandbox-trixie-apt-lists,target=/var/lib/apt,sharing=locked \
   apt-get update \
   && apt-get install -y --no-install-recommends \
     bash \
@@ -12,7 +12,28 @@ RUN --mount=type=cache,id=openclaw-sandbox-bookworm-apt-cache,target=/var/cache/
     git \
     jq \
     python3 \
-    ripgrep
+    python3-pip \
+    ripgrep \
+    unzip
+
+# Deno is not packaged in Debian apt; install the official release binary
+# system-wide so it is on PATH for the unprivileged sandbox user.
+RUN set -eux; \
+  arch="$(dpkg --print-architecture)"; \
+  case "$arch" in \
+    amd64) deno_target="x86_64-unknown-linux-gnu" ;; \
+    arm64) deno_target="aarch64-unknown-linux-gnu" ;; \
+    *) echo "unsupported arch for deno: $arch" >&2; exit 1 ;; \
+  esac; \
+  curl -fsSL "https://github.com/denoland/deno/releases/latest/download/deno-${deno_target}.zip" -o /tmp/deno.zip; \
+  unzip -o /tmp/deno.zip -d /usr/local/bin; \
+  rm /tmp/deno.zip; \
+  chmod +x /usr/local/bin/deno; \
+  deno --version
+
+# Base image Python is externally-managed (PEP 668); install curl_cffi into the
+# system interpreter so sandbox scripts can import it.
+RUN pip3 install --no-cache-dir --break-system-packages curl_cffi
 
 RUN useradd --create-home --shell /bin/bash sandbox
 USER sandbox
