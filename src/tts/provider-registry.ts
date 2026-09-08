@@ -7,7 +7,11 @@ import {
 } from "../plugins/capability-provider-runtime.js";
 import { buildCapabilityProviderIndex } from "../plugins/provider-registry-shared.js";
 import type { SpeechProviderPlugin } from "../plugins/types.js";
-import { createSpeechProviderRegistry } from "./provider-registry-core.js";
+import {
+  createSpeechProviderRegistry,
+  normalizeSpeechProviderId,
+} from "./provider-registry-core.js";
+import { buildKokoroSpeechProvider } from "./providers/kokoro.js";
 export { normalizeSpeechProviderId } from "./provider-registry-core.js";
 
 /** Config-aware registry used by setup/status/runtime paths before plugins are loaded. */
@@ -18,7 +22,14 @@ const defaultSpeechProviderRegistry = createSpeechProviderRegistry({
       providerId,
       cfg,
     }),
-  listProviders: (cfg) => resolvePluginCapabilityProviders({ key: "speechProviders", cfg }),
+  listProviders: (cfg) => {
+    const providers = resolvePluginCapabilityProviders({ key: "speechProviders", cfg });
+    const kokoro = buildKokoroSpeechProvider();
+    const hasKokoro = providers.some(
+      (provider) => normalizeSpeechProviderId(provider.id) === normalizeSpeechProviderId(kokoro.id),
+    );
+    return hasKokoro ? providers : [...providers, kokoro];
+  },
 });
 
 /** List configured speech providers using manifest/capability discovery. */
