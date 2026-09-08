@@ -88,11 +88,28 @@ trap 'cleanup "$?"' EXIT
 trap 'cleanup 130' INT
 trap 'cleanup 143' TERM
 
+SCREEN_RES="${OPENCLAW_BROWSER_SCREEN_RESOLUTION:-1920x1080x24}"
+
 mkdir -p "${HOME}" "${HOME}/.chrome" "${XDG_CONFIG_HOME}" "${XDG_CACHE_HOME}"
 
-Xvfb :1 -screen 0 1280x800x24 -ac -nolisten tcp &
+# Remove stale Chrome singleton lock files left over from unclean container shutdown.
+# Without this, Chromium refuses to start: "The profile appears to be in use by another process".
+rm -f "${HOME}/.chrome/SingletonLock" "${HOME}/.chrome/SingletonCookie" "${HOME}/.chrome/SingletonSocket" 2>/dev/null || true
+
+# Recreate /tmp/.X11-unix when tmpfs wipes the image-layer copy.
+mkdir -p /tmp/.X11-unix 2>/dev/null || true
+
+Xvfb :1 -screen 0 "${SCREEN_RES}" -ac -nolisten tcp &
 XVFB_PID=$!
 echo "[sandbox] Xvfb started (PID: ${XVFB_PID})"
+
+if [[ "${HEADLESS}" == "1" ]]; then
+  CHROME_ARGS=(
+    "--headless=new"
+  )
+else
+  CHROME_ARGS=()
+fi
 
 if [[ "${CDP_PORT}" -ge 65535 ]]; then
   CHROME_CDP_PORT="$((CDP_PORT - 1))"
@@ -100,20 +117,44 @@ else
   CHROME_CDP_PORT="$((CDP_PORT + 1))"
 fi
 
-CHROME_ARGS=(
+# Extract width×height from the resolution string (e.g. "1920x1080x24" → "1920,1080").
+WINDOW_SIZE="${SCREEN_RES%x[0-9]*}"
+WINDOW_SIZE="${WINDOW_SIZE/x/,}"
+
+CHROME_ARGS+=(
   "--remote-debugging-address=127.0.0.1"
   "--remote-debugging-port=${CHROME_CDP_PORT}"
   "--user-data-dir=${HOME}/.chrome"
   "--no-first-run"
   "--no-default-browser-check"
+  "--window-size=${WINDOW_SIZE}"
+  # Rendering consistency: deterministic fonts + color for reliable screenshots.
+  "--font-render-hinting=none"
+  "--force-color-profile=srgb"
+  "--hide-scrollbars"
+  # Resource & telemetry: silence network calls and background work.
   "--disable-dev-shm-usage"
   "--disable-background-networking"
+  "--disable-background-timer-throttling"
+  "--disable-backgrounding-occluded-windows"
+  "--disable-renderer-backgrounding"
+  "--disable-client-side-phishing-detection"
+  "--disable-default-apps"
+  "--disable-domain-reliability"
+  "--disable-sync"
   "--disable-breakpad"
   "--disable-crash-reporter"
   "--no-zygote"
   "--metrics-recording-only"
+  "--mute-audio"
+  "--no-pings"
   "--password-store=basic"
   "--use-mock-keychain"
+  # Agent-friendly: no blocking dialogs, allow popups, permit HTTP navigation.
+  "--disable-popup-blocking"
+  "--disable-prompt-on-repost"
+  "--disable-ipc-flooding-protection"
+  "--disable-features=TranslateUI,HttpsFirstBalancedModeAutoEnable"
 )
 
 if [[ "${HEADLESS}" == "1" ]]; then
