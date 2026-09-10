@@ -52,6 +52,41 @@ describe("incomplete-turn recovery policy", () => {
     ).toBeNull();
   });
 
+  it("never re-prompts an authored NO_REPLY whose streamed text was not recorded", () => {
+    const assistant = buildEmbeddedRunnerAssistant({
+      content: [{ type: "text", text: "NO_REPLY" }],
+      api: "openai-completions",
+      provider: "ollama",
+      model: "kimi-k2.7-code:cloud",
+      stopReason: "stop",
+      usage: { ...createZeroUsageFixture(), input: 900, output: 4, totalTokens: 904 },
+    });
+    const attempt = makeEmbeddedRunnerAttempt({
+      assistantTexts: [],
+      lastAssistant: assistant,
+      currentAttemptAssistant: assistant,
+    });
+    const state = {
+      provider: "ollama",
+      modelId: "kimi-k2.7-code:cloud",
+      modelApi: "openai-completions",
+      payloadCount: 0,
+      aborted: false,
+      timedOut: false,
+      attempt,
+    };
+    expect(resolveEmptyResponseRetryInstruction(state)).toBeNull();
+    expect(resolveReasoningOnlyRetryInstruction(state)).toBeNull();
+    expect(
+      shouldTreatEmptyAssistantReplyAsSilent({
+        ...state,
+        allowEmptyAssistantReplyAsSilent: true,
+        terminalReplyExpectation: "optional",
+      }),
+    ).toBe(true);
+    expect(resolveIncompleteTurnPayloadText({ ...state, externalAbort: false })).toBeNull();
+  });
+
   it.each(
     (["required", "optional"] as const).flatMap((terminalReplyExpectation) =>
       ["async tool", "active lifecycle item", "unfinished lifecycle item"].map((owner) => ({

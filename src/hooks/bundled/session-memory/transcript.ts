@@ -106,7 +106,7 @@ function renderSessionMemoryRecords(events: readonly unknown[]): SessionMemoryRe
     if (role === "user" && hasInterSessionUserProvenance(record.message)) {
       continue;
     }
-    const heartbeatMessage = record.message as { role: string; content?: unknown };
+    const heartbeatMessage = { ...record.message, role };
     if (isHeartbeatUserMessage(heartbeatMessage)) {
       lastAssistantText = undefined;
       inHeartbeatTurn = true;
