@@ -27,6 +27,7 @@ export { isIncognitoSessionKey } from "../shared/incognito-session-key.js";
 export {
   isCronSessionKey,
   isAcpSessionKey,
+  isHeartbeatSessionKey,
   isSubagentSessionKey,
   parseAgentSessionKey,
   parseSessionDeliveryRoute,

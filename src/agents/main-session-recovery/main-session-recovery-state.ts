@@ -11,6 +11,7 @@ import { hasRestartRecoveryTerminalRun } from "../../config/sessions/restart-rec
 import {
   isAcpSessionKey,
   isCronSessionKey,
+  isHeartbeatSessionKey,
   isSubagentSessionKey,
 } from "../../routing/session-key.js";
 import { interruptAdmittedMainSessionRecovery } from "./main-session-recovery-admitted-interruption.js";
@@ -146,10 +147,16 @@ export function isMainRestartRecoveryCandidate(entry: SessionEntry, sessionKey: 
   if (entry.subagentRole != null) {
     return false;
   }
+  // Isolated heartbeat rows are transient poll executions: replaying one after a
+  // restart asks the model to continue a poll, and the prose answer reaches the owner.
+  if (entry.heartbeatIsolatedBaseSessionKey?.trim()) {
+    return false;
+  }
   return (
     !isSubagentSessionKey(sessionKey) &&
     !isCronSessionKey(sessionKey) &&
-    !isAcpSessionKey(sessionKey)
+    !isAcpSessionKey(sessionKey) &&
+    !isHeartbeatSessionKey(sessionKey)
   );
 }
 
