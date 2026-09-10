@@ -165,6 +165,27 @@ describe("session-memory transcript extraction", () => {
     expect(memoryContent).toContain(sessionMemoryRecord("user", "External follow-up"));
   });
 
+  it("drops heartbeat poll turns and their status replies", () => {
+    const memoryContent = getRecentSessionContentFromEvents([
+      message("user", "Plan my Wroclaw weekend"),
+      message("assistant", "Here is the plan"),
+      message("user", "[OpenClaw heartbeat poll]"),
+      message("assistant", "HEARTBEAT_OK\n\nNo priority checks triggered. State updated."),
+      message("user", "[OpenClaw heartbeat poll]"),
+      message("assistant", "HEARTBEAT_OK"),
+      message("user", "Thanks, looks good"),
+      message("assistant", "Enjoy the trip"),
+    ]);
+
+    expect(memoryContent).not.toContain("heartbeat poll");
+    expect(memoryContent).not.toContain("HEARTBEAT_OK");
+    expect(memoryContent).not.toContain("No priority checks");
+    expect(memoryContent).toContain(sessionMemoryRecord("user", "Plan my Wroclaw weekend"));
+    expect(memoryContent).toContain(sessionMemoryRecord("assistant", "Here is the plan"));
+    expect(memoryContent).toContain(sessionMemoryRecord("user", "Thanks, looks good"));
+    expect(memoryContent).toContain(sessionMemoryRecord("assistant", "Enjoy the trip"));
+  });
+
   it("filters command messages starting with /", () => {
     const memoryContent = getRecentSessionContentFromEvents([
       message("user", "/help"),

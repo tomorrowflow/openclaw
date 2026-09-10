@@ -284,6 +284,11 @@ export function parseCronRunScopeSuffix(
   };
 }
 
+/** Isolated heartbeat execution keys carry a `:heartbeat` suffix on their conversation base key. */
+export function isHeartbeatSessionKey(sessionKey: string | undefined | null): boolean {
+  return normalizeOptionalLowercaseString(sessionKey)?.endsWith(":heartbeat") === true;
+}
+
 export function isCronSessionKey(sessionKey: string | undefined | null): boolean {
   const parsed = parseAgentSessionKey(sessionKey);
   if (!parsed) {
