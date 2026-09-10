@@ -109,7 +109,7 @@ function renderSessionMemoryMessage(
   if (role === "user" && hasInterSessionUserProvenance(record.message)) {
     return { turnOrigin: nextTurnOrigin };
   }
-  const heartbeatMessage = record.message as { role: string; content?: unknown };
+  const heartbeatMessage = { ...record.message, role };
   if (
     isHeartbeatUserMessage(heartbeatMessage) ||
     (role === "assistant" && isHeartbeatOkResponse(heartbeatMessage))
