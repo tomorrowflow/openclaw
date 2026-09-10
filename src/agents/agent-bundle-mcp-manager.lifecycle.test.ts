@@ -81,6 +81,11 @@ function createManager(createRuntime?: CreateSessionMcpRuntime) {
   return manager;
 }
 
+// One session key resolves to one live session id; distinct ids need distinct keys.
+function sessionParams(sessionId: string) {
+  return { ...params, sessionId, sessionKey: `agent:test:${sessionId}` };
+}
+
 function requesterParams(requesterSenderId: string) {
   return {
     ...params,
@@ -135,21 +140,21 @@ describe("MCP manager creation ownership", () => {
   it("keeps serverless sessions available beyond the MCP limit and while it is full", async () => {
     const manager = createManager(createRuntimeFixture);
     for (let index = 0; index < 300; index += 1) {
-      await manager.getOrCreate({ ...params, sessionId: `serverless-${index}` });
+      await manager.getOrCreate(sessionParams(`serverless-${index}`));
     }
     const configured = { mcp: { servers: { fixture: { command: "true" } } } };
     for (let index = 0; index < 256; index += 1) {
-      await manager.getOrCreate({ ...params, sessionId: `connected-${index}`, cfg: configured });
+      await manager.getOrCreate({ ...sessionParams(`connected-${index}`), cfg: configured });
     }
-    await manager.getOrCreate({ ...params, sessionId: "serverless-at-capacity" });
+    await manager.getOrCreate(sessionParams("serverless-at-capacity"));
     await expect(
-      manager.getOrCreate({ ...params, sessionId: "connected-overflow", cfg: configured }),
+      manager.getOrCreate({ ...sessionParams("connected-overflow"), cfg: configured }),
     ).rejects.toThrow("live runtime limit (256)");
     await expect(
-      manager.getOrCreate({ ...params, sessionId: "serverless-0", cfg: configured }),
+      manager.getOrCreate({ ...sessionParams("serverless-0"), cfg: configured }),
     ).rejects.toThrow("live runtime limit (256)");
-    await manager.getOrCreate({ ...params, sessionId: "connected-0" });
-    await manager.getOrCreate({ ...params, sessionId: "serverless-0", cfg: configured });
+    await manager.getOrCreate(sessionParams("connected-0"));
+    await manager.getOrCreate({ ...sessionParams("serverless-0"), cfg: configured });
   });
 
   it("bounds requester runtimes across sessions, creation, and cleanup", async () => {
@@ -157,7 +162,11 @@ describe("MCP manager creation ownership", () => {
     const factory = vi.fn<CreateSessionMcpRuntime>(createRuntimeFixture);
     const manager = createManager(factory);
     const acquire = (sessionId: string) =>
-      manager.getOrCreateRequesterScoped({ ...requesterParams("sender"), sessionId });
+      manager.getOrCreateRequesterScoped({
+        ...requesterParams("sender"),
+        ...sessionParams(sessionId),
+        cfg: requesterParams("sender").cfg,
+      });
     await withRequesterResolver(async () => {
       for (let index = 0; index < 255; index += 1) {
         await acquire(`bounded-${index}`);
@@ -760,5 +769,51 @@ describe("MCP manager creation ownership", () => {
     await expect(manager.completeDeferredRetirement(params.sessionId, runtime)).resolves.toBe(true);
     expect(runtime.dispose).toHaveBeenCalledOnce();
     expect(manager.listRuntimeKeys()).toEqual([]);
+  });
+});
+
+describe("MCP manager session key rollover", () => {
+  const rolloverParams = (sessionId: string) => ({
+    ...params,
+    sessionId,
+    sessionKey: "agent:test:main:heartbeat",
+    cfg: { mcp: { servers: { fixture: { command: "true" } } } },
+  });
+
+  it("retires the superseded runtime when a session key rolls to a fresh session id", async () => {
+    const manager = createManager(createRuntimeFixture);
+    const first = await manager.getOrCreate(rolloverParams("heartbeat-run-1"));
+    const second = await manager.getOrCreate(rolloverParams("heartbeat-run-2"));
+
+    expect(second).not.toBe(first);
+    expect(first.dispose).toHaveBeenCalledTimes(1);
+    expect(second.dispose).not.toHaveBeenCalled();
+    expect(manager.listSessionIds()).toEqual(["heartbeat-run-2"]);
+    expect(manager.resolveSessionId("agent:test:main:heartbeat")).toBe("heartbeat-run-2");
+  });
+
+  it("keeps the superseded runtime until its active lease releases", async () => {
+    const manager = createManager(createRuntimeFixture);
+    const firstLease = await manager.acquire(rolloverParams("heartbeat-run-1"));
+    const second = await manager.getOrCreate(rolloverParams("heartbeat-run-2"));
+
+    expect(firstLease.runtime.dispose).not.toHaveBeenCalled();
+    expect(manager.listSessionIds().toSorted()).toEqual(["heartbeat-run-1", "heartbeat-run-2"]);
+
+    firstLease.releaseLease();
+    await manager.completeDeferredRetirement("heartbeat-run-1", firstLease.runtime);
+
+    expect(firstLease.runtime.dispose).toHaveBeenCalledTimes(1);
+    expect(second.dispose).not.toHaveBeenCalled();
+    expect(manager.listSessionIds()).toEqual(["heartbeat-run-2"]);
+  });
+
+  it("reuses the runtime when the same session id is acquired again", async () => {
+    const manager = createManager(createRuntimeFixture);
+    const first = await manager.getOrCreate(rolloverParams("heartbeat-run-1"));
+    const again = await manager.getOrCreate(rolloverParams("heartbeat-run-1"));
+
+    expect(again).toBe(first);
+    expect(first.dispose).not.toHaveBeenCalled();
   });
 });

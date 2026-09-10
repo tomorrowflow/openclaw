@@ -680,3 +680,27 @@ describe("session-memory hook", () => {
     );
   });
 });
+
+describe("session-memory runtime-owned sessions", () => {
+  it.each([
+    "agent:main:main:heartbeat",
+    "agent:main:cron:job-1:run:run-1",
+    "agent:main:subagent:child-1",
+  ])("does not write memory when %s resets", async (sessionKey) => {
+    const tempDir = await createCaseWorkspace("workspace");
+    // The hook must skip before touching the workspace; an empty memory dir proves no write.
+    await fs.mkdir(path.join(tempDir, "memory"), { recursive: true });
+
+    const { files } = await runNewWithPreviousSessionEntry({
+      tempDir,
+      sessionKey,
+      previousSessionEntry: { sessionId: "runtime-owned-1" },
+      events: createSessionMessages([
+        { role: "user", content: "[OpenClaw heartbeat poll]" },
+        { role: "assistant", content: "HEARTBEAT_OK\n\nNo priority checks triggered." },
+      ]),
+    });
+
+    expect(files).toEqual([]);
+  });
+});

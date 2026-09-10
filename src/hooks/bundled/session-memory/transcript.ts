@@ -1,6 +1,10 @@
 // Session memory transcript helpers persist compact session transcript excerpts.
 import { classifySessionMessageOrigin } from "../../../../packages/memory-host-sdk/src/host/session-provenance.js";
 import type { MemoryOriginClass } from "../../../../packages/memory-host-sdk/src/host/types.js";
+import {
+  isHeartbeatOkResponse,
+  isHeartbeatUserMessage,
+} from "../../../auto-reply/heartbeat-filter.js";
 import { sanitizeModelSpecialTokens } from "../../../security/external-content.js";
 import { hasInterSessionUserProvenance } from "../../../sessions/input-provenance.js";
 import { isOpenClawDeliveryMirrorAssistantMessage } from "../../../shared/transcript-only-openclaw-assistant.js";
@@ -73,6 +77,9 @@ function renderSessionMemoryRecords(events: readonly unknown[]): SessionMemoryRe
   const allMessages: SessionMemoryRecord[] = [];
   let lastAssistantText: string | undefined;
   let turnOrigin: MemoryOriginClass = "untrusted";
+  // A heartbeat poll owns every assistant row until the next real user turn:
+  // the reply text is status prose for the runtime, not remembered conversation.
+  let inHeartbeatTurn = false;
   for (const event of events) {
     if (!event || typeof event !== "object") {
       continue;
@@ -99,6 +106,15 @@ function renderSessionMemoryRecords(events: readonly unknown[]): SessionMemoryRe
     if (role === "user" && hasInterSessionUserProvenance(record.message)) {
       continue;
     }
+    const heartbeatMessage = record.message as { role: string; content?: unknown };
+    if (isHeartbeatUserMessage(heartbeatMessage)) {
+      lastAssistantText = undefined;
+      inHeartbeatTurn = true;
+      continue;
+    }
+    if (role === "assistant" && isHeartbeatOkResponse(heartbeatMessage)) {
+      continue;
+    }
     const text = extractTextMessageContent(record.message.content);
     const sanitized = text ? sanitizeSessionMemoryTranscriptText(text) : null;
     if (!sanitized) {
@@ -108,8 +124,9 @@ function renderSessionMemoryRecords(events: readonly unknown[]): SessionMemoryRe
       // New turn: reset even when slash commands are omitted from memory, so
       // later standalone delivery mirrors are preserved.
       lastAssistantText = undefined;
+      inHeartbeatTurn = false;
     }
-    if (sanitized.startsWith("/")) {
+    if (sanitized.startsWith("/") || inHeartbeatTurn) {
       continue;
     }
     // Skip delivery-mirror rows only when they duplicate the preceding
