@@ -20,6 +20,11 @@ import {
   parseAgentSessionKey,
   toAgentStoreSessionKey,
 } from "../../../routing/session-key.js";
+import {
+  isCronSessionKey,
+  isHeartbeatSessionKey,
+  isSubagentSessionKey,
+} from "../../../sessions/session-key-utils.js";
 import { shortenHomePath } from "../../../utils.js";
 import { resolveHookConfig } from "../../config.js";
 import type { HookHandler } from "../../hooks.js";
@@ -278,6 +283,14 @@ async function saveSessionMemoryNow(
   }
 }
 
+function isRuntimeOwnedSessionKey(sessionKey: string): boolean {
+  return (
+    isHeartbeatSessionKey(sessionKey) ||
+    isCronSessionKey(sessionKey) ||
+    isSubagentSessionKey(sessionKey)
+  );
+}
+
 const saveSessionToMemory: HookHandler = (event) => {
   // Manual commands retain their shipped hook contract, including /reset soft.
   // Automatic rollover uses a distinct lifecycle event so command hooks do not
@@ -288,6 +301,11 @@ const saveSessionToMemory: HookHandler = (event) => {
     event.action === "auto-reset" &&
     isSessionAutoResetReason(event.context.reason);
   if ((event.type !== "command" || !isResetCommand) && !isAutoReset) {
+    return undefined;
+  }
+  // Heartbeat, cron, and subagent sessions are runtime plumbing: their transcripts
+  // are polls and task hand-offs, not conversation context worth carrying forward.
+  if (isRuntimeOwnedSessionKey(event.sessionKey)) {
     return undefined;
   }
   const context = event.context;
