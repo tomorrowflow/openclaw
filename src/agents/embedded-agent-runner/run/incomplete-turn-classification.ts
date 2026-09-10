@@ -192,6 +192,29 @@ export function joinAssistantTexts(assistantTexts?: readonly string[]): string {
   return (assistantTexts ?? []).join("\n\n").trim();
 }
 
+/** Uses the current canonical answer, never earlier accumulated text, to recognize authored silence. */
+export function hasExplicitSilentAssistantReply(
+  attempt: Pick<
+    IncompleteTurnAttempt,
+    "assistantTexts" | "currentAttemptAssistant" | "currentAttemptCompletedAssistant"
+  >,
+): boolean {
+  const assistant = resolveCurrentAttemptAssistant(attempt);
+  if (assistant) {
+    return (
+      assistant.stopReason !== "error" &&
+      assistant.stopReason !== "aborted" &&
+      parseReplyDirectives(resolveRawAssistantAnswerText(assistant)).isSilent
+    );
+  }
+  // Text-only attempt projections have no canonical message to supersede these fragments.
+  const nonEmptyTexts = attempt.assistantTexts.filter((text) => text.trim().length > 0);
+  return (
+    nonEmptyTexts.length > 0 &&
+    nonEmptyTexts.every((text) => isSilentReplyPayloadText(text, SILENT_REPLY_TOKEN))
+  );
+}
+
 export function isReasoningOnlyAssistantTurn(message: unknown): boolean {
   if (!message || typeof message !== "object") {
     return false;
@@ -270,6 +293,7 @@ export function classifyAssistantTurn(params: {
   );
   const visibleText = output.text.trim();
   const reasoningOnly = isReasoningOnlyAssistantTurn(assistant);
+  const explicitSilentReply = hasExplicitSilentAssistantReply(params.attempt);
   const nonVisibleEligibleForSilentReply =
     params.payloadCount === 0 &&
     visibleText.length === 0 &&
@@ -284,7 +308,8 @@ export function classifyAssistantTurn(params: {
     visibleText,
     silent: output.isSilent,
     reasoningOnly,
-    emptyResponse: nonVisibleEligibleForSilentReply && !reasoningOnly,
+    explicitSilentReply,
+    emptyResponse: nonVisibleEligibleForSilentReply && !reasoningOnly && !explicitSilentReply,
     nonVisibleEligibleForSilentReply,
   };
 }
