@@ -26,6 +26,7 @@ import { normalizeAccountId } from "./account-id.js";
 export {
   isCronSessionKey,
   isAcpSessionKey,
+  isHeartbeatSessionKey,
   isSubagentSessionKey,
   parseAgentSessionKey,
   parseSessionDeliveryRoute,
