@@ -7,6 +7,7 @@ import type {
 import { projectMainSessionRecoveryLifecycle } from "./main-session-recovery-lifecycle.js";
 import {
   inspectMainRestartRecoveryRolloverEligibility,
+  isMainRestartRecoveryCandidate,
   transitionMainSessionRecovery,
 } from "./main-session-recovery-state.js";
 
@@ -971,5 +972,26 @@ describe("main session recovery state", () => {
         mainRestartRecovery: entry.mainRestartRecovery,
       },
     });
+  });
+});
+
+describe("main session restart recovery candidates", () => {
+  it("recovers interrupted conversation sessions", () => {
+    expect(isMainRestartRecoveryCandidate(interruptedEntry(), sessionKey)).toBe(true);
+    expect(isMainRestartRecoveryCandidate(interruptedEntry(), "agent:main:signal:direct:+1")).toBe(
+      true,
+    );
+  });
+
+  it("never replays isolated heartbeat executions", () => {
+    expect(isMainRestartRecoveryCandidate(interruptedEntry(), "agent:frodi:main:heartbeat")).toBe(
+      false,
+    );
+    expect(
+      isMainRestartRecoveryCandidate(
+        interruptedEntry({ heartbeatIsolatedBaseSessionKey: "agent:frodi:main" }),
+        "agent:frodi:custom-poll",
+      ),
+    ).toBe(false);
   });
 });
