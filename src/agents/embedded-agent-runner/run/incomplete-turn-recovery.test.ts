@@ -33,6 +33,45 @@ function emptyAttempt(assistant = emptyAssistant()) {
 }
 
 describe("incomplete-turn recovery policy", () => {
+  it("never re-prompts an authored NO_REPLY whose streamed text was not recorded", () => {
+    // Heartbeat polls on streaming ollama models: the silent token is consumed by
+    // the block chunker, assistantTexts stays empty, and the final message is the
+    // only evidence. Treating it as an empty response re-prompted the model, whose
+    // "please restate your request" prose was then delivered to the owner.
+    const assistant = buildEmbeddedRunnerAssistant({
+      content: [{ type: "text", text: "NO_REPLY" }],
+      api: "openai-completions",
+      provider: "ollama",
+      model: "kimi-k2.7-code:cloud",
+      stopReason: "stop",
+      usage: { ...createZeroUsageFixture(), input: 900, output: 4, totalTokens: 904 },
+    });
+    const attempt = makeEmbeddedRunnerAttempt({
+      assistantTexts: [],
+      lastAssistant: assistant,
+      currentAttemptAssistant: assistant,
+    });
+    const state = {
+      provider: "ollama",
+      modelId: "kimi-k2.7-code:cloud",
+      modelApi: "openai-completions",
+      payloadCount: 0,
+      aborted: false,
+      timedOut: false,
+      attempt,
+    };
+    expect(resolveEmptyResponseRetryInstruction(state)).toBeNull();
+    expect(resolveReasoningOnlyRetryInstruction(state)).toBeNull();
+    expect(
+      shouldTreatEmptyAssistantReplyAsSilent({
+        ...state,
+        allowEmptyAssistantReplyAsSilent: true,
+        terminalReplyExpectation: "required",
+      }),
+    ).toBe(true);
+    expect(resolveIncompleteTurnPayloadText({ ...state, externalAbort: false })).toBeNull();
+  });
+
   it.each(["required", "optional"] as const)(
     "keeps async-owned work out of completed silence (reply=%s)",
     (terminalReplyExpectation) => {

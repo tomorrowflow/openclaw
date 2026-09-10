@@ -58,6 +58,9 @@ export function createSessionMcpRuntimeManager(
     acquire: (params: PreparedAcquisitionParams) => Promise<T>,
   ) =>
     async function current(params: RuntimeAcquisitionParams): Promise<T> {
+      const supersededSessionId = params.sessionKey
+        ? store.sessionIdBySessionKey.get(params.sessionKey)
+        : undefined;
       const senderId = normalizeOptionalString(params.requesterSenderId);
       const requester = senderId
         ? {
@@ -80,7 +83,7 @@ export function createSessionMcpRuntimeManager(
       try {
         // Reserve every possible partition before yielding, including requester
         // keys a crossed publication may add. Teardown drains this entire admission.
-        return await lifecycle.runExclusiveOnRuntimeKeys(runtimeKeys, async () => {
+        const result = await lifecycle.runExclusiveOnRuntimeKeys(runtimeKeys, async () => {
           await Promise.all([priorDisposal, priorSessionWork].filter((work) => work !== undefined));
           for (;;) {
             const next = store.configReload;
@@ -98,6 +101,9 @@ export function createSessionMcpRuntimeManager(
             }
           }
         });
+        // Outside the successor's key queue: retirement joins the superseded key's own chain.
+        await retireSupersededSessionRuntime(params, supersededSessionId);
+        return result;
       } catch (error) {
         acquired?.releaseLease();
         acquired = undefined;
@@ -171,6 +177,33 @@ export function createSessionMcpRuntimeManager(
       },
     });
     return runtime ? leaseRuntime(runtime) : undefined;
+  };
+
+  // A session key resolves to one live session id. Producers that roll a key to a
+  // fresh id without a reset (isolated heartbeat runs) never retire the old id, and
+  // idle sweeping is opt-in, so the superseded runtime and its server processes
+  // would otherwise outlive their session. Active leases still defer the teardown.
+  const retireSupersededSessionRuntime = async (
+    params: RuntimeAcquisitionParams,
+    supersededSessionId: string | undefined,
+  ): Promise<void> => {
+    if (
+      !params.sessionKey ||
+      !supersededSessionId ||
+      supersededSessionId === params.sessionId ||
+      store.sessionIdBySessionKey.get(params.sessionKey) !== params.sessionId
+    ) {
+      return;
+    }
+    try {
+      if (manager.deferRetirement(supersededSessionId)) {
+        await manager.completeDeferredRetirement(supersededSessionId);
+      }
+    } catch (error) {
+      logWarn(
+        `bundle-mcp: failed to retire superseded runtime for session ${supersededSessionId}: ${String(error)}`,
+      );
+    }
   };
 
   const manager: SessionMcpRuntimeManager = {

@@ -533,9 +533,12 @@ reset dispatch also runs independently of the successor turn. Wait for
 
 This is a filtered excerpt, not a complete transcript or a model-written
 summary. It omits slash-command text, tool messages, inter-session user input,
-silent reply markers, and duplicate delivery-mirror text. If transcript reading
-fails, the artifact can record that content was unavailable. The workspace is
-resolved from event/agent config; you do not need to add a `workspace.dir` key.
+silent reply markers, duplicate delivery-mirror text, and heartbeat poll turns
+(the `[OpenClaw heartbeat poll]` prompt together with the reply it produced).
+Heartbeat, cron, and subagent sessions never write memory files; only
+conversation sessions do. If transcript reading fails, the artifact can record
+that content was unavailable. The workspace is resolved from event/agent config;
+you do not need to add a `workspace.dir` key.
 
 With `llmSlug: true`, conversation text is sent to the configured model to name
 the file. Failure falls back to a timestamp slug. Leave it off if you want no

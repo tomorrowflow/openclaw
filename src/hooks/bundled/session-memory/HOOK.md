@@ -27,6 +27,8 @@ When a manual or automatic reset starts a fresh session:
 3. **Chooses filename slug** - Uses a timestamp in `agents.defaults.userTimezone` by default, or an LLM-generated description when `llmSlug` is enabled
 4. **Saves to memory** - Creates a new file at `<workspace>/memory/YYYY-MM-DD-HHMM.md` in the background
 
+Heartbeat, cron, and subagent sessions never produce memory files: their transcripts are runtime polls and task hand-offs. Heartbeat poll turns inside a conversation session (the `[OpenClaw heartbeat poll]` prompt and the reply it produced) are dropped from the saved conversation.
+
 ## Output Format
 
 Memory files are created with the following format:

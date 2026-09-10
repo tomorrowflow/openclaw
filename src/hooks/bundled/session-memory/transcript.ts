@@ -1,6 +1,10 @@
 // Session memory transcript helpers persist compact session transcript excerpts.
 import { classifySessionMessageOrigin } from "../../../../packages/memory-host-sdk/src/host/session-provenance.js";
 import type { MemoryOriginClass } from "../../../../packages/memory-host-sdk/src/host/types.js";
+import {
+  isHeartbeatOkResponse,
+  isHeartbeatUserMessage,
+} from "../../../auto-reply/heartbeat-filter.js";
 import { sanitizeModelSpecialTokens } from "../../../security/external-content.js";
 import { hasInterSessionUserProvenance } from "../../../sessions/input-provenance.js";
 import { isOpenClawDeliveryMirrorAssistantMessage } from "../../../shared/transcript-only-openclaw-assistant.js";
@@ -66,6 +70,7 @@ function extractTextMessageContent(content: unknown): string | undefined {
 
 type RenderedSessionMemoryMessage = {
   isDeliveryMirror: boolean;
+  isHeartbeatPoll: boolean;
   originClass: MemoryOriginClass;
   role: "assistant" | "user";
   text?: string;
@@ -104,6 +109,16 @@ function renderSessionMemoryMessage(
   if (role === "user" && hasInterSessionUserProvenance(record.message)) {
     return { turnOrigin: nextTurnOrigin };
   }
+  const heartbeatMessage = { ...record.message, role };
+  if (
+    isHeartbeatUserMessage(heartbeatMessage) ||
+    (role === "assistant" && isHeartbeatOkResponse(heartbeatMessage))
+  ) {
+    return {
+      turnOrigin: nextTurnOrigin,
+      message: { isDeliveryMirror: false, isHeartbeatPoll: true, originClass, role },
+    };
+  }
   const text = extractTextMessageContent(record.message.content);
   const sanitized = text ? sanitizeSessionMemoryTranscriptText(text) : null;
   if (!sanitized) {
@@ -112,13 +127,16 @@ function renderSessionMemoryMessage(
   if (sanitized.startsWith("/")) {
     return {
       turnOrigin: nextTurnOrigin,
-      ...(role === "user" ? { message: { isDeliveryMirror: false, originClass, role } } : {}),
+      ...(role === "user"
+        ? { message: { isDeliveryMirror: false, isHeartbeatPoll: false, originClass, role } }
+        : {}),
     };
   }
   return {
     turnOrigin: nextTurnOrigin,
     message: {
       isDeliveryMirror: isOpenClawDeliveryMirrorAssistantMessage(record.message),
+      isHeartbeatPoll: false,
       originClass,
       role,
       text: sanitized,
@@ -135,6 +153,9 @@ function renderSessionMemoryRecords(events: readonly unknown[]): SessionMemoryRe
   const allMessages: SessionMemoryRecord[] = [];
   let lastAssistantText: string | undefined;
   let turnOrigin: MemoryOriginClass = "untrusted";
+  // A heartbeat poll owns every assistant row until the next real user turn:
+  // the reply text is status prose for the runtime, not remembered conversation.
+  let inHeartbeatTurn = false;
   for (const event of events) {
     const result = renderSessionMemoryMessage(event, turnOrigin);
     turnOrigin = result.turnOrigin;
@@ -146,8 +167,9 @@ function renderSessionMemoryRecords(events: readonly unknown[]): SessionMemoryRe
       // New turn: reset even when slash commands are omitted from memory, so
       // later standalone delivery mirrors are preserved.
       lastAssistantText = undefined;
+      inHeartbeatTurn = rendered.isHeartbeatPoll;
     }
-    if (!rendered.text) {
+    if (!rendered.text || inHeartbeatTurn || rendered.isHeartbeatPoll) {
       continue;
     }
     // Skip delivery-mirror rows only when they duplicate the preceding
