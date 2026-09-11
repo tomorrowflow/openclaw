@@ -11,7 +11,7 @@ import {
 } from "../auto-reply/heartbeat-tool-response.js";
 import { stripHeartbeatToken } from "../auto-reply/heartbeat.js";
 import { getReplyPayloadMetadata } from "../auto-reply/reply-payload.js";
-import { isSilentReplyPayloadText } from "../auto-reply/tokens.js";
+import { isSilentReplyPayloadText, stripSilentToken } from "../auto-reply/tokens.js";
 import type { ReplyPayload } from "../auto-reply/types.js";
 import { escapeRegExp } from "../utils.js";
 import { truncateHeartbeatPreview } from "./heartbeat-runner-prompt.js";
@@ -71,15 +71,25 @@ function normalizeHeartbeatReply(
   const rawText = typeof payload.text === "string" ? payload.text : "";
   const textForStrip = stripLeadingHeartbeatResponsePrefix(rawText, responsePrefix);
   const isSilentReply = isSilentReplyPayloadText(textForStrip);
-  const stripped = stripHeartbeatToken(isSilentReply ? "" : textForStrip, {
+  // A silent token appended to prose is still the model's acknowledgement: the
+  // token itself is never user-visible text, and the remainder is judged by the
+  // same ack threshold as a trailing HEARTBEAT_OK.
+  const withoutTrailingSilent = isSilentReply ? "" : stripSilentToken(textForStrip);
+  const strippedTrailingSilent = !isSilentReply && withoutTrailingSilent !== textForStrip.trim();
+  const stripped = stripHeartbeatToken(withoutTrailingSilent, {
     mode,
     maxAckChars: ackMaxChars,
   });
+  const ackByTrailingSilent =
+    strippedTrailingSilent &&
+    mode === "heartbeat" &&
+    !stripped.didStrip &&
+    stripped.text.trim().length <= ackMaxChars;
   const hasMedia = resolveSendableOutboundReplyParts(payload).hasMedia;
   const notifyFalse = stripTrailingHeartbeatNotifyFalse(stripped.text);
-  notifyFalse.silent ||= isSilentReply;
+  notifyFalse.silent ||= isSilentReply || strippedTrailingSilent;
   const isInternalPlaceholderOnly = isStreamErrorFallbackPlaceholderOnly(notifyFalse.text);
-  if ((stripped.shouldSkip || isInternalPlaceholderOnly) && !hasMedia) {
+  if ((stripped.shouldSkip || ackByTrailingSilent || isInternalPlaceholderOnly) && !hasMedia) {
     return {
       shouldSkip: true,
       text: "",
