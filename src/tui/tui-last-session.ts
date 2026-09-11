@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { normalizeLowercaseStringOrEmpty as normalizeMarker } from "@openclaw/normalization-core/string-coerce";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
+import { isHeartbeatSessionKey } from "../sessions/session-key-utils.js";
 import {
   writeConfigMachineState,
   updateConfigMachineState,
@@ -36,10 +37,6 @@ export function buildTuiLastSessionScopeKey(params: {
     .update(`${params.sessionScope}\n${agentId}\n${connectionUrl}`)
     .digest("hex")
     .slice(0, 32);
-}
-
-function isHeartbeatSessionKey(sessionKey: string): boolean {
-  return normalizeMarker(sessionKey).endsWith(":heartbeat");
 }
 
 /** Detects heartbeat/system sessions that should not become the remembered human session. */

@@ -148,6 +148,31 @@ export function hasOnlySilentAssistantReply(assistantTexts?: readonly string[]):
   );
 }
 
+/**
+ * An authored silent reply is a completed answer, not missing output. Streamed
+ * silent tokens are consumed without entering `assistantTexts`, so the final
+ * assistant message is the authority when the recorded texts are empty.
+ */
+export function hasExplicitSilentAssistantReply(
+  attempt: Pick<
+    IncompleteTurnAttempt,
+    "assistantTexts" | "currentAttemptAssistant" | "currentAttemptCompletedAssistant"
+  >,
+): boolean {
+  if (hasOnlySilentAssistantReply(attempt.assistantTexts)) {
+    return true;
+  }
+  if (attempt.assistantTexts.some((text) => text.trim().length > 0)) {
+    return false;
+  }
+  const assistant = resolveCurrentAttemptAssistant(attempt);
+  if (!assistant || assistant.stopReason === "error") {
+    return false;
+  }
+  const text = readAssistantSnapshotText(assistant);
+  return text.length > 0 && isSilentReplyPayloadText(text, SILENT_REPLY_TOKEN);
+}
+
 export function isReasoningOnlyAssistantTurn(message: unknown): boolean {
   if (!message || typeof message !== "object") {
     return false;
@@ -221,6 +246,7 @@ export function classifyAssistantTurn(params: {
   const assistant = resolveCurrentAttemptAssistant(params.attempt);
   const visibleText = joinAssistantTexts(params.attempt.assistantTexts);
   const reasoningOnly = isReasoningOnlyAssistantTurn(assistant);
+  const explicitSilentReply = hasExplicitSilentAssistantReply(params.attempt);
   const nonVisibleEligibleForSilentReply =
     params.payloadCount === 0 &&
     visibleText.length === 0 &&
@@ -233,7 +259,8 @@ export function classifyAssistantTurn(params: {
     assistant,
     visibleText,
     reasoningOnly,
-    emptyResponse: nonVisibleEligibleForSilentReply && !reasoningOnly,
+    explicitSilentReply,
+    emptyResponse: nonVisibleEligibleForSilentReply && !reasoningOnly && !explicitSilentReply,
     nonVisibleEligibleForSilentReply,
   };
 }
