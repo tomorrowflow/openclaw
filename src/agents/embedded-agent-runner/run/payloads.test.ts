@@ -367,6 +367,34 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
     });
   });
 
+  it("keeps a quiet heartbeat's read-only tool failure out of the owner's chat", () => {
+    // Observed: a heartbeat listed a missing directory, moved on, and ended with
+    // NO_REPLY; the owner still received "⚠️ Ls failed".
+    expectNoPayloads({
+      isHeartbeatTrigger: true,
+      lastToolError: {
+        toolName: "ls",
+        error: "No such file or directory: 'notes'",
+        executionStarted: true,
+        mutatingAction: false,
+      },
+    });
+  });
+
+  it("still surfaces a quiet heartbeat's mutating tool failure", () => {
+    const payloads = buildPayloads({
+      isHeartbeatTrigger: true,
+      lastToolError: {
+        toolName: "write",
+        error: "disk full",
+        executionStarted: true,
+        mutatingAction: true,
+      },
+    });
+
+    expectSingleToolErrorPayload(payloads, { title: "Write", absentDetail: "disk full" });
+  });
+
   it("surfaces declined Codex native command errors for aborted empty turns", () => {
     const payloads = buildPayloads({
       assistantTexts: [],

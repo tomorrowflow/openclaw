@@ -135,9 +135,19 @@ function stripTokenAtEdges(raw: string): { text: string; didStrip: boolean } {
       const after = next.slice(idx + token.length).trimStart();
       text = `${before}${after}`.trimEnd();
       didStrip = true;
-    } else {
-      break;
+      continue;
     }
+    // A closing line that opens with the token is the acknowledgement plus the
+    // model's commentary on it ("HEARTBEAT_OK — nothing to report."). Drop the
+    // whole line; a token inside a sentence stays untouched.
+    const lastLineStart = next.lastIndexOf("\n") + 1;
+    const lastLine = lastLineStart > 0 ? next.slice(lastLineStart).trim() : "";
+    if (lastLine.startsWith(token) && !/\w/.test(lastLine.charAt(token.length))) {
+      text = next.slice(0, lastLineStart).trimEnd();
+      didStrip = true;
+      continue;
+    }
+    break;
   }
 
   const collapsed = text.replace(/\s+/g, " ").trim();
