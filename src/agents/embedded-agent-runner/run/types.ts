@@ -164,6 +164,12 @@ export type EmbeddedRunAttemptParams = EmbeddedRunAttemptBase & {
   hostCapabilities?: import("../../harness/host-capability-types.js").AgentHarnessHostCapabilities;
   /** Sticky operation identity used to suppress ordinary retry and hook policy. */
   operation?: EmbeddedRunAttemptOperation;
+  /**
+   * Settled-turn finalization only: the exact model context the settled attempt
+   * ended with. The finalizer resumes from this snapshot; a bounded store read
+   * is sized for a fresh turn and can omit the tool batch it must answer for.
+   */
+  settledTurnMessages?: readonly AgentMessage[];
   /** Core-prepared fact that explicit requester/config policy restricts plugin-native tools. */
   pluginHarnessToolPolicyRestricted?: boolean;
   /** Audited exact denies that the plugin harness must enforce against native equivalents. */
