@@ -1,6 +1,7 @@
 import { runEmbeddedAttempt } from "../embedded-agent-runner/run/attempt.js";
 import type { EmbeddedRunAttemptParams } from "../embedded-agent-runner/run/types.js";
 import { runHostPreparedIsolatedCompletion } from "../host-prepared-isolated-completion.js";
+import type { AgentMessage } from "../runtime/index.js";
 import { BUILTIN_AGENT_HARNESS_METADATA } from "./builtin-openclaw-metadata.js";
 import { projectSettledTurnFinalizationAttemptResult } from "./settled-turn-finalization-result.js";
 import { harnessSupportsTurnScopedToolRestrictions } from "./types.js";
@@ -15,6 +16,7 @@ const builtInOpenClawHarnesses = new WeakSet<object>();
 
 function buildRestrictedFinalizationAttempt(
   attempt: AgentHarnessSettledTurnFinalizationAttemptParams<AgentHarnessAttemptParamsV2>,
+  settledTurnMessages: readonly AgentMessage[],
 ): EmbeddedRunAttemptParams {
   const internalAttempt =
     attempt as AgentHarnessSettledTurnFinalizationAttemptParams<AgentHarnessAttemptParamsV2> &
@@ -73,6 +75,7 @@ function buildRestrictedFinalizationAttempt(
     fastMode: attempt.fastMode,
     fastModeAuto: attempt.fastModeAuto,
     operation: "settled-tool-finalization",
+    settledTurnMessages,
     disableTools: true,
     disableTrajectory: true,
     skipPreparedUserTurnMessage: true,
@@ -91,10 +94,13 @@ export function createOpenClawAgentHarness(): AgentHarnessV2 {
         supportsTurnScopedToolRestrictions: harnessSupportsTurnScopedToolRestrictions(harness),
       }),
     runIsolatedCompletionV2: runHostPreparedIsolatedCompletion,
-    finalizeSettledTurn: async ({ attempt }) => {
+    finalizeSettledTurn: async ({ attempt, settledAttempt }) => {
       // Preserve only transcript/model transport state. The operation-specific
       // runner path suppresses every ambient prompt and capability contributor.
-      const result = await runEmbeddedAttempt(buildRestrictedFinalizationAttempt(attempt));
+      // The settled attempt's snapshot is the transcript being finalized.
+      const result = await runEmbeddedAttempt(
+        buildRestrictedFinalizationAttempt(attempt, settledAttempt.messagesSnapshot),
+      );
       return projectSettledTurnFinalizationAttemptResult(result);
     },
   };

@@ -361,6 +361,12 @@ export function resolveSettledToolTerminalContinuationInstruction(
     !hasAcceptedSessionSpawn(attempt.acceptedSessionSpawns) &&
     assistantState.emptyResponse,
   );
+  // A completed "stop" message after the settled batch is the model's own
+  // terminal decision; only a turn that owes a visible reply may reopen it. The
+  // batch owner resolved above proves settlement, not that decision, so it must
+  // not stand in for the current assistant here.
+  const terminalStopAfterSettledBatch =
+    resolveCurrentAttemptAssistant(attempt)?.stopReason === "stop";
   if (
     params.payloadCount !== 0 ||
     // Optional authored silence skips generation without clearing tool failure evidence.
@@ -371,7 +377,7 @@ export function resolveSettledToolTerminalContinuationInstruction(
     params.aborted ||
     ((params.timedOut || terminal.kind === "timeout") && !idlePromptTimeout) ||
     (terminal.kind === "failed" && !attempt.settledTurnFinalizationContext) ||
-    (toolBatchAssistant?.stopReason === "toolUse"
+    (!terminalStopAfterSettledBatch && toolBatchAssistant?.stopReason === "toolUse"
       ? !allToolsProvenSettled
       : !emptyStopAfterSettledTools) ||
     intentionalTermination ||
