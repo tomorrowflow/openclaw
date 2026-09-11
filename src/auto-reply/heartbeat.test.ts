@@ -84,6 +84,29 @@ describe("stripHeartbeatToken", () => {
     });
   });
 
+  it("drops a closing acknowledgement line that carries commentary", () => {
+    // Observed heartbeat reply: status prose, then "HEARTBEAT_OK — no proactive
+    // message needed." on its own line. The line is the ack, not user text.
+    const long = "x".repeat(320);
+    expect(
+      stripHeartbeatToken(`${long}\n\n${HEARTBEAT_TOKEN} — no proactive message needed.`, {
+        mode: "heartbeat",
+      }),
+    ).toEqual({ shouldSkip: false, text: long, didStrip: true });
+    expect(
+      stripHeartbeatToken(`All clear.\n${HEARTBEAT_TOKEN} — no proactive message needed.`, {
+        mode: "heartbeat",
+      }),
+    ).toEqual(createSkippedHeartbeatOutcome());
+    expect(
+      stripHeartbeatToken(`hello\n${HEARTBEAT_TOKEN}ish is not a token`, { mode: "message" }),
+    ).toEqual({
+      shouldSkip: false,
+      text: `hello\n${HEARTBEAT_TOKEN}ish is not a token`,
+      didStrip: false,
+    });
+  });
+
   it("strips HTML-wrapped heartbeat tokens", () => {
     expect(stripHeartbeatToken(`<b>${HEARTBEAT_TOKEN}</b>`, { mode: "heartbeat" })).toEqual(
       createSkippedHeartbeatOutcome(),
