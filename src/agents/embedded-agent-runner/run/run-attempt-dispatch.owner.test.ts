@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { getAgentEventLifecycleGeneration } from "../../../infra/agent-events.js";
 import { createEmptyPluginRegistry } from "../../../plugins/registry-empty.js";
@@ -29,19 +31,47 @@ vi.mock("../../runtime-plan/build.js", () => ({
 
 afterEach(() => setActivePluginRegistry(createEmptyPluginRegistry()));
 
+const hostSkillFile = "/usr/lib/node_modules/openclaw/skills/demo/SKILL.md";
+
 it.each([
-  { agentId: "main", sandboxSessionKey: undefined, remoteSkills: false, oneShotCliRun: undefined },
-  { agentId: "work", sandboxSessionKey: "global", remoteSkills: false, oneShotCliRun: true },
+  {
+    agentId: "main",
+    sandboxSessionKey: undefined,
+    remoteSkills: false,
+    materializedSkills: false,
+    oneShotCliRun: undefined,
+  },
+  {
+    agentId: "work",
+    sandboxSessionKey: "global",
+    remoteSkills: false,
+    materializedSkills: false,
+    oneShotCliRun: true,
+  },
   {
     agentId: "work",
     sandboxSessionKey: "agent:main:policy",
     remoteSkills: false,
+    materializedSkills: false,
     oneShotCliRun: false,
   },
-  { agentId: "main", sandboxSessionKey: undefined, remoteSkills: true, oneShotCliRun: true },
+  {
+    agentId: "main",
+    sandboxSessionKey: undefined,
+    remoteSkills: true,
+    materializedSkills: false,
+    oneShotCliRun: true,
+  },
+  {
+    agentId: "main",
+    sandboxSessionKey: undefined,
+    remoteSkills: false,
+    materializedSkills: true,
+    oneShotCliRun: false,
+  },
 ])(
-  "dispatches the generic harness for $agentId/global with policy $sandboxSessionKey, remote skills $remoteSkills, and one-shot $oneShotCliRun",
-  async ({ agentId, sandboxSessionKey, remoteSkills, oneShotCliRun }) => {
+  "dispatches the generic harness for $agentId/global with policy $sandboxSessionKey, remote skills $remoteSkills, materialized skills $materializedSkills, and one-shot $oneShotCliRun",
+  async ({ agentId, sandboxSessionKey, remoteSkills, materializedSkills, oneShotCliRun }) => {
     await withOpenClawTestState({ label: "harness-owner" }, async (state) => {
       const config = {
         agents: {
@@ -128,6 +158,15 @@ it.each([
                 { name: "demo", path: "/host/skills/demo/SKILL.md" },
                 { name: "native", path: "node://worker/skills/native/SKILL.md" },
               ],
+            }
+          : {}),
+        // The session snapshot is host-resolved; a plugin harness must not see it.
+        ...(materializedSkills
+          ? {
+              skillsSnapshot: {
+                prompt: `<available_skills>\n  <skill>\n    <name>demo</name>\n    <description>Demo skill</description>\n    <location>${hostSkillFile}</location>\n  </skill>\n</available_skills>`,
+                skills: [{ name: "demo" }],
+              },
             }
           : {}),
         timeoutMs: 5_000,
@@ -230,7 +269,38 @@ it.each([
             },
           })
         : null;
-      const sandboxProvider = { resolveSandbox: async () => remoteSandbox };
+      const materializedSkillsWorkspace = state.path("sandbox-skills");
+      if (materializedSkills) {
+        const skillDir = path.join(materializedSkillsWorkspace, "skills", "demo");
+        await fs.mkdir(skillDir, { recursive: true });
+        await fs.writeFile(
+          path.join(skillDir, "SKILL.md"),
+          ["---", "name: demo", "description: Demo skill", "---", "# Demo", ""].join("\n"),
+          "utf8",
+        );
+      }
+      const materializedSandbox = materializedSkills
+        ? createSandboxTestContext({
+            overrides: {
+              workspaceDir: state.workspaceDir,
+              agentWorkspaceDir: state.workspaceDir,
+              workspaceAccess: "rw",
+              containerWorkdir: "/workspace",
+              skillsWorkspaceDir: materializedSkillsWorkspace,
+              skillUsagePaths: [
+                {
+                  readPath: path.join(materializedSkillsWorkspace, "skills", "demo", "SKILL.md"),
+                  skillFile: hostSkillFile,
+                  skillName: "demo",
+                  skillSource: "openclaw-bundled",
+                },
+              ],
+            },
+          })
+        : null;
+      const sandboxProvider = {
+        resolveSandbox: async () => remoteSandbox ?? materializedSandbox,
+      };
       const restorePlacement = installSessionPlacementAdmissionProvider({
         assertCompactionSuccessorAllowed() {},
         executeLocalTurn: async (_claim, runLocal) => runLocal(),
@@ -258,6 +328,16 @@ it.each([
           ]);
           expect(params.explicitSkillSelections?.[0]?.path).toBe("/host/skills/demo/SKILL.md");
           expect(sandbox).toEqual(remoteSandbox);
+        } else if (materializedSkills) {
+          const dispatched = runAttempt.mock.calls[0]?.[0];
+          expect(dispatched?.skillsSnapshot?.prompt).toContain(
+            "/workspace/.openclaw/sandbox-skills/skills/demo/SKILL.md",
+          );
+          expect(dispatched?.skillsSnapshot?.prompt).not.toContain(hostSkillFile);
+          expect(dispatched?.skillsSnapshot?.skills).toEqual([
+            expect.objectContaining({ name: "demo" }),
+          ]);
+          expect(sandbox).toEqual(materializedSandbox);
         } else if (agentId === "work" && sandboxSessionKey === "global") {
           expect(provisioned).toHaveLength(1);
           expect(provisioned[0]).toMatch(/^agent:work:workspace:/);
