@@ -41,6 +41,8 @@ vi.mock("../../runtime-plan/build.js", () => ({
 
 afterEach(() => setActivePluginRegistry(createEmptyPluginRegistry()));
 
+const hostSkillFile = "/usr/lib/node_modules/openclaw/skills/demo/SKILL.md";
+
 it.each([
   {
     agentId: "main",
@@ -183,6 +185,15 @@ it.each([
               ],
             }
           : {}),
+        // The session snapshot is host-resolved; a plugin harness must not see it.
+        ...(materializedSkills
+          ? {
+              skillsSnapshot: {
+                prompt: `<available_skills>\n  <skill>\n    <name>demo</name>\n    <description>Demo skill</description>\n    <location>${hostSkillFile}</location>\n  </skill>\n</available_skills>`,
+                skills: [{ name: "demo" }],
+              },
+            }
+          : {}),
         timeoutMs: 5_000,
         oneShotCliRun,
         runtimePluginToolGrant,
@@ -283,7 +294,38 @@ it.each([
             },
           })
         : null;
-      const sandboxProvider = { resolveSandbox: async () => remoteSandbox };
+      const materializedSkillsWorkspace = state.path("sandbox-skills");
+      if (materializedSkills) {
+        const skillDir = path.join(materializedSkillsWorkspace, "skills", "demo");
+        await fs.mkdir(skillDir, { recursive: true });
+        await fs.writeFile(
+          path.join(skillDir, "SKILL.md"),
+          ["---", "name: demo", "description: Demo skill", "---", "# Demo", ""].join("\n"),
+          "utf8",
+        );
+      }
+      const materializedSandbox = materializedSkills
+        ? createSandboxTestContext({
+            overrides: {
+              workspaceDir: state.workspaceDir,
+              agentWorkspaceDir: state.workspaceDir,
+              workspaceAccess: "rw",
+              containerWorkdir: "/workspace",
+              skillsWorkspaceDir: materializedSkillsWorkspace,
+              skillUsagePaths: [
+                {
+                  readPath: path.join(materializedSkillsWorkspace, "skills", "demo", "SKILL.md"),
+                  skillFile: hostSkillFile,
+                  skillName: "demo",
+                  skillSource: "openclaw-bundled",
+                },
+              ],
+            },
+          })
+        : null;
+      const sandboxProvider = {
+        resolveSandbox: async () => remoteSandbox ?? materializedSandbox,
+      };
       const restorePlacement = installSessionPlacementAdmissionProvider({
         assertCompactionSuccessorAllowed() {},
         executeLocalTurn: async (_claim, runLocal) => runLocal(),
