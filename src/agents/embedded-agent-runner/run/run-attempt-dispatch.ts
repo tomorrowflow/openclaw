@@ -26,9 +26,8 @@ import {
 import { resolveAttemptWorkspaceSandbox } from "../../workspace-sandbox.js";
 import type { EmbeddedRunReplayState } from "../replay-state.js";
 import {
-  resolveSandboxSkillRuntimeInputs,
-  mapSandboxSkillUsagePaths,
   remapSkillReferencePaths,
+  resolveSandboxHarnessSkillsSnapshot,
 } from "../sandbox-skills.js";
 import { mapThinkingLevelForProvider } from "../utils.js";
 import { prepareExecApprovalContinuationForAttempt } from "./attempt-exec-approval-continuation.js";
@@ -344,22 +343,19 @@ export async function prepareAndDispatchEmbeddedRunAttempt(input: {
     skillFile: path.join(mount.hostPath, "SKILL.md"),
     readPath: path.posix.join(mount.containerPath, "SKILL.md"),
   }));
-  if (
-    pluginSandbox?.enabled &&
-    !pluginSandbox.readOnlyResourceMounts?.length &&
-    skillsSnapshot?.librarySelections?.length
-  ) {
-    const prepared = resolveSandboxSkillRuntimeInputs({
+  // The plugin harness renders whatever snapshot it receives. Inside a sandbox
+  // the host catalog's locations are unreadable, so hand it the materialized
+  // copies instead; remote resource mounts already carry their own paths.
+  if (pluginSandbox?.enabled && !pluginSandbox.readOnlyResourceMounts?.length) {
+    const prepared = resolveSandboxHarnessSkillsSnapshot({
       sandbox: pluginSandbox,
       skillsAnchorWorkspace: bootstrapWorkspaceDir ?? workspaceDir,
       skillsSnapshot,
+      config: params.config,
+      agentId: workspaceResolution.agentId,
     });
     skillsSnapshot = prepared.skillsSnapshot;
-    skillReferencePaths = mapSandboxSkillUsagePaths({
-      paths: pluginSandbox.skillUsagePaths,
-      skillsWorkspaceDir: prepared.skillsWorkspaceDir,
-      skillsPromptWorkspaceDir: prepared.skillsPromptWorkspaceDir,
-    });
+    skillReferencePaths = prepared.skillReferencePaths;
   }
   const attemptControls = createAttemptControls({
     admittedRunContext,
