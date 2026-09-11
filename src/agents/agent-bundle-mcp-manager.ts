@@ -1,5 +1,6 @@
 /** Session MCP runtime manager: acquisition and requester-scoped install orchestration. */
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { logWarn } from "../logger.js";
 import type { BundleMcpServerConfig } from "../plugins/bundle-mcp.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { createCombinedSessionMcpRuntime } from "./agent-bundle-mcp-combined.js";
