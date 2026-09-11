@@ -75,9 +75,16 @@ export async function prepareEmbeddedAttemptHistory(
       sessionId: attempt.sessionId,
       policy: transcriptPolicy,
     });
+    // Finalization answers for the settled attempt's exact context. The store
+    // view opened for this operation is bounded like a fresh turn and can omit
+    // the very tool batch the finalizer must summarize.
+    const sourceMessages =
+      isSettledTurnFinalization && attempt.settledTurnMessages
+        ? [...attempt.settledTurnMessages]
+        : activeSession.messages;
     const prior = await sanitizeSessionHistory({
       ...replayContext(),
-      messages: activeSession.messages,
+      messages: sourceMessages,
       allowedToolNames: replayAllowedToolNames,
       sessionManager,
     });
