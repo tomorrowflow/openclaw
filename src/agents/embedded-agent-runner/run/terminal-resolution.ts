@@ -105,6 +105,24 @@ function requiresVisibleTerminalReply(runParams: TerminalRunParams): boolean {
   );
 }
 
+// A caller that leaves the reply expectation open delegates it to the trigger.
+// Heartbeat and cron prompts already offer NO_REPLY, so when the trigger owes no
+// visible reply a clean empty stop after settled tools is the model's silence,
+// not a missing answer to reopen or report.
+function resolveEmptyReplyPolicy(runParams: TerminalRunParams): {
+  allowEmptyAssistantReplyAsSilent: boolean;
+  terminalReplyExpectation: "required" | "optional";
+} {
+  const owesVisibleReply = requiresVisibleTerminalReply(runParams);
+  return {
+    allowEmptyAssistantReplyAsSilent:
+      runParams.allowEmptyAssistantReplyAsSilent === true ||
+      (runParams.terminalReplyExpectation == null && !owesVisibleReply),
+    terminalReplyExpectation:
+      runParams.terminalReplyExpectation ?? (owesVisibleReply ? "required" : "optional"),
+  };
+}
+
 export function resolveSettledTurnFinalizationRequest(input: {
   runParams: TerminalRunParams;
   attempt: EmbeddedRunAttemptResult;
@@ -141,8 +159,7 @@ export function resolveSettledTurnFinalizationRequest(input: {
     ? input.recoveredFinalAssistantPayloadsAfterPromptTimeout.length
     : preparedPayloadCount || (silentToolResultReplyPayload ? 1 : 0);
   const emptyAssistantReplyIsSilent = shouldTreatEmptyAssistantReplyAsSilent({
-    allowEmptyAssistantReplyAsSilent: input.runParams.allowEmptyAssistantReplyAsSilent,
-    terminalReplyExpectation: input.runParams.terminalReplyExpectation,
+    ...resolveEmptyReplyPolicy(input.runParams),
     onlyExplicitSilentReply: false,
     payloadCount,
     aborted: terminalAborted,
@@ -255,8 +272,7 @@ export async function resolveEmbeddedRunTerminal(input: {
   // its settled side effects cascade into any ordinary retry family.
   const settledTurnFinalizationAttempted = input.settledTurnFinalizationOutcome !== "not-attempted";
   const emptyAssistantReplyIsSilent = shouldTreatEmptyAssistantReplyAsSilent({
-    allowEmptyAssistantReplyAsSilent: runParams.allowEmptyAssistantReplyAsSilent,
-    terminalReplyExpectation: runParams.terminalReplyExpectation,
+    ...resolveEmptyReplyPolicy(runParams),
     onlyExplicitSilentReply: settledTurnFinalizationAttempted,
     payloadCount,
     aborted: terminalAborted,
