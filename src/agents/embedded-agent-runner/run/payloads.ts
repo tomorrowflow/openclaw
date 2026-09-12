@@ -363,7 +363,14 @@ export function buildEmbeddedRunPayloads(params: {
     );
     hasUserFacingReply = true;
   }
-  if (params.lastToolError) {
+  // A heartbeat poll that hit a proven read-only tool failure and then went
+  // quiet has nothing the owner can act on; the log keeps the failure. Unknown
+  // or mutating failures still surface (see heartbeatTerminalToolFailure).
+  const suppressHeartbeatReadOnlyFailure =
+    params.isHeartbeatTrigger === true &&
+    !hasUserFacingReply &&
+    params.lastToolError?.mutatingAction === false;
+  if (params.lastToolError && !suppressHeartbeatReadOnlyFailure) {
     // A restart intentionally aborts the active tool while the Gateway takes over.
     // Report the lifecycle status instead of a tool failure.
     const isRestartStatus = params.runStopReason === "restart";
