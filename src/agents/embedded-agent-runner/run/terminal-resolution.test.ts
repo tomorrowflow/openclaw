@@ -315,6 +315,56 @@ describe("terminal resolution", () => {
     expect(activateInternalPrompt).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["heartbeat", "silent"],
+    ["cron", "silent"],
+    ["user", "warned"],
+  ] as const)(
+    "a %s run that stops clean after settled side-effecting tools is %s",
+    async (trigger, expected) => {
+      // Observed 2026-09-12 11:06/13:06: a heartbeat poll ran ls/calendar/read/write,
+      // then stopped with no content. The write counted as a side effect and the
+      // owner received "⚠️ Agent couldn't generate a response …".
+      const assistant = emptyAssistant({ content: [], stopReason: "stop" });
+      const attempt = makeEmbeddedRunnerAttempt({
+        assistantTexts: [],
+        lastAssistant: assistant,
+        currentAttemptAssistant: assistant,
+        toolMetas: [
+          { toolName: "ls", replaySafe: true },
+          { toolName: "dav__calendar_query", replaySafe: true },
+          { toolName: "read", replaySafe: true },
+          { toolName: "write", replaySafe: false },
+        ],
+        replayMetadata: { hadPotentialSideEffects: true, replaySafe: false },
+        currentAttemptReplayMetadata: { hadPotentialSideEffects: true, replaySafe: false },
+      });
+      const activateInternalPrompt = vi.fn();
+      const input = makeTerminalInput({
+        attempt,
+        attemptAssistant: assistant,
+        runParams: { trigger },
+        activateInternalPrompt,
+        replayState: { hadPotentialSideEffects: true, replayInvalid: false },
+      });
+
+      const resolved = await resolveEmbeddedRunTerminal(input);
+
+      expect(resolved.action).toBe("complete");
+      if (resolved.action !== "complete") {
+        return;
+      }
+      const texts = resolved.result.payloads?.map((payload) => payload.text ?? "") ?? [];
+      if (expected === "silent") {
+        expect(texts.join("\n")).not.toContain("couldn't generate a response");
+        expect(resolved.result.meta.terminalReplyKind).toBe("silent-empty");
+        expect(activateInternalPrompt).not.toHaveBeenCalled();
+      } else {
+        expect(texts.join("\n")).toContain("some tool actions may have already been executed");
+      }
+    },
+  );
+
   it("keeps an empty visible parent alive for accepted completion children", async () => {
     const attempt = makeEmbeddedRunnerAttempt({
       acceptedSessionSpawns: [
