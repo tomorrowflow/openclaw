@@ -233,11 +233,12 @@ node scripts/prepare-global-install-package-json.mjs
 sudo npm i -g . --install-links
 node scripts/prepare-global-install-package-json.mjs --restore
 
-# Copy externalized extensions, reinstall supergateway, rebuild Control UI.
-# CI=true keeps pnpm non-interactive: the Control UI rebuild (scripts/ui.js)
-# may run `pnpm install`, which can hit pnpm's "remove modules and reinstall
-# from scratch? (Y/n)" purge prompt. Under cron (no TTY) that would hang/fail;
-# CI mode makes pnpm auto-proceed.
+# Copy externalized extensions, reinstall supergateway, and verify the Control
+# UI shipped by `npm i -g .` matches the installed build identity. The UI is
+# not rebuilt here: `pnpm build` already emitted it under the same build ID as
+# dist/build-info.json, and a second build would stamp a different ID that the
+# Gateway rejects as stale. CI=true keeps any pnpm prompt non-interactive under
+# cron (no TTY).
 STAGE="deploy: pnpm deploy:globally (gateway still up)"
 CI=true corepack pnpm deploy:globally
 
