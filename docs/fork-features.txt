@@ -79,6 +79,7 @@ wrapOllamaCompatMessageToolArgs\(streamFn\) | extensions/ollama/src/stream-compa
 # script FILE survives but becomes uninvokable. See sync-prompt Step 5g.
 deploy:globally | package.json | Fork deploy script (node scripts/deploy-globally.mjs) — bundles externalized plugins into the global install
 markBundledDist\(globalPath\) | scripts/deploy-globally.mjs | Stamps openclaw.build.bundledDist=true on each externalized plugin the deploy bundles, so update convergence treats the bundled copy as the owner. Without it codex's settings migration waits forever for an npm release of the running core and `plugins install codex` refuses.
+verifyControlUiBuildIdentity\(\) | scripts/deploy-globally.mjs | Deploy verifies the Control UI shipped by `npm i -g .` carries dist/build-info.json's build ID instead of rebuilding it. A post-install `pnpm ui:build` re-derived the ID from the git HEAD of that moment, so a commit landing mid-deploy made the Gateway reject its own UI as stale (503 "Control UI assets could not be prepared") with no ui/ sources for doctor to repair.
 
 # --- Memory (LanceDB) ---
 storageOptions | extensions/memory-lancedb/config.ts | LanceDB storageOptions config
