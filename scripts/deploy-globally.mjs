@@ -26,7 +26,8 @@
  *      jiti from `dist/extensions/<name>/runtime-api.ts`.
  *   5. Reinstalls supergateway (which `npm i -g .` can drop because it
  *      shares the global prefix).
- *   6. Builds + copies the Control UI (not part of `pnpm build`).
+ *   6. Verifies the Control UI that `npm i -g .` shipped carries the same
+ *      build identity as the installed `dist/build-info.json`.
  *
  * The script is idempotent: re-running it overwrites the targets.
  *
@@ -305,28 +306,35 @@ function reinstallSupergateway() {
   }
 }
 
-function rebuildAndCopyControlUi() {
-  // pnpm build does NOT include the Control UI; it must be rebuilt + copied
-  // every time the global dist/ is replaced.
-  sh(`pnpm ui:build`);
-  const globalRoot = npmGlobalRoot();
-  const globalUiDir = path.join(globalRoot, "openclaw", "dist", "control-ui");
-  const localUiDir = path.join(REPO_ROOT, "dist", "control-ui");
-  if (!fs.existsSync(localUiDir)) {
-    throw new Error(`UI build output missing at ${localUiDir}`);
-  }
-  sh(`sudo rm -rf ${JSON.stringify(globalUiDir)}`);
-  sh(`sudo cp -r ${JSON.stringify(localUiDir)} ${JSON.stringify(globalUiDir)}`);
-  log("Control UI rebuilt and copied");
-}
+// Vite appends a 64-hex public-asset digest to the runtime build ID it stamps
+// on index.html; the Gateway strips it before comparing against build-info.
+const CONTROL_UI_BUILD_ID_ATTRIBUTE = /data-openclaw-control-ui-build-id="([^"]+)"/u;
 
-function verifyDeploy() {
-  const globalRoot = npmGlobalRoot();
-  const indexHtml = path.join(globalRoot, "openclaw", "dist", "control-ui", "index.html");
+function verifyControlUiBuildIdentity() {
+  // `pnpm build` runs ui:build and write-build-info under one shared build
+  // identity (scripts/lib/build-identity.mts), and `npm i -g .` ships both
+  // outputs. Rebuilding the UI here re-derived its build ID from the git HEAD
+  // of the moment, so a commit landing between `pnpm build` and this step made
+  // the Gateway reject its own bundled UI as stale and serve 503s; doctor
+  // cannot repair that because the global install has no ui/ sources.
+  // Verify the shipped pair instead of regenerating half of it.
+  const distDir = path.join(npmGlobalRoot(), "openclaw", "dist");
+  const indexHtml = path.join(distDir, "control-ui", "index.html");
   if (!fs.existsSync(indexHtml)) {
     throw new Error(`Control UI index.html missing at ${indexHtml}`);
   }
-  log("verified Control UI index.html present");
+  const expected = JSON.parse(
+    fs.readFileSync(path.join(distDir, "build-info.json"), "utf8"),
+  ).buildId;
+  const stamped = CONTROL_UI_BUILD_ID_ATTRIBUTE.exec(fs.readFileSync(indexHtml, "utf8"))?.[1];
+  const actual = stamped?.replace(/-[a-f0-9]{64}$/u, "");
+  if (!expected || !actual || actual !== expected) {
+    throw new Error(
+      `Control UI build ${actual ?? "(unstamped)"} does not match Gateway build ` +
+        `${expected ?? "(missing)"} under ${distDir}; rerun pnpm build and npm i -g .`,
+    );
+  }
+  log(`verified Control UI build ${actual} matches dist/build-info.json`);
 }
 
 function main() {
@@ -334,8 +342,7 @@ function main() {
   bundleExternalizedExtensions();
   copyLibraryExtensions();
   reinstallSupergateway();
-  rebuildAndCopyControlUi();
-  verifyDeploy();
+  verifyControlUiBuildIdentity();
   log("deploy-globally complete");
 }
 
