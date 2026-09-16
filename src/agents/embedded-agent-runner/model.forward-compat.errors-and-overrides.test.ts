@@ -13,13 +13,13 @@ import {
   configuredPricingCases,
   staleCost,
 } from "./model.configured-pricing.test-support.js";
-import { buildInlineProviderModels } from "./model.inline-provider.js";
-import { createProviderRuntimeTestMock } from "./model.provider-runtime.test-support.js";
 import {
   expectResolvedForwardCompatFallbackResult,
   expectUnknownModelErrorResult,
 } from "./model.forward-compat.test-support.js";
-import { resolveModel } from "./model.js";
+import { buildInlineProviderModels } from "./model.inline-provider.js";
+import { resolveModelAsync } from "./model.js";
+import { createProviderRuntimeTestMock } from "./model.provider-runtime.test-support.js";
 import {
   buildOpenAICodexForwardCompatExpectation,
   makeModel,
@@ -154,19 +154,6 @@ vi.mock("../agent-model-discovery.js", () => ({
   discoverAuthStorage: vi.fn(() => ({ mocked: true })),
   discoverModels: vi.fn(() => ({ find: vi.fn(() => null) })),
 }));
-
-import {
-  expectResolvedForwardCompatFallbackResult,
-  expectUnknownModelErrorResult,
-} from "./model.forward-compat.test-support.js";
-import { resolveModelAsync } from "./model.js";
-import {
-  buildOpenAICodexForwardCompatExpectation,
-  makeModel,
-  mockDiscoveredModel,
-  mockOpenAICodexTemplateModel,
-  resetMockDiscoverModels,
-} from "./model.test-harness.js";
 
 beforeEach(() => {
   resetMockDiscoverModels(discoverModels);
