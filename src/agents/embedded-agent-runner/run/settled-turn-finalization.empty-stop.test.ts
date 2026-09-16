@@ -6,11 +6,9 @@ import {
   buildEmbeddedRunnerAssistant,
   makeEmbeddedRunnerAttempt,
 } from "../../test-helpers/embedded-agent-runner-e2e-fixtures.js";
+import { SETTLED_TOOL_TERMINAL_CONTINUATION_INSTRUCTION } from "./incomplete-turn-recovery.js";
 import { resolveEmbeddedRunAttemptTerminalState } from "./terminal-outcome.js";
 import { resolveSettledTurnFinalizationRequest } from "./terminal-resolution.js";
-
-const SETTLED_TOOL_TERMINAL_CONTINUATION_INSTRUCTION =
-  "The previous assistant turn completed its tool calls but did not produce a user-visible answer. Continue from the current transcript and produce the final user-visible answer now. Do not repeat completed tool calls or restart from scratch.";
 
 describe("resolveSettledTurnFinalizationRequest with a content-less post-tool stop", () => {
   // Observed on a heartbeat poll: the model settles its tool batch, then ends
