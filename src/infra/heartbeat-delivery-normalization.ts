@@ -62,7 +62,7 @@ function stripTrailingHeartbeatNotifyFalse(text: string): {
     : { text, silent: false };
 }
 
-function normalizeHeartbeatReply(
+export function normalizeHeartbeatReply(
   payload: ReplyPayload,
   responsePrefix: string | undefined,
   ackMaxChars: number,
