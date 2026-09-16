@@ -1,15 +1,20 @@
+---
+name: kokoro-tts
+description: Local CPU-only text-to-speech via a Kokoro-FastAPI server on http://127.0.0.1:9007 (OpenAI-compatible /v1/audio/speech). Use when an agent needs to synthesize speech audio from text, pick a voice, or produce a spoken reply file.
+---
+
 # Kokoro TTS (Text-to-Speech)
 
 Local CPU-only text-to-speech via [Kokoro-FastAPI](https://github.com/remsky/Kokoro-FastAPI), an OpenAI-compatible TTS server.
 
 ## Endpoint
 
-`http://localhost:9007/v1/audio/speech`
+`http://127.0.0.1:9007/v1/audio/speech`
 
 ## Generate Speech
 
 ```bash
-curl -X POST http://localhost:9007/v1/audio/speech \
+curl -X POST http://127.0.0.1:9007/v1/audio/speech \
   -H "Content-Type: application/json" \
   -d '{
     "model": "kokoro",
@@ -52,11 +57,11 @@ Combine voices by joining with `+`: `af_heart+af_bella` blends both voices.
 ## List Available Voices
 
 ```bash
-curl http://localhost:9007/v1/audio/voices
+curl http://127.0.0.1:9007/v1/audio/voices
 ```
 
 ## Notes
 
 - Runs on CPU only; no GPU required.
-- OpenAI-compatible API; can also be used via `OPENAI_TTS_BASE_URL=http://localhost:9007/v1` with provider `openai` and model `kokoro`.
+- OpenAI-compatible API; can also be used via `OPENAI_TTS_BASE_URL=http://127.0.0.1:9007/v1` with provider `openai` and model `kokoro`.
 - Language codes follow BCP-47 lowercase format (e.g. `en-us`, `ja`, `fr-fr`).

@@ -1,3 +1,8 @@
+---
+name: whisper-asr
+description: Local CPU-only speech-to-text via a Whisper ASR WebService on http://127.0.0.1:9009 running faster-whisper, with an FFmpeg API on http://127.0.0.1:9008 for audio conversion. Use when an agent needs to transcribe a voice message or audio file.
+---
+
 # Whisper ASR (Speech-to-Text)
 
 Local CPU-only speech-to-text via [Whisper ASR WebService](https://github.com/ahmetoner/whisper-asr-webservice) running faster-whisper.
@@ -6,15 +11,15 @@ Local CPU-only speech-to-text via [Whisper ASR WebService](https://github.com/ah
 
 | Service     | URL                     | Purpose                      |
 | ----------- | ----------------------- | ---------------------------- |
-| Whisper ASR | `http://localhost:9009` | Speech-to-text transcription |
-| FFmpeg API  | `http://localhost:9008` | Audio format conversion      |
+| Whisper ASR | `http://127.0.0.1:9009` | Speech-to-text transcription |
+| FFmpeg API  | `http://127.0.0.1:9008` | Audio format conversion      |
 
 ## Transcribe Audio
 
 ```bash
 # Transcribe an audio file (mp3, wav, flac)
 curl -F "audio_file=@recording.mp3" \
-  "http://localhost:9009/asr?task=transcribe&output=txt"
+  "http://127.0.0.1:9009/asr?task=transcribe&output=txt"
 ```
 
 Plain text transcript is returned directly (not JSON).
@@ -32,11 +37,11 @@ Plain text transcript is returned directly (not JSON).
 ```bash
 # Get JSON with word timestamps
 curl -F "audio_file=@recording.mp3" \
-  "http://localhost:9009/asr?task=transcribe&output=json&word_timestamps=true"
+  "http://127.0.0.1:9009/asr?task=transcribe&output=json&word_timestamps=true"
 
 # Get SRT subtitles
 curl -F "audio_file=@recording.mp3" \
-  "http://localhost:9009/asr?task=transcribe&output=srt"
+  "http://127.0.0.1:9009/asr?task=transcribe&output=srt"
 ```
 
 ## Language Detection
@@ -44,11 +49,11 @@ curl -F "audio_file=@recording.mp3" \
 ```bash
 # Auto-detect language
 curl -F "audio_file=@recording.mp3" \
-  "http://localhost:9009/asr?task=transcribe&output=json"
+  "http://127.0.0.1:9009/asr?task=transcribe&output=json"
 
 # Force a specific language
 curl -F "audio_file=@recording.mp3" \
-  "http://localhost:9009/asr?task=transcribe&output=txt&language=fr"
+  "http://127.0.0.1:9009/asr?task=transcribe&output=txt&language=fr"
 ```
 
 ## Audio Conversion (FFmpeg API)
@@ -58,7 +63,7 @@ Convert audio formats before transcription if needed (e.g. m4a, aac, ogg, webm).
 ```bash
 # Convert m4a to mp3
 curl -F "file=@voice.m4a" \
-  "http://localhost:9008/convert/audio/to/mp3" -o voice.mp3
+  "http://127.0.0.1:9008/convert/audio/to/mp3" -o voice.mp3
 ```
 
 ## Notes
