@@ -6,7 +6,6 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
-import { gzip } from "pako";
 import type { Plugin, ResolveModulePreloadDependenciesFn, UserConfig } from "vite";
 import { CONTROL_UI_LOCALE_ENTRIES } from "../scripts/lib/control-ui-i18n-config.ts";
 import {
