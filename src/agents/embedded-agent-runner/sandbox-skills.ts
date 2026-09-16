@@ -5,10 +5,7 @@
  * copies instead of reusing host-path snapshots.
  */
 import path from "node:path";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatSkillsForPromptBounded } from "../../skills/loading/skill-prompt-limits.js";
-import { loadWorkspaceSkills } from "../../skills/loading/workspace-skill-loader.js";
-import { buildSkillSnapshot } from "../../skills/loading/workspace-skill-prompt.js";
 import type {
   SkillEligibilityContext,
   SkillSnapshot,
@@ -228,58 +225,6 @@ export function resolveSandboxSkillRuntimeInputs(params: {
     skillsSnapshot: params.skillsSnapshot,
     skillsWorkspaceDir: params.skillsAnchorWorkspace,
     workspaceOnly: false,
-  };
-}
-
-/**
- * Plugin harnesses render the skills catalog from the snapshot they are handed,
- * so a sandboxed run must receive a snapshot whose locations are the sandbox's
- * readable copies. Library selections keep their delivered paths and an
- * explicitly empty snapshot stays empty; any other host snapshot is rebuilt from
- * the materialized skills workspace, exactly like the embedded runner's prompt.
- */
-export function resolveSandboxHarnessSkillsSnapshot(params: {
-  sandbox: SandboxSkillRuntimeContext;
-  skillsAnchorWorkspace: string;
-  skillsSnapshot?: SkillSnapshot;
-  config?: OpenClawConfig;
-  agentId?: string;
-}): { skillsSnapshot?: SkillSnapshot; skillReferencePaths?: SkillUsagePath[] } {
-  const prepared = resolveSandboxSkillRuntimeInputs(params);
-  const skillReferencePaths = mapSandboxSkillUsagePaths({
-    paths: params.sandbox.skillUsagePaths,
-    skillsWorkspaceDir: prepared.skillsWorkspaceDir,
-    skillsPromptWorkspaceDir: prepared.skillsPromptWorkspaceDir,
-  });
-  if (prepared.skillsSnapshot) {
-    return { skillsSnapshot: prepared.skillsSnapshot, skillReferencePaths };
-  }
-  const skillFilter = params.skillsSnapshot?.skillFilter;
-  const skillOverrides = params.skillsSnapshot?.skillOverrides;
-  const entries =
-    mapSandboxSkillEntriesForPrompt({
-      entries: loadWorkspaceSkills(prepared.skillsWorkspaceDir, {
-        config: params.config,
-        agentId: params.agentId,
-        ...(prepared.skillsEligibility ? { eligibility: prepared.skillsEligibility } : {}),
-        ...(skillFilter ? { skillFilter } : {}),
-        ...(skillOverrides ? { skillOverrides } : {}),
-        workspaceOnly: true,
-      }),
-      skillsWorkspaceDir: prepared.skillsWorkspaceDir,
-      skillsPromptWorkspaceDir: prepared.skillsPromptWorkspaceDir,
-    }) ?? [];
-  return {
-    skillsSnapshot: buildSkillSnapshot(prepared.skillsPromptWorkspaceDir, {
-      entries,
-      config: params.config,
-      agentId: params.agentId,
-      ...(prepared.skillsEligibility ? { eligibility: prepared.skillsEligibility } : {}),
-      ...(skillFilter ? { skillFilter } : {}),
-      ...(skillOverrides ? { skillOverrides } : {}),
-      snapshotVersion: params.skillsSnapshot?.version,
-    }),
-    skillReferencePaths,
   };
 }
 
