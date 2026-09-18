@@ -7,15 +7,35 @@ RUN --mount=type=cache,id=openclaw-sandbox-trixie-apt-cache,target=/var/cache/ap
   apt-get update \
   && apt-get install -y --no-install-recommends \
     bash \
+    bat \
     ca-certificates \
     curl \
+    fd-find \
     ffmpeg \
+    file \
+    gh \
     git \
+    imagemagick \
     jq \
+    nodejs \
+    npm \
+    pandoc \
+    poppler-utils \
     python3 \
     python3-pip \
     ripgrep \
-    unzip
+    rsync \
+    sqlite3 \
+    tree \
+    unzip \
+    wget \
+    yq \
+    zip
+
+# Debian renames these two to avoid clashes, but every agent and every snippet
+# on the web calls them fd and bat. Link the conventional names onto PATH.
+RUN ln -s /usr/bin/fdfind /usr/local/bin/fd \
+  && ln -s /usr/bin/batcat /usr/local/bin/bat
 
 # Deno is not packaged in Debian apt; install the official release binary
 # system-wide so it is on PATH for the unprivileged sandbox user.
