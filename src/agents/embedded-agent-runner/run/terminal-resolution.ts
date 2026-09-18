@@ -115,8 +115,11 @@ function resolveEmptyReplyPolicy(runParams: TerminalRunParams): {
 } {
   const owesVisibleReply = requiresVisibleTerminalReply(runParams);
   return {
+    // `??`, not `|| ... === true`: only an unset flag delegates to the trigger.
+    // An explicit false is a caller that already decided, and overriding it
+    // turned a run that must reopen into a silent completion.
     allowEmptyAssistantReplyAsSilent:
-      runParams.allowEmptyAssistantReplyAsSilent === true ||
+      runParams.allowEmptyAssistantReplyAsSilent ??
       (runParams.terminalReplyExpectation == null && !owesVisibleReply),
     terminalReplyExpectation:
       runParams.terminalReplyExpectation ?? (owesVisibleReply ? "required" : "optional"),

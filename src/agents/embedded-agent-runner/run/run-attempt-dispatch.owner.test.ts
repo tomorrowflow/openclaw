@@ -185,15 +185,6 @@ it.each([
               ],
             }
           : {}),
-        // The session snapshot is host-resolved; a plugin harness must not see it.
-        ...(materializedSkills
-          ? {
-              skillsSnapshot: {
-                prompt: `<available_skills>\n  <skill>\n    <name>demo</name>\n    <description>Demo skill</description>\n    <location>${hostSkillFile}</location>\n  </skill>\n</available_skills>`,
-                skills: [{ name: "demo" }],
-              },
-            }
-          : {}),
         timeoutMs: 5_000,
         oneShotCliRun,
         runtimePluginToolGrant,
@@ -295,7 +286,11 @@ it.each([
           })
         : null;
       const materializedSkillsWorkspace = state.path("sandbox-skills");
+      // The fork's table carried a materializedSkills flag; the merged table
+      // expresses the same case as the "sandbox" skill catalog.
+      const materializedSkills = skillCatalog === "sandbox";
       if (materializedSkills) {
+        // Shadows the host skillDir above: this is the materialized copy.
         const skillDir = path.join(materializedSkillsWorkspace, "skills", "demo");
         await fs.mkdir(skillDir, { recursive: true });
         await fs.writeFile(
@@ -317,7 +312,7 @@ it.each([
                   readPath: path.join(materializedSkillsWorkspace, "skills", "demo", "SKILL.md"),
                   skillFile: hostSkillFile,
                   skillName: "demo",
-                  skillSource: "openclaw-bundled",
+                  skillSource: "bundled",
                 },
               ],
             },

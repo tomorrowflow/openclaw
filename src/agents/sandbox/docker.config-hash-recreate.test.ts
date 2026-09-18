@@ -363,13 +363,15 @@ describe("ensureSandboxContainer config-hash recreation", () => {
       spawnState.inspectRunning = false;
       registryMocks.readRegistryEntry.mockResolvedValue(null);
 
-      const engine = backend === "podman" ? PODMAN_SANDBOX_ENGINE : undefined;
+      const engine = backend === "podman" ? harness.PODMAN_SANDBOX_ENGINE : undefined;
       const createCall = await ensureSandboxCreateCallForTest({ cfg, workspaceDir, engine });
       const bindArgs = collectDockerFlagValues(createCall.args, "-v");
 
       expect(createCall.command).toBe(backend);
       expect(bindArgs).not.toContain(customMount);
-      expect(bindArgs).toContain(`${path.join(workspaceDir, "skills")}:/workspace/./skills:ro,z`);
+      // 2026.9.5 normalizes mount targets, so the "/workspace/." workdir
+      // resolves to "/workspace" here.
+      expect(bindArgs).toContain(`${path.join(workspaceDir, "skills")}:/workspace/skills:ro,z`);
     },
   );
 
@@ -381,7 +383,10 @@ describe("ensureSandboxContainer config-hash recreation", () => {
     "uses expected main mount permissions when workspaceAccess=$workspaceAccess",
     async ({ workspaceAccess, expectedMainMount }) => {
       const workspaceDir = "/tmp/workspace";
-      const cfg = createSandboxConfig([], undefined, workspaceAccess);
+      // No binds: the helper's default "/tmp/workspace:/workspace:rw" targets the
+      // same path as the managed workspace mount, and an explicit operator bind
+      // wins that collision, which would mask the mode under test.
+      const cfg = createSandboxConfig([], [], workspaceAccess);
 
       spawnState.inspectRunning = false;
       registryMocks.readRegistryEntry.mockResolvedValue(null);
