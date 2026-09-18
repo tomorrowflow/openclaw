@@ -393,7 +393,7 @@ describe("ensureSandboxContainer Podman-specific config-hash recreation", () => 
       agentWorkspaceDir: workspaceDir,
       mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
       createArgsEpoch: SANDBOX_DOCKER_CREATE_ARGS_EPOCH,
-      readOnlyWorkspaceSkillMounts: [],
+      managedMounts: [],
     });
     const oldHash = `${genericHash}:podman-runtime-v8:keep-id:default`;
     cfg.dockerTmpfsSource = "configured";
