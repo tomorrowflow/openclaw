@@ -284,10 +284,29 @@ const { output } = await run({
 
 printResult(output);
 
-// Block deploy only on a genuine failure: a hard stop gate ("failed") or no
-// push. "partial" means the agent pushed successfully and only a non-blocking
-// check lane failed (e.g. the npm shrinkwrap guard's @smithy dual-major case
-// that self-resolves) — that code is on origin/main and should still deploy.
-if (output.status === "failed" || !output.pushed) {
+// Block deploy on a hard stop gate. "partial" means the agent pushed and only a
+// non-blocking check lane failed (e.g. the npm shrinkwrap guard's @smithy
+// dual-major case that self-resolves) — that code is on origin/main and should
+// still deploy.
+if (output.status === "failed") {
   process.exit(1);
+}
+
+// `pushed` is the agent's own report, and it says false for two different
+// things: it refused to push, and it had nothing to push. A no-op sync cannot
+// confirm a push at all — the sandbox holds no GitHub credentials — so taking
+// it at face value skips the deploy on a perfectly good run. The host is the
+// authority on whether main is published, so ask git instead.
+if (!output.pushed) {
+  git("fetch", "origin", "main", "--prune");
+  const ahead = Number(git("rev-list", "--count", "origin/main..main"));
+  const behind = Number(git("rev-list", "--count", "main..origin/main"));
+  if (ahead !== 0 || behind !== 0) {
+    console.error(
+      `\n✗ Sync did not push and main is not level with origin/main ` +
+        `(${ahead} local, ${behind} remote commit(s)) — skipping deploy.`,
+    );
+    process.exit(1);
+  }
+  console.log("[sync] agent reported no push; main is level with origin/main — deploying that.");
 }
