@@ -16,10 +16,11 @@ await run({
     mounts: [{ hostPath: "~/.codex", sandboxPath: "~/.codex", readonly: true }],
   }),
 
-  // The agent provider. Pass a model string to codex() — sonnet balances
-  // capability and speed for most tasks. Switch to claude-opus-4-7 for harder
-  // problems, or claude-haiku-4-5-20251001 for speed.
-  agent: codex("gpt-5.4-mini"),
+  // The agent provider. Pass a model string to codex(). Keep this on a model the
+  // account still lists: a retired pin fails the run before turn 1, and Codex
+  // reports it only on its --json stream. `~/.codex/models_cache.json` is the
+  // live list.
+  agent: codex("gpt-5.6-terra"),
 
   // Path to the prompt file. Shell expressions inside are evaluated inside the
   // sandbox at the start of each iteration, so the agent always sees fresh data.
