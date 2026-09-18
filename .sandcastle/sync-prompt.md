@@ -146,6 +146,7 @@ resolves the large majority of stops on a release→release bump.
   upstream `ce53f7e82e2` removed the session write lease; the silent-handoff
   behaviour it added now lives in `resolveReplyOperationAbortAction`, gated on
   `turn.isRestartRecoveryArmed?.()`, in `agent-runner-error-handler.ts`.
+
 - **Genuine fork-only source — semantic** (commit is NOT an ancestor of the
   release AND both sides changed the same logic differently): **stop gate** — set
   `status: "failed"` and report details. This applies only after the redundant
@@ -157,7 +158,7 @@ resolves the large majority of stops on a release→release bump.
   mechanical rule above, not on the commit as a whole. Resolve the always-delete
   and always-accept classes first (workflows, changelogs, generated baselines,
   lockfile, iOS release metadata), then re-inspect `git diff --name-only
-  --diff-filter=U`. A large upstream commit that touches deleted CI workflows
+--diff-filter=U`. A large upstream commit that touches deleted CI workflows
   alongside docs, scripts, and tests is not a stop gate: strip the workflow files
   per the rule above and resolve the remainder normally. Escalate only if real
   source files are still conflicted once the mechanical classes are gone.
@@ -165,6 +166,7 @@ resolves the large majority of stops on a release→release bump.
 ### Step 5a: Install
 
 Already done by `onSandboxReady`. If pnpm-lock.yaml changed during rebase, re-run:
+
 ```bash
 CI=true corepack pnpm install --no-frozen-lockfile
 ```
@@ -203,6 +205,7 @@ PATH="$(pwd)/.tmp/bin:$PATH" CI=true corepack pnpm check
 ```
 
 Remove `.tmp/` before any commit:
+
 ```bash
 rm -rf .tmp/
 ```
@@ -253,8 +256,12 @@ Failures whose reported paths begin with `../../` are the tell.
 ```bash
 MISSING=0
 while IFS='|' read -r pattern file desc; do
-  pattern=$(echo "$pattern" | xargs); file=$(echo "$file" | xargs)
-  if ! grep -qn "$pattern" "$file" 2>/dev/null; then
+  # Trim with sed, not xargs: xargs strips the backslashes these BRE
+  # patterns need (\( \) \.), which silently breaks every escaped entry.
+  pattern=$(printf '%s' "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'); file=$(printf '%s' "$file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  # -E: the entries are ERE (\( is a literal paren). Under BRE that is a
+  # group opener, so every entry matching a call site failed to match.
+  if ! grep -qnE "$pattern" "$file" 2>/dev/null; then
     echo "MISSING: $desc ($pattern in $file)"
     MISSING=1
   fi
@@ -270,7 +277,7 @@ sometimes absorbs a fork feature outright. Classify each MISSING by reading the
 code before you decide, because the two outcomes need opposite actions:
 
 1. **Genuinely lost** — the behaviour is gone. Confirm by searching the whole
-   repo for the symbol *and* for whatever replaced it (`rg -n '<symbol>' src/`),
+   repo for the symbol _and_ for whatever replaced it (`rg -n '<symbol>' src/`),
    and by checking the feature is still reachable. A symbol that still exists but
    which nothing imports is also "lost" — it is dead code, and the feature is off.
    → Re-apply the patch, keep the entry, continue.
@@ -287,7 +294,7 @@ code before you decide, because the two outcomes need opposite actions:
 Only case 1 that you could not repair is a stop gate. Cases 2 and 3 are checklist
 maintenance: fix the file, commit it in Step 6, and continue the sync.
 
-If you leave a stale entry unfixed, it fails again on *every* future sync and
+If you leave a stale entry unfixed, it fails again on _every_ future sync and
 trains the next run to "restore" code upstream already has. Treat a checklist that
 has been failing across multiple syncs as a bug in the checklist, not the code.
 
@@ -327,8 +334,8 @@ restore it — a dropped upstream guard is a silent regression, not a cleanup.
 
 #### Fork patches on upstream code (re-apply if Step 5f flags them)
 
-Most fork features are fork-only *additions* that simply replant during rebase.
-The two below instead *modify upstream-owned files*, so an upstream change can
+Most fork features are fork-only _additions_ that simply replant during rebase.
+The two below instead _modify upstream-owned files_, so an upstream change can
 silently revert them or cause a semantic conflict. If Step 5f reports either as
 MISSING — or the rebase conflicts in these files — re-apply the patch (do **not**
 just delete the conflicting hunk), keep the fork-features.txt entry, then continue.
@@ -344,7 +351,7 @@ Both are deployed-behaviour bug fixes; dropping them re-breaks live agents.
      are correct only for the native `/api/chat` path (`convertToOllamaMessages`).
    - If upstream reverts it to `ensureArgsObject`, runs on cloud models like
      `glm-5.2:cloud` die with `400 ... cannot unmarshal object into Go struct field
-     .messages.tool_calls.function.arguments of type string` on the first turn that
+.messages.tool_calls.function.arguments of type string` on the first turn that
      replays a prior tool call. (Deploy also carries a belt-and-suspenders config
      flag `models.providers.ollama.injectNumCtxForOpenAICompat: false`, but the code
      fix is the real resolution — keep it.)
@@ -372,7 +379,7 @@ The rebase takes upstream's root `package.json` for the metadata/scripts blocks,
 which silently drops fork-only entries and adopts the release branch's in-dev
 version. Restore both after the rebase (idempotent):
 
-> **Dependency versions are upstream's, not the fork's.** Only the fork's *own*
+> **Dependency versions are upstream's, not the fork's.** Only the fork's _own_
 > entries are restored here — `version`, `deploy:globally`, and the plugin-sdk
 > export. For any third-party dependency the rebase touches, **take upstream's
 > version**; never re-pin the value the fork happened to carry in. Upstream bumps
@@ -415,6 +422,7 @@ Step 6.
 ### Step 6: Commit fixups
 
 If install, build, check, or fork-feature repair required file changes, commit them:
+
 ```bash
 scripts/committer "chore/fix: <description>" <files...>
 ```
