@@ -19,7 +19,7 @@ export type SandboxFsMount = {
   hostRoot: string;
   containerRoot: string;
   writable: boolean;
-  source: "workspace" | "agent" | "bind" | "protectedSkill";
+  source: "workspace" | "agent" | "bind" | "protectedSkill" | "managedState";
 };
 
 export type SandboxResolvedFsPath = {
