@@ -80,6 +80,9 @@ Kokoro TTS | skills/kokoro-tts/SKILL.md | Kokoro TTS skill (agent instructions)
 whisper-asr | skills/whisper-asr/SKILL.md | Whisper ASR skill (agent instructions)
 excalidraw | skills/excalidraw/SKILL.md | Excalidraw skill (agent instructions)
 
+# --- Agents / MCP ---
+retireSupersededSessionRuntime | src/agents/agent-bundle-mcp-manager.ts | Retires the MCP runtime a session key rolls off. Isolated heartbeat runs roll a key to a fresh session id without a reset and idle sweeping is opt-in, so without this every superseded runtime kept its server processes alive (bundle MCP process leak). Diverges from upstream's run-settlement expectation that a non-run-owned successor survives; see the comment in run-settlement.test.ts.
+
 # --- Plugins / Skills / Dockerfiles ---
 excalidraw | extensions/excalidraw/openclaw.plugin.json | Excalidraw canvas plugin
 denoland/deno | scripts/docker/sandbox/Dockerfile | Deno runtime installed in sandbox base image (official release binary on PATH)
