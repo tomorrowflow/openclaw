@@ -298,8 +298,12 @@ machine-readable checklist in `docs/fork-features.txt`:
 ```bash
 MISSING=0
 while IFS='|' read -r pattern file desc; do
-  pattern=$(echo "$pattern" | xargs); file=$(echo "$file" | xargs)
-  if ! grep -qn "$pattern" "$file" 2>/dev/null; then
+  # Trim with sed, not xargs: xargs strips the backslashes these BRE
+  # patterns need (\( \) \.), which silently breaks every escaped entry.
+  pattern=$(printf '%s' "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'); file=$(printf '%s' "$file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  # -E: the entries are ERE (\( is a literal paren). Under BRE that is a
+  # group opener, so every entry matching a call site failed to match.
+  if ! grep -qnE "$pattern" "$file" 2>/dev/null; then
     echo "MISSING: $desc ($pattern in $file)"
     MISSING=1
   fi
@@ -621,7 +625,7 @@ OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) syste
   && OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 pnpm build \
   && pnpm check \
   && echo ">>> Run conflict-scoped tests manually (see step 5d) <<<" \
-  && grep -v '^#\|^$' docs/fork-features.txt | while IFS='|' read -r p f d; do p=$(echo "$p"|xargs); f=$(echo "$f"|xargs); grep -q "$p" "$f" 2>/dev/null || echo "MISSING: $d"; done \
+  && grep -v '^#\|^$' docs/fork-features.txt | while IFS='|' read -r p f d; do p=$(printf '%s' "$p"|sed 's/^[[:space:]]*//;s/[[:space:]]*$//'); f=$(printf '%s' "$f"|sed 's/^[[:space:]]*//;s/[[:space:]]*$//'); grep -qE "$p" "$f" 2>/dev/null || echo "MISSING: $d"; done \
   && git push origin main --force-with-lease \
   && $OC_SYSTEMCTL stop openclaw-gateway.service \
   && OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 pnpm build \
