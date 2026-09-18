@@ -131,7 +131,7 @@ export function resolveReadOnlyWorkspaceSkillMounts(params: {
 
 export type ManagedWorkspaceMount = ReadOnlyWorkspaceSkillMount & { readOnly: boolean };
 export type SandboxSelectedMount = ManagedWorkspaceMount & {
-  source: "workspace" | "agent" | "bind" | "protectedSkill";
+  source: "workspace" | "agent" | "bind" | "protectedSkill" | "managedState";
 };
 
 /** Resolves Gateway-local sources before the container lifecycle selects daemon paths. */
@@ -171,7 +171,7 @@ export function resolveWorkspaceMounts(params: {
       hostPath: SANDBOX_SHARED_HOST_DIR,
       containerPath: SANDBOX_SHARED_MOUNT,
       readOnly: false,
-      source: "bind",
+      source: "managedState",
     });
   }
 
@@ -185,7 +185,7 @@ export function resolveWorkspaceMounts(params: {
       hostPath: SANDBOX_MEDIA_HOST_DIR,
       containerPath: SANDBOX_MEDIA_MOUNT,
       readOnly: true,
-      source: "bind",
+      source: "managedState",
     });
   }
   return mounts;
