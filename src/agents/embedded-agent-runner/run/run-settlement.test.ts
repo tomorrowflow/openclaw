@@ -231,9 +231,15 @@ describe("MCP run lifetime", () => {
         const rebound = await create(randomUUID());
         await fixture.settle();
         expect(manager.peekSession({ sessionId: original.sessionId })).toBeUndefined();
-        expect(manager.peekSession({ sessionId: successor.sessionId })).toBe(
-          cleanup ? undefined : successor,
-        );
+        // Fork divergence from upstream's expectation (`cleanup ? undefined :
+        // successor`): retireSupersededSessionRuntime retires whichever id a
+        // session key rolls off, so creating `rebound` retires the successor here
+        // regardless of cleanupBundleMcpOnRunEnd. Upstream can keep a
+        // non-run-owned successor alive; this fork cannot, because the isolated
+        // heartbeat runs that roll these keys never reset them, and every
+        // superseded runtime kept its server processes alive (the bundle MCP
+        // process leak). Active leases still defer the teardown.
+        expect(manager.peekSession({ sessionId: successor.sessionId })).toBeUndefined();
         expect(manager.peekSession({ sessionKey: fixture.target.sessionKey })).toBe(rebound);
       } finally {
         await manager.disposeAll();
