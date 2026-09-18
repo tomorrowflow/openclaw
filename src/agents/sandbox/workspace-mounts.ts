@@ -7,7 +7,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { isPathInside } from "../../infra/path-guards.js";
 import { splitSandboxBindSpec } from "./bind-spec.js";
-import { SANDBOX_AGENT_WORKSPACE_MOUNT } from "./constants.js";
+import {
+  SANDBOX_AGENT_WORKSPACE_MOUNT,
+  SANDBOX_MEDIA_HOST_DIR,
+  SANDBOX_MEDIA_MOUNT,
+  SANDBOX_SHARED_HOST_DIR,
+  SANDBOX_SHARED_MOUNT,
+} from "./constants.js";
 import { resolveSandboxHostPathViaExistingAncestor } from "./host-paths.js";
 import { normalizeContainerPathCore } from "./path-utils.js";
 import type { SandboxWorkspaceAccess } from "./types.js";
@@ -142,10 +148,28 @@ export function resolveWorkspaceMounts(params: {
     });
   }
 
+  // Shared and media live in one selection because that selection is what both
+  // container creation and the file tools read. Wiring them anywhere else makes
+  // the constants look present while agents get no /workspace/shared and no
+  // /media -- the exact dead-feature shape a grep of the declaration site passes.
+  mounts.push({
+    hostPath: SANDBOX_SHARED_HOST_DIR,
+    containerPath: SANDBOX_SHARED_MOUNT,
+    readOnly: false,
+    source: "bind",
+  });
+
   const skills = params.readOnlyWorkspaceSkillMounts ?? resolveReadOnlyWorkspaceSkillMounts(params);
   for (const { hostPath, containerPath } of skills) {
     mounts.push({ hostPath, containerPath, readOnly: true, source: "protectedSkill" });
   }
+
+  mounts.push({
+    hostPath: SANDBOX_MEDIA_HOST_DIR,
+    containerPath: SANDBOX_MEDIA_MOUNT,
+    readOnly: true,
+    source: "bind",
+  });
   return mounts;
 }
 
