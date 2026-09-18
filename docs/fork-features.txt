@@ -21,7 +21,7 @@ DEFAULT_FFMPEG_API_URL | src/media-understanding/providers/whisper-asr/audio.ts 
 # --- Streaming / Tag Stripping ---
 stripReasoningTagsFromText | src/shared/text/reasoning-tags.ts | Reasoning tag stripping helper
 stripReasoningTags | src/tui/tui-formatters.ts | TUI reasoning tag stripping
-stripReasoningTagsFromText | src/gateway/server-chat.ts | Gateway reasoning tag stripping
+stripReasoningTagsFromText\(rawFinalText | src/gateway/server-chat.ts | Gateway reasoning tag stripping on the final chat broadcast. Matches the call, not the import: the 2026.9.5 re-cut dropped the call while the helper stayed importable elsewhere.
 splitTrailingBlockTagFragment | src/agents/embedded-agent-subscribe.stream-rendering.ts | Streaming partial tag stripping (upstreamed 2026.8.1; the fork's stripTrailingPartialTag DISCARDED a trailing "<..." fragment, upstream buffers it as pendingTagFragment and re-emits it with the next chunk — strictly better, and code-span aware. Do not re-add the fork helper.)
 # RETIRED: the fork helper is gone from that file (and was already gone pre-rebase).
 # Partial-tag handling is upstream's splitTrailingBlockTagFragment, checked above.

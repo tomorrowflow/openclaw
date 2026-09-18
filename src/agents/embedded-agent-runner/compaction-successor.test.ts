@@ -278,10 +278,17 @@ describe("acceptCompactionSuccessor", () => {
           }
           release?.();
           await manager.completeDeferredRetirement(original.sessionId, original);
-          expect(manager.peekSession({ sessionId: original.sessionId })).toBe(
-            kind === "unchanged" ? original : undefined,
+          // Fork divergence from upstream (`kind === "unchanged" ? original :
+          // undefined` / `successor`): retireSupersededSessionRuntime retires
+          // whichever id a session key rolls off. That is the bundle MCP
+          // process-leak fix, which upstream does not carry. Creating the
+          // successor rolls the key off the original in every kind, so the
+          // original is always retired here; every kind but "unchanged" then
+          // rolls the key back to the original, retiring the successor too.
+          expect(manager.peekSession({ sessionId: original.sessionId })).toBeUndefined();
+          expect(manager.peekSession({ sessionId: successor.sessionId })).toBe(
+            kind === "unchanged" ? successor : undefined,
           );
-          expect(manager.peekSession({ sessionId: successor.sessionId })).toBe(successor);
           if (kind === "rotation") {
             const latest = await create(randomUUID());
             await fixture.accept({

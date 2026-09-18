@@ -210,31 +210,6 @@ export function hasExplicitSilentAssistantReply(
   );
 }
 
-/**
- * An authored silent reply is a completed answer, not missing output. Streamed
- * silent tokens are consumed without entering `assistantTexts`, so the final
- * assistant message is the authority when the recorded texts are empty.
- */
-export function hasExplicitSilentAssistantReply(
-  attempt: Pick<
-    IncompleteTurnAttempt,
-    "assistantTexts" | "currentAttemptAssistant" | "currentAttemptCompletedAssistant"
-  >,
-): boolean {
-  if (hasOnlySilentAssistantReply(attempt.assistantTexts)) {
-    return true;
-  }
-  if (attempt.assistantTexts.some((text) => text.trim().length > 0)) {
-    return false;
-  }
-  const assistant = resolveCurrentAttemptAssistant(attempt);
-  if (!assistant || assistant.stopReason === "error") {
-    return false;
-  }
-  const text = readAssistantSnapshotText(assistant);
-  return text.length > 0 && isSilentReplyPayloadText(text, SILENT_REPLY_TOKEN);
-}
-
 export function isReasoningOnlyAssistantTurn(message: unknown): boolean {
   if (!message || typeof message !== "object") {
     return false;

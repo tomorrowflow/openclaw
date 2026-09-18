@@ -32,7 +32,10 @@ const outDir = path.resolve(here, "../dist/control-ui");
 const CONTROL_UI_GIT_READ_TIMEOUT_MS = 2_000;
 const require = createRequire(import.meta.url);
 const pako = require("pako") as {
-  gzip: (input: Uint8Array, options: { level: number; legacyHash: boolean }) => Uint8Array;
+  gzip: (
+    input: Uint8Array,
+    options: { level: number; legacyHash: boolean; memLevel: number },
+  ) => Uint8Array;
 };
 const json5EsmPath = require.resolve("json5/dist/index.mjs");
 type ControlUiViteAlias = {
@@ -88,10 +91,11 @@ export function createControlUiPrecompressedAssetVariants(
     },
     {
       fileName: `${fileName}.gz`,
-      // Host zlib is byte-unstable across supported runtimes; pako's classic hash is canonical.
-      source: Buffer.from(pako.gzip(body, { level: 9, legacyHash: true })),
+      // Host zlib is byte-unstable across supported runtimes; pako's classic hash
+      // is canonical. Resolved through createRequire, like json5 below, because a
+      // named import does not resolve in this config.
       // Smaller deflate blocks reduce startup JavaScript size and encoder memory.
-      source: Buffer.from(gzip(body, { level: 9, legacyHash: true, memLevel: 7 })),
+      source: Buffer.from(pako.gzip(body, { level: 9, legacyHash: true, memLevel: 7 })),
     },
   ];
 }
