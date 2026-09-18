@@ -87,6 +87,11 @@ retireSupersededSessionRuntime | src/agents/agent-bundle-mcp-manager.ts | Retire
 excalidraw | extensions/excalidraw/openclaw.plugin.json | Excalidraw canvas plugin
 denoland/deno | scripts/docker/sandbox/Dockerfile | Deno runtime installed in sandbox base image (official release binary on PATH)
 ffmpeg | scripts/docker/sandbox/Dockerfile | ffmpeg installed in the sandbox base image so agents can convert images and media in-container
+imagemagick | scripts/docker/sandbox/Dockerfile | ImageMagick in the sandbox base image for still-image work ffmpeg does not cover (resize/crop/composite, EXIF, ICO/SVG)
+poppler-utils | scripts/docker/sandbox/Dockerfile | poppler-utils in the sandbox base image so agents can read PDFs (pdftotext/pdftoppm); /workspace/shared holds PDFs
+gh | scripts/docker/sandbox/Dockerfile | GitHub CLI in the sandbox base image. The GH_TOKEN secret mount is configured for it, so losing this leaves a provisioned credential with no consumer
+pandoc | scripts/docker/sandbox/Dockerfile | pandoc in the sandbox base image for document conversion (docx/odt/html/md)
+fdfind | scripts/docker/sandbox/Dockerfile | fd/bat conventional-name symlinks over Debian's fdfind/batcat, so agent commands resolve
 curl_cffi | scripts/docker/sandbox/Dockerfile | curl_cffi installed into system Python (PEP 668 break-system-packages) for sandbox scripts
 brave-browser | Dockerfile.sandbox-browser-brave | Brave browser overlay Dockerfile
 fonts-noto-cjk | scripts/docker/sandbox/Dockerfile.browser | CJK/Unicode fonts in sandbox browser image
