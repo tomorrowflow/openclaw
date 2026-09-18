@@ -9,6 +9,7 @@ RUN --mount=type=cache,id=openclaw-sandbox-trixie-apt-cache,target=/var/cache/ap
     bash \
     ca-certificates \
     curl \
+    ffmpeg \
     git \
     jq \
     python3 \
