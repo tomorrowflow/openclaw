@@ -63,6 +63,20 @@ function isExistingWorkspaceSkillMountSource(params: {
   return isPathInside(agentRoot, canonicalSource);
 }
 
+/**
+ * Gate for the two state-dir mounts below. `statSync`, not `lstatSync`: the
+ * shared dir is routinely a symlink into the workspace, and an absent source
+ * must stay absent -- Docker would otherwise create it root-owned, which the
+ * unprivileged sandbox user cannot write.
+ */
+function isExistingManagedHostDir(hostPath: string): boolean {
+  try {
+    return fs.statSync(hostPath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /** Protects managed skills inside writable shared or private sandbox workspaces. */
 export function resolveReadOnlyWorkspaceSkillMounts(params: {
   workspaceDir: string;
@@ -152,24 +166,28 @@ export function resolveWorkspaceMounts(params: {
   // container creation and the file tools read. Wiring them anywhere else makes
   // the constants look present while agents get no /workspace/shared and no
   // /media -- the exact dead-feature shape a grep of the declaration site passes.
-  mounts.push({
-    hostPath: SANDBOX_SHARED_HOST_DIR,
-    containerPath: SANDBOX_SHARED_MOUNT,
-    readOnly: false,
-    source: "bind",
-  });
+  if (isExistingManagedHostDir(SANDBOX_SHARED_HOST_DIR)) {
+    mounts.push({
+      hostPath: SANDBOX_SHARED_HOST_DIR,
+      containerPath: SANDBOX_SHARED_MOUNT,
+      readOnly: false,
+      source: "bind",
+    });
+  }
 
   const skills = params.readOnlyWorkspaceSkillMounts ?? resolveReadOnlyWorkspaceSkillMounts(params);
   for (const { hostPath, containerPath } of skills) {
     mounts.push({ hostPath, containerPath, readOnly: true, source: "protectedSkill" });
   }
 
-  mounts.push({
-    hostPath: SANDBOX_MEDIA_HOST_DIR,
-    containerPath: SANDBOX_MEDIA_MOUNT,
-    readOnly: true,
-    source: "bind",
-  });
+  if (isExistingManagedHostDir(SANDBOX_MEDIA_HOST_DIR)) {
+    mounts.push({
+      hostPath: SANDBOX_MEDIA_HOST_DIR,
+      containerPath: SANDBOX_MEDIA_MOUNT,
+      readOnly: true,
+      source: "bind",
+    });
+  }
   return mounts;
 }
 
