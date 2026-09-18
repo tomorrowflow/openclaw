@@ -9,6 +9,7 @@ RUN --mount=type=cache,id=openclaw-sandbox-bookworm-apt-cache,target=/var/cache/
     bash \
     ca-certificates \
     curl \
+    ffmpeg \
     git \
     jq \
     python3 \
