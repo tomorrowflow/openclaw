@@ -228,6 +228,15 @@ sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
 # deps of the root package. npm rejects that protocol; this fork installs from
 # source, not the npm registry, so rewrite those to absolute `file:` paths for
 # the install, then restore the committed `workspace:*` form immediately after.
+# Build before installing. The sync agent builds as part of steps 1-7, but it
+# skips the build whenever the rebase was a no-op, and `npm i -g .` copies dist/
+# exactly as it finds it. Without this a run with nothing to sync ships whatever
+# dist was last built, which can predate the commit being deployed — the deploy
+# then reports the new version while serving older code. Incremental, so a dist
+# the agent already built costs little.
+STAGE="deploy: build (gateway still up)"
+CI=true corepack pnpm build
+
 STAGE="deploy: npm i -g (gateway still up)"
 node scripts/prepare-global-install-package-json.mjs
 sudo npm i -g . --install-links
