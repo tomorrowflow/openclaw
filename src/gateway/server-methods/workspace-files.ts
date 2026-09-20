@@ -9,6 +9,9 @@ import type {
   SessionFileEntry,
   SessionFileRelevance,
 } from "../../../packages/gateway-protocol/src/index.js";
+import { resolveSandboxHostPathForContainerPath } from "../../agents/sandbox/fs-paths.js";
+import { resolveSandboxHostPathViaExistingAncestor } from "../../agents/sandbox/host-paths.js";
+import type { SandboxWorkspaceAccess } from "../../agents/sandbox/types.js";
 import { resolveToCwd as resolveSessionToolPathToCwd } from "../../agents/sessions/tools/path-utils.js";
 import { insideGitCheckout } from "../../agents/worktrees/git.js";
 import { FsSafeError } from "../../infra/fs-safe.js";
@@ -34,11 +37,19 @@ import {
 } from "./workspace-fs.js";
 
 export type TouchedFile = { path: string; kind: "modified" | "read" };
+/** Sandbox mount inputs for translating container paths the agent named back to this root. */
+export type SessionSandboxPaths = {
+  agentWorkspaceDir: string;
+  workspaceAccess: SandboxWorkspaceAccess;
+  workdir?: string;
+  binds?: readonly string[];
+};
 export type LoadedSessionFiles = {
   root?: string;
   fileRoot?: string;
   diffCwd?: string;
   files: TouchedFile[];
+  sandbox?: SessionSandboxPaths;
 };
 type FileKind = TouchedFile["kind"];
 const MAX_PREVIEW_BYTES = WORKSPACE_PREVIEW_MAX_BYTES;
@@ -290,13 +301,44 @@ function resolveSessionFileCandidates(params: {
   root: string;
   fileRoot: string | undefined;
   filePath: string;
+  sandbox?: SessionSandboxPaths;
 }): string[] {
   return [
     resolveTouchedFilePath(params),
     resolveWorkspacePath(params.root, params.filePath),
+    resolveSandboxContainerFilePath(params),
   ].filter((candidate, index, all): candidate is string => {
     return candidate !== undefined && all.indexOf(candidate) === index;
   });
+}
+
+/**
+ * Sandboxed agents name files by container path, so `/workspace/...` never
+ * resolves against the Gateway-local root on its own. The sandbox mount
+ * selection owns the translation; containment against this root still decides
+ * whether the file may be served, and the candidate keeps the caller's root
+ * spelling so display paths stay relative to it.
+ */
+function resolveSandboxContainerFilePath(params: {
+  root: string;
+  filePath: string;
+  sandbox?: SessionSandboxPaths;
+}): string | undefined {
+  if (!params.sandbox) {
+    return undefined;
+  }
+  const hostPath = resolveSandboxHostPathForContainerPath({
+    ...params.sandbox,
+    containerPath: params.filePath,
+    workspaceDir: params.root,
+  });
+  if (!hostPath) {
+    return undefined;
+  }
+  const canonicalRoot = resolveSandboxHostPathViaExistingAncestor(params.root);
+  return isPathInside(canonicalRoot, hostPath)
+    ? path.resolve(params.root, path.relative(canonicalRoot, hostPath))
+    : undefined;
 }
 
 async function toBrowserEntry(
@@ -372,6 +414,26 @@ async function searchBrowserEntries(params: {
   return { entries: sortWorkspaceEntries(entries), ...(truncated ? { truncated } : {}) };
 }
 
+/** Reveal-in-workspace hands browsing the same path a file link carried. */
+function toBrowserRequestPath(params: {
+  root: string;
+  path?: string;
+  sandbox?: SessionSandboxPaths;
+}): string {
+  const requested = params.path ?? "";
+  if (params.sandbox && path.posix.isAbsolute(requested.replaceAll("\\", "/"))) {
+    const resolved = resolveSandboxContainerFilePath({
+      root: params.root,
+      filePath: requested,
+      sandbox: params.sandbox,
+    });
+    if (resolved) {
+      return toDisplayPath(params.root, resolved);
+    }
+  }
+  return normalizeRelativePath(requested);
+}
+
 async function buildBrowserResult(params: {
   root: string | undefined;
   workspaceRoot?: WorkspaceRoot;
@@ -379,6 +441,7 @@ async function buildBrowserResult(params: {
   path?: string;
   search?: string;
   files: readonly TouchedFile[];
+  sandbox?: SessionSandboxPaths;
 }): Promise<SessionFileBrowserResult | undefined> {
   if (!params.root) {
     return undefined;
@@ -398,7 +461,11 @@ async function buildBrowserResult(params: {
       ...(result.truncated ? { truncated: result.truncated } : {}),
     };
   }
-  const browserPath = normalizeRelativePath(params.path);
+  const browserPath = toBrowserRequestPath({
+    root: params.root,
+    path: params.path,
+    sandbox: params.sandbox,
+  });
   const resolved = resolveWorkspacePath(params.root, browserPath);
   if (!resolved) {
     return undefined;
@@ -462,6 +529,7 @@ export async function listSessionWorkspaceFiles(
     path: params.path,
     search: params.search,
     files: workspaceFiles,
+    ...(loaded.sandbox ? { sandbox: loaded.sandbox } : {}),
   });
   return {
     ...(root ? { root } : {}),
@@ -493,6 +561,7 @@ export async function getSessionWorkspaceFile(
     root: loaded.root,
     fileRoot: loaded.fileRoot,
     filePath: params.path,
+    ...(loaded.sandbox ? { sandbox: loaded.sandbox } : {}),
   });
   if (candidates.length === 0) {
     return { root: loaded.root };
@@ -529,6 +598,7 @@ export async function setSessionWorkspaceFile(params: {
   content: string;
   expectedHash: string;
   assertCurrent?: () => void;
+  sandbox?: SessionSandboxPaths;
 }): Promise<SessionWorkspaceWriteResult> {
   // Reject content the preview cannot round-trip, before encoding oversized input.
   if (params.content.includes("\0")) {
@@ -544,10 +614,13 @@ export async function setSessionWorkspaceFile(params: {
   if (!params.root) {
     return { status: "missing" };
   }
+  // The preview can open a file by container path, so saving it back must reach
+  // the same candidate; containment against the root still gates the write.
   const candidates = resolveSessionFileCandidates({
     root: params.root,
     fileRoot: params.fileRoot,
     filePath: params.path,
+    ...(params.sandbox ? { sandbox: params.sandbox } : {}),
   });
   let browserPath: string | undefined;
   for (const candidate of candidates) {
