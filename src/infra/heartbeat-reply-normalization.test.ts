@@ -1,7 +1,7 @@
 // Heartbeat reply normalization: acknowledgement tokens never reach the owner,
 // whether they lead, trail, or are appended to prose.
 import { describe, expect, it } from "vitest";
-import { normalizeHeartbeatReply } from "./heartbeat-delivery-normalization.js";
+import { normalizeHeartbeatReply } from "./heartbeat-reply-normalization.js";
 
 const ACK_MAX_CHARS = 300;
 
