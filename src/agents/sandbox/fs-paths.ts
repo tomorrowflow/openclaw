@@ -9,6 +9,7 @@ import { shortenPathWithHome } from "../../infra/home-display.js";
 import { isPathInside } from "../../infra/path-guards.js";
 import { normalizeSandboxInputPath, resolveSandboxInputPath } from "../sandbox-paths.js";
 import type { SandboxFsBridgeContext } from "./backend-handle.types.js";
+import { DEFAULT_SANDBOX_WORKDIR } from "./constants.js";
 import {
   isSandboxHostPathAbsolute,
   resolveSandboxHostPathViaExistingAncestor,
@@ -18,6 +19,7 @@ import {
   normalizeContainerPathCore,
   relativePathEscapesContainerRoot,
 } from "./path-utils.js";
+import type { SandboxWorkspaceAccess } from "./types.js";
 import { resolveSandboxMountSelection, resolveSandboxBindMounts } from "./workspace-mounts.js";
 
 export type SandboxFsMount = {
@@ -55,6 +57,55 @@ export function buildSandboxFsMounts(sandbox: SandboxFsBridgeContext): SandboxFs
     writable: !mount.readOnly,
     source: mount.source,
   }));
+}
+
+/**
+ * Maps a container path back to the Gateway-local host path that backs it.
+ *
+ * Read surfaces outside the container see container paths whenever an agent
+ * names a file the way its own tools showed it. Only the mount selection knows
+ * that a nested managed mount such as the shared directory is not a
+ * subdirectory of the workspace root, so the mapping reuses that selection
+ * instead of stripping the container prefix. Parent symlinks resolve here so a
+ * caller comparing against a canonical root sees the canonical location;
+ * authorizing the read stays with that caller.
+ */
+export function resolveSandboxHostPathForContainerPath(params: {
+  containerPath: string;
+  workspaceDir: string;
+  agentWorkspaceDir: string;
+  workspaceAccess: SandboxWorkspaceAccess;
+  workdir?: string;
+  binds?: readonly string[];
+}): string | undefined {
+  const containerPath = normalizeContainerPathCore(
+    normalizePosixInput(normalizeSandboxInputPath(params.containerPath)),
+  );
+  if (!path.posix.isAbsolute(containerPath)) {
+    return undefined;
+  }
+  const selection = resolveSandboxMountSelection({
+    workspaceDir: params.workspaceDir,
+    agentWorkspaceDir: params.agentWorkspaceDir,
+    workdir: params.workdir ?? DEFAULT_SANDBOX_WORKDIR,
+    workspaceAccess: params.workspaceAccess,
+    binds: params.binds,
+  });
+  const mount = resolveSandboxFsMount(
+    selection.mounts.map((selected) => ({
+      containerRoot: selected.containerPath,
+      hostRoot: path.resolve(selected.hostPath),
+    })),
+    containerPath,
+  );
+  if (!mount) {
+    return undefined;
+  }
+  const relative = path.posix.relative(mount.containerRoot, containerPath);
+  const hostPath = relative
+    ? path.resolve(mount.hostRoot, ...toHostSegments(relative))
+    : mount.hostRoot;
+  return resolveSandboxHostPathViaExistingAncestor(hostPath);
 }
 
 export function resolveWritableSandboxBindHostRoots(
