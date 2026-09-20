@@ -3,6 +3,7 @@ import { afterEach, beforeAll, beforeEach, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { computeSandboxConfigHash } from "./config-hash.js";
 import { DOCKER_SANDBOX_ENGINE } from "./container-engine.js";
+import { resolveDockerEnvPolicyEpoch } from "./sanitize-env-vars.js";
 import type { SandboxConfig } from "./types.js";
 
 type SpawnCall = {
@@ -254,7 +255,6 @@ export function createSandboxContainerTestHarness() {
   // Keep loaded modules and temporary directories per suite. Shared mock modules
   // are reset by the hooks installed for that suite.
   let ensureSandboxContainer: typeof import("./docker.js").ensureSandboxContainer;
-  let resolveDockerEnvPolicyEpoch: typeof import("./docker.js").resolveDockerEnvPolicyEpoch;
   let PODMAN_SANDBOX_ENGINE: typeof import("./docker.js").PODMAN_SANDBOX_ENGINE;
   let prepareSandboxMountPlan: typeof import("./mount-plan.js").prepareSandboxMountPlan;
 
@@ -267,8 +267,7 @@ export function createSandboxContainerTestHarness() {
     vi.doMock("./docker-mount-source.js", createNamespaceMock);
     vi.doMock("../../process/exec.js", createProcessMock);
     ({ prepareSandboxMountPlan } = await import("./mount-plan.js"));
-    ({ ensureSandboxContainer, resolveDockerEnvPolicyEpoch, PODMAN_SANDBOX_ENGINE } =
-      await import("./docker.js"));
+    ({ ensureSandboxContainer, PODMAN_SANDBOX_ENGINE } = await import("./docker.js"));
   });
 
   async function computeTestSandboxHash(input: Parameters<typeof computeSandboxConfigHash>[0]) {

@@ -49,7 +49,6 @@ import {
   readDockerContainerEnvVar,
   readDockerContainerLabel,
   readDockerPort,
-  resolveDockerEnvPolicyEpoch,
 } from "./docker.js";
 import { prepareSandboxMountPlan, sandboxMountPlanMatchesContainer } from "./mount-plan.js";
 import {
@@ -61,6 +60,7 @@ import {
   issueNoVncObserverToken,
 } from "./novnc-auth.js";
 import { readBrowserRegistry, updateBrowserRegistry } from "./registry.js";
+import { resolveDockerEnvPolicyEpoch } from "./sanitize-env-vars.js";
 import { buildSandboxContainerName, slugifySessionKey } from "./shared.js";
 import { isToolAllowed } from "./tool-policy.js";
 import type { SandboxBrowserContext, SandboxConfig } from "./types.js";

@@ -416,7 +416,7 @@ function validateApparmorProfile(profile: string | undefined): void {
  * Validate secret mounts — checks that each source path is absolute and not in a blocked
  * system directory. Does NOT enforce allowed-source-roots (secrets live outside workspace).
  */
-export function validateSecretMounts(secretMounts: Record<string, string> | undefined): void {
+function validateSecretMounts(secretMounts: Record<string, string> | undefined): void {
   if (!secretMounts || Object.keys(secretMounts).length === 0) {
     return;
   }
