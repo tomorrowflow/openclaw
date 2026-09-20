@@ -8,10 +8,7 @@ import { withContainerEnvFile } from "../../infra/container-env-file.js";
 import { markOpenClawExecEnv } from "../../infra/openclaw-exec-env.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { KeyedAsyncQueue } from "../../plugin-sdk/keyed-async-queue.js";
-import {
-  computeSandboxConfigHash,
-  SANDBOX_DOCKER_EXPLICIT_ENV_POLICY_EPOCH,
-} from "./config-hash.js";
+import { computeSandboxConfigHash } from "./config-hash.js";
 import { DEFAULT_SANDBOX_IMAGE, SANDBOX_DOCKER_CREATE_ARGS_EPOCH } from "./constants.js";
 import {
   DOCKER_SANDBOX_ENGINE,
@@ -39,7 +36,10 @@ import {
   type PodmanSandboxRuntimeInfo,
 } from "./podman-runtime.js";
 import { readRegistryEntry, removeRegistryEntry, updateRegistry } from "./registry.js";
-import { sanitizeEnvVars, sanitizeExplicitSandboxEnvVars } from "./sanitize-env-vars.js";
+import {
+  resolveDockerEnvPolicyEpoch,
+  sanitizeExplicitSandboxEnvVars,
+} from "./sanitize-env-vars.js";
 import { buildSandboxContainerName, slugifySessionKey } from "./shared.js";
 import type { SandboxConfig, SandboxDockerConfig, SandboxWorkspaceAccess } from "./types.js";
 import { validateSandboxSecurity } from "./validate-sandbox-security.js";
@@ -79,22 +79,6 @@ const sandboxContainerLifecycleQueue = new KeyedAsyncQueue();
 
 type ExecDockerOptions = ExecDockerRawOptions;
 
-function envRecordsEqual(left: Record<string, string>, right: Record<string, string>): boolean {
-  const leftEntries = Object.entries(left).toSorted(([leftKey], [rightKey]) =>
-    leftKey.localeCompare(rightKey),
-  );
-  const rightEntries = Object.entries(right).toSorted(([leftKey], [rightKey]) =>
-    leftKey.localeCompare(rightKey),
-  );
-  if (leftEntries.length !== rightEntries.length) {
-    return false;
-  }
-  return leftEntries.every(([key, value], index) => {
-    const rightEntry = rightEntries[index];
-    return rightEntry?.[0] === key && rightEntry[1] === value;
-  });
-}
-
 function appendSecretMountArgs(
   args: string[],
   secretMounts: Record<string, string> | undefined,
@@ -111,14 +95,6 @@ function appendSecretMountArgs(
   }
 }
 
-export function resolveDockerEnvPolicyEpoch(env: Record<string, string | undefined> | undefined) {
-  const explicitEnv = env ?? {};
-  const previousAllowed = sanitizeEnvVars(explicitEnv).allowed;
-  const currentAllowed = sanitizeExplicitSandboxEnvVars(explicitEnv).allowed;
-  return envRecordsEqual(previousAllowed, currentAllowed)
-    ? undefined
-    : SANDBOX_DOCKER_EXPLICIT_ENV_POLICY_EPOCH;
-}
 export async function execDocker(args: string[], opts?: ExecDockerOptions) {
   const result = await execDockerRaw(args, opts);
   return {
