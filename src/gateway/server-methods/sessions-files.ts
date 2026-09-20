@@ -13,6 +13,7 @@ import {
 } from "../../../packages/gateway-protocol/src/index.js";
 import { resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
 import { resolveSandboxConfigForAgent } from "../../agents/sandbox/config.js";
+import { resolveSandboxRuntimeStatus } from "../../agents/sandbox/runtime-status.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { pruneMapToMaxSize } from "../../infra/map-size.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-key.js";
@@ -256,18 +257,27 @@ async function loadSqliteTouchedFiles(
 /**
  * Sandboxed agents name files by container path, so browsing needs the same
  * mount inputs the container was built from to map them back to this root.
+ *
+ * The agent's `mode` is not that signal: under "non-main" the agent's own main
+ * session runs on the host, where `/workspace/...` is a literal host path and
+ * translating it would resolve an unrelated file. Ask the runtime-status owner
+ * whether this exact session is sandboxed.
  */
 function resolveSessionSandboxPaths(
   cfg: OpenClawConfig,
   agentId: string,
+  sessionKey: string,
 ): SessionSandboxPaths | undefined {
-  const sandbox = resolveSandboxConfigForAgent(cfg, agentId);
-  if (sandbox.mode === "off") {
+  const status = resolveSandboxRuntimeStatus({ cfg, agentId, sessionKey });
+  if (!status.sandboxed) {
     return undefined;
   }
+  const sandbox = resolveSandboxConfigForAgent(cfg, agentId);
   return {
     agentWorkspaceDir: resolveAgentWorkspaceDir(cfg, agentId),
-    workspaceAccess: sandbox.workspaceAccess,
+    // A session created with sandbox "required" runs at the access the status
+    // owner downgraded it to, and that decides which mounts it received.
+    workspaceAccess: status.sandboxRequired ? status.workspaceAccess : sandbox.workspaceAccess,
     workdir: sandbox.docker.workdir,
     ...(sandbox.docker.binds ? { binds: sandbox.docker.binds } : {}),
   };
@@ -311,7 +321,7 @@ function loadSessionFileRoot(params: { sessionKey: string; agentId?: string }) {
     root,
     fileRoot: resolveFileRoot({ root, spawnedCwd }),
     diffCwd,
-    sandbox: resolveSessionSandboxPaths(loaded.cfg, agentId),
+    sandbox: resolveSessionSandboxPaths(loaded.cfg, agentId, loaded.canonicalKey),
   };
 }
 

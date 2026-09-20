@@ -60,15 +60,19 @@ const mockVisibleMessages = createVisibleMessagesMock(
 );
 
 /** Re-points the session entry at a sandboxed agent; binds are operator mounts. */
-function useSandboxedSession(workspaceRoot: string, binds?: string[]): void {
+function useSandboxedSession(
+  workspaceRoot: string,
+  opts: { binds?: string[]; mode?: string; canonicalKey?: string } = {},
+): void {
+  const { binds, mode = "all", canonicalKey = "agent:main:main" } = opts;
   hoisted.loadSessionEntry.mockReturnValue({
     agentId: "main",
-    canonicalKey: "agent:main:main",
+    canonicalKey,
     cfg: {
       agents: {
         defaults: {
           sandbox: {
-            mode: "all",
+            mode,
             workspaceAccess: "rw",
             ...(binds ? { docker: { binds } } : {}),
           },
@@ -114,9 +118,9 @@ describe("sessions.files container paths", () => {
     // would serve the wrong file rather than fail.
     writeWorkspaceFile(workspaceRoot, "exchange/note.md", "# Exchanged\n");
     writeWorkspaceFile(workspaceRoot, "shared/note.md", "# Not the mount source\n");
-    useSandboxedSession(workspaceRoot, [
-      `${path.join(workspaceRoot, "exchange")}:/workspace/shared`,
-    ]);
+    useSandboxedSession(workspaceRoot, {
+      binds: [`${path.join(workspaceRoot, "exchange")}:/workspace/shared`],
+    });
 
     const payload = expectOkPayload(
       await invokeSessionFilesHandler("sessions.files.get", {
@@ -174,6 +178,37 @@ describe("sessions.files container paths", () => {
     );
 
     expect(error).toMatchObject({ details: { type: "session_file_not_found" } });
+  });
+
+  it("leaves container paths unresolved for a non-main session that runs on the host", async () => {
+    // "non-main" sandboxes every session except the agent's own main one, where
+    // /workspace/... is a literal host path rather than a container path.
+    useSandboxedSession(workspaceRoot, { mode: "non-main" });
+
+    const error = expectError(
+      await invokeSessionFilesHandler("sessions.files.get", {
+        sessionKey: "agent:main:main",
+        path: "/workspace/src/readme.md",
+      }),
+    );
+
+    expect(error).toMatchObject({ details: { type: "session_file_not_found" } });
+  });
+
+  it("still translates for a non-main session that is sandboxed", async () => {
+    useSandboxedSession(workspaceRoot, {
+      mode: "non-main",
+      canonicalKey: "agent:main:sidequest",
+    });
+
+    const payload = expectOkPayload(
+      await invokeSessionFilesHandler("sessions.files.get", {
+        sessionKey: "agent:main:sidequest",
+        path: "/workspace/src/readme.md",
+      }),
+    );
+
+    expect(payload.file.workspacePath).toBe("src/readme.md");
   });
 
   it("leaves container paths unresolved for an unsandboxed agent", async () => {
