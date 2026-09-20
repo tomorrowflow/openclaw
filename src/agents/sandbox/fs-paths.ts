@@ -59,24 +59,23 @@ export function buildSandboxFsMounts(sandbox: SandboxFsBridgeContext): SandboxFs
   }));
 }
 
+export type SandboxContainerMount = { hostPath: string; containerPath: string };
+
 /**
- * Maps a container path back to the Gateway-local host path that backs it.
+ * Maps a container path back to the Gateway-local host path that backs it,
+ * using an explicit container->host mapping.
  *
  * Read surfaces outside the container see container paths whenever an agent
- * names a file the way its own tools showed it. Only the mount selection knows
- * that a nested managed mount such as the shared directory is not a
- * subdirectory of the workspace root, so the mapping reuses that selection
- * instead of stripping the container prefix. Parent symlinks resolve here so a
- * caller comparing against a canonical root sees the canonical location;
- * authorizing the read stays with that caller.
+ * names a file the way its own tools showed it. Callers pass the mapping the
+ * container actually received; only that mapping knows a nested mount such as
+ * the shared directory is not a subdirectory of the workspace root, so a
+ * container-prefix strip resolves a different directory. Parent symlinks
+ * resolve here so a caller comparing against a canonical root sees the
+ * canonical location; authorizing the read stays with that caller.
  */
 export function resolveSandboxHostPathForContainerPath(params: {
   containerPath: string;
-  workspaceDir: string;
-  agentWorkspaceDir: string;
-  workspaceAccess: SandboxWorkspaceAccess;
-  workdir?: string;
-  binds?: readonly string[];
+  mounts: readonly SandboxContainerMount[];
 }): string | undefined {
   const containerPath = normalizeContainerPathCore(
     normalizePosixInput(normalizeSandboxInputPath(params.containerPath)),
@@ -84,17 +83,10 @@ export function resolveSandboxHostPathForContainerPath(params: {
   if (!path.posix.isAbsolute(containerPath)) {
     return undefined;
   }
-  const selection = resolveSandboxMountSelection({
-    workspaceDir: params.workspaceDir,
-    agentWorkspaceDir: params.agentWorkspaceDir,
-    workdir: params.workdir ?? DEFAULT_SANDBOX_WORKDIR,
-    workspaceAccess: params.workspaceAccess,
-    binds: params.binds,
-  });
   const mount = resolveSandboxFsMount(
-    selection.mounts.map((selected) => ({
-      containerRoot: selected.containerPath,
-      hostRoot: path.resolve(selected.hostPath),
+    params.mounts.map((entry) => ({
+      containerRoot: normalizeContainerPathCore(entry.containerPath),
+      hostRoot: path.resolve(entry.hostPath),
     })),
     containerPath,
   );
@@ -106,6 +98,32 @@ export function resolveSandboxHostPathForContainerPath(params: {
     ? path.resolve(mount.hostRoot, ...toHostSegments(relative))
     : mount.hostRoot;
   return resolveSandboxHostPathViaExistingAncestor(hostPath);
+}
+
+/**
+ * Derives the mapping a container for these inputs would receive from current
+ * configuration. This is the fallback for a container created before its mounts
+ * were recorded; a registered container's own recorded mapping is authoritative,
+ * because configuration can already describe a container that has not been
+ * recreated yet.
+ */
+export function deriveSandboxContainerMounts(params: {
+  workspaceDir: string;
+  agentWorkspaceDir: string;
+  workspaceAccess: SandboxWorkspaceAccess;
+  workdir?: string;
+  binds?: readonly string[];
+}): SandboxContainerMount[] {
+  return resolveSandboxMountSelection({
+    workspaceDir: params.workspaceDir,
+    agentWorkspaceDir: params.agentWorkspaceDir,
+    workdir: params.workdir ?? DEFAULT_SANDBOX_WORKDIR,
+    workspaceAccess: params.workspaceAccess,
+    binds: params.binds,
+  }).mounts.map((mount) => ({
+    hostPath: mount.hostPath,
+    containerPath: mount.containerPath,
+  }));
 }
 
 export function resolveWritableSandboxBindHostRoots(
