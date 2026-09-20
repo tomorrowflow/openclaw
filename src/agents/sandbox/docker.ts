@@ -658,9 +658,9 @@ async function ensureSandboxContainerLifecycle(
         operatorAuthority: params.operatorAuthority,
       });
       if (needsSetupReservation) {
-        await completeSandboxRegistryReservation(readyEntry);
+        await completeSandboxRegistryReservation({ ...readyEntry, mounts: mountPlan.mounts });
       } else if (params.workspaceSource !== "managed-worktree") {
-        await updateRegistry(readyEntry);
+        await updateRegistry({ ...readyEntry, mounts: mountPlan.mounts });
       }
       params.assertCurrent?.();
       return { containerName, containerId };
