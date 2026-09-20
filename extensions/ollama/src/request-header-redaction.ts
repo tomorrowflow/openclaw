@@ -113,7 +113,7 @@ function collectOllamaRequestHeaderSecretValues(
   });
 }
 
-export function redactOllamaResponseErrorText(
+function redactOllamaResponseErrorText(
   text: string,
   headers: Readonly<Record<string, string>>,
   options?: { sourceTruncated?: boolean },

@@ -6,8 +6,8 @@ import {
 } from "../../shared.js";
 import type { AudioTranscriptionRequest, AudioTranscriptionResult } from "../../types.js";
 
-export const DEFAULT_WHISPER_ASR_BASE_URL = "http://localhost:9009";
-export const DEFAULT_FFMPEG_API_URL = "http://localhost:9008";
+const DEFAULT_WHISPER_ASR_BASE_URL = "http://localhost:9009";
+const DEFAULT_FFMPEG_API_URL = "http://localhost:9008";
 
 const FORMATS_NEEDING_CONVERSION = new Set(["m4a", "aac", "mp4", "ogg", "webm"]);
 
