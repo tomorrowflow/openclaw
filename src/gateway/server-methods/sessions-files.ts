@@ -14,6 +14,8 @@ import {
   validateSessionsFilesSetParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { getAgentWorkspaceAccess } from "../../agents/workspace-access.js";
+import { resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
+import { resolveSandboxConfigForAgent } from "../../agents/sandbox/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { pruneMapToMaxSize } from "../../infra/map-size.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-key.js";
@@ -50,6 +52,7 @@ import { assertValidParams, defineValidatedGatewayHandler } from "./validation.j
 import {
   getSessionWorkspaceFile,
   listSessionWorkspaceFiles,
+  type SessionSandboxPaths,
   setSessionWorkspaceFile,
   resolveFileRoot,
   type LoadedSessionFiles,
@@ -258,10 +261,36 @@ async function loadSqliteTouchedFiles(
   }
 }
 
+/**
+ * Sandboxed agents name files by container path, so browsing needs the same
+ * mount inputs the container was built from to map them back to this root.
+ */
+function resolveSessionSandboxPaths(
+  cfg: OpenClawConfig,
+  agentId: string,
+): SessionSandboxPaths | undefined {
+  const sandbox = resolveSandboxConfigForAgent(cfg, agentId);
+  if (sandbox.mode === "off") {
+    return undefined;
+  }
+  return {
+    agentWorkspaceDir: resolveAgentWorkspaceDir(cfg, agentId),
+    workspaceAccess: sandbox.workspaceAccess,
+    workdir: sandbox.docker.workdir,
+    ...(sandbox.docker.binds ? { binds: sandbox.docker.binds } : {}),
+  };
+}
+
 function loadSessionFileRoot(params: { sessionKey: string; agentId?: string }) {
   const loaded = loadGatewaySessionEntryReadOnly(params.sessionKey, { agentId: params.agentId });
   if (!loaded.entry?.sessionId) {
-    return { ...loaded, agentId: undefined, root: undefined, fileRoot: undefined };
+    return {
+      ...loaded,
+      agentId: undefined,
+      root: undefined,
+      fileRoot: undefined,
+      sandbox: undefined,
+    };
   }
   const agentId = normalizeAgentId(
     loaded.agentId ??
@@ -270,7 +299,14 @@ function loadSessionFileRoot(params: { sessionKey: string; agentId?: string }) {
       parseAgentSessionKey(params.sessionKey)?.agentId,
   );
   if (loaded.entry.repositoryWorkspaceId) {
-    return { ...loaded, agentId, root: undefined, fileRoot: undefined, diffCwd: undefined };
+    return {
+      ...loaded,
+      agentId,
+      root: undefined,
+      fileRoot: undefined,
+      diffCwd: undefined,
+      sandbox: undefined,
+    };
   }
   const { spawnedCwd, root, diffCwd } = resolveSessionWorkspaceRoots(
     loaded.cfg,
@@ -283,6 +319,7 @@ function loadSessionFileRoot(params: { sessionKey: string; agentId?: string }) {
     root,
     fileRoot: resolveFileRoot({ root, spawnedCwd }),
     diffCwd,
+    sandbox: resolveSessionSandboxPaths(loaded.cfg, agentId),
   };
 }
 
@@ -358,6 +395,7 @@ async function loadSessionFiles(params: {
     root: loaded.root,
     fileRoot: loaded.fileRoot,
     diffCwd: loaded.diffCwd,
+    ...(loaded.sandbox ? { sandbox: loaded.sandbox } : {}),
     files: [...files.values()].toSorted((a, b) => {
       if (a.kind !== b.kind) {
         return a.kind === "modified" ? -1 : 1;
@@ -538,6 +576,7 @@ export const sessionsFilesHandlers: GatewayRequestHandlers = {
           root: loaded.root,
           fileRoot: loaded.fileRoot,
           assertCurrent: authorize,
+          ...(loaded.sandbox ? { sandbox: loaded.sandbox } : {}),
         });
     if (update.status === "missing") {
       respondSessionFileNotFound(respond, params.path);
