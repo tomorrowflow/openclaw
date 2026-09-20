@@ -738,7 +738,7 @@ async function ensureSandboxContainerLifecycle(
         assertCurrent: params.assertCurrent,
       });
       if (params.workspaceSource !== "managed-worktree") {
-        await updateRegistry(readyEntry);
+        await updateRegistry({ ...readyEntry, mounts: mountPlan.mounts });
       }
       return containerName;
     } catch (creationError) {

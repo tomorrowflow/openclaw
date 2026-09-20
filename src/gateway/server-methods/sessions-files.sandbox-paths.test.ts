@@ -21,6 +21,14 @@ const hoisted = vi.hoisted(() => ({
   resolveAgentWorkspaceDir: vi.fn(),
   resolveDefaultAgentId: vi.fn(),
   readSessionTranscriptVisibleMessageDeltaCore: vi.fn(),
+  readRegisteredSandboxRuntimeIds: vi.fn(),
+  readRegistryEntry: vi.fn(),
+}));
+
+vi.mock("../../agents/sandbox/registry.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../agents/sandbox/registry.js")>()),
+  readRegisteredSandboxRuntimeIds: hoisted.readRegisteredSandboxRuntimeIds,
+  readRegistryEntry: hoisted.readRegistryEntry,
 }));
 
 vi.mock("./open-path.js", async () => {
@@ -93,6 +101,9 @@ describe("sessions.files container paths", () => {
 
   beforeEach(() => {
     workspaceRoot = prepareSessionFilesTest(hoisted, mockVisibleMessages);
+    // No registered container by default: the derived mapping serves these.
+    hoisted.readRegisteredSandboxRuntimeIds.mockResolvedValue([]);
+    hoisted.readRegistryEntry.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -209,6 +220,35 @@ describe("sessions.files container paths", () => {
     );
 
     expect(payload.file.workspacePath).toBe("src/readme.md");
+  });
+
+  it("prefers the container's recorded mapping over one derived from config", async () => {
+    // The container still mounts `old` at /workspace/shared while config now
+    // names `new`. Both resolve inside the root, so deriving would serve a real
+    // but wrong file rather than fail.
+    writeWorkspaceFile(workspaceRoot, "old/note.md", "# From the live container\n");
+    writeWorkspaceFile(workspaceRoot, "new/note.md", "# From stale config\n");
+    useSandboxedSession(workspaceRoot, {
+      binds: [`${path.join(workspaceRoot, "new")}:/workspace/shared`],
+    });
+    hoisted.readRegisteredSandboxRuntimeIds.mockResolvedValue(["openclaw-sbx-workspace-live"]);
+    hoisted.readRegistryEntry.mockResolvedValue({
+      containerName: "openclaw-sbx-workspace-live",
+      mounts: [
+        { hostPath: workspaceRoot, containerPath: "/workspace" },
+        { hostPath: path.join(workspaceRoot, "old"), containerPath: "/workspace/shared" },
+      ],
+    });
+
+    const payload = expectOkPayload(
+      await invokeSessionFilesHandler("sessions.files.get", {
+        sessionKey: "agent:main:main",
+        path: "/workspace/shared/note.md",
+      }),
+    );
+
+    expect(payload.file.content).toBe("# From the live container\n");
+    expect(payload.file.workspacePath).toBe("old/note.md");
   });
 
   it("leaves container paths unresolved for an unsandboxed agent", async () => {

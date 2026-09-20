@@ -9,9 +9,11 @@ import type {
   SessionFileEntry,
   SessionFileRelevance,
 } from "../../../packages/gateway-protocol/src/index.js";
-import { resolveSandboxHostPathForContainerPath } from "../../agents/sandbox/fs-paths.js";
+import {
+  resolveSandboxHostPathForContainerPath,
+  type SandboxContainerMount,
+} from "../../agents/sandbox/fs-paths.js";
 import { resolveSandboxHostPathViaExistingAncestor } from "../../agents/sandbox/host-paths.js";
-import type { SandboxWorkspaceAccess } from "../../agents/sandbox/types.js";
 import { resolveToCwd as resolveSessionToolPathToCwd } from "../../agents/sessions/tools/path-utils.js";
 import { insideGitCheckout } from "../../agents/worktrees/git.js";
 import { FsSafeError } from "../../infra/fs-safe.js";
@@ -36,13 +38,8 @@ import {
 } from "./workspace-fs.js";
 
 export type TouchedFile = { path: string; kind: "modified" | "read" };
-/** Sandbox mount inputs for translating container paths the agent named back to this root. */
-export type SessionSandboxPaths = {
-  agentWorkspaceDir: string;
-  workspaceAccess: SandboxWorkspaceAccess;
-  workdir?: string;
-  binds?: readonly string[];
-};
+/** The container->host mapping used to translate container paths back to this root. */
+export type SessionSandboxPaths = { mounts: readonly SandboxContainerMount[] };
 export type LoadedSessionFiles = {
   root?: string;
   fileRoot?: string;
@@ -327,9 +324,8 @@ function resolveSandboxContainerFilePath(params: {
     return undefined;
   }
   const hostPath = resolveSandboxHostPathForContainerPath({
-    ...params.sandbox,
     containerPath: params.filePath,
-    workspaceDir: params.root,
+    mounts: params.sandbox.mounts,
   });
   if (!hostPath) {
     return undefined;
