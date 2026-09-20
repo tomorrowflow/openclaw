@@ -234,8 +234,15 @@ sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
 # dist was last built, which can predate the commit being deployed — the deploy
 # then reports the new version while serving older code. Incremental, so a dist
 # the agent already built costs little.
+#
+# OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 is required on this server: upstream's
+# optionalBundledClusters skip memory-lancedb, googlechat, matrix, nostr,
+# whatsapp, acpx and friends without it, and deploy:globally then copies
+# nothing for them ("skipped N excluded extensions not built locally"), leaving
+# the Gateway to fail their discovery. The sync stage already builds with the
+# flag; this build is the one whose dist is installed, so it needs it too.
 STAGE="deploy: build (gateway still up)"
-CI=true corepack pnpm build
+OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 CI=true corepack pnpm build
 
 STAGE="deploy: npm i -g (gateway still up)"
 node scripts/prepare-global-install-package-json.mjs
