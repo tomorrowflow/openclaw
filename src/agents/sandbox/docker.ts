@@ -724,7 +724,7 @@ async function ensureSandboxContainerLifecycle(
           allocated = true;
         },
       });
-      await updateRegistry(readyEntry);
+      await updateRegistry({ ...readyEntry, mounts: mountPlan.mounts });
       return containerName;
     } catch (creationError) {
       if (!allocated) {

@@ -13,7 +13,13 @@ import {
 } from "../../../packages/gateway-protocol/src/index.js";
 import { resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
 import { resolveSandboxConfigForAgent } from "../../agents/sandbox/config.js";
+import { deriveSandboxContainerMounts } from "../../agents/sandbox/fs-paths.js";
+import {
+  readRegisteredSandboxRuntimeIds,
+  readRegistryEntry,
+} from "../../agents/sandbox/registry.js";
 import { resolveSandboxRuntimeStatus } from "../../agents/sandbox/runtime-status.js";
+import { resolveSandboxWorkspaceLayoutPaths } from "../../agents/sandbox/shared.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { pruneMapToMaxSize } from "../../infra/map-size.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-key.js";
@@ -254,32 +260,87 @@ async function loadSqliteTouchedFiles(
 }
 
 /**
- * Sandboxed agents name files by container path, so browsing needs the same
- * mount inputs the container was built from to map them back to this root.
+ * Sandboxed agents name files by container path, so browsing needs the mapping
+ * the container was built from to resolve them against this root.
  *
- * The agent's `mode` is not that signal: under "non-main" the agent's own main
- * session runs on the host, where `/workspace/...` is a literal host path and
- * translating it would resolve an unrelated file. Ask the runtime-status owner
- * whether this exact session is sandboxed.
+ * The agent's `mode` is not the signal for whether to translate: under
+ * "non-main" the agent's own main session runs on the host, where
+ * `/workspace/...` is a literal host path and translating it would resolve an
+ * unrelated file. Ask the runtime-status owner about this exact session.
+ *
+ * The registered container's own recorded mapping wins over one derived from
+ * current configuration, which can already describe a container that has not
+ * been recreated yet — deriving there can resolve a real but wrong file, since
+ * both the old and new mapping can land inside this root.
  */
-function resolveSessionSandboxPaths(
+async function resolveSessionSandboxPaths(
   cfg: OpenClawConfig,
   agentId: string,
   sessionKey: string,
-): SessionSandboxPaths | undefined {
+  root: string | undefined,
+): Promise<SessionSandboxPaths | undefined> {
+  if (!root) {
+    return undefined;
+  }
   const status = resolveSandboxRuntimeStatus({ cfg, agentId, sessionKey });
   if (!status.sandboxed) {
     return undefined;
   }
   const sandbox = resolveSandboxConfigForAgent(cfg, agentId);
+  const agentWorkspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
+  const recorded = await readRecordedSandboxMounts({
+    sandbox,
+    agentId,
+    agentWorkspaceDir,
+    sessionKey,
+    isolationSubject: status.sandboxRequired ? status.isolationSubject : undefined,
+  });
+  if (recorded) {
+    return { mounts: recorded };
+  }
   return {
-    agentWorkspaceDir: resolveAgentWorkspaceDir(cfg, agentId),
-    // A session created with sandbox "required" runs at the access the status
-    // owner downgraded it to, and that decides which mounts it received.
-    workspaceAccess: status.sandboxRequired ? status.workspaceAccess : sandbox.workspaceAccess,
-    workdir: sandbox.docker.workdir,
-    ...(sandbox.docker.binds ? { binds: sandbox.docker.binds } : {}),
+    mounts: deriveSandboxContainerMounts({
+      workspaceDir: root,
+      agentWorkspaceDir,
+      // A session created with sandbox "required" runs at the access the status
+      // owner downgraded it to, and that decides which mounts it received.
+      workspaceAccess: status.sandboxRequired ? status.workspaceAccess : sandbox.workspaceAccess,
+      workdir: sandbox.docker.workdir,
+      ...(sandbox.docker.binds ? { binds: sandbox.docker.binds } : {}),
+    }),
   };
+}
+
+/** Reads the mapping the newest container registered for this sandbox scope received. */
+async function readRecordedSandboxMounts(params: {
+  sandbox: ReturnType<typeof resolveSandboxConfigForAgent>;
+  agentId: string;
+  agentWorkspaceDir: string;
+  sessionKey: string;
+  isolationSubject?: Parameters<typeof resolveSandboxWorkspaceLayoutPaths>[0]["isolationSubject"];
+}) {
+  try {
+    const { scopeKey } = resolveSandboxWorkspaceLayoutPaths({
+      cfg: params.sandbox,
+      rawSessionKey: params.sessionKey,
+      agentId: params.agentId,
+      ...(params.isolationSubject ? { isolationSubject: params.isolationSubject } : {}),
+      workspaceDir: params.agentWorkspaceDir,
+    });
+    const [containerName] = await readRegisteredSandboxRuntimeIds({
+      backendId: params.sandbox.backend,
+      scopeKey,
+    });
+    if (!containerName) {
+      return undefined;
+    }
+    const entry = await readRegistryEntry(containerName);
+    return entry?.mounts?.length ? entry.mounts : undefined;
+  } catch {
+    // Browsing must not fail because the sandbox registry is unreadable; the
+    // derived mapping still serves the common case.
+    return undefined;
+  }
 }
 
 function loadSessionFileRoot(params: { sessionKey: string; agentId?: string }) {
@@ -290,7 +351,6 @@ function loadSessionFileRoot(params: { sessionKey: string; agentId?: string }) {
       agentId: undefined,
       root: undefined,
       fileRoot: undefined,
-      sandbox: undefined,
     };
   }
   const agentId = normalizeAgentId(
@@ -306,7 +366,6 @@ function loadSessionFileRoot(params: { sessionKey: string; agentId?: string }) {
       root: undefined,
       fileRoot: undefined,
       diffCwd: undefined,
-      sandbox: undefined,
     };
   }
   const { spawnedCwd, root, diffCwd } = resolveSessionWorkspaceRoots(
@@ -320,7 +379,6 @@ function loadSessionFileRoot(params: { sessionKey: string; agentId?: string }) {
     root,
     fileRoot: resolveFileRoot({ root, spawnedCwd }),
     diffCwd,
-    sandbox: resolveSessionSandboxPaths(loaded.cfg, agentId, loaded.canonicalKey),
   };
 }
 
@@ -369,12 +427,18 @@ async function loadSessionFiles(params: {
     toTranscriptReadScope(target),
     `${agentId}\0${entry.sessionId}\0${target.storePath ?? ""}`,
   );
+  const sandbox = await resolveSessionSandboxPaths(
+    loaded.cfg,
+    agentId,
+    loaded.canonicalKey,
+    loaded.root,
+  );
   return {
     repository,
     root: loaded.root,
     fileRoot: loaded.fileRoot,
     diffCwd: loaded.diffCwd,
-    ...(loaded.sandbox ? { sandbox: loaded.sandbox } : {}),
+    ...(sandbox ? { sandbox } : {}),
     files: [...files.values()].toSorted((a, b) => {
       if (a.kind !== b.kind) {
         return a.kind === "modified" ? -1 : 1;
@@ -521,6 +585,16 @@ export const sessionsFilesHandlers: GatewayRequestHandlers = {
       throw new Error("Start this cloud session before editing its repository files.");
     }
     const authorize = () => sessionMutationAuthorization?.assertCurrent();
+    // A file the preview opened by container path must save back to that same
+    // file, so the write resolves the mapping the read used.
+    const sandbox = repository
+      ? undefined
+      : await resolveSessionSandboxPaths(
+          loaded.cfg,
+          loaded.agentId,
+          loaded.canonicalKey,
+          loaded.root,
+        );
     const update = repository
       ? await repository.inspect(
           "set",
@@ -532,7 +606,7 @@ export const sessionsFilesHandlers: GatewayRequestHandlers = {
           root: loaded.root,
           fileRoot: loaded.fileRoot,
           assertCurrent: authorize,
-          ...(loaded.sandbox ? { sandbox: loaded.sandbox } : {}),
+          ...(sandbox ? { sandbox } : {}),
         });
     if (update.status === "missing") {
       respondSessionFileNotFound(respond, params.path);

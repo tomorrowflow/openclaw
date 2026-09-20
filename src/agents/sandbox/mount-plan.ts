@@ -20,6 +20,12 @@ import {
 
 export type SandboxMountPlan = {
   binds: string[];
+  /**
+   * Gateway-local container->host mapping, before the lifecycle translates
+   * sources into daemon-host paths. Recorded with the container so readers
+   * outside it resolve container paths against what it actually received.
+   */
+  mounts: { hostPath: string; containerPath: string }[];
   skippedBinds: string[];
   readOnlyWorkspaceSkillMounts: ReturnType<
     typeof resolveSandboxMountSelection
@@ -81,6 +87,10 @@ export async function prepareSandboxMountPlan(params: {
   }
   return {
     binds: [...binds.values()],
+    mounts: selection.mounts.map((mount) => ({
+      hostPath: mount.hostPath,
+      containerPath: normalizeMountContainerPath(mount.containerPath),
+    })),
     skippedBinds: selection.skippedBinds,
     readOnlyWorkspaceSkillMounts: selection.readOnlyWorkspaceSkillMounts,
     tmpfs: resolveSandboxTmpfsMounts(params.tmpfs),
