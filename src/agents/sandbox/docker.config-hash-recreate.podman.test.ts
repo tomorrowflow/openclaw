@@ -7,6 +7,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { computeSandboxConfigHash } from "./config-hash.js";
 import { SANDBOX_DOCKER_CREATE_ARGS_EPOCH } from "./constants.js";
+import { resolveDockerEnvPolicyEpoch } from "./sanitize-env-vars.js";
 import { collectDockerFlagValues } from "./test-args.js";
 import type { SandboxConfig } from "./types.js";
 import { SANDBOX_MOUNT_FORMAT_VERSION } from "./workspace-mounts.js";
@@ -162,7 +163,6 @@ vi.mock("../../process/exec.js", async (importOriginal) => ({
 }));
 
 let ensureSandboxContainer: typeof import("./docker.js").ensureSandboxContainer;
-let resolveDockerEnvPolicyEpoch: typeof import("./docker.js").resolveDockerEnvPolicyEpoch;
 let PODMAN_SANDBOX_ENGINE: typeof import("./docker.js").PODMAN_SANDBOX_ENGINE;
 
 async function loadFreshDockerModuleForTest() {
@@ -176,8 +176,7 @@ async function loadFreshDockerModuleForTest() {
     ...(await importOriginal<typeof import("../../process/exec.js")>()),
     spawnCommand: spawnDockerProcess,
   }));
-  ({ ensureSandboxContainer, resolveDockerEnvPolicyEpoch, PODMAN_SANDBOX_ENGINE } =
-    await import("./docker.js"));
+  ({ ensureSandboxContainer, PODMAN_SANDBOX_ENGINE } = await import("./docker.js"));
 }
 
 function createSandboxConfig(
