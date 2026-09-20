@@ -54,7 +54,7 @@ RUN set -eux; \
 
 # Base image Python is externally-managed (PEP 668); install curl_cffi into the
 # system interpreter so sandbox scripts can import it.
- RUN pip3 install --no-cache-dir --break-system-packages curl_cffi
+RUN pip3 install --no-cache-dir --break-system-packages curl_cffi
 
 RUN useradd --create-home --shell /bin/bash sandbox
 USER sandbox
