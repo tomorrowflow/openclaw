@@ -139,6 +139,29 @@ describe("registry race safety", () => {
     });
   });
 
+  it("preserves recorded mounts across a usage update and replaces them on recreate", async () => {
+    // Creation records the mapping; readers outside the container resolve its
+    // paths against it, so a lastUsedAt touch must not erase it.
+    const created = [
+      { hostPath: "/srv/workspace", containerPath: "/workspace" },
+      { hostPath: "/srv/state/shared", containerPath: "/workspace/shared" },
+    ];
+    await updateRegistry(containerEntry({ mounts: created }));
+    await updateRegistry(containerEntry({ lastUsedAtMs: 2 }));
+
+    await expect(readRegistryEntry("container-a")).resolves.toMatchObject({
+      lastUsedAtMs: 2,
+      mounts: created,
+    });
+
+    const recreated = [{ hostPath: "/srv/workspace", containerPath: "/workspace" }];
+    await updateRegistry(containerEntry({ lastUsedAtMs: 3, mounts: recreated }));
+
+    await expect(readRegistryEntry("container-a")).resolves.toMatchObject({
+      mounts: recreated,
+    });
+  });
+
   it("reads registered runtime IDs for one backend and scope newest first", async () => {
     await updateRegistry(
       containerEntry({
