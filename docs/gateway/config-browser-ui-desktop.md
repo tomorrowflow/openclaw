@@ -119,7 +119,12 @@ For the full key index and the other top-level config domains, see [Configuratio
   Per-profile `userDataDir` on `existing-session` profiles is also tilde-expanded.
 - Control service: loopback only (port derived from `gateway.port`, default `18791`).
 - `extraArgs` appends extra launch flags to local Chromium startup (for example
-  `--disable-gpu`, window sizing, or debug flags).
+  `--disable-gpu`, window sizing, or debug flags). Chromium keeps one value per
+  switch, so repeating a switch replaces its earlier value rather than adding to
+  it. `--disable-features` is the exception OpenClaw handles for you: your
+  entries are merged with the features the managed profile always disables, and
+  emitted as one flag. Any other switch OpenClaw already passes is yours to
+  override, including its built-in value.
 - Browser profiles, the default profile, global launch settings,
   `snapshotDefaults`, and `tabCleanup` hot-reload.
   Changed launch settings replace affected managed browsers on their next use;

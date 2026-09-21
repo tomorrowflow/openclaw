@@ -174,6 +174,8 @@ export const OpenClawSchemaShape = {
        * Additional Chrome launch arguments.
        * Useful for stealth flags, window size overrides, or custom user-agent strings.
        * Example: ["--window-size=1920,1080", "--disable-infobars"]
+       * Repeating a switch Chrome already received replaces its value rather
+       * than extending it; --disable-features entries are merged instead.
        */
       extraArgs: z.array(z.string()).optional(),
       /** Best-effort cleanup policy for tabs opened by primary-agent browser sessions. */

@@ -24,7 +24,7 @@ import { redactToolPayloadText } from "../logging/redact.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { CONFIG_DIR } from "../utils.js";
 import { createBoundedUtf8Tail } from "./bounded-utf8-tail.js";
-import { hasChromeProxyControlArg, omitChromeProxyEnv } from "./browser-proxy-mode.js";
+import { omitChromeProxyEnv } from "./browser-proxy-mode.js";
 import { assertManagedProxyAllowsCdpUrl } from "./cdp-proxy-bypass.js";
 import {
   CHROME_BOOTSTRAP_EXIT_POLL_MS,
@@ -49,6 +49,7 @@ import {
   withCdpSocket,
 } from "./cdp.helpers.js";
 import { normalizeCdpWsUrl } from "./cdp.js";
+import { buildOpenClawChromeLaunchArgs } from "./chrome-launch-args.js";
 import {
   type ChromeCdpDiagnostic,
   diagnoseChromeCdp,
@@ -758,59 +759,6 @@ export function resolveOpenClawUserDataDir(profileName = DEFAULT_OPENCLAW_BROWSE
 
 function cdpUrlForPort(cdpPort: number) {
   return `http://127.0.0.1:${cdpPort}`;
-}
-
-/** Build Chrome launch arguments for the managed OpenClaw browser. */
-function buildOpenClawChromeLaunchArgs(params: {
-  resolved: ResolvedBrowserConfig;
-  profile: ResolvedBrowserProfile;
-  userDataDir: string;
-  headlessOverride?: boolean;
-  env?: NodeJS.ProcessEnv;
-  platform?: NodeJS.Platform;
-  useMockKeychain?: boolean;
-}): string[] {
-  const { resolved, profile, userDataDir } = params;
-  const platform = params.platform ?? process.platform;
-  const headlessMode = resolveManagedBrowserHeadlessMode(resolved, profile, params);
-  const args: string[] = [
-    `--remote-debugging-port=${profile.cdpPort}`,
-    `--user-data-dir=${userDataDir}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-sync",
-    "--disable-background-networking",
-    "--disable-component-update",
-    "--disable-features=Translate,MediaRouter",
-    "--disable-session-crashed-bubble",
-    "--hide-crash-restore-bubble",
-    "--password-store=basic",
-  ];
-
-  if (platform === "darwin" && params.useMockKeychain) {
-    // This is an isolated OpenClaw-owned profile, not the user's Chrome profile.
-    // Keep its basic password store non-interactive so headless Chrome can
-    // encrypt and persist cookies without login-keychain prompts.
-    args.push("--use-mock-keychain");
-  }
-  if (headlessMode.headless) {
-    args.push("--headless=new");
-    args.push("--disable-gpu");
-  }
-  if (resolved.noSandbox) {
-    args.push("--no-sandbox");
-  }
-  if (platform === "linux") {
-    args.push("--disable-dev-shm-usage");
-  }
-  if (!hasChromeProxyControlArg(resolved.extraArgs)) {
-    args.push("--no-proxy-server");
-  }
-  if (resolved.extraArgs.length > 0) {
-    args.push(...resolved.extraArgs);
-  }
-
-  return args;
 }
 
 type ChromeCdpEndpointPin = NonNullable<Awaited<ReturnType<typeof assertCdpEndpointAllowed>>>;
