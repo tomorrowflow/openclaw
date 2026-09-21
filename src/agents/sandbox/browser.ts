@@ -22,6 +22,7 @@ import {
   type ResolvedBrowserConfig,
 } from "../../plugin-sdk/browser-profiles.js";
 import { KeyedAsyncQueue } from "../../plugin-sdk/keyed-async-queue.js";
+import { getPluginValueInstance } from "../../plugins/plugin-instance-scope.js";
 import { defaultRuntime } from "../../runtime.js";
 import { sleep } from "../../utils/sleep.js";
 import {
@@ -538,11 +539,18 @@ async function ensureSandboxBrowserContainer(
     (existing.authToken === desiredAuthToken && existing.authPassword === desiredAuthPassword);
   const evaluateMatches =
     !existing || existing.bridge.state.resolved.evaluateEnabled === params.evaluateEnabled;
+  // A cached bridge belongs to the plugin generation that started it. A plugin
+  // reload retires that instance, and a listening server is no proof the owner
+  // survived it, so a later turn must build its own bridge instead of calling
+  // back into the retired instance.
+  const bridgeOwnerLive =
+    !existing || (getPluginValueInstance(existing.bridge)?.acceptingCalls ?? true);
   const canReuse = Boolean(
     // Guarded restart callbacks retain one admitted turn, not a later turn's authority.
     !params.withWorkspace &&
     !params.assertCurrent &&
     existing &&
+    bridgeOwnerLive &&
     existing.bridge.server.listening &&
     existing.containerName === containerName &&
     existingProfile?.cdpPort === mappedCdp &&
