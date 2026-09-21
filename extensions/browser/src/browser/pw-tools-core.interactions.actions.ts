@@ -241,6 +241,15 @@ export async function insertTextViaPlaywright(
   });
 }
 
+/** Bounds for the pause between keystrokes of a `slowly` type action. */
+const TYPE_KEYSTROKE_MIN_DELAY_MS = 40;
+const TYPE_KEYSTROKE_MAX_DELAY_MS = 140;
+
+function nextKeystrokeDelayMs(): number {
+  const span = TYPE_KEYSTROKE_MAX_DELAY_MS - TYPE_KEYSTROKE_MIN_DELAY_MS;
+  return TYPE_KEYSTROKE_MIN_DELAY_MS + Math.floor(Math.random() * (span + 1));
+}
+
 export async function typeViaPlaywright(
   opts: ElementInteractionOptions & {
     text: string;
@@ -263,7 +272,24 @@ export async function typeViaPlaywright(
           await assertInteractionCurrent(opts);
         }
         throwIfInteractionAborted(opts.signal);
-        await locator.type(text, { timeout, signal, delay: 75 });
+        // Type key by key so the pause between keystrokes can vary. A single
+        // type() call only accepts one fixed delay, and perfectly metronomic
+        // input is itself distinguishable from a person typing.
+        // The whole sequence stays inside `timeout`, as the single call it
+        // replaced did, so act-policy's phase budget still bounds the action.
+        const deadline = Date.now() + timeout;
+        let typedAny = false;
+        for (const char of text) {
+          if (typedAny) {
+            await sleepWithAbort(nextKeystrokeDelayMs(), opts.signal);
+            throwIfInteractionAborted(opts.signal);
+          }
+          typedAny = true;
+          await locator.type(char, {
+            timeout: Math.max(1, deadline - Date.now()),
+            signal,
+          });
+        }
       } else {
         await locator.fill(text, { timeout, signal });
       }
