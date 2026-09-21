@@ -4,6 +4,7 @@
  * The prune path uses this table to stop bridge servers when backing containers expire.
  */
 import { type BrowserBridge, stopBrowserBridgeServer } from "../../plugin-sdk/browser-bridge.js";
+import { getPluginValueInstance } from "../../plugins/plugin-instance-scope.js";
 
 export type CachedBrowserBridge = {
   bridge: BrowserBridge;
@@ -20,6 +21,13 @@ export async function stopCachedBrowserBridge(
   expected: CachedBrowserBridge,
 ): Promise<void> {
   if (BROWSER_BRIDGES.get(sessionKey) !== expected) {
+    return;
+  }
+  // A retired plugin generation stopped its own bridge while it was disposed.
+  // Calling back into it would only raise the retired-instance error and leave
+  // the dead entry cached, so drop it without touching the retired owner.
+  if (getPluginValueInstance(expected.bridge)?.acceptingCalls === false) {
+    BROWSER_BRIDGES.delete(sessionKey);
     return;
   }
   await stopBrowserBridgeServer(expected.bridge.server);
