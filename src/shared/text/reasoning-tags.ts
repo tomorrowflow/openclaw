@@ -8,14 +8,6 @@ export type ReasoningTagMode = "strict" | "preserve";
 export type ReasoningTagTrim = "none" | "start" | "both";
 export type ReasoningTagScope = "all" | "leading";
 
-/** Detects whether a stray reasoning close tag separates two visible text regions. */
-export function hasOrphanReasoningCloseBoundary(params: {
-  before: string;
-  after: string;
-}): boolean {
-  return params.before.trim().length > 0 && params.after.trim().length > 0;
-}
-
 /** Strips model reasoning/final tags from visible text while preserving literal code examples. */
 export function stripReasoningTagsFromText(
   text: string,
