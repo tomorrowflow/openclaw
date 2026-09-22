@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionsFilesHandlers } from "./sessions-files.js";
 import {
+  assistantToolCall,
   createSessionFilesHandlerInvoker,
   createVisibleMessagesMock,
   expectError,
@@ -142,6 +143,44 @@ describe("sessions.files container paths", () => {
 
     expect(payload.file.content).toBe("# Exchanged\n");
     expect(payload.file.workspacePath).toBe("exchange/note.md");
+  });
+
+  it("previews a file the agent recorded in the transcript by container path", async () => {
+    // The touched entry keeps the container spelling, so serving it needs the
+    // same translation an untouched path already gets.
+    mockVisibleMessages([assistantToolCall("read", { path: "/workspace/src/readme.md" })]);
+    useSandboxedSession(workspaceRoot);
+
+    const payload = expectOkPayload(
+      await invokeSessionFilesHandler("sessions.files.get", {
+        sessionKey: "agent:main:main",
+        path: "/workspace/src/readme.md",
+      }),
+    );
+
+    expect(payload.file.content).toBe("# Read me\n");
+    expect(payload.file.workspacePath).toBe("src/readme.md");
+  });
+
+  it("lists the container-path files the agent touched and marks them in the tree", async () => {
+    mockVisibleMessages([assistantToolCall("edit", { path: "/workspace/ui/chat.ts" })]);
+    useSandboxedSession(workspaceRoot);
+
+    const payload = expectOkPayload(
+      await invokeSessionFilesHandler("sessions.files.list", {
+        sessionKey: "agent:main:main",
+      }),
+    );
+
+    expect(
+      payload.files.map((file: { workspacePath?: string; missing?: boolean }) => [
+        file.workspacePath,
+        file.missing,
+      ]),
+    ).toEqual([["ui/chat.ts", false]]);
+    expect(
+      payload.browser?.entries.find((entry: { path: string }) => entry.path === "ui"),
+    ).toMatchObject({ sessionKind: "modified" });
   });
 
   it("browses the directory a revealed container path points at", async () => {
