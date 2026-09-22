@@ -93,16 +93,24 @@ function resolveTouchedFilePath(params: {
   root: string | undefined;
   fileRoot: string | undefined;
   filePath: string;
+  sandbox?: SessionSandboxPaths;
 }): string | undefined {
   if (!params.root) {
     return undefined;
   }
   const base = params.fileRoot ?? params.root;
   const resolved = resolveSessionToolPathToCwd(params.filePath, base);
-  if (!isPathInside(params.root, resolved)) {
-    return undefined;
+  if (isPathInside(params.root, resolved)) {
+    return resolved;
   }
-  return resolved;
+  // A sandboxed agent records the file under its container path, which never
+  // resolves against this root on its own. The mount table owns that spelling,
+  // so the touched entry resolves through it rather than counting as missing.
+  return resolveSandboxContainerFilePath({
+    root: params.root,
+    filePath: params.filePath,
+    ...(params.sandbox ? { sandbox: params.sandbox } : {}),
+  });
 }
 
 export function resolveFileRoot(params: {
@@ -141,6 +149,7 @@ function buildSessionRelevanceMap(
   files: readonly TouchedFile[],
   root: string | undefined,
   fileRoot: string | undefined,
+  sandbox?: SessionSandboxPaths,
 ): Map<string, SessionFileRelevance> {
   const relevance = new Map<string, SessionFileRelevance>();
   if (!root) {
@@ -150,7 +159,12 @@ function buildSessionRelevanceMap(
     return relevance;
   }
   for (const file of files) {
-    const resolved = resolveTouchedFilePath({ root, fileRoot, filePath: file.path });
+    const resolved = resolveTouchedFilePath({
+      root,
+      fileRoot,
+      filePath: file.path,
+      ...(sandbox ? { sandbox } : {}),
+    });
     if (!resolved) {
       continue;
     }
@@ -241,9 +255,18 @@ async function toSessionFileEntry(
   touched: TouchedFile,
   root: string | undefined,
   fileRoot: string | undefined,
-  opts: { includeContent?: boolean; workspaceRoot?: WorkspaceRoot } = {},
+  opts: {
+    includeContent?: boolean;
+    workspaceRoot?: WorkspaceRoot;
+    sandbox?: SessionSandboxPaths;
+  } = {},
 ): Promise<SessionFileEntry> {
-  const resolved = resolveTouchedFilePath({ root, fileRoot, filePath: touched.path });
+  const resolved = resolveTouchedFilePath({
+    root,
+    fileRoot,
+    filePath: touched.path,
+    ...(opts.sandbox ? { sandbox: opts.sandbox } : {}),
+  });
   const base = {
     path: touched.path,
     name: displayNameForPath(touched.path),
@@ -302,7 +325,6 @@ function resolveSessionFileCandidates(params: {
   return [
     resolveTouchedFilePath(params),
     resolveWorkspacePath(params.root, params.filePath),
-    resolveSandboxContainerFilePath(params),
   ].filter((candidate, index, all): candidate is string => {
     return candidate !== undefined && all.indexOf(candidate) === index;
   });
@@ -441,7 +463,12 @@ async function buildBrowserResult(params: {
     return undefined;
   }
   const search = normalizeOptionalString(params.search);
-  const relevance = buildSessionRelevanceMap(params.files, params.root, params.fileRoot);
+  const relevance = buildSessionRelevanceMap(
+    params.files,
+    params.root,
+    params.fileRoot,
+    params.sandbox,
+  );
   if (search) {
     const result = await searchBrowserEntries({
       root: params.workspaceRoot ?? params.root,
@@ -508,12 +535,22 @@ export async function listSessionWorkspaceFiles(
   const workspaceRoot = root ? await openWorkspaceRoot(root) : undefined;
   const workspaceFiles = root
     ? loaded.files.filter((file) =>
-        Boolean(resolveTouchedFilePath({ root, fileRoot: loaded.fileRoot, filePath: file.path })),
+        Boolean(
+          resolveTouchedFilePath({
+            root,
+            fileRoot: loaded.fileRoot,
+            filePath: file.path,
+            ...(loaded.sandbox ? { sandbox: loaded.sandbox } : {}),
+          }),
+        ),
       )
     : loaded.files;
   const files = await Promise.all(
     workspaceFiles.map((file) =>
-      toSessionFileEntry(file, loaded.root, loaded.fileRoot, { workspaceRoot }),
+      toSessionFileEntry(file, loaded.root, loaded.fileRoot, {
+        workspaceRoot,
+        ...(loaded.sandbox ? { sandbox: loaded.sandbox } : {}),
+      }),
     ),
   );
   const browser = await buildBrowserResult({
@@ -543,6 +580,7 @@ export async function getSessionWorkspaceFile(
       ...(loaded.root ? { root: loaded.root } : {}),
       file: await toSessionFileEntry(exactTouched, loaded.root, loaded.fileRoot, {
         includeContent: true,
+        ...(loaded.sandbox ? { sandbox: loaded.sandbox } : {}),
       }),
     };
   }
@@ -560,7 +598,12 @@ export async function getSessionWorkspaceFile(
   if (candidates.length === 0) {
     return { root: loaded.root };
   }
-  const relevance = buildSessionRelevanceMap(loaded.files, loaded.root, loaded.fileRoot);
+  const relevance = buildSessionRelevanceMap(
+    loaded.files,
+    loaded.root,
+    loaded.fileRoot,
+    loaded.sandbox,
+  );
   for (const candidate of candidates) {
     const browserPath = toDisplayPath(loaded.root, candidate);
     const sessionKind = relevance.get(browserPath);
