@@ -194,7 +194,7 @@ export function joinAssistantTexts(assistantTexts?: readonly string[]): string {
 }
 
 /** Uses the current canonical answer, never earlier accumulated text, to recognize authored silence. */
-export function hasExplicitSilentAssistantReply(
+function hasExplicitSilentAssistantReply(
   attempt: Pick<
     IncompleteTurnAttempt,
     "assistantTexts" | "currentAttemptAssistant" | "currentAttemptCompletedAssistant"
