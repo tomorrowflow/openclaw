@@ -119,6 +119,19 @@ function stripDevDependencies(packageJsonPath) {
   );
 }
 
+// npm's os/cpu matching, including "!value" negation.
+function matchesPlatformList(list, actual) {
+  if (!Array.isArray(list) || list.length === 0) {
+    return true;
+  }
+  const denied = list.filter((entry) => entry.startsWith("!")).map((entry) => entry.slice(1));
+  if (denied.includes(actual)) {
+    return false;
+  }
+  const allowed = list.filter((entry) => !entry.startsWith("!"));
+  return allowed.length === 0 || allowed.includes(actual);
+}
+
 function npmInstallExtensionDeps(extDir) {
   // pnpm's workspace node_modules is a symlink farm pointing into the repo's
   // node_modules/.pnpm store, and `cp -r` copies those links verbatim. Every
@@ -138,6 +151,16 @@ function npmInstallExtensionDeps(extDir) {
   try {
     packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
   } catch {
+    return;
+  }
+  // A bundled extension can declare its own platform: 2026.9.6 ships
+  // @openclaw/facetime as darwin/arm64 only. npm validates the --prefix
+  // package's own os/cpu and aborts with EBADPLATFORM, which failed the whole
+  // deploy on this Linux host. Skip what this machine cannot run instead.
+  if (
+    !matchesPlatformList(packageJson?.os, process.platform) ||
+    !matchesPlatformList(packageJson?.cpu, process.arch)
+  ) {
     return;
   }
   const deps = packageJson?.dependencies;
