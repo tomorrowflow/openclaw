@@ -77,7 +77,9 @@ function projectSystemAgentExecutionConfig(
 ): OpenClawConfig {
   const agents = listAgentEntries(config);
   const routeAgent = agents.find((agent) => normalizeAgentId(agent.id) === routeAgentId);
-  const retainedAgents = agents.filter((agent) => normalizeAgentId(agent.id) !== SYSTEM_AGENT_ID);
+  const retainedAgents = agents
+    .filter((agent) => normalizeAgentId(agent.id) !== SYSTEM_AGENT_ID)
+    .map(({ sandbox: _sandbox, ...agent }) => agent);
   const projectedAgents = [
     ...retainedAgents,
     {
@@ -90,6 +92,13 @@ function projectSystemAgentExecutionConfig(
     ...config,
     agents: {
       ...config.agents,
+      // Nothing running on this config reaches the host: the setup probe is
+      // tool-free and the assistant turn holds only the in-process "openclaw"
+      // tool. A sandbox would isolate neither, while its browser sidecar loads a
+      // bundled facade the route's projected plugin registry does not carry —
+      // which failed the probe outright and left container-owned files behind in
+      // its temp workspace. Per-agent overrides beat defaults, so both are cleared.
+      defaults: { ...config.agents?.defaults, sandbox: { mode: "off" as const } },
       entries: toAgentEntriesRecord(projectedAgents),
     },
   };
