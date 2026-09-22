@@ -106,11 +106,16 @@ describe("stripReasoningTagsFromText", () => {
         "Here is how to use <think tags in your code",
         "Here is how to use <think tags in your code",
       ],
-      [
-        "You can start with <think and then close with </think>",
-        "You can start with <think and then close with",
-      ],
+      // An unfenced trailing close tag costs this sentence its visible text. The
+      // realistic way to write one is fenced, which the code-span cases below keep,
+      // and a close tag mid-sentence already retracted the prose before it.
+      ["You can start with <think and then close with </think>", ""],
       ["Internal reasoning </think> final answer", "final answer"],
+      // Templates that prefill <think> emit only the body and its close tag, so a
+      // tool-call turn ends at the orphan close with no answer after it.
+      ["Let me check the inbox first.</think>", ""],
+      ["Reasoning one</think>Reasoning two</think>", ""],
+      ["</think>Answer only", "Answer only"],
       ["<reasoning>outer<think>secret</think>", ""],
       [
         "Use `<think>` to open and `</think>` to close. Final sentence.",

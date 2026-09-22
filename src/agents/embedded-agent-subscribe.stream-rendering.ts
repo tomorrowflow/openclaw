@@ -11,7 +11,6 @@ import type { ReplyDirectiveParseResult } from "../auto-reply/reply/reply-direct
 import { createStreamingDirectiveAccumulator } from "../auto-reply/reply/streaming-directives.js";
 import { emitAgentEvent } from "../infra/agent-events.js";
 import { findFinalTagMatches } from "../shared/text/final-tags.js";
-import { hasOrphanReasoningCloseBoundary } from "../shared/text/reasoning-tags.js";
 import {
   createTextProjection,
   trimTextFilter,
@@ -222,8 +221,11 @@ export function createStreamRendering({
         if (isClose) {
           const afterIndex = idx + match[0].length;
           const before = scanText.slice(lastIndex, idx);
-          const after = scanText.slice(afterIndex);
-          if (hasOrphanReasoningCloseBoundary({ before, after })) {
+          // Matches the reducer: a close tag with no matching open ends reasoning
+          // the model never opened. This clears only what this pass staged; a tag
+          // arriving in a later chunk is handled by the deltaBuffer recompute in
+          // the update handler, which owns cross-chunk retraction.
+          if (before.trim()) {
             processed = "";
           } else {
             processed += before;

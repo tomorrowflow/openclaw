@@ -642,13 +642,22 @@ export function reduceReasoningText(
 
     if (options.mode === "visible") {
       append(tag.text);
-    } else {
-      const after = text.slice(tagEnd);
-      if (beforeTag.trim() && after.trim()) {
-        const thinking = output.filter((delta) => delta.kind === "thinking");
-        output.splice(0, output.length, ...thinking);
-        state.visibleEver = false;
-      }
+    } else if (beforeTag.trim()) {
+      // A close tag with no matching open ends reasoning the model never opened:
+      // templates that prefill <think> (GLM, Qwen) emit the block body and its
+      // close tag only. Everything before it is reasoning whether or not an
+      // answer follows, so a tool-call turn that ends at the close tag reclassifies
+      // its whole body. Literal close tags in prose stay protected by code spans.
+      // Reclassify rather than drop, so the body still reaches the reasoning
+      // stream exactly as a properly opened block does.
+      const reclassified = output
+        .filter((delta) => delta.kind === "text")
+        .map((delta) => delta.text)
+        .join("");
+      const thinking = output.filter((delta) => delta.kind === "thinking");
+      output.splice(0, output.length, ...thinking);
+      state.visibleEver = false;
+      emit("thinking", reclassified);
     }
     cursor = tagEnd;
   }

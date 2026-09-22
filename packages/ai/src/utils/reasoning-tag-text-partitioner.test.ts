@@ -619,7 +619,14 @@ describe("createReasoningTagTextPartitioner", () => {
       ...partitioner.flush(),
     ];
 
-    expect(deltas).toEqual([{ kind: "text", text: " Visible answer" }]);
+    // The body before an orphan close tag is reasoning, so it moves to the
+    // thinking stream instead of being discarded. Recovery cannot depend on an
+    // answer following the tag: that condition is what delivered a whole
+    // reasoning body when a turn ended at the close tag.
+    expect(deltas).toEqual([
+      { kind: "thinking", text: "private chain\n\n" },
+      { kind: "text", text: " Visible answer" },
+    ]);
   });
 
   it("keeps close tags inside list-owned fences hidden from an outer reasoning block", () => {
