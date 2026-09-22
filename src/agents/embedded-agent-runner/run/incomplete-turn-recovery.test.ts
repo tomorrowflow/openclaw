@@ -81,7 +81,7 @@ describe("incomplete-turn recovery policy", () => {
       shouldTreatEmptyAssistantReplyAsSilent({
         ...state,
         allowEmptyAssistantReplyAsSilent: true,
-        terminalReplyExpectation: "optional",
+        terminalReplyExpectation: "required",
       }),
     ).toBe(true);
     expect(resolveIncompleteTurnPayloadText({ ...state, externalAbort: false })).toBeNull();
