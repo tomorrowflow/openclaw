@@ -128,11 +128,18 @@ export function shouldTreatEmptyAssistantReplyAsSilent(params: {
   timedOut: boolean;
   attempt: IncompleteTurnAttempt;
 }): boolean {
+  const assistant = classifyAssistantTurn(params);
+  // Fork divergence: an authored NO_REPLY completes the turn even when the host
+  // asked for a required reply. Upstream resolves silence from the expectation
+  // alone, so a cron/heartbeat run that requests delivery (required) reads that
+  // authored silence as a missing answer and reopens the turn — the
+  // "couldn't generate a response" leak. A merely permissive caller flag is not
+  // enough; the model must have actually authored the silence.
+  const expectation = assistant.silent ? "optional" : resolveReplyExpectation(params);
   const completion = resolveReplyCompletion(
-    resolveReplyExpectation(params),
+    expectation,
     params.payloadCount === 0 ? "empty" : "ready",
   );
-  const assistant = classifyAssistantTurn(params);
   return (
     completion.outcome === "silent" &&
     !shouldSkipNonVisibleTurnRetry({ ...params, tolerateSideEffects: true }) &&
