@@ -296,28 +296,23 @@ files. After rebase, verify all fork features are still present using the
 machine-readable checklist in `docs/fork-features.txt`:
 
 ```bash
-MISSING=0
-while IFS='|' read -r pattern file desc; do
-  # Trim with sed, not xargs: xargs strips the backslashes these BRE
-  # patterns need (\( \) \.), which silently breaks every escaped entry.
-  pattern=$(printf '%s' "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'); file=$(printf '%s' "$file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-  # -E: the entries are ERE (\( is a literal paren). Under BRE that is a
-  # group opener, so every entry matching a call site failed to match.
-  if ! grep -qnE "$pattern" "$file" 2>/dev/null; then
-    echo "MISSING: $desc ($pattern in $file)"
-    MISSING=1
-  fi
-done < <(grep -v '^#\|^$' docs/fork-features.txt)
-if [ "$MISSING" -eq 1 ]; then
-  echo "STOP: fork features missing — re-add them in the new locations"
-fi
+node scripts/check-fork-features.mjs
 ```
 
-If any features are missing, the upstream refactor moved the surrounding code
-and our additions were lost. Re-add them in the new location.
+It prints `fork features: N present` and exits 0, or names every missing entry
+with the file it was last seen in and why it matters, and exits 1. Never paper
+over a failure by deleting the entry: if the upstream refactor moved the
+surrounding code, re-add the feature in its new location and update the entry's
+file/pattern to match. Delete an entry only when the feature is genuinely
+retired, and say so in a `# RETIRED:` comment above it.
 
-**Maintenance:** update `docs/fork-features.txt` when adding or removing fork
-features.
+The same check runs again in `scripts/sync-and-deploy.sh` before the deploy
+builds anything, so a feature lost in a hand-resolved rebase cannot reach the
+live Gateway.
+
+**Maintenance:** update `docs/fork-features.txt` whenever you add, move, or
+retire a fork feature — including a fork-owned expectation inside an upstream
+test, which a rebase reverts just as silently as production code.
 
 ## 6. Commit any fixups
 
@@ -625,7 +620,7 @@ OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) syste
   && OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 pnpm build \
   && pnpm check \
   && echo ">>> Run conflict-scoped tests manually (see step 5d) <<<" \
-  && grep -v '^#\|^$' docs/fork-features.txt | while IFS='|' read -r p f d; do p=$(printf '%s' "$p"|sed 's/^[[:space:]]*//;s/[[:space:]]*$//'); f=$(printf '%s' "$f"|sed 's/^[[:space:]]*//;s/[[:space:]]*$//'); grep -qE "$p" "$f" 2>/dev/null || echo "MISSING: $d"; done \
+  && node scripts/check-fork-features.mjs \
   && git push origin main --force-with-lease \
   && $OC_SYSTEMCTL stop openclaw-gateway.service \
   && OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 pnpm build \
