@@ -241,6 +241,16 @@ sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
 # nothing for them ("skipped N excluded extensions not built locally"), leaving
 # the Gateway to fail their discovery. The sync stage already builds with the
 # flag; this build is the one whose dist is installed, so it needs it too.
+# Fork features are the fork's whole reason to exist, and an upstream refactor
+# drops them silently: the file still builds, the tests still pass, and the
+# behaviour is simply gone. The sync stage checks this too, but --deploy-only
+# skips that stage entirely and a hand-resolved rebase is exactly when a feature
+# goes missing. Gate here as well, before anything is built or installed, so a
+# missing feature costs a failed run rather than a deployed regression. The
+# gateway is still serving the old version at this point.
+STAGE="deploy: fork features (gateway still up)"
+node scripts/check-fork-features.mjs
+
 STAGE="deploy: build (gateway still up)"
 OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 CI=true corepack pnpm build
 
