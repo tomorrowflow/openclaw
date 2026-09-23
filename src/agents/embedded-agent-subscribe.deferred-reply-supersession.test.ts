@@ -186,11 +186,12 @@ describe("subscribeEmbeddedAgentSession deferred reply supersession", () => {
           terminalState: resolveEmbeddedRunAttemptTerminalState({ attempt, assistant }),
           settledTurnFinalizationAvailable: true,
         });
-        if (replyDeliveryState === "missing") {
-          expect(finalizationRequest).toContain("Tools are unavailable");
-        } else {
-          expect(finalizationRequest).toBeNull();
-        }
+        // Fork divergence: this run ends with an authored NO_REPLY, which completes
+        // the turn even when the host asked for a required reply. Upstream reopens
+        // the turn whenever delivery is missing, and that reprompt is the
+        // heartbeat's "couldn't generate a response" leak, so finalization stays
+        // closed for every delivery outcome here. See docs/fork-features.txt.
+        expect(finalizationRequest).toBeNull();
       } finally {
         subscription.unsubscribe();
       }
