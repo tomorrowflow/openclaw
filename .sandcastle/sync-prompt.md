@@ -254,20 +254,13 @@ Failures whose reported paths begin with `../../` are the tell.
 ### Step 5f: Fork features
 
 ```bash
-MISSING=0
-while IFS='|' read -r pattern file desc; do
-  # Trim with sed, not xargs: xargs strips the backslashes these BRE
-  # patterns need (\( \) \.), which silently breaks every escaped entry.
-  pattern=$(printf '%s' "$pattern" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'); file=$(printf '%s' "$file" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-  # -E: the entries are ERE (\( is a literal paren). Under BRE that is a
-  # group opener, so every entry matching a call site failed to match.
-  if ! grep -qnE "$pattern" "$file" 2>/dev/null; then
-    echo "MISSING: $desc ($pattern in $file)"
-    MISSING=1
-  fi
-done < <(grep -v '^#\|^$' docs/fork-features.txt)
-[ "$MISSING" -eq 1 ] && echo "STOP: fork features missing"
+node scripts/check-fork-features.mjs
 ```
+
+It exits 0 on `fork features: N present`, or names every missing entry with its
+file, its pattern, and why the feature matters, and exits 1. The same check runs
+again in `scripts/sync-and-deploy.sh` before the deploy builds, so anything you
+leave missing here fails the deploy rather than shipping.
 
 #### Triage every MISSING before treating it as a stop gate
 
@@ -293,6 +286,12 @@ code before you decide, because the two outcomes need opposite actions:
 
 Only case 1 that you could not repair is a stop gate. Cases 2 and 3 are checklist
 maintenance: fix the file, commit it in Step 6, and continue the sync.
+
+Some entries point at an **upstream test** whose expectation the fork supersedes.
+A rebase takes upstream's copy of that file wholesale, so the fork's expectation
+reverts and the suite goes red against fork behaviour that is working as intended.
+Those are case 1: re-apply the fork's expectation, keep the comment that explains
+the divergence, and do not "fix" the production code to satisfy upstream's copy.
 
 If you leave a stale entry unfixed, it fails again on _every_ future sync and
 trains the next run to "restore" code upstream already has. Treat a checklist that
