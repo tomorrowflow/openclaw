@@ -179,4 +179,47 @@ describe("senderIsOwner only reflects explicit owner authorization", () => {
     expect(revoked.senderIsOwner).toBe(false);
     expect(revoked.isAuthorizedSender).toBe(false);
   });
+
+  // Fork divergence: a wildcard deliberately grants owner access on every configured channel.
+  it("treats ownerAllowFrom wildcards as owner access", () => {
+    const cfg = {
+      channels: { discord: {} },
+      commands: { ownerAllowFrom: ["*"] },
+    } as OpenClawConfig;
+
+    const ctx = {
+      Provider: "discord",
+      Surface: "discord",
+      From: "discord:anyone",
+      SenderId: "anyone",
+    } as MsgContext;
+
+    const auth = resolveCommandAuthorization({
+      ctx,
+      cfg,
+      commandAuthorized: true,
+    });
+
+    expect(auth.ownerList).toEqual(["*"]);
+    expect(auth.senderIsOwner).toBe(true);
+    expect(auth.isAuthorizedSender).toBe(true);
+  });
+
+  it("senderIsOwner is true for internal operator.admin sessions", () => {
+    const cfg = {} as OpenClawConfig;
+
+    const ctx = {
+      Provider: "webchat",
+      Surface: "webchat",
+      GatewayClientScopes: ["operator.admin"],
+    } as MsgContext;
+
+    const auth = resolveCommandAuthorization({
+      ctx,
+      cfg,
+      commandAuthorized: true,
+    });
+
+    expect(auth.senderIsOwner).toBe(true);
+  });
 });
