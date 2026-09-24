@@ -257,7 +257,8 @@ describe("senderIsOwner only reflects explicit owner authorization", () => {
     expect(revoked.isAuthorizedSender).toBe(false);
   });
 
-  it("ignores ownerAllowFrom wildcards", () => {
+  // Fork divergence: a wildcard deliberately grants owner access on every configured channel.
+  it("treats ownerAllowFrom wildcards as owner access", () => {
     const cfg = {
       channels: { discord: {} },
       commands: { ownerAllowFrom: ["*"] },
@@ -276,8 +277,8 @@ describe("senderIsOwner only reflects explicit owner authorization", () => {
       commandAuthorized: true,
     });
 
-    expect(auth.ownerList).toEqual([]);
-    expect(auth.senderIsOwner).toBe(false);
+    expect(auth.ownerList).toEqual(["*"]);
+    expect(auth.senderIsOwner).toBe(true);
     expect(auth.isAuthorizedSender).toBe(true);
   });
 
