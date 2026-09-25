@@ -1835,6 +1835,7 @@ function buildLegacyStateMigrationSteps(
               detected,
               config: params.config,
               env,
+              inventory: params.pluginStateMigrationInventory,
               ...(plannedPluginDescriptor
                 ? {
                     plannedActions: plannedPluginDescriptor.actions.map((action) => ({
@@ -1923,6 +1924,7 @@ function buildLegacyStateMigrationSteps(
         pluginId,
         id,
       })),
+      inventory: params.pluginStateMigrationInventory,
     };
   }
 
@@ -3730,6 +3732,7 @@ async function executeLegacyStateMigrations(
           postSessionPluginMigration: {
             step: migrationStepPlan(deferredPostSessionStep),
             plannedActions: deferredPostSessionStep.deferredExecution.plannedActions,
+            inventory: deferredPostSessionStep.deferredExecution.inventory,
           },
         }
       : {}),
