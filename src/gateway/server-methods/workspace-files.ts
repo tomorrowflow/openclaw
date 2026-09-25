@@ -9,7 +9,9 @@ import type {
   SessionFileEntry,
   SessionFileRelevance,
 } from "../../../packages/gateway-protocol/src/index.js";
+import { SANDBOX_STATE_DIR } from "../../agents/sandbox/constants.js";
 import {
+  resolveSandboxContainerPathMount,
   resolveSandboxHostPathForContainerPath,
   type SandboxContainerMount,
 } from "../../agents/sandbox/fs-paths.js";
@@ -571,6 +573,61 @@ export async function listSessionWorkspaceFiles(
 }
 
 export async function getSessionWorkspaceFile(
+  params: LoadedSessionFiles & { path: string },
+): Promise<{ root?: string; file?: SessionFileEntry }> {
+  const result = await getSessionRootFile(params);
+  if (result.file && !result.file.missing) {
+    return result;
+  }
+  const mounted = await getSandboxMountedFile(params);
+  return mounted ? { ...result, file: mounted } : result;
+}
+
+/**
+ * A sandboxed agent also reads files whose mount source lives outside the
+ * session root, such as the materialized skills workspace under the sandbox
+ * state dir. The session root cannot serve those, so the preview opens the
+ * mount's own host root instead; fs-safe containment then applies to what the
+ * container was actually given. Only mounts sourced from the Gateway-owned
+ * sandbox state dir qualify: custom binds keep daemon-host paths that may name
+ * a different Gateway-local file, and widening previews to every operator bind
+ * is not this fallback's job. The entry carries no hash, which keeps it
+ * read-only: sessions.files.set still only writes inside the session root.
+ */
+async function getSandboxMountedFile(
+  params: LoadedSessionFiles & { path: string },
+): Promise<SessionFileEntry | undefined> {
+  if (!params.sandbox) {
+    return undefined;
+  }
+  const target = resolveSandboxContainerPathMount({
+    containerPath: params.path,
+    mounts: params.sandbox.mounts,
+  });
+  if (
+    !target?.relativePath ||
+    !isPathInside(
+      resolveSandboxHostPathViaExistingAncestor(SANDBOX_STATE_DIR),
+      resolveSandboxHostPathViaExistingAncestor(target.hostRoot),
+    )
+  ) {
+    return undefined;
+  }
+  const touched = params.files.find((file) => file.path === params.path);
+  const entry = await toSessionFileEntry(
+    { path: target.relativePath, kind: touched?.kind ?? "read" },
+    target.hostRoot,
+    target.hostRoot,
+    { includeContent: true },
+  );
+  if (entry.missing) {
+    return undefined;
+  }
+  const { hash: _hash, workspacePath: _workspacePath, ...readOnly } = entry;
+  return { ...readOnly, path: params.path };
+}
+
+async function getSessionRootFile(
   params: LoadedSessionFiles & { path: string },
 ): Promise<{ root?: string; file?: SessionFileEntry }> {
   const loaded = params;
