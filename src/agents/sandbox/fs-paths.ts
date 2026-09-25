@@ -77,6 +77,26 @@ export function resolveSandboxHostPathForContainerPath(params: {
   containerPath: string;
   mounts: readonly SandboxContainerMount[];
 }): string | undefined {
+  const target = resolveSandboxContainerPathMount(params);
+  if (!target) {
+    return undefined;
+  }
+  const hostPath = target.relativePath
+    ? path.resolve(target.hostRoot, ...target.relativePath.split("/"))
+    : target.hostRoot;
+  return resolveSandboxHostPathViaExistingAncestor(hostPath);
+}
+
+/**
+ * Resolves a container path to the mount that backs it, as the mount's host
+ * root plus the POSIX path below it. Callers that must serve a file outside
+ * their own root open the mount root itself, so containment and symlink checks
+ * stay anchored to what the container was actually given.
+ */
+export function resolveSandboxContainerPathMount(params: {
+  containerPath: string;
+  mounts: readonly SandboxContainerMount[];
+}): { hostRoot: string; relativePath: string } | undefined {
   const containerPath = normalizeContainerPathCore(
     normalizePosixInput(normalizeSandboxInputPath(params.containerPath)),
   );
@@ -94,10 +114,7 @@ export function resolveSandboxHostPathForContainerPath(params: {
     return undefined;
   }
   const relative = path.posix.relative(mount.containerRoot, containerPath);
-  const hostPath = relative
-    ? path.resolve(mount.hostRoot, ...toHostSegments(relative))
-    : mount.hostRoot;
-  return resolveSandboxHostPathViaExistingAncestor(hostPath);
+  return { hostRoot: mount.hostRoot, relativePath: toHostSegments(relative).join("/") };
 }
 
 /**
