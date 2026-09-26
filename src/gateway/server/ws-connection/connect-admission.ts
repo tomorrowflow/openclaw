@@ -198,6 +198,13 @@ export function resolveGatewayConnectPolicyFailure(
   ) {
     return { kind: "auth" };
   }
+  if (
+    state.tailscaleBrowserDeviceTokenGeneration !== undefined &&
+    state.tailscaleBrowserDeviceTokenGeneration !==
+      context.handler.getRequiredSharedGatewaySessionGeneration?.()
+  ) {
+    return { kind: "auth" };
+  }
   return undefined;
 }
 
