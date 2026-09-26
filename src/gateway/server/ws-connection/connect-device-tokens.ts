@@ -22,6 +22,7 @@ export async function issueGatewayConnectDeviceTokens(params: {
     sessionUsesSharedGatewayAuth,
     sessionSharedGatewaySessionGeneration,
     deviceTokenSharedGatewaySessionGeneration,
+    tailscaleBrowserDeviceTokenGeneration,
     handoffBootstrapProfile,
   } = state;
   const sharedGatewayAuthIssuer =
@@ -32,7 +33,12 @@ export async function issueGatewayConnectDeviceTokens(params: {
           kind: "shared-gateway-auth" as const,
           generation: sessionSharedGatewaySessionGeneration,
         }
-      : undefined;
+      : tailscaleBrowserDeviceTokenGeneration
+        ? {
+            kind: "shared-gateway-auth" as const,
+            generation: tailscaleBrowserDeviceTokenGeneration,
+          }
+        : undefined;
   const issuedDeviceGrant =
     !trustedProxyAuthOk && device && hasApprovedDeviceBaseline
       ? await ensureDeviceToken({
