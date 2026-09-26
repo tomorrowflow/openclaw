@@ -9,6 +9,8 @@ type AvatarRouteEntry = {
   retryTimer: ReturnType<typeof setTimeout> | undefined;
   retryAttempts: number;
   unavailable: boolean;
+  /** The Gateway refused every credential candidate; held until browser auth recovers. */
+  authRejected: boolean;
 };
 
 /** Bound protected avatar fetches so a stalled Gateway route cannot pin UI state forever. */
@@ -81,15 +83,19 @@ async function fetchAvatarRoute(
   // Only the current response can retain an unavailable entry. A failed retry
   // must not inherit the preceding 503 and strand a still-retryable route.
   entry.unavailable = false;
+  entry.authRejected = false;
   const timeout = setTimeout(() => entry.controller.abort(), AUTHENTICATED_AVATAR_FETCH_TIMEOUT_MS);
   let blobUrl: string | null = null;
   let notFound = false;
+  let authRejected = false;
   let retryDelayMs: number | undefined;
   try {
     // Ordered credential recovery: a saved token can be stale while the session's
     // password is valid, so a rejected credential falls through to the next one
     // instead of silently leaving the caller on its fallback forever.
     for (const authToken of authTokens.length > 0 ? authTokens : [""]) {
+      // A later candidate's network failure must not inherit an earlier rejection.
+      authRejected = false;
       const response = await fetchControlUiResource(url, {
         ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
         signal: entry.controller.signal,
@@ -101,7 +107,8 @@ async function fetchAvatarRoute(
       notFound = response.status === 404;
       entry.unavailable = retryUnavailable && response.status === 503;
       retryDelayMs = entry.unavailable ? retryAfterMs(response) : undefined;
-      if (response.status !== 401 && response.status !== 403) {
+      authRejected = response.status === 401 || response.status === 403;
+      if (!authRejected) {
         break;
       }
     }
@@ -119,6 +126,13 @@ async function fetchAvatarRoute(
   }
   if (!blobUrl) {
     if (notFound) {
+      return;
+    }
+    if (authRejected) {
+      // Every rejected attempt counts against the Gateway's per-client auth
+      // limiter, which also guards bootstrap config. Keep the miss so rerenders
+      // cannot replay refused credentials; changed credentials use a new key.
+      entry.authRejected = true;
       return;
     }
     if (entry.unavailable && entry.consumers.size > 0) {
@@ -177,7 +191,7 @@ export class AuthenticatedAvatarRouteLoader implements ReactiveController {
     this.stopAuthRecovery ??= subscribeBrowserAuthRestored(() => {
       for (const key of this.keys) {
         const entry = sharedAvatarRoutes.get(key);
-        if (entry?.unavailable && entry.retryTimer === undefined) {
+        if ((entry?.unavailable || entry?.authRejected) && entry.retryTimer === undefined) {
           deleteEntry(key, entry);
         }
       }
@@ -239,6 +253,7 @@ export class AuthenticatedAvatarRouteLoader implements ReactiveController {
         retryTimer: undefined,
         retryAttempts: 0,
         unavailable: false,
+        authRejected: false,
       };
       sharedAvatarRoutes.set(key, entry);
       void fetchAvatarRoute(key, url, authTokens, retryUnavailable, entry);

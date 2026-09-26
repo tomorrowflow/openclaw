@@ -162,6 +162,8 @@ export type AuthenticatedGatewayConnect = {
   pairingLocality: PairingLocalityKind;
   sessionUsesSharedGatewayAuth: boolean;
   sessionSharedGatewaySessionGeneration?: string;
+  /** Issuer generation for a browser token minted by a Tailscale identity login. */
+  tailscaleBrowserDeviceTokenGeneration?: string;
   issuedBootstrapProfile: DeviceBootstrapProfile | null;
   handoffBootstrapProfile: DeviceBootstrapProfile | null;
   trustedProxyAuthOk: boolean;
