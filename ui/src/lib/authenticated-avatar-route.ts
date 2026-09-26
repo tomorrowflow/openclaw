@@ -9,6 +9,8 @@ type AvatarRouteEntry = {
   retryTimer: ReturnType<typeof setTimeout> | undefined;
   retryAttempts: number;
   retryEligibleAt: number | undefined;
+  /** Browser auth epoch in which the Gateway refused every credential candidate. */
+  rejectedAuthEpoch: number | undefined;
 };
 
 /** Bound protected avatar fetches so a stalled Gateway route cannot pin UI state forever. */
@@ -17,6 +19,11 @@ const AUTHENTICATED_AVATAR_MAX_RETRY_AFTER_MS = 30_000;
 const AUTHENTICATED_AVATAR_MAX_RETRIES = 3;
 const AUTHENTICATED_AVATAR_RETRY_COOLDOWN_MS = 30_000;
 const sharedAvatarRoutes = new Map<string, AvatarRouteEntry>();
+// Subscribed at module load so the epoch advances before any loader rerenders.
+let browserAuthEpoch = 0;
+subscribeBrowserAuthRestored(() => {
+  browserAuthEpoch += 1;
+});
 
 function retryAfterMs(response: Response): number | undefined {
   if (response.status !== 503) {
@@ -92,12 +99,15 @@ async function fetchAvatarRoute(
   const timeout = setTimeout(() => entry.controller.abort(), AUTHENTICATED_AVATAR_FETCH_TIMEOUT_MS);
   let blobUrl: string | null = null;
   let notFound = false;
+  let authRejected = false;
   let retryDelayMs: number | undefined;
   try {
     // Ordered credential recovery: a saved token can be stale while the session's
     // password is valid, so a rejected credential falls through to the next one
     // instead of silently leaving the caller on its fallback forever.
     for (const authToken of authTokens.length > 0 ? authTokens : [""]) {
+      // A later candidate's network failure must not inherit an earlier rejection.
+      authRejected = false;
       const response = await fetchControlUiResource(url, {
         ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
         signal: entry.controller.signal,
@@ -107,8 +117,9 @@ async function fetchAvatarRoute(
         break;
       }
       notFound = response.status === 404;
+      authRejected = response.status === 401 || response.status === 403;
       retryDelayMs = retryUnavailable ? retryAfterMs(response) : undefined;
-      if (response.status !== 401 && response.status !== 403) {
+      if (!authRejected) {
         break;
       }
     }
@@ -126,6 +137,13 @@ async function fetchAvatarRoute(
   }
   if (!blobUrl) {
     if (notFound && cacheNotFound) {
+      return;
+    }
+    if (authRejected) {
+      // Every rejected attempt counts against the Gateway's per-client auth
+      // limiter, which also guards bootstrap config. Keep the miss so rerenders
+      // cannot replay refused credentials; changed credentials use a new key.
+      entry.rejectedAuthEpoch = browserAuthEpoch;
       return;
     }
     if (retryDelayMs !== undefined && entry.consumers.size > 0) {
@@ -237,8 +255,16 @@ export class AuthenticatedAvatarRouteLoader implements ReactiveController {
         retryTimer: undefined,
         retryAttempts: 0,
         retryEligibleAt: undefined,
+        rejectedAuthEpoch: undefined,
       };
       sharedAvatarRoutes.set(key, entry);
+      void fetchAvatarRoute(key, url, authTokens, cacheNotFound, retryUnavailable, entry);
+    } else if (
+      entry.rejectedAuthEpoch !== undefined &&
+      entry.rejectedAuthEpoch !== browserAuthEpoch
+    ) {
+      entry.rejectedAuthEpoch = undefined;
+      entry.controller = new AbortController();
       void fetchAvatarRoute(key, url, authTokens, cacheNotFound, retryUnavailable, entry);
     } else if (
       entry.blobUrl === null &&

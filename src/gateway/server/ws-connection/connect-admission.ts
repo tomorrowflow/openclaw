@@ -196,6 +196,13 @@ export function resolveGatewayConnectPolicyFailure(
   ) {
     return { kind: "auth" };
   }
+  if (
+    state.tailscaleBrowserDeviceTokenGeneration !== undefined &&
+    state.tailscaleBrowserDeviceTokenGeneration !==
+      context.handler.getRequiredSharedGatewaySessionGeneration?.()
+  ) {
+    return { kind: "auth" };
+  }
   if (context.browserOrigin) {
     const originCheck = checkGatewayWsBrowserOrigin(context.browserOrigin, getRuntimeConfig());
     if (!originCheck.ok) {

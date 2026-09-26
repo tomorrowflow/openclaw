@@ -126,6 +126,7 @@ export async function attachAuthenticatedGatewayConnect(
     pairingLocality,
     sessionUsesSharedGatewayAuth,
     sessionSharedGatewaySessionGeneration,
+    tailscaleBrowserDeviceTokenGeneration,
   } = state;
   if (!(await prepareGatewayNodeConnect(context, state))) {
     return;
@@ -402,8 +403,12 @@ export async function attachAuthenticatedGatewayConnect(
     pairedClientId: isBrowserCopilotClient(connectParams.client)
       ? connectParams.client.id
       : undefined,
-    usesSharedGatewayAuth: sessionUsesSharedGatewayAuth,
-    sharedGatewaySessionGeneration: sessionSharedGatewaySessionGeneration,
+    // A Tailscale browser session holds a generation-tagged device token, so bind
+    // it to that generation: rotation reconnects it and re-mints a valid token.
+    usesSharedGatewayAuth:
+      sessionUsesSharedGatewayAuth || tailscaleBrowserDeviceTokenGeneration !== undefined,
+    sharedGatewaySessionGeneration:
+      sessionSharedGatewaySessionGeneration ?? tailscaleBrowserDeviceTokenGeneration,
     authPolicyGeneration: resolveGatewayAuthPolicyGeneration(context.configSnapshot),
     presenceKey,
     ...(authenticatedUserId ? { authenticatedUserId } : {}),

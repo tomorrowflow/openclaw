@@ -15,6 +15,7 @@ import {
   type UsersSelectModelAccountResult,
   type UsersSelfResult,
 } from "../../packages/gateway-protocol/src/schema/users.js";
+import { withTestTimeout } from "../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { writeConfigFile } from "../config/config.js";
 import type { GatewayAuthConfig, GatewayOperatorRolesConfig } from "../config/types.gateway.js";
@@ -758,6 +759,113 @@ describe("gateway identity scope grants", () => {
         expect(await waitForWsClose(reconnectWs, 1_000)).toBe(true);
       }
     });
+  });
+
+  test("issues a Tailscale browser device token that authorizes Control UI HTTP reads", async () => {
+    await configureGatewayAuth(
+      { mode: "token", token: "secret", allowTailscale: true },
+      { tailscaleMode: "serve" },
+    );
+    const login = "http-reader@example.com";
+    testTailscaleWhois.value = { login, name: "HTTP Reader" };
+
+    await withGatewayServer(
+      async ({ port, server }) => {
+        const endpoint = server.getTailscaleIngressEndpoint();
+        if (!endpoint) {
+          throw new Error("expected managed Tailscale listener");
+        }
+        const ws = await openTailscaleWs(endpoint, {
+          origin: BROWSER_ORIGIN,
+          "tailscale-user-login": login,
+        });
+        let deviceToken: string | undefined;
+        try {
+          const connected = await connectReq(ws, {
+            skipDefaultAuth: true,
+            prePairDevice: true,
+            scopes: ["operator.read"],
+            client: CONTROL_UI_CLIENT,
+            deviceIdentityPath: deviceIdentityPath("identity-tailscale-http-read"),
+            browserOrigin: BROWSER_ORIGIN,
+          });
+          expect(connected.ok, JSON.stringify(connected.error)).toBe(true);
+          deviceToken = (connected.payload as HelloOk).auth.deviceToken;
+        } finally {
+          ws.close();
+        }
+        expect(deviceToken).toBeTypeOf("string");
+
+        // The Control UI sends this token as the bearer on icon, avatar, and
+        // bootstrap-config reads, which disables Tailscale header auth for them.
+        const response = await fetch(`http://127.0.0.1:${port}/control-ui-config.json`, {
+          headers: { Authorization: `Bearer ${deviceToken}` },
+        });
+        expect(response.status).toBe(200);
+      },
+      { serverOptions: { controlUiEnabled: true } },
+    );
+  });
+
+  test("reconnects a Tailscale browser session when shared auth rotates", async () => {
+    const login = "rotating-admin@example.com";
+    await configureGatewayAuth(
+      {
+        mode: "token",
+        token: "secret",
+        allowTailscale: true,
+        identityScopes: { [login]: ["operator.admin"] },
+      },
+      { tailscaleMode: "serve" },
+    );
+    testTailscaleWhois.value = { login, name: "Rotating Admin" };
+
+    await withGatewayServer(
+      async ({ port, server }) => {
+        const endpoint = server.getTailscaleIngressEndpoint();
+        if (!endpoint) {
+          throw new Error("expected managed Tailscale listener");
+        }
+        const ws = await openTailscaleWs(endpoint, {
+          origin: BROWSER_ORIGIN,
+          "tailscale-user-login": login,
+        });
+        const closed = new Promise<number>((resolve) => ws.once("close", resolve));
+        try {
+          const connected = await connectReq(ws, {
+            skipDefaultAuth: true,
+            prePairDevice: true,
+            scopes: ["operator.read"],
+            client: CONTROL_UI_CLIENT,
+            deviceIdentityPath: deviceIdentityPath("identity-tailscale-rotation"),
+            browserOrigin: BROWSER_ORIGIN,
+          });
+          expect(connected.ok, JSON.stringify(connected.error)).toBe(true);
+          const deviceToken = (connected.payload as HelloOk).auth.deviceToken;
+          await writeConfigFile({
+            gateway: {
+              auth: { ...testState.gatewayAuth, token: "rotated-secret" },
+              trustedProxies: ["127.0.0.1"],
+              tailscale: { mode: "serve" },
+              controlUi: { allowedOrigins: [BROWSER_ORIGIN] },
+            },
+          });
+          const reloaded = await rpcReq(ws, "secrets.reload");
+          expect(reloaded.ok, JSON.stringify(reloaded.error)).toBe(true);
+
+          // The session holds a token bound to the retired generation; closing it
+          // lets the browser reconnect through Tailscale and receive a fresh token.
+          expect(await withTestTimeout(closed, 10_000, "rotation did not close socket")).toBe(4001);
+          const stale = await fetch(`http://127.0.0.1:${port}/control-ui-config.json`, {
+            headers: { Authorization: `Bearer ${deviceToken}` },
+          });
+          expect(stale.status).toBe(401);
+        } finally {
+          ws.close();
+        }
+      },
+      { serverOptions: { controlUiEnabled: true } },
+    );
   });
 
   test("caps the device and identity scope union", async () => {

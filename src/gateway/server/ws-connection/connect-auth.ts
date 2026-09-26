@@ -499,6 +499,14 @@ async function authenticateGatewayConnectCore(
     sharedGatewaySessionGeneration ??
     deviceTokenSharedGatewaySessionGeneration ??
     controlUiBootstrapSharedGatewaySessionGeneration;
+  // Browser device tokens are verified against the current shared-auth generation
+  // whenever one exists (see verifyDeviceToken). A Tailscale identity login does
+  // not use the shared secret, so tag its browser token with that generation too;
+  // otherwise the Gateway issues a token its own HTTP read routes reject.
+  const tailscaleBrowserDeviceTokenGeneration =
+    authMethod === "tailscale" && (isBrowserOperatorUi || isWebchat)
+      ? getRequiredSharedGatewaySessionGeneration?.()
+      : undefined;
   if (sessionUsesSharedGatewayAuth) {
     const requiredSharedGatewaySessionGeneration = getRequiredSharedGatewaySessionGeneration?.();
     if (
@@ -559,6 +567,7 @@ async function authenticateGatewayConnectCore(
     usesSharedGatewayAuth,
     sessionUsesSharedGatewayAuth,
     sessionSharedGatewaySessionGeneration,
+    tailscaleBrowserDeviceTokenGeneration,
     issuedBootstrapProfile,
     handoffBootstrapProfile,
     trustedProxyAuthOk,
