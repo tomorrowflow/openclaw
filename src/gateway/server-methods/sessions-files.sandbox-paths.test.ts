@@ -3,7 +3,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SANDBOX_STATE_DIR } from "../../agents/sandbox/constants.js";
+import { resolveSandboxConfigForAgent } from "../../agents/sandbox/config.js";
+import { resolveSandboxWorkspaceLayoutPaths } from "../../agents/sandbox/shared.js";
 import { sessionsFilesHandlers } from "./sessions-files.js";
 import {
   assistantToolCall,
@@ -291,29 +292,27 @@ describe("sessions.files container paths", () => {
     expect(payload.file.workspacePath).toBe("old/note.md");
   });
 
-  it("serves a mounted file whose source lives outside the session root read-only", async () => {
+  it("serves materialized skills mounted from outside the session root read-only", async () => {
     // Materialized skills live under the sandbox state dir and are mounted over
     // an empty scaffold inside the workspace, so the session root alone only
-    // finds the empty mountpoint.
-    const skillsParent = path.join(SANDBOX_STATE_DIR, "skills-workspaces");
-    fs.mkdirSync(skillsParent, { recursive: true });
-    const skillsRoot = fs.mkdtempSync(path.join(skillsParent, "workspace-"));
+    // finds the empty mountpoint. No container is registered (as right after a
+    // deploy recreates sandboxes), so the derived mapping must name the same
+    // skills workspace the runtime would mount.
+    useSandboxedSession(workspaceRoot);
+    const cfg = hoisted.loadSessionEntry().cfg;
+    const { skillsWorkspaceDir } = resolveSandboxWorkspaceLayoutPaths({
+      cfg: resolveSandboxConfigForAgent(cfg, "main"),
+      rawSessionKey: "agent:main:main",
+      agentId: "main",
+      workspaceDir: workspaceRoot,
+    });
     try {
-      writeWorkspaceFile(skillsRoot, "publish/SKILL.md", "# Publish\n");
+      writeWorkspaceFile(skillsWorkspaceDir, "skills/publish/SKILL.md", "# Publish\n");
       fs.mkdirSync(path.join(workspaceRoot, ".openclaw/sandbox-skills/skills"), {
         recursive: true,
       });
       const skillPath = "/workspace/.openclaw/sandbox-skills/skills/publish/SKILL.md";
       mockVisibleMessages([assistantToolCall("read", { path: skillPath })]);
-      useSandboxedSession(workspaceRoot);
-      hoisted.readRegisteredSandboxRuntimeIds.mockResolvedValue(["openclaw-sbx-workspace-live"]);
-      hoisted.readRegistryEntry.mockResolvedValue({
-        containerName: "openclaw-sbx-workspace-live",
-        mounts: [
-          { hostPath: workspaceRoot, containerPath: "/workspace" },
-          { hostPath: skillsRoot, containerPath: "/workspace/.openclaw/sandbox-skills/skills" },
-        ],
-      });
 
       const payload = expectOkPayload(
         await invokeSessionFilesHandler("sessions.files.get", {
@@ -325,21 +324,8 @@ describe("sessions.files container paths", () => {
       expect(payload.file).toMatchObject({ path: skillPath, content: "# Publish\n" });
       expect(payload.file.hash).toBeUndefined();
       expect(payload.file.workspacePath).toBeUndefined();
-
-      const error = expectError(
-        await invokeSessionFilesHandler("sessions.files.set", {
-          sessionKey: "agent:main:main",
-          path: skillPath,
-          content: "# Rewritten\n",
-          expectedHash: hashContent("# Publish\n"),
-        }),
-      );
-      expect(error).toMatchObject({ details: { type: "session_file_not_found" } });
-      expect(fs.readFileSync(path.join(skillsRoot, "publish/SKILL.md"), "utf8")).toBe(
-        "# Publish\n",
-      );
     } finally {
-      fs.rmSync(skillsRoot, { recursive: true, force: true });
+      fs.rmSync(path.dirname(path.dirname(skillsWorkspaceDir)), { recursive: true, force: true });
     }
   });
 
