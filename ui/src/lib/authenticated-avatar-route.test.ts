@@ -1,5 +1,6 @@
 import type { ReactiveControllerHost } from "lit";
 import { afterEach, expect, it, vi, type Mock } from "vitest";
+import { notifyBrowserAuthRestored } from "../app/browser-http.ts";
 import { AuthenticatedAvatarRouteLoader } from "./authenticated-avatar-route.ts";
 
 afterEach(() => {
@@ -209,6 +210,78 @@ it("falls through to the next credential when the first is rejected", async () =
   });
   expect(loader.resolve("/avatar/main", ["stale-token", "session-password"])).toBe(
     "blob:recovered-avatar",
+  );
+  loader.reset();
+});
+
+it("holds a credential rejection until browser auth is restored", async () => {
+  vi.stubGlobal(
+    "URL",
+    class extends URL {
+      static override createObjectURL = vi.fn(() => "blob:restored-avatar");
+      static override revokeObjectURL = vi.fn();
+    },
+  );
+  // Each rejected attempt counts against the Gateway's per-client auth limiter,
+  // so rerenders must not replay credentials the Gateway already refused.
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce({ ok: false, status: 401 })
+    .mockResolvedValueOnce({ ok: false, status: 401 })
+    .mockResolvedValueOnce({ ok: true, blob: async () => new Blob(["avatar"]) });
+  vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+  const onUpdate = vi.fn();
+  const loader = createLoader(onUpdate);
+
+  expect(loader.resolve("/avatar/main", ["device-token", "saved-token"])).toBeNull();
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  await Promise.resolve();
+
+  expect(loader.resolve("/avatar/main", ["device-token", "saved-token"])).toBeNull();
+  expect(loader.resolve("/avatar/main", ["device-token", "saved-token"])).toBeNull();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+
+  notifyBrowserAuthRestored();
+  expect(loader.resolve("/avatar/main", ["device-token", "saved-token"])).toBeNull();
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  await vi.waitFor(() =>
+    expect(loader.resolve("/avatar/main", ["device-token", "saved-token"])).toBe(
+      "blob:restored-avatar",
+    ),
+  );
+  loader.reset();
+});
+
+it("keeps a network failure retryable after an earlier credential rejection", async () => {
+  vi.stubGlobal(
+    "URL",
+    class extends URL {
+      static override createObjectURL = vi.fn(() => "blob:after-network-failure");
+      static override revokeObjectURL = vi.fn();
+    },
+  );
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce({ ok: false, status: 401 })
+    .mockRejectedValueOnce(new TypeError("network down"))
+    .mockResolvedValueOnce({ ok: false, status: 401 })
+    .mockResolvedValueOnce({ ok: true, blob: async () => new Blob(["avatar"]) });
+  vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+  const onUpdate = vi.fn();
+  const loader = createLoader(onUpdate);
+
+  expect(loader.resolve("/avatar/main", ["stale-token", "session-password"])).toBeNull();
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  await Promise.resolve();
+
+  // The failed attempt proved nothing about the second credential, so the next
+  // render retries instead of holding the route as rejected.
+  expect(loader.resolve("/avatar/main", ["stale-token", "session-password"])).toBeNull();
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+  await vi.waitFor(() =>
+    expect(loader.resolve("/avatar/main", ["stale-token", "session-password"])).toBe(
+      "blob:after-network-failure",
+    ),
   );
   loader.reset();
 });
