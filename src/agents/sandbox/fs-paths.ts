@@ -127,6 +127,7 @@ export function resolveSandboxContainerPathMount(params: {
 export function deriveSandboxContainerMounts(params: {
   workspaceDir: string;
   agentWorkspaceDir: string;
+  skillsWorkspaceDir?: string;
   workspaceAccess: SandboxWorkspaceAccess;
   workdir?: string;
   binds?: readonly string[];
@@ -134,6 +135,7 @@ export function deriveSandboxContainerMounts(params: {
   return resolveSandboxMountSelection({
     workspaceDir: params.workspaceDir,
     agentWorkspaceDir: params.agentWorkspaceDir,
+    ...(params.skillsWorkspaceDir ? { skillsWorkspaceDir: params.skillsWorkspaceDir } : {}),
     workdir: params.workdir ?? DEFAULT_SANDBOX_WORKDIR,
     workspaceAccess: params.workspaceAccess,
     binds: params.binds,

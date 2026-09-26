@@ -289,13 +289,22 @@ async function resolveSessionSandboxPaths(
   }
   const sandbox = resolveSandboxConfigForAgent(cfg, agentId);
   const agentWorkspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
-  const recorded = await readRecordedSandboxMounts({
-    sandbox,
+  // A session created with sandbox "required" runs at the access the status
+  // owner downgraded it to, and that decides which mounts it received.
+  const workspaceAccess = status.sandboxRequired ? status.workspaceAccess : sandbox.workspaceAccess;
+  // The layout owner names both the registry scope and the materialized skills
+  // workspace; without the latter a derived mapping points the skills mount at
+  // the empty scaffold inside the workspace instead of the copy it received.
+  const layout = resolveSandboxWorkspaceLayoutPaths({
+    cfg: { ...sandbox, workspaceAccess },
+    rawSessionKey: sessionKey,
     agentId,
-    agentWorkspaceDir,
-    sessionKey,
-    isolationSubject: status.sandboxRequired ? status.isolationSubject : undefined,
+    ...(status.sandboxRequired && status.isolationSubject
+      ? { isolationSubject: status.isolationSubject }
+      : {}),
+    workspaceDir: agentWorkspaceDir,
   });
+  const recorded = await readRecordedSandboxMounts(sandbox.backend, layout.scopeKey);
   if (recorded) {
     return { mounts: recorded };
   }
@@ -303,9 +312,8 @@ async function resolveSessionSandboxPaths(
     mounts: deriveSandboxContainerMounts({
       workspaceDir: root,
       agentWorkspaceDir,
-      // A session created with sandbox "required" runs at the access the status
-      // owner downgraded it to, and that decides which mounts it received.
-      workspaceAccess: status.sandboxRequired ? status.workspaceAccess : sandbox.workspaceAccess,
+      skillsWorkspaceDir: layout.skillsWorkspaceDir,
+      workspaceAccess,
       workdir: sandbox.docker.workdir,
       ...(sandbox.docker.binds ? { binds: sandbox.docker.binds } : {}),
     }),
@@ -313,25 +321,12 @@ async function resolveSessionSandboxPaths(
 }
 
 /** Reads the mapping the newest container registered for this sandbox scope received. */
-async function readRecordedSandboxMounts(params: {
-  sandbox: ReturnType<typeof resolveSandboxConfigForAgent>;
-  agentId: string;
-  agentWorkspaceDir: string;
-  sessionKey: string;
-  isolationSubject?: Parameters<typeof resolveSandboxWorkspaceLayoutPaths>[0]["isolationSubject"];
-}) {
+async function readRecordedSandboxMounts(
+  backendId: ReturnType<typeof resolveSandboxConfigForAgent>["backend"],
+  scopeKey: string,
+) {
   try {
-    const { scopeKey } = resolveSandboxWorkspaceLayoutPaths({
-      cfg: params.sandbox,
-      rawSessionKey: params.sessionKey,
-      agentId: params.agentId,
-      ...(params.isolationSubject ? { isolationSubject: params.isolationSubject } : {}),
-      workspaceDir: params.agentWorkspaceDir,
-    });
-    const [containerName] = await readRegisteredSandboxRuntimeIds({
-      backendId: params.sandbox.backend,
-      scopeKey,
-    });
+    const [containerName] = await readRegisteredSandboxRuntimeIds({ backendId, scopeKey });
     if (!containerName) {
       return undefined;
     }
