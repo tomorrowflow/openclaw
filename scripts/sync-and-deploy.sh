@@ -103,8 +103,10 @@ GATEWAY_TOUCHED=0
 notify_send() {
   local msg="$1"
   echo "$msg"
-  if sudo -u openclaw XDG_RUNTIME_DIR="/run/user/$OC_UID" \
-    openclaw message send --channel "$NOTIFY_CHANNEL" --target "$NOTIFY_TARGET" \
+  # oc_openclaw, not a bare sudo: from this script's cwd the CLI dies with
+  # "spawn /usr/bin/node EACCES" before it reaches the gateway, so every
+  # alert was lost while reporting "send failed while the gateway is up".
+  if oc_openclaw message send --channel "$NOTIFY_CHANNEL" --target "$NOTIFY_TARGET" \
     --message "$msg" 2>&1 | tail -3; then
     return 0
   fi
@@ -667,8 +669,7 @@ if [ -n "$SMOKE_PROBLEMS" ]; then
   echo "  ⚠ Gateway is up but inbound processing looks unhealthy:"
   printf "%b\n" "$SMOKE_PROBLEMS"
   echo "    Channel may be silently dead — check before relying on it."
-  sudo -u openclaw XDG_RUNTIME_DIR="/run/user/$OC_UID" \
-    openclaw message send --channel "$NOTIFY_CHANNEL" --target "$NOTIFY_TARGET" \
+  oc_openclaw message send --channel "$NOTIFY_CHANNEL" --target "$NOTIFY_TARGET" \
     --message "⚠ OpenClaw deploy v$NEW_VER: gateway is up but inbound processing looks unhealthy.$(printf "%b" "$SMOKE_PROBLEMS")
 Log: $LOG_FILE" 2>&1 | tail -3 || echo "  (smoke alert send failed — inbound may be down both ways)"
 else
