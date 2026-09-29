@@ -414,6 +414,24 @@ describe("createOpenClawCodingTools", () => {
     expect(names.has("tool_call")).toBe(true);
   });
 
+  it("keeps core tools when Tool Search controls join an empty allow-all list", () => {
+    const tools = createOpenClawCodingTools({
+      includeToolSearchControls: true,
+      config: {
+        tools: {
+          allow: [],
+          deny: ["tts"],
+        },
+      },
+    });
+    const names = new Set(tools.map((tool) => tool.name));
+
+    expect(names.has("read")).toBe(true);
+    expect(names.has("write")).toBe(true);
+    expect(names.has("exec")).toBe(true);
+    expect(names.has("tool_search")).toBe(true);
+  });
+
   it("lets explicit deny policies remove Tool Search controls", () => {
     const tools = createOpenClawCodingTools({
       includeToolSearchControls: true,
