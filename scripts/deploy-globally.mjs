@@ -125,14 +125,17 @@ function markBundledDist(extDir) {
   // install ships a matching copy. With no npm release for the running core
   // (2026.9.7), codex's settings migration could never finish and its bundled
   // copy could never be installed. `build.bundledDist: true` is the core's
-  // declared marker that this dist owns the plugin.
+  // declared marker that this dist owns the plugin. Only fill an unset marker:
+  // an explicit `false` (source-external channels like signal) also selects the
+  // Gateway startup policy, and flipping it would start opencode/teams-meetings/
+  // zoom-meetings by default.
   const packageJsonPath = path.join(extDir, "package.json");
   if (!fs.existsSync(packageJsonPath)) {
     return;
   }
   const tmp = `${packageJsonPath}.tmp`;
   sh(
-    `sudo sh -c 'jq ".openclaw.build.bundledDist = true" ${JSON.stringify(packageJsonPath)} > ${JSON.stringify(tmp)} && mv ${JSON.stringify(tmp)} ${JSON.stringify(packageJsonPath)}'`,
+    `sudo sh -c 'jq "if .openclaw.build.bundledDist == null then .openclaw.build.bundledDist = true else . end" ${JSON.stringify(packageJsonPath)} > ${JSON.stringify(tmp)} && mv ${JSON.stringify(tmp)} ${JSON.stringify(packageJsonPath)}'`,
   );
 }
 
