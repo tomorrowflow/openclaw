@@ -308,7 +308,7 @@ export async function add(
     // agent at the limit can still converge the jobs it owns.
     const defaultAgentId = resolveCurrentDefaultAgentId(state);
     const agentJobCount = (state.store?.jobs ?? []).filter(
-      (job) => resolveEffectiveJobAgentId(job, defaultAgentId) === agentId,
+      (job) => resolveCronJobEffectiveAgentId(job, defaultAgentId) === agentId,
     ).length;
     if (agentJobCount >= MAX_JOBS_PER_AGENT) {
       throw new Error(

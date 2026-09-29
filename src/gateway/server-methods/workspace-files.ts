@@ -617,7 +617,7 @@ export async function getSessionWorkspaceFile(
  * read-only: sessions.files.set still only writes inside the session root.
  */
 async function getSandboxMountedFile(
-  params: LoadedSessionFiles & { path: string },
+  params: LoadedSessionFiles & { path: string; assertCurrent?: () => void },
 ): Promise<SessionFileEntry | undefined> {
   if (!params.sandbox) {
     return undefined;
@@ -640,7 +640,7 @@ async function getSandboxMountedFile(
     { path: target.relativePath, kind: touched?.kind ?? "read" },
     target.hostRoot,
     target.hostRoot,
-    { includeContent: true },
+    { includeContent: true, assertCurrent: params.assertCurrent },
   );
   if (entry.missing) {
     return undefined;
@@ -650,7 +650,7 @@ async function getSandboxMountedFile(
 }
 
 async function getSessionRootFile(
-  params: LoadedSessionFiles & { path: string },
+  params: LoadedSessionFiles & { path: string; assertCurrent?: () => void },
 ): Promise<{ root?: string; file?: SessionFileEntry }> {
   const loaded = params;
   const exactTouched = loaded.files.find((file) => file.path === params.path);

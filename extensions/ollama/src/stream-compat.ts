@@ -116,6 +116,66 @@ export function wrapOllamaCompatNumCtx(baseFn: StreamFn | undefined, numCtx: num
   });
 }
 
+// Ollama's OpenAI-compatible endpoint requires tool-call arguments to remain
+// JSON strings; only its native chat transport accepts object arguments.
+function ensureArgsString(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === undefined || value === null) {
+    return "{}";
+  }
+  return JSON.stringify(value);
+}
+
+function normalizeOllamaCompatMessageToolArgs(payloadRecord: Record<string, unknown>): void {
+  const messages = payloadRecord.messages;
+  if (!Array.isArray(messages)) {
+    return;
+  }
+  for (const message of messages) {
+    if (!message || typeof message !== "object" || Array.isArray(message)) {
+      continue;
+    }
+    // SAFETY: the non-array object guard above establishes a record-like message payload.
+    const messageRecord = message as Record<string, unknown>;
+    const functionCall = messageRecord.function_call;
+    if (functionCall && typeof functionCall === "object" && !Array.isArray(functionCall)) {
+      // SAFETY: the non-array object guard above establishes a record-like function call.
+      const functionCallRecord = functionCall as Record<string, unknown>;
+      if (Object.hasOwn(functionCallRecord, "arguments")) {
+        functionCallRecord.arguments = ensureArgsString(functionCallRecord.arguments);
+      }
+    }
+    const toolCalls = messageRecord.tool_calls;
+    if (!Array.isArray(toolCalls)) {
+      continue;
+    }
+    for (const toolCall of toolCalls) {
+      if (!toolCall || typeof toolCall !== "object" || Array.isArray(toolCall)) {
+        continue;
+      }
+      // SAFETY: the non-array object guard above establishes a record-like tool call.
+      const functionSpec = (toolCall as Record<string, unknown>).function;
+      if (!functionSpec || typeof functionSpec !== "object" || Array.isArray(functionSpec)) {
+        continue;
+      }
+      // SAFETY: the non-array object guard above establishes a record-like function spec.
+      const functionRecord = functionSpec as Record<string, unknown>;
+      if (Object.hasOwn(functionRecord, "arguments")) {
+        functionRecord.arguments = ensureArgsString(functionRecord.arguments);
+      }
+    }
+  }
+}
+
+function wrapOllamaCompatMessageToolArgs(baseFn: StreamFn | undefined): StreamFn {
+  return createLazyPayloadPatchStreamWrapper(baseFn, ({ payload }) => {
+    // SAFETY: the payload patch helper passes the mutable JSON request object.
+    normalizeOllamaCompatMessageToolArgs(payload as Record<string, unknown>);
+  });
+}
+
 function createOllamaThinkingWrapper(
   baseFn: StreamFn | undefined,
   think: OllamaThinkValue,
@@ -220,6 +280,9 @@ export function createConfiguredOllamaCompatStreamWrapper(
     ) {
       streamFn = wrapOllamaCompatNumCtx(streamFn, resolveOllamaNumCtx(model));
     }
+  }
+  if (model?.api === "openai-completions") {
+    streamFn = wrapOllamaCompatMessageToolArgs(streamFn);
   }
 
   const nativeMax = supportsNativeOllamaMax(model, ctx.provider);
