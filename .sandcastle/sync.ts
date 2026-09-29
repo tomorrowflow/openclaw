@@ -24,6 +24,10 @@ const syncResultSchema = z.object({
   build: z.enum(["passed", "failed", "skipped"]),
   tests: z.enum(["passed", "failed", "skipped"]),
   forkFeatures: z.enum(["verified", "failed", "skipped"]),
+  // Subjects of fork-authored commits the agent deliberately dropped because
+  // upstream superseded them. Any other fork commit missing after the rebase is
+  // reported by the host as lost.
+  droppedForkCommits: z.array(z.string()).optional(),
   pushed: z.boolean(),
   deployNeeded: z.boolean(),
   newUpstreamCommits: z.number().optional(),
@@ -42,6 +46,9 @@ function printResult(result: SyncResult) {
   console.log(`  Build                   : ${result.build}`);
   console.log(`  Tests                   : ${result.tests}`);
   console.log(`  Fork features           : ${result.forkFeatures}`);
+  for (const subject of result.droppedForkCommits ?? []) {
+    console.log(`  Dropped fork commit     : ${subject}`);
+  }
   console.log(`  Pushed to origin/main   : ${result.pushed}`);
   if (result.failedCheckLanes?.length) {
     console.log(`  Failed check lanes      : ${result.failedCheckLanes.join(", ")}`);
@@ -96,7 +103,7 @@ function git(...args: string[]): string {
 // Fast-forward when local `main` is strictly behind. Refuse when the two have
 // diverged — picking which side survives is a maintainer's call, not this
 // script's.
-function reconcileWithOrigin() {
+function reconcileWithOrigin(): string {
   const branch = git("rev-parse", "--abbrev-ref", "HEAD");
   if (branch !== "main") {
     throw new Error(
@@ -128,7 +135,7 @@ function reconcileWithOrigin() {
 
   if (behind === 0) {
     console.log(`[sync] checkout is level with origin/main (${ahead} unpushed commit(s))`);
-    return;
+    return git("rev-parse", "origin/main");
   }
   if (ahead > 0) {
     throw new Error(
@@ -140,6 +147,7 @@ function reconcileWithOrigin() {
   console.log(`[sync] fast-forwarding main to origin/main (${behind} commit(s) behind)`);
   git("merge", "--ff-only", "origin/main");
   console.log(`[sync] now at ${git("rev-parse", "--short", "HEAD")}`);
+  return git("rev-parse", "origin/main");
 }
 
 // Codex reports a rejected request — a retired model pin, expired ChatGPT auth —
@@ -207,7 +215,7 @@ function describeCodexFailure(since: number): string | undefined {
   return undefined;
 }
 
-reconcileWithOrigin();
+const preSyncOrigin = reconcileWithOrigin();
 const runStartedAt = Date.now();
 
 const { output } = await run({
@@ -282,6 +290,39 @@ const { output } = await run({
   throw error;
 });
 
+// Fork commits are the only ones a rebase must carry; upstream commits are
+// replaced by the new release cut. Every commit the fork authored before the
+// sync must still be on main by subject (SHAs are all rewritten), be present
+// upstream by subject, or be declared dropped. The 2026.9.x rebases lost fork
+// fixes silently, e.g. Control UI previews of /workspace/shared (OneDrive) links.
+function forkSubjects(ref: string): string[] {
+  const author = git("config", "user.name");
+  return git("log", "--format=%an%x09%s", ref, "--not", "--remotes=upstream")
+    .split("\n")
+    .map((line) => line.split("\t"))
+    .filter(([name, subject]) => name === author && subject)
+    .map(([, subject]) => subject!);
+}
+
+function reportLostForkCommits(release: string | undefined, declared: string[]) {
+  const kept = new Set(forkSubjects("main"));
+  const upstream = new Set(
+    release ? git("log", "--format=%s", `upstream/release/${release}`).split("\n") : [],
+  );
+  const lost = [...new Set(forkSubjects(preSyncOrigin))].filter(
+    (subject) => !kept.has(subject) && !upstream.has(subject) && !declared.includes(subject),
+  );
+  if (lost.length === 0) {
+    console.log("[sync] every pre-sync fork commit is on main, upstream, or declared dropped");
+    return;
+  }
+  console.error(
+    `\n✗ ${lost.length} fork commit(s) missing after the rebase and not declared dropped:\n` +
+      lost.map((subject) => `    - ${subject}`).join("\n") +
+      "\n  Restore them or confirm upstream superseded them before publishing.",
+  );
+}
+
 printResult(output);
 
 // Block deploy on a hard stop gate. "partial" means the agent pushed and only a
@@ -302,9 +343,12 @@ if (!output.pushed) {
   const ahead = Number(git("rev-list", "--count", "origin/main..main"));
   const behind = Number(git("rev-list", "--count", "main..origin/main"));
   if (ahead !== 0 || behind !== 0) {
+    reportLostForkCommits(output.trackedRelease, output.droppedForkCommits ?? []);
     console.error(
       `\n✗ Sync did not push and main is not level with origin/main ` +
-        `(${ahead} local, ${behind} remote commit(s)) — skipping deploy.`,
+        `(${ahead} local, ${behind} remote commit(s)) — skipping deploy.\n` +
+        `  Publish by hand: git push origin main --force-with-lease=main:${preSyncOrigin}\n` +
+        `  then: scripts/sync-and-deploy.sh --deploy-only`,
     );
     process.exit(1);
   }
