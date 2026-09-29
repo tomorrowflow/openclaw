@@ -106,9 +106,17 @@ function git(...args: string[]): string {
 function reconcileWithOrigin(): string {
   const branch = git("rev-parse", "--abbrev-ref", "HEAD");
   if (branch !== "main") {
+    // main can be checked out in only one worktree, so name it: a feature
+    // worktree's copy of this script is usually stale anyway.
+    const mainWorktree = git("worktree", "list", "--porcelain")
+      .split("\n\n")
+      .find((block) => block.includes("\nbranch refs/heads/main"))
+      ?.match(/^worktree (.+)$/m)?.[1];
     throw new Error(
       `sync preflight: HEAD is on "${branch}", not main. The sync rebases and ` +
-        `force-pushes main; check it out first.`,
+        (mainWorktree
+          ? `publishes main; run it from ${mainWorktree}/scripts/sync-and-deploy.sh.`
+          : `publishes main; check it out first.`),
     );
   }
   if (
