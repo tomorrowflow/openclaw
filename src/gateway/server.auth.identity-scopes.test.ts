@@ -759,7 +759,9 @@ describe("gateway identity scope grants", () => {
           origin: BROWSER_ORIGIN,
           "tailscale-user-login": login,
         });
-        const closed = new Promise<number>((resolve) => ws.once("close", resolve));
+        const closed = new Promise<number>((resolve) => {
+          ws.once("close", resolve);
+        });
         try {
           const connected = await connectReq(ws, {
             skipDefaultAuth: true,

@@ -413,7 +413,7 @@ function validateSecretMounts(secretMounts: Record<string, string> | undefined):
       );
     }
 
-    const normalized = normalizeHostPath(filePath);
+    const normalized = normalizeSandboxHostPath(filePath);
 
     const blockedHostPaths = getBlockedHostPaths();
     const blockedReason = getBlockedReasonForSourcePath(normalized, blockedHostPaths);
