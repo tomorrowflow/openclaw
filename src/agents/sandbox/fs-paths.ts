@@ -103,7 +103,7 @@ export function resolveSandboxContainerPathMount(params: {
     return undefined;
   }
   const relative = path.posix.relative(mount.containerRoot, containerPath);
-  return { hostRoot: mount.hostRoot, relativePath: toHostSegments(relative).join("/") };
+  return { hostRoot: mount.hostRoot, relativePath: relative.split("/").filter(Boolean).join("/") };
 }
 
 /**
@@ -355,7 +355,15 @@ function compareMountsByHostPath(a: SandboxFsMount, b: SandboxFsMount): number {
   );
 }
 
-const MOUNT_SOURCE_PRIORITY = { workspace: 0, agent: 1, bind: 2, protectedSkill: 3 };
+// The shared and media mounts rank with the workspace, as the fork's original
+// mountSourcePriority did: only binds and protected skills outrank them.
+const MOUNT_SOURCE_PRIORITY = {
+  workspace: 0,
+  managedState: 0,
+  agent: 1,
+  bind: 2,
+  protectedSkill: 3,
+};
 
 export function resolveSandboxFsMount<T extends { containerRoot: string }>(
   mounts: readonly T[],

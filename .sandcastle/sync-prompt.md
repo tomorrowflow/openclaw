@@ -122,6 +122,19 @@ resolves the large majority of stops on a release→release bump.
   ```
   The newer cut carries that change, evolved. Replaying it duplicates it, and a
   double-applied fix once spliced one test into the middle of another.
+- **Fork backport of an upstream fix — drop it once the target ships the
+  original.** The fork sometimes cherry-picks an upstream fix onto the release it
+  deploys, with `(cherry picked from commit <sha>)` in the message. When that
+  original is in the target, the backport is superseded and usually conflicts,
+  because it was adapted to the older cut's shape. It is not a semantic stop:
+  ```bash
+  ORIG=$(git log -1 --format=%B REBASE_HEAD | sed -n 's/^(cherry picked from commit \([0-9a-f]*\))$/\1/p')
+  [ -n "$ORIG" ] && git merge-base --is-ancestor "$ORIG" "upstream/release/$TARGET" \
+    && git rebase --skip
+  ```
+  Put its subject in `droppedForkCommits`. Precedent: the 2026.9.7 re-cut sync
+  stopped on "fix(doctor): backport plan-and-execute plugin migrations from one
+  inventory", whose original `47a84c8f1f3` (#157479) the re-cut already shipped.
 - **pnpm-lock.yaml**: always accept upstream's version:
   `git checkout --theirs pnpm-lock.yaml && git add pnpm-lock.yaml && git rebase --continue`
 - **Generated baselines** (`docs/.generated/*.sha256`): accept the release version:

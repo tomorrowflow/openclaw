@@ -267,6 +267,65 @@ describe("createConfiguredOllamaCompatStreamWrapper", () => {
     expect(payload.options).toEqual({ num_ctx: 262144 });
   });
 
+  // Fork patch: Ollama's OpenAI endpoint rejects object arguments with
+  // "cannot unmarshal object ... arguments of type string" on tool-call replay.
+  it("stringifies OpenAI-compatible replay tool arguments that arrive as objects", async () => {
+    let patchedPayload: Record<string, unknown> | undefined;
+    const baseStreamFn = vi.fn((_model, _context, options) => {
+      options?.onPayload?.({
+        messages: [
+          {
+            role: "assistant",
+            function_call: { name: "legacy_gateway", arguments: { action: "config.get" } },
+            tool_calls: [
+              {
+                id: "call_gateway",
+                type: "function",
+                function: { name: "gateway", arguments: { path: "gateway.port" } },
+              },
+              { id: "call_empty", type: "function", function: { name: "noop", arguments: null } },
+            ],
+          },
+        ],
+      });
+      return (async function* () {})();
+    });
+    const model = {
+      api: "openai-completions",
+      provider: "ollama",
+      id: "glm-5.2:cloud",
+      contextWindow: 262144,
+    };
+
+    const wrapped = createConfiguredOllamaCompatStreamWrapper({
+      provider: "ollama",
+      modelId: "glm-5.2:cloud",
+      model,
+      streamFn: baseStreamFn,
+    } as never);
+    await wrapped?.(
+      model as never,
+      { messages: [] } as never,
+      {
+        onPayload: (payload: unknown) => {
+          patchedPayload = payload as Record<string, unknown>;
+        },
+      } as never,
+    );
+
+    const payload = requireRecord(patchedPayload, "patched payload");
+    const messages = payload.messages as Array<Record<string, unknown>>;
+    const assistantMessage = requireRecord(messages[0], "assistant message");
+    const toolCalls = assistantMessage.tool_calls as Array<Record<string, unknown>>;
+    expect(requireRecord(assistantMessage.function_call, "function call").arguments).toBe(
+      '{"action":"config.get"}',
+    );
+    expect(requireRecord(toolCalls[0]?.function, "tool call").arguments).toBe(
+      '{"path":"gateway.port"}',
+    );
+    expect(requireRecord(toolCalls[1]?.function, "empty tool call").arguments).toBe("{}");
+  });
+
   it("falls back to contextWindow when configured num_ctx is invalid", async () => {
     let patchedPayload: Record<string, unknown> | undefined;
     const baseStreamFn = vi.fn((_model, _context, options) => {
