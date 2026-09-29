@@ -352,6 +352,9 @@ export function buildModelDecision(params: {
 
 export type MediaRequestOverrides = Pick<AudioTranscriptionRequest, "prompt" | "language">;
 
+// Local providers that don't require API keys (e.g. Docker services).
+const LOCAL_KEYLESS_PROVIDERS = new Set(["whisper-asr"]);
+
 type ProviderExecutionAuth =
   | {
       kind: "api-key";
