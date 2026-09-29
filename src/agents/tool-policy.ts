@@ -326,7 +326,14 @@ export function mergeAlsoAllowPolicy<TPolicy extends { allow?: string[] }>(
   policy: TPolicy | undefined,
   alsoAllow?: string[],
 ): TPolicy | undefined {
-  if (!policy?.allow || !Array.isArray(alsoAllow) || alsoAllow.length === 0) {
+  // An empty allow list already allows everything not denied; appending names
+  // would turn it into an allowlist of only those names.
+  if (
+    !policy?.allow ||
+    policy.allow.length === 0 ||
+    !Array.isArray(alsoAllow) ||
+    alsoAllow.length === 0
+  ) {
     return policy;
   }
   return { ...policy, allow: uniqueStrings([...policy.allow, ...alsoAllow]) };
