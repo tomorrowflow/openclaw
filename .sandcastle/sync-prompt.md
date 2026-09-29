@@ -1,8 +1,8 @@
 # Upstream Sync Task
 
 You are running the upstream sync procedure defined in `docs/UPSTREAM-SYNC.md`.
-Execute steps 1–7 (fetch through push). Step 8 (deploy) requires sudo and
-systemd access — stop before it.
+Execute steps 1–6 (fetch through commit). The host publishes (step 7) and
+deploys (step 8) — stop before both.
 
 ## Environment notes
 
@@ -108,6 +108,20 @@ resolves the large majority of stops on a release→release bump.
   (In the 2026.7.1 sync, 776 of 981 replayed commits were redundant. The stop-gate
   that failed the run — an iOS snapshot-test refactor — was one of them, already
   shipped in the release; it should have been skipped, not treated as semantic.)
+- **Previous release cut's commit — skip it.** Upstream cuts every
+  `release/X.Y.Z` branch independently from `main`, and re-cuts a release branch
+  in place (2026.9.7 was re-cut twice). The commits a previous cut carried are
+  then no longer ancestors of the target, so the check above misses them. At a
+  stop, if the commit is **not** authored by the fork (`git config user.name`) and
+  its subject already appears in the target's history, skip it:
+  ```bash
+  [ "$(git log -1 --format=%an REBASE_HEAD)" != "$(git config user.name)" ] \
+    && git log --format=%s "upstream/release/$TARGET" \
+      | grep -Fqx -- "$(git log -1 --format=%s REBASE_HEAD)" \
+    && git rebase --skip
+  ```
+  The newer cut carries that change, evolved. Replaying it duplicates it, and a
+  double-applied fix once spliced one test into the middle of another.
 - **pnpm-lock.yaml**: always accept upstream's version:
   `git checkout --theirs pnpm-lock.yaml && git add pnpm-lock.yaml && git rebase --continue`
 - **Generated baselines** (`docs/.generated/*.sha256`): accept the release version:
@@ -140,8 +154,11 @@ resolves the large majority of stops on a release→release bump.
   4. Upstream has regression coverage for that behaviour, or the fork's own test
      for it is unreproducible because its trigger type no longer exists.
 
-  Report every dropped commit in `notes` with the four findings, so the drop is a
-  recorded decision rather than a silent loss. Precedent: `35b9ccfac7d`
+  Report every dropped commit in `notes` with the four findings, and list the
+  subject of every dropped **fork-authored** commit in `droppedForkCommits`, so the
+  drop is a recorded decision rather than a silent loss. The host compares
+  fork-authored subjects before and after the rebase and reports any missing one
+  that is neither upstream nor declared there as lost. Precedent: `35b9ccfac7d`
   ("hand off restart lease loss") was dropped for the 2026.8.1 sync after
   upstream `ce53f7e82e2` removed the session write lease; the silent-handoff
   behaviour it added now lives in `resolveReplyOperationAbortAction`, gated on
@@ -231,7 +248,7 @@ If `pnpm check` fails **only** on the `npm shrinkwrap guard` lane:
 
 If only `npm shrinkwrap guard` fails and you've followed the above, set
 `status: "partial"` with `failedCheckLanes: ["npm shrinkwrap guard"]` and continue
-to push — it is not a blocker.
+— it is not a blocker.
 
 ### Step 5d: Tests (conflict-scoped)
 
@@ -292,6 +309,27 @@ A rebase takes upstream's copy of that file wholesale, so the fork's expectation
 reverts and the suite goes red against fork behaviour that is working as intended.
 Those are case 1: re-apply the fork's expectation, keep the comment that explains
 the divergence, and do not "fix" the production code to satisfy upstream's copy.
+
+#### Every fork fix needs a checklist entry
+
+A fork fix committed between syncs is only protected once
+`docs/fork-features.txt` asserts it. Fixes without an entry are exactly the ones
+earlier rebases dropped silently, and nobody noticed until a user did. The
+Control UI's container-path previews of `/workspace/shared/...` (OneDrive and
+Syncthing) links broke that way after a sync and had to be re-landed. Before
+Step 6, list the fork-authored commits since the last sync and check that each
+non-sync fix has an entry:
+
+```bash
+# origin/main is still the pre-sync tree: only the host publishes.
+git log --format='%h %an %s' origin/main --not --remotes=upstream \
+  --author="$(git config user.name)" \
+  | grep -vE ' (chore/fix|fix\(sync\)|docs\(fork-features\)|fix\(sandcastle\)|fix\(deploy\)):'
+```
+
+For each one with no entry, add one that asserts the **call or condition** that
+carries the behavior, not an import or a type field, since those survive a
+rebase that drops the behavior. Commit it with the Step 6 fixups.
 
 If you leave a stale entry unfixed, it fails again on _every_ future sync and
 trains the next run to "restore" code upstream already has. Treat a checklist that
@@ -428,11 +466,14 @@ scripts/committer "chore/fix: <description>" <files...>
 
 Remove `.tmp/` before committing. Never commit `.tmp/` or any scratch directory.
 
-### Step 7: Push
+### Step 7: Publish — the host does this, not you
 
-```bash
-git push origin main --force-with-lease
-```
+Do **not** run `git push`. This sandbox has no GitHub credentials, so the push
+fails with `could not read Username`, and that is not a sync failure. The host
+publishes after checking your result: it re-runs the fork-feature check, reports
+fork commits the rebase lost, and pushes with an explicit lease. Leave `main`
+committed and clean, report `pushed: false`, and set `status` from steps 1–6
+alone.
 
 ## Stop gates (set status: "failed" and stop)
 
@@ -451,16 +492,18 @@ additions. Set `rebased: true` as long as `git diff HEAD` shows no unstaged
 changes to tracked files and the rebase completed.
 
 Not a stop gate: `npm shrinkwrap guard` failing alone due to dual-major-version
-packages — accept, note it, and push.
+packages — accept, note it, and continue.
+
+Not a stop gate: a failed `git push`. You should not push at all (Step 7).
 
 ## When done
 
 Emit a `<sync-result>` JSON object with these fields:
 
 - `status`: `"success"` | `"partial"` | `"failed"`
-  - `"success"`: all steps completed, pushed
-  - `"partial"`: pushed but one or more non-blocking check lanes failed
-  - `"failed"`: hit a stop gate — did not push
+  - `"success"`: steps 1–6 completed; `main` is ready for the host to publish
+  - `"partial"`: ready to publish, but one or more non-blocking check lanes failed
+  - `"failed"`: hit a stop gate — `main` must not be published
 - `upstreamCommits`: number of release-branch commits brought in (the `NEW_COMMITS`
   count from step 2–4; integer)
 - `trackedRelease`: the release branch version this sync rebased onto, e.g.
@@ -469,9 +512,10 @@ Emit a `<sync-result>` JSON object with these fields:
 - `build`: `"passed"` | `"failed"` | `"skipped"`
 - `tests`: `"passed"` | `"failed"` | `"skipped"`
 - `forkFeatures`: `"verified"` | `"failed"` | `"skipped"`
-- `pushed`: `true` if `git push --force-with-lease` succeeded **or origin/main already
-  matches local main** ("Everything up to date" is still success); `false` only if a push
-  was attempted and failed
+- `pushed`: `true` only for a confirmed no-op where origin/main already matches local
+  main; otherwise `false` (you never push — see Step 7)
+- `droppedForkCommits`: (optional) subjects of fork-authored commits you dropped because
+  upstream superseded them
 - `deployNeeded`: always `true` (step 8 requires sudo/systemd — cannot run here)
 - `newUpstreamCommits`: (optional) new upstream commits that arrived during this run
 - `failedCheckLanes`: (optional) array of lane names that failed in `pnpm check`
@@ -480,13 +524,13 @@ Emit a `<sync-result>` JSON object with these fields:
 Example (success):
 
 <sync-result>
-{"status":"success","upstreamCommits":41,"trackedRelease":"2026.6.5","conflicts":3,"build":"passed","tests":"passed","forkFeatures":"verified","pushed":true,"deployNeeded":true}
+{"status":"success","upstreamCommits":41,"trackedRelease":"2026.6.5","conflicts":3,"build":"passed","tests":"passed","forkFeatures":"verified","pushed":false,"deployNeeded":true}
 </sync-result>
 
 Example (shrinkwrap partial):
 
 <sync-result>
-{"status":"partial","upstreamCommits":41,"trackedRelease":"2026.6.5","conflicts":3,"build":"passed","tests":"skipped","forkFeatures":"verified","pushed":true,"deployNeeded":true,"failedCheckLanes":["npm shrinkwrap guard"],"notes":"@smithy packages have two major versions in pnpm-lock — shrinkwrap will self-resolve on next sync."}
+{"status":"partial","upstreamCommits":41,"trackedRelease":"2026.6.5","conflicts":3,"build":"passed","tests":"skipped","forkFeatures":"verified","pushed":false,"deployNeeded":true,"failedCheckLanes":["npm shrinkwrap guard"],"notes":"@smithy packages have two major versions in pnpm-lock — shrinkwrap will self-resolve on next sync."}
 </sync-result>
 
 Example (no-op — `main` already on the newest release; build/check skipped, see Step 2–4):
