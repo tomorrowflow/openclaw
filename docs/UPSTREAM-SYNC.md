@@ -330,14 +330,18 @@ scripts/committer "chore: regenerate pnpm-lock.yaml after upstream sync" pnpm-lo
 
 ## 7. Push to fork
 
-Since we rebased, a force push is required:
+Since we rebased, a force push is required. It runs on the host: the sandcastle
+agent has no GitHub credentials, so `.sandcastle/sync.ts` stops after steps 1–6,
+reports any fork commit the rebase lost, and prints the exact command. Lease on
+the origin SHA from before the sync, not the remote-tracking ref:
 
 ```bash
-git push origin main --force-with-lease
+git push origin main --force-with-lease=main:<pre-sync origin/main sha>
 ```
 
-`--force-with-lease` is safer than `--force` because it refuses to push if
-someone else has pushed to the remote since your last fetch.
+A bare `--force-with-lease` compares against `origin/main`, which any `git fetch`
+refreshes, so a checkout that sits behind origin passes it and erases the commits
+it is missing.
 
 ## 8. Deploy (stop, install, restart)
 
