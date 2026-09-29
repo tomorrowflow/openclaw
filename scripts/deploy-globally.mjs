@@ -119,6 +119,23 @@ function stripDevDependencies(packageJsonPath) {
   );
 }
 
+function markBundledDist(extDir) {
+  // Upstream treats an officially externalized plugin (codex, signal, …) as
+  // npm-owned, so update convergence waits for its npm package even when this
+  // install ships a matching copy. With no npm release for the running core
+  // (2026.9.7), codex's settings migration could never finish and its bundled
+  // copy could never be installed. `build.bundledDist: true` is the core's
+  // declared marker that this dist owns the plugin.
+  const packageJsonPath = path.join(extDir, "package.json");
+  if (!fs.existsSync(packageJsonPath)) {
+    return;
+  }
+  const tmp = `${packageJsonPath}.tmp`;
+  sh(
+    `sudo sh -c 'jq ".openclaw.build.bundledDist = true" ${JSON.stringify(packageJsonPath)} > ${JSON.stringify(tmp)} && mv ${JSON.stringify(tmp)} ${JSON.stringify(packageJsonPath)}'`,
+  );
+}
+
 // npm's os/cpu matching, including "!value" negation.
 function matchesPlatformList(list, actual) {
   if (!Array.isArray(list) || list.length === 0) {
@@ -264,6 +281,7 @@ function bundleExternalizedExtensions() {
     }
     const globalPath = path.join(globalDistRoot, name);
     copyDir(localPath, globalPath);
+    markBundledDist(globalPath);
     npmInstallExtensionDeps(globalPath);
     hoistExtensionDepsToDistRoot(
       path.join(globalPath, "node_modules"),
