@@ -2,6 +2,7 @@ import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { resolveActiveEmbeddedRunSessionId } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
+import { loadUserTurnTranscriptRecorderFactoryForTest } from "openclaw/plugin-sdk/plugin-test-runtime";
 import {
   appendSessionTranscriptMessageByIdentity,
   readSessionTranscriptEvents,
@@ -22,6 +23,8 @@ import {
   runCodexAppServerAttempt,
   setupRunAttemptTestHooks,
   tempDir,
+  threadStartResult,
+  turnStartResult,
 } from "./run-attempt-test-harness.js";
 import { attachSqliteSessionTarget } from "./sqlite-session.test-helpers.js";
 import { codexTranscriptMirrorRuntime } from "./transcript-mirror.js";
@@ -345,5 +348,113 @@ it("keeps one steering prefix and source through degraded tainted native complet
     vi.useRealTimers();
     await Promise.allSettled([fixture.run, ...notifications, ...(writer ? [writer] : [])]);
     fixture.closeHost();
+  }
+});
+
+it("retries the same run after accepted steering rotated the transcript generation", async () => {
+  const params = createTestParams();
+  await attachSqliteSessionTarget(
+    params,
+    path.join(tempDir, "steering-retry.sqlite"),
+    "steering-retry",
+  );
+  const target = {
+    agentId: "main",
+    sessionId: params.sessionId,
+    sessionKey: expectDefined(params.sessionKey, "steering retry session key"),
+    storePath: expectDefined(params.sessionTarget?.storePath, "steering retry store"),
+    sessionEntry: undefined,
+  };
+  const createRecorder = await loadUserTurnTranscriptRecorderFactoryForTest();
+  const original = createRecorder({
+    input: { text: params.prompt, idempotencyKey: "steering-retry-original:user" },
+    target,
+  });
+  await original.persistApproved();
+  const steering = createRecorder({
+    input: { text: steerText, idempotencyKey: "steering-retry-steer:user" },
+    target,
+  });
+  params.userTurnTranscriptRecorder = original;
+  params.toolAuthorityFingerprint = "steering-retry-authority";
+  const closeHost = await bindProductionHarnessHostCapabilitiesForTest(params);
+  const turnIds: string[] = [];
+  const harness = createStartedThreadHarness(async (method) => {
+    if (method === "thread/resume") {
+      return threadStartResult();
+    }
+    if (method === "turn/start") {
+      turnIds.push(`turn-${turnIds.length + 1}`);
+      return turnStartResult(turnIds.at(-1));
+    }
+    if (method === "turn/steer") {
+      return { turnId: "turn-1" };
+    }
+    return undefined;
+  });
+  const started = createDeferred<void>();
+  params.onAgentEvent = (event) => {
+    if (event.stream === "lifecycle" && event.data.phase === "start") {
+      started.resolve();
+    }
+  };
+  try {
+    const first = runCodexAppServerAttempt(params);
+    await started.promise;
+    const accepted = vi.fn();
+    expect(
+      queueActiveRunMessageForTest(params.sessionId, steerText, {
+        debounceMs: 0,
+        isInboundUserMessage: true,
+        toolAuthorityFingerprint: params.toolAuthorityFingerprint,
+        userTurnTranscriptRecorder: steering,
+        waitForTranscriptCommit: true,
+        onQueueAccepted: accepted,
+      }),
+    ).toBe(true);
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledExactlyOnceWith(true), fastWait);
+    const steer = expectDefined(
+      harness.requests.find((request) => request.method === "turn/steer"),
+      "native steer",
+    );
+    const clientId = expectDefined(
+      isJsonObject(steer.params) && typeof steer.params.clientUserMessageId === "string"
+        ? steer.params.clientUserMessageId
+        : undefined,
+      "native steer correlation",
+    );
+    await harness.notify(
+      itemNotification("item/completed", { id: "steered-user", type: "userMessage", clientId }),
+    );
+    // The reply-run registry stamps the accepted steer's target run, rotating the
+    // transcript generation that the original admission was captured under.
+    const staleGeneration = original.getAdmissionReceipt()?.generation;
+    await steering.confirmSteerTargetRunIdForPersistence?.(params.runId);
+    expect(steering.getAdmissionReceipt()?.generation).not.toBe(staleGeneration);
+    await harness.notify(turnCompleted({ id: "turn-1", status: "failed", items: [] }));
+    await first;
+
+    // The embedded runner's same-model retry reruns the attempt with the same
+    // run and original recorder.
+    const retried = runCodexAppServerAttempt(params);
+    const settledEarly = await Promise.race([
+      retried.then(
+        (result) => ({ result }),
+        (error: unknown) => ({ error }),
+      ),
+      vi.waitFor(() => expect(turnIds).toHaveLength(2), fastWait).then(() => undefined),
+    ]);
+    expect(settledEarly).toBeUndefined();
+    await harness.notify({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-2",
+        turn: { id: "turn-2", status: "completed", items: [] },
+      },
+    });
+    expect((await retried).terminal.kind).toBe("ok");
+  } finally {
+    closeHost();
   }
 });
