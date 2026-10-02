@@ -25,11 +25,21 @@ LOG_DIR="$HOME/logs"
 # --deploy-only runs stage 2 alone. The sync stage is a separate concern: when a
 # release bump is too large for the agent's single iteration it gets rebased by
 # hand, and the deploy still needs the tested path rather than hand-run steps.
+#
+# --target X.Y.Z pins the sync to upstream/release/X.Y.Z instead of the newest
+# release branch (validated in .sandcastle/sync.ts: must exist and not be older
+# than main). Use it when the newest cut is a fresh beta far ahead of the
+# deployed line and a smaller patch cut is the one to ship.
 RUN_SYNC=1
+USAGE="usage: $(basename "$0") [--deploy-only | --target X.Y.Z]"
 case "${1:-}" in
   --deploy-only) RUN_SYNC=0 ;;
+  --target)
+    [ -n "${2:-}" ] || { echo "$USAGE" >&2; exit 2; }
+    export SYNC_TARGET_RELEASE="$2"
+    ;;
   "") ;;
-  *) echo "usage: $(basename "$0") [--deploy-only]" >&2; exit 2 ;;
+  *) echo "$USAGE" >&2; exit 2 ;;
 esac
 
 # Where failure alerts go. openclaw runs as the openclaw user, so the send is

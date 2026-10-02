@@ -19,21 +19,29 @@ Follow `docs/UPSTREAM-SYNC.md` exactly. Key reminders per step:
 ### Step 2–4: Fetch + rebase onto the newest release branch
 
 This fork tracks the newest upstream **release** branch (e.g. `release/2026.6.5`),
-**not** `main`. `main` never carries version bumps — its `package.json` stays at a
+**not** `main` — unless the host pinned a specific release (see `TARGET` below);
+a pinned target is deliberate, so never substitute a newer branch for it. `main` never carries version bumps — its `package.json` stays at a
 baseline (e.g. `2026.6.2`) even as code lands — so the deployed version only
 advances when we rebase onto release branches.
 
 ```bash
 git fetch upstream --tags --prune
 
-# Newest release branch by version. Only `release/X.Y.Z` names qualify:
-# `release-ci/*` (hash-named CI snapshots) and any suffixed names are excluded,
-# and `sort -V` orders the dotted versions correctly.
-TARGET=$(git for-each-ref --format='%(refname:short)' 'refs/remotes/upstream/release/*' \
-  | sed 's#^upstream/release/##' \
-  | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
-  | sort -V | tail -1)
-echo "Newest release branch: upstream/release/$TARGET"
+# The host may pin the target (SYNC_TARGET_RELEASE, already validated: X.Y.Z,
+# fetched, not older than main). Empty means the newest release branch by
+# version. Only `release/X.Y.Z` names qualify: `release-ci/*` (hash-named CI
+# snapshots) and any suffixed names are excluded, and `sort -V` orders the
+# dotted versions correctly.
+TARGET="{{TARGET_RELEASE}}"
+if [ -z "$TARGET" ]; then
+  TARGET=$(git for-each-ref --format='%(refname:short)' 'refs/remotes/upstream/release/*' \
+    | sed 's#^upstream/release/##' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sort -V | tail -1)
+fi
+git rev-parse --verify --quiet "upstream/release/$TARGET" >/dev/null \
+  || { echo "STOP: upstream/release/$TARGET does not exist"; exit 1; }
+echo "Target release branch: upstream/release/$TARGET"
 
 # Fork-only commits = everything in `main` not contained in ANY upstream ref.
 # They form one contiguous chain at the tip of `main` (re-stacked every sync),
