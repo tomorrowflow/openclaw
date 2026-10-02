@@ -65,6 +65,12 @@ git for-each-ref --format='%(refname:short)' 'refs/remotes/upstream/release/*' \
 git log --oneline main --not --remotes=upstream
 ```
 
+To pin a specific release instead of the newest one (for example a small patch
+cut while the newest branch is a fresh beta far ahead of the deployed line), run
+`scripts/sync-and-deploy.sh --target X.Y.Z`. It sets `SYNC_TARGET_RELEASE`, which
+`.sandcastle/sync.ts` validates (the branch must exist and must not be older than
+the version `main` carries) before handing it to the agent as `TARGET`.
+
 ## 4. Rebase fork commits onto the newest release branch
 
 Replant our fork-specific patch stack on top of the newest upstream release

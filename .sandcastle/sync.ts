@@ -223,7 +223,59 @@ function describeCodexFailure(since: number): string | undefined {
   return undefined;
 }
 
+// ── Optional release pin ────────────────────────────────────────────────────
+//
+// By default the agent rebases onto the newest upstream `release/X.Y.Z` branch.
+// That is wrong when the newest cut is a fresh beta far ahead of the deployed
+// line (2026.10.1 landed 2005 commits over 2026.9.7, beyond what one agent
+// iteration can rebase) while a small patch cut (2026.9.8) is the one to ship.
+// SYNC_TARGET_RELEASE=X.Y.Z pins the target. Validate it here, before the
+// sandbox starts: a typo or a downgrade below the version main already carries
+// would otherwise only surface mid-rebase, or replant the fork onto an older
+// independent cut.
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    if (pa[i] !== pb[i]) {
+      return pa[i] - pb[i];
+    }
+  }
+  return 0;
+}
+
+function resolvePinnedRelease(): string {
+  const pinned = process.env.SYNC_TARGET_RELEASE?.trim() ?? "";
+  if (!pinned) {
+    return "";
+  }
+  if (!/^\d+\.\d+\.\d+$/.test(pinned)) {
+    throw new Error(
+      `sync preflight: SYNC_TARGET_RELEASE="${pinned}" is not a release version (X.Y.Z).`,
+    );
+  }
+  try {
+    git(
+      "fetch",
+      "upstream",
+      `+refs/heads/release/${pinned}:refs/remotes/upstream/release/${pinned}`,
+    );
+  } catch {
+    throw new Error(`sync preflight: upstream has no release/${pinned} branch.`);
+  }
+  const current = JSON.parse(git("show", "HEAD:package.json")).version as string;
+  if (compareVersions(pinned, current) < 0) {
+    throw new Error(
+      `sync preflight: SYNC_TARGET_RELEASE=${pinned} is older than main's ${current}. ` +
+        "Release branches are independent cuts; rebasing onto an older one is a downgrade.",
+    );
+  }
+  console.log(`[sync] pinned target release: upstream/release/${pinned} (main is ${current})`);
+  return pinned;
+}
+
 const preSyncOrigin = reconcileWithOrigin();
+const pinnedRelease = resolvePinnedRelease();
 const runStartedAt = Date.now();
 
 const { output } = await run({
@@ -249,6 +301,8 @@ const { output } = await run({
   agent: codex("gpt-5.6-terra"),
 
   promptFile: "./.sandcastle/sync-prompt.md",
+  // Empty selects the newest release branch; see resolvePinnedRelease.
+  promptArgs: { TARGET_RELEASE: pinnedRelease },
 
   // Must stay 1: sandcastle rejects `output` (the structured sync-result schema
   // below) on multi-iteration runs — "output requires maxIterations to be 1".
