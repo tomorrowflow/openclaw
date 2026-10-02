@@ -8,6 +8,8 @@ import {
   isHostScopedAgentToolActive,
   resolveContextEngineOwnerPluginId,
   runHarnessContextEngineMaintenance,
+  type AgentMessage,
+  type EmbeddedRunAttemptParamsV2 as EmbeddedRunAttemptParams,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import {
   buildCodexOpenClawPromptContext,
@@ -29,6 +31,17 @@ import {
   buildDeveloperInstructions,
   type CodexContextEngineThreadBootstrapProjection,
 } from "./thread-lifecycle.js";
+
+// Accepted steering rewrites the transcript and rotates its generation, so a same-run
+// retry can no longer read through the original admission. The fenced read ends before
+// that admission and excludes this run's own results, so the first attempt's snapshot
+// is exactly what a reread would return. Keyed by recorder: one logical run's lifetime.
+// Context-engine bootstrap and assembly still read through the receipt; their engine-owned
+// effects are not cacheable here, so those retries keep failing closed until core refreshes it.
+const retainedFencedHistories = new WeakMap<
+  NonNullable<EmbeddedRunAttemptParams["userTurnTranscriptRecorder"]>,
+  { scope: string; messages: AgentMessage[] }
+>();
 
 export async function prepareCodexAttemptContext(
   runtime: CodexAttemptRuntime,
@@ -77,11 +90,40 @@ export async function prepareCodexAttemptContext(
     connection.assertCurrent();
     return messages;
   };
+  const readRetainedFencedHistory = async () => {
+    const recorder = params.userTurnTranscriptRecorder;
+    const admission = recorder?.getAdmissionReceipt();
+    if (!recorder || !admission) {
+      return await readFencedHistory();
+    }
+    const scope = JSON.stringify([
+      params.runId,
+      admission.entryId,
+      activeTranscriptTarget.agentId,
+      activeTranscriptTarget.sessionId,
+      activeTranscriptTarget.sessionKey,
+      activeTranscriptTarget.sessionFile,
+      params.sessionTarget?.storePath,
+      effectiveContextTokenBudget,
+    ]);
+    const retained = retainedFencedHistories.get(recorder);
+    if (retained?.scope === scope) {
+      connection.runAbortController.signal.throwIfAborted();
+      connection.assertCurrent();
+      return [...retained.messages];
+    }
+    retainedFencedHistories.delete(recorder);
+    const messages = await readFencedHistory();
+    if (messages) {
+      retainedFencedHistories.set(recorder, { scope, messages: [...messages] });
+    }
+    return messages;
+  };
   const historyState = {
     messages:
       !activeContextEngine && initialStartupBindingHadInactiveThreadBootstrap
         ? []
-        : ((await readFencedHistory()) ?? []),
+        : ((await readRetainedFencedHistory()) ?? []),
   };
   const hadSessionTranscriptState = historyState.messages.length > 0;
   const hookContextWindowFields = {
