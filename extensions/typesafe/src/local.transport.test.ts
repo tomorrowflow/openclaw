@@ -95,17 +95,30 @@ it("refuses to send the local Kev selection to hosted inference through register
   expect(fetch).not.toHaveBeenCalled();
 });
 
-it.each(["http://127.0.0.1:8009/", "https://localhost"])(
-  "accepts an explicit loopback origin %s",
-  (url) => {
-    expect(runtimeConfig({ baseUrl: url, apiKey: "ignored-secret" })).toEqual({
-      baseUrl: new URL(url).origin,
-      timeoutMs: 30000,
-    });
-  },
-);
+it.each([
+  "http://localhost:8009",
+  "http://127.0.0.1:8009/",
+  "http://[::1]:8009",
+  "https://localhost",
+  "http://192.168.1.2:8009",
+  "http://10.0.0.5:11434",
+  "http://172.31.255.1",
+  "http://100.113.22.76:11434",
+])("accepts an explicit loopback or private IPv4 origin %s", (url) => {
+  expect(runtimeConfig({ baseUrl: url, apiKey: "ignored-secret" })).toEqual({
+    baseUrl: new URL(url).origin,
+    timeoutMs: 30000,
+  });
+});
 
 it.each([
+  "",
+  "http://8.8.8.8:11434",
+  "http://172.32.0.1",
+  "http://100.128.0.1",
+  "http://192.168.010.1",
+  "http://10.0.0.256",
+  "http://gpu.lan:11434",
   "https://remote.example",
   "http://localhost.example",
   "http://localhost:8009/v1",
@@ -120,6 +133,21 @@ it.each([
   null,
 ])("rejects non-origin, non-loopback, or ambiguous endpoint %s", (url) => {
   expect(() => runtimeConfig({ baseUrl: url })).toThrow("baseUrl");
+});
+
+it("sends the configured local model name and accepts its name:tag report", async () => {
+  const fetch = vi.fn(
+    async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ...localAnswer, model: "tev1:4b" })),
+  );
+  vi.stubGlobal("fetch", fetch);
+  const config = runtimeConfig({ baseUrl: "http://192.168.2.17:11434", localModel: "tev1:4b" });
+  await expect(evaluate(input, config)).resolves.toHaveProperty("evaluation.model", "tev1:4b");
+  const [url, init] = fetch.mock.calls[0] ?? [];
+  expect(url).toBe("http://192.168.2.17:11434/v1/systemone");
+  assert(typeof init?.body === "string");
+  expect(JSON.parse(init.body)).toHaveProperty("model", "tev1:4b");
+  expect(() => runtimeConfig({ baseUrl, localModel: "tev1 4b" })).toThrow("localModel");
 });
 
 it.each([
