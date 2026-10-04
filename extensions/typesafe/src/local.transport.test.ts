@@ -150,6 +150,34 @@ it("sends the configured local model name and accepts its name:tag report", asyn
   expect(() => runtimeConfig({ baseUrl, localModel: "tev1 4b" })).toThrow("localModel");
 });
 
+it("fills omitted instructions for a name-routed server, which rejects null", async () => {
+  const fetch = vi.fn(
+    async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ ...localAnswer, model: "tev1:4b" })),
+  );
+  vi.stubGlobal("fetch", fetch);
+  await evaluate(
+    input,
+    runtimeConfig({ baseUrl: "http://192.168.2.17:11434", localModel: "tev1:4b" }),
+  );
+  const init = fetch.mock.calls[0]?.[1];
+  assert(typeof init?.body === "string");
+  const sent = JSON.parse(init.body).questions;
+  expect(sent.c.instructions).toBe("Select the option that best matches the state.");
+  expect(sent.s.instructions).toBe("Select the level that best matches the state.");
+  expect(sent.b.instructions).toEqual({ question: "Escalate?" });
+});
+
+it("reports a local 400 as unsupported input, not an unreachable server", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response('{"error":"bad question"}', { status: 400 })),
+  );
+  await expect(evaluate(input, runtimeConfig({ baseUrl }))).rejects.toMatchObject({
+    reason: "unsupported-input",
+  });
+});
+
 it.each([
   { ...localAnswer, latency_ms: -1 },
   { ...localAnswer, latency_ms: "15" },

@@ -1,9 +1,23 @@
 import { parseResult, type Evaluation, type EvaluationInput } from "./schema.js";
 
-export function localInput(input: EvaluationInput): EvaluationInput {
+// Ollama's /v1/systemone requires nonempty instructions where Kev accepts null. The
+// decision contract makes them optional, so a name-routed server gets the judgment the
+// criteria already express, stated neutrally per question type.
+const DEFAULT_INSTRUCTIONS = {
+  choice: "Select the option that best matches the state.",
+  score: "Select the level that best matches the state.",
+  noul: "Decide whether the true description applies to the state.",
+} as const;
+
+export function localInput(
+  input: EvaluationInput,
+  options: { requireInstructions?: boolean } = {},
+): EvaluationInput {
   const questions: EvaluationInput["questions"] = {};
   for (const [id, question] of Object.entries(input.questions)) {
-    const instructions = question.instructions ?? null;
+    const instructions =
+      question.instructions ??
+      (options.requireInstructions ? DEFAULT_INSTRUCTIONS[question.type] : null);
     if (question.type === "score") {
       questions[id] = {
         ...question,
