@@ -31,7 +31,8 @@ export async function evaluate(
   try {
     const wireInput = config.baseUrl ? localInput(parsed) : parsed;
     const response = await requestEvaluation({
-      body: { ...wireInput, model },
+      // Kev serves its loaded checkpoint whatever the label; Ollama routes by model name.
+      body: { ...wireInput, model: (config.baseUrl && config.localModel) || model },
       apiKey: config.baseUrl ? undefined : config.apiKey,
       baseUrl: config.baseUrl,
       timeoutMs: config.timeoutMs,

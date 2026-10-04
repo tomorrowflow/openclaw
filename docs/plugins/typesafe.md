@@ -170,11 +170,40 @@ whose model label names Jev. Model selection does not choose between hosted and
 local endpoints. The `kev-latest` label requires `baseUrl` and is never sent to
 the hosted TypeSafe endpoint.
 
-`baseUrl` accepts HTTP or HTTPS on `localhost`, `127.0.0.1`, or `[::1]`, with an
-optional port and trailing slash. Supply the origin, without `/v1`, credentials,
-query, or fragment; the plugin appends `/v1/systemone`. LAN and remote hosts are
-not accepted. Ordinary ambient HTTP proxy variables are not used for these
-requests; explicitly enabled managed proxy policy still applies.
+`baseUrl` accepts HTTP or HTTPS on `localhost`, `127.0.0.1`, `[::1]`, or a
+private IPv4 literal (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, or the
+`100.64.0.0/10` range Tailscale uses), with an optional port and trailing slash.
+Supply the origin, without `/v1`, credentials, query, or fragment; the plugin
+appends `/v1/systemone`. Hostnames other than `localhost` and public addresses
+are not accepted, and evidence sent to a private address leaves this machine.
+Ordinary ambient HTTP proxy variables are not used for these requests;
+explicitly enabled managed proxy policy still applies.
+
+### Ollama decision models
+
+Ollama 0.35 and later serve decision models such as `tev1` and `nimble` at
+`/v1/systemone`. Unlike Kev, Ollama routes each request by its model name, so set
+`localModel` to the Ollama model and keep `typesafe/kev-latest` as the selected
+decision model:
+
+```json5
+{
+  plugins: {
+    entries: {
+      typesafe: {
+        enabled: true,
+        config: { baseUrl: "http://192.168.2.17:11434", localModel: "tev1:4b" },
+      },
+    },
+  },
+  agents: {
+    defaults: { decisionModel: "typesafe/kev-latest" },
+  },
+}
+```
+
+Results report the Ollama model name, such as `tev1:4b`. `localModel` is
+ignored without `baseUrl`.
 
 Kev runs one checkpoint per server process. Its request model label does not
 load or switch weights. Choose the checkpoint when starting the server and

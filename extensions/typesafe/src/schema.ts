@@ -34,7 +34,8 @@ const instructions = Type.Optional(
       "The complete judgment to make; question IDs are not read by the model. Text, structured object/array, or null. May be omitted when criteria express the judgment.",
   }),
 );
-const model = Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9._/-]+$" });
+// Admits Ollama's name:tag form, which a local server reports back as the model.
+const model = Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9._/:-]+$" });
 const probability = Type.Number({ minimum: 0, maximum: 1 });
 const objectOptions = { additionalProperties: false };
 const noulQuestion = Type.Object(
