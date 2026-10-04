@@ -12,7 +12,7 @@ import { MAX_JSON_BYTES, type EvaluationInput } from "./schema.js";
 
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 
-function httpError(response: Response): EvaluationError {
+function httpError(response: Response, local: boolean): EvaluationError {
   if (response.status === 401 || response.status === 403) {
     return new EvaluationError(
       "TypeSafe authentication failed; check the configured credential and account access.",
@@ -37,7 +37,8 @@ function httpError(response: Response): EvaluationError {
   }
   // 422 is documented request validation; 413 is HTTP Content Too Large.
   // Neither establishes the exact tokenizer/context cause, and bodies may reflect secrets.
-  if (response.status === 413 || response.status === 422) {
+  // A local server reports request validation as 400 (Ollama names the offending field).
+  if (response.status === 413 || response.status === 422 || (local && response.status === 400)) {
     return new EvaluationError("TypeSafe rejected the supplied input.", "unsupported-input");
   }
   return new EvaluationError("TypeSafe service rejected the evaluation request.", "transport");
@@ -160,7 +161,7 @@ export async function requestEvaluation(params: {
       if (!response.ok) {
         // Error payloads may reflect credentials or supplied state. Never consume or expose them.
         await response.body?.cancel();
-        throw httpError(response);
+        throw httpError(response, Boolean(baseUrl));
       }
       const bytes = await readBody(response, signal);
       try {

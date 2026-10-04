@@ -29,7 +29,9 @@ export async function evaluate(
     throw new Error("TypeSafe API key is missing. Configure a SecretRef in plugin Settings.");
   }
   try {
-    const wireInput = config.baseUrl ? localInput(parsed) : parsed;
+    const wireInput = config.baseUrl
+      ? localInput(parsed, { requireInstructions: Boolean(config.localModel) })
+      : parsed;
     const response = await requestEvaluation({
       // Kev serves its loaded checkpoint whatever the label; Ollama routes by model name.
       body: { ...wireInput, model: (config.baseUrl && config.localModel) || model },
