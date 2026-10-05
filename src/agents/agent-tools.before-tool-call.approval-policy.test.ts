@@ -1,10 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { GATEWAY_RESTART_UNAVAILABLE_REASON } from "../../packages/gateway-protocol/src/restart-unavailable.js";
+import { GatewayClientRequestError } from "../gateway/client.js";
 import { resetDiagnosticEventsForTest } from "../infra/diagnostic-events.js";
 import { resetDiagnosticRunActivityForTest } from "../logging/diagnostic-run-activity.js";
 import { resetDiagnosticSessionStateForTest } from "../logging/diagnostic-session-state.js";
 import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
 import { setActivePluginRegistry } from "../plugins/runtime.js";
 import { setPluginToolMeta } from "../plugins/tool-metadata.js";
+import {
+  isGatewayRestartBlockedSession,
+  markGatewayRestartDraining,
+  resetGatewayWorkAdmission,
+} from "../process/gateway-work-admission.js";
 import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
 import { toToolDefinitions } from "./agent-tool-definition-adapter.js";
 import {
@@ -118,5 +125,50 @@ describe("plugin approval policy subject and setup guidance", () => {
       accountId: "default",
     });
     expect(mockCallGateway).toHaveBeenCalledTimes(1);
+  });
+
+  it("parks a call the restart drain refuses until its run aborts", async () => {
+    hookRunner.runBeforeToolCall.mockResolvedValue({
+      requireApproval: { title: "Approval", description: "Restart drain refusal" },
+    });
+    markGatewayRestartDraining();
+    try {
+      const run = new AbortController();
+      mockCallGateway.mockRejectedValueOnce(
+        new GatewayClientRequestError({ code: "UNAVAILABLE", message: "approval service down" }),
+      );
+      const unrelated = await runBeforeToolCallHook({
+        toolName: "diffs",
+        params: {},
+        ctx: { agentId: "main", sessionKey: "main", sessionId: "unrelated-session" },
+        signal: run.signal,
+      });
+      expect(unrelated).toHaveProperty("reason", "Plugin approval required (gateway unavailable)");
+      expect(isGatewayRestartBlockedSession("unrelated-session")).toBe(false);
+
+      mockCallGateway.mockRejectedValueOnce(
+        new GatewayClientRequestError({
+          code: "UNAVAILABLE",
+          message: "plugin.approval.request unavailable during gateway restart",
+          details: {
+            method: "plugin.approval.request",
+            reason: GATEWAY_RESTART_UNAVAILABLE_REASON,
+          },
+        }),
+      );
+      const parked = runBeforeToolCallHook({
+        toolName: "diffs",
+        params: {},
+        ctx: { agentId: "main", sessionKey: "main", sessionId: "restart-session" },
+        signal: run.signal,
+      });
+      await vi.waitFor(() => expect(isGatewayRestartBlockedSession("restart-session")).toBe(true));
+
+      run.abort();
+      await expect(parked).resolves.toHaveProperty("reason", "Approval cancelled (run aborted)");
+      expect(isGatewayRestartBlockedSession("restart-session")).toBe(false);
+    } finally {
+      resetGatewayWorkAdmission();
+    }
   });
 });

@@ -6,8 +6,10 @@ export async function waitForGatewayDrain<Snapshot extends { idle: boolean }>(
     pollMs: number;
     ref?: boolean;
     onSnapshot?: (snapshot: Snapshot) => void;
+    /** Ends the wait early when the remaining work cannot settle by waiting. */
+    release?: (snapshot: Snapshot) => boolean;
   },
-): Promise<{ drained: boolean; elapsedMs: number; snapshot: Snapshot }> {
+): Promise<{ drained: boolean; released?: true; elapsedMs: number; snapshot: Snapshot }> {
   const startedAt = Date.now();
   const deadlineAt =
     typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
@@ -17,6 +19,9 @@ export async function waitForGatewayDrain<Snapshot extends { idle: boolean }>(
     const snapshot = inspect();
     options.onSnapshot?.(snapshot);
     const elapsedMs = Date.now() - startedAt;
+    if (!snapshot.idle && options.release?.(snapshot)) {
+      return { drained: false, released: true, elapsedMs, snapshot };
+    }
     const remainingMs = deadlineAt === undefined ? undefined : deadlineAt - Date.now();
     if (snapshot.idle || (remainingMs !== undefined && remainingMs <= 0)) {
       return { drained: snapshot.idle, elapsedMs, snapshot };

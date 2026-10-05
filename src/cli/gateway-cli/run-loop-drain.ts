@@ -12,6 +12,49 @@ import { formatShutdownReason } from "./run-loop-shutdown-format.js";
 
 const RESTART_DRAIN_STILL_PENDING_WARN_MS = 30_000;
 
+/**
+ * True when every active embedded run is parked on an approval the draining
+ * Gateway refuses, so waiting cannot let it finish. Shutdown then hands those
+ * runs to restart recovery. Unattributed counts stay within what the parked runs
+ * hold themselves (one reply and root request each, plus a session lane task
+ * wrapping its global lane task), so another owner's in-flight delivery, lane
+ * task, or request keeps the drain waiting.
+ */
+function isOnlyRestartBlockedRunWork(
+  snapshot: GatewayActiveWorkSnapshot,
+  runtime: Pick<
+    typeof import("./lifecycle.runtime.js"),
+    "listActiveEmbeddedRunSessionIds" | "isGatewayRestartBlockedSession"
+  >,
+): boolean {
+  const { counts } = snapshot;
+  if (
+    counts.embeddedRuns === 0 ||
+    counts.agentRuns > counts.embeddedRuns ||
+    counts.sessionAdmissions > counts.embeddedRuns ||
+    counts.pendingReplies > counts.embeddedRuns ||
+    counts.rootRequests > counts.embeddedRuns ||
+    counts.chatRuns > counts.embeddedRuns ||
+    counts.queueSize > 2 * counts.embeddedRuns ||
+    counts.backgroundExecSessions +
+      counts.cronRuns +
+      counts.acpRuns +
+      counts.mediaRuns +
+      counts.sessionMutations +
+      counts.terminalPersistence +
+      counts.terminalSessions +
+      counts.lifecycleWrites >
+      0
+  ) {
+    return false;
+  }
+  const sessionIds = runtime.listActiveEmbeddedRunSessionIds();
+  return (
+    sessionIds.length >= counts.embeddedRuns &&
+    sessionIds.every((sessionId) => runtime.isGatewayRestartBlockedSession(sessionId))
+  );
+}
+
 export async function drainGatewayActiveWork({
   request,
   runtime,
@@ -28,9 +71,10 @@ export async function drainGatewayActiveWork({
   recordCounts: (counts: string) => void;
   recordWarning: (warning: string) => void;
   logger: Pick<SubsystemLogger, "info" | "warn">;
-}) {
+}): Promise<{ drainCutShort: boolean; releasedBlockedRuns: boolean }> {
   const { restartIntent } = request;
   let drainTimedOut = false;
+  let approvalBlocked = false;
   const reportDrainSnapshot = createGatewayDrainReporter(
     request.action,
     drainTimeoutMs,
@@ -66,11 +110,19 @@ export async function drainGatewayActiveWork({
             : Math.max(0, restartDrainDeadlineAt - Date.now());
         const drain = await waitForGatewayActiveWork(remainingDrainTimeoutMs, {
           onSnapshot: reportDrainSnapshot,
+          release: (snapshot) => isOnlyRestartBlockedRunWork(snapshot, runtime),
         });
         if (drain.drained) {
           if (!initialSnapshot.idle) {
             logger.info("all active work drained");
           }
+          return;
+        }
+        if (drain.released) {
+          approvalBlocked = true;
+          const warning = `restart drain ended early: remaining run(s) are parked on approvals the restarting gateway cannot grant; handing them to restart recovery ${formatGatewayDrainCounts(drain.snapshot)}`;
+          recordWarning(warning);
+          logger.warn(warning);
           return;
         }
         drainTimedOut = true;
@@ -84,6 +136,7 @@ export async function drainGatewayActiveWork({
         ["activeWork", activeWorkAtDrainStart],
         ["activeRuns", activeRunsAtDrainStart],
         ["timedOut", drainTimedOut],
+        ["approvalBlocked", approvalBlocked],
         ["force", restartIntent?.force === true],
       ],
     );
@@ -113,7 +166,7 @@ export async function drainGatewayActiveWork({
     logger.info("active-work drain settled; beginning server close");
   }
   beginGatewayShutdownCleanup();
-  return drainTimedOut;
+  return { drainCutShort: drainTimedOut, releasedBlockedRuns: approvalBlocked };
 }
 
 function createGatewayDrainReporter(

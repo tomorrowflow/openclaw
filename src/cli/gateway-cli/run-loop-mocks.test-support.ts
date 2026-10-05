@@ -152,16 +152,21 @@ const scheduleGatewayRestart = vi.fn((_opts?: { delayMs?: number; reason?: strin
 }));
 const idleActiveWorkSnapshot = createActiveWorkSnapshot();
 const createGatewayActiveWorkSnapshot = vi.fn(() => idleActiveWorkSnapshot);
+type ActiveWorkWaitOptions = {
+  onSnapshot?: (snapshot: GatewayActiveWorkSnapshot) => void;
+  release?: (snapshot: GatewayActiveWorkSnapshot) => boolean;
+};
 const waitForGatewayActiveWork = vi.fn(
   async (
     _timeoutMs?: number,
-    options?: { onSnapshot?: (snapshot: GatewayActiveWorkSnapshot) => void },
-  ) => {
+    options?: ActiveWorkWaitOptions,
+  ): Promise<{ drained: boolean; released?: true; snapshot: GatewayActiveWorkSnapshot }> => {
     const snapshot = createGatewayActiveWorkSnapshot();
     options?.onSnapshot?.(snapshot);
     return { drained: snapshot.idle, snapshot };
   },
 );
+const listActiveEmbeddedRunSessionIds = vi.fn((): string[] => []);
 const advanceCronActiveJobGeneration = vi.fn();
 const resetCronActiveJobs = vi.fn();
 const abortActiveCronTaskRuns = vi.fn((_reason?: string) => 0);
@@ -314,10 +319,15 @@ vi.mock("../../infra/restart-handoff.js", () => ({
 
 vi.mock("../../infra/gateway-active-work.js", () => ({
   createGatewayActiveWorkSnapshot: () => createGatewayActiveWorkSnapshot(),
-  waitForGatewayActiveWork: (
-    timeoutMs?: number,
-    options?: { onSnapshot?: (snapshot: GatewayActiveWorkSnapshot) => void },
-  ) => waitForGatewayActiveWork(timeoutMs, options),
+  waitForGatewayActiveWork: (timeoutMs?: number, options?: ActiveWorkWaitOptions) =>
+    waitForGatewayActiveWork(timeoutMs, options),
+}));
+
+vi.mock("../../agents/embedded-agent-runner/active-run-projections.js", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("../../agents/embedded-agent-runner/active-run-projections.js")
+  >()),
+  listActiveEmbeddedRunSessionIds: () => listActiveEmbeddedRunSessionIds(),
 }));
 
 vi.mock("../../cron/active-jobs.js", () => ({
@@ -495,6 +505,8 @@ beforeEach(async () => {
     options?.onSnapshot?.(snapshot);
     return { drained: snapshot.idle, snapshot };
   });
+  listActiveEmbeddedRunSessionIds.mockReset();
+  listActiveEmbeddedRunSessionIds.mockReturnValue([]);
   cancelManagedServiceUpdateHandoff.mockReset();
   cancelManagedServiceUpdateHandoff.mockResolvedValue("restored-in-process");
   claimManagedServiceUpdateHandoff.mockReset();
@@ -575,6 +587,7 @@ export const runLoopFixture = {
   waitForActiveCronJobs,
   waitForActiveCronTaskRuns,
   waitForGatewayActiveWork,
+  listActiveEmbeddedRunSessionIds,
   waitForGatewayHealthyRestart,
   waitForSystemServiceUpdateHandoffs,
   writeDiagnosticStabilityBundleForFailureSync,

@@ -39,6 +39,8 @@ type GatewayWorkAdmissionState = {
   restartDrainReason: GatewayDrainReason | undefined;
   restartDrainController: AbortController;
   shutdownCleanupController: AbortController;
+  /** Parked tool calls per session that need an approval this restart drain refuses. */
+  restartBlockedSessions: Map<string, number>;
   restartSignalPending: boolean;
   restartSignalGeneration: number;
   suspendPhase: GatewaySuspendAdmissionPhase;
@@ -64,6 +66,7 @@ const GATEWAY_WORK_ADMISSION_STATE = resolveGlobalSingleton(
     restartDrainReason: undefined,
     restartDrainController: new AbortController(),
     shutdownCleanupController: createShutdownCleanupController(),
+    restartBlockedSessions: new Map(),
     restartSignalPending: false,
     restartSignalGeneration: 0,
     suspendPhase: "accepting",
@@ -298,6 +301,37 @@ export function beginGatewayShutdownCleanup(): void {
   if (GATEWAY_WORK_ADMISSION_STATE.restartDrainReason !== undefined) {
     GATEWAY_WORK_ADMISSION_STATE.shutdownCleanupController.abort();
   }
+}
+
+/**
+ * Records a tool call parked until the restart completes because it needs an
+ * approval this drain refuses, so the drain need not wait for its run. Only the
+ * one-way drain records; the reversible signal fence can still reopen
+ * admission. Returns the release for when the parked call ends.
+ */
+export function markGatewayRestartBlockedSession(sessionId: string): (() => void) | undefined {
+  if (GATEWAY_WORK_ADMISSION_STATE.restartDrainReason === undefined) {
+    return undefined;
+  }
+  const blocked = GATEWAY_WORK_ADMISSION_STATE.restartBlockedSessions;
+  blocked.set(sessionId, (blocked.get(sessionId) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    const remaining = (blocked.get(sessionId) ?? 0) - 1;
+    if (remaining > 0) {
+      blocked.set(sessionId, remaining);
+    } else {
+      blocked.delete(sessionId);
+    }
+  };
+}
+
+export function isGatewayRestartBlockedSession(sessionId: string): boolean {
+  return GATEWAY_WORK_ADMISSION_STATE.restartBlockedSessions.has(sessionId);
 }
 
 export function isGatewayRestartDrainError(error: unknown): error is GatewayDrainingError {
@@ -694,6 +728,7 @@ export function resetGatewayWorkAdmission(): void {
   GATEWAY_WORK_ADMISSION_STATE.restartDrainController = new AbortController();
   GATEWAY_WORK_ADMISSION_STATE.shutdownCleanupController.abort();
   GATEWAY_WORK_ADMISSION_STATE.shutdownCleanupController = createShutdownCleanupController();
+  GATEWAY_WORK_ADMISSION_STATE.restartBlockedSessions.clear();
   GATEWAY_WORK_ADMISSION_STATE.restartSignalPending = false;
   GATEWAY_WORK_ADMISSION_STATE.restartSignalGeneration += 1;
   if (GATEWAY_WORK_ADMISSION_STATE.suspendPhase !== "accepting") {

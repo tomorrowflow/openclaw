@@ -754,7 +754,7 @@ export async function runGatewayLoop(params: {
         // before process exit can strand an external fixing agent.
         await restartRecovery.waitForCleanup();
         shutdownStep = "active-work-drain";
-        const drainCutShort = await drainGatewayActiveWork({
+        const drainOutcome = await drainGatewayActiveWork({
           request: acceptedRequest,
           runtime: eagerLifecycleRuntime,
           drainTimeoutMs: drainBudget.drainTimeoutMs,
@@ -815,10 +815,18 @@ export async function runGatewayLoop(params: {
             server?.close({
               reason: isRestart ? "gateway restarting" : "gateway stopping",
               restartExpectedMs: isRestart ? 1500 : null,
-              ...(isRestart ? { drainTimeoutMs: drainBudget.closeDrainTimeoutMs() } : {}),
+              ...(isRestart
+                ? {
+                    // Released runs cannot settle; joining them again would spend
+                    // the budget the active-work drain just declined to wait for.
+                    drainTimeoutMs: drainOutcome.releasedBlockedRuns
+                      ? 0
+                      : drainBudget.closeDrainTimeoutMs(),
+                  }
+                : {}),
               ...loopExit.interruptedShutdownExitOptions({
                 request: acceptedRequest,
-                drainCutShort,
+                drainCutShort: drainOutcome.drainCutShort,
                 ownsProcessLifecycle: params.ownsProcessLifecycle,
                 runtime: eagerLifecycleRuntime,
                 logger: gatewayLog,

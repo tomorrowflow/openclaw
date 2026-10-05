@@ -60,6 +60,7 @@ const {
   idleActiveWorkSnapshot,
   createGatewayActiveWorkSnapshot,
   waitForGatewayActiveWork,
+  listActiveEmbeddedRunSessionIds,
   advanceCronActiveJobGeneration,
   resetCronActiveJobs,
   abortActiveCronTaskRuns,
@@ -813,6 +814,48 @@ describe("runGatewayLoop", () => {
         restartExpectedMs: null,
       });
     }).finally(() => clock.mockRestore());
+  });
+
+  it("releases runs blocked on refused approvals without a second close drain", async () => {
+    consumeGatewayRestartIntentPayloadSync.mockReturnValueOnce({});
+    // Mirrors the observed channel turn: one run holds every run-owned count.
+    const blockedSnapshot = createActiveWorkSnapshot(
+      { queueSize: 2, pendingReplies: 1, embeddedRuns: 1, agentRuns: 1, sessionAdmissions: 1 },
+      [{ kind: "embedded-run", count: 1, message: "1 active embedded run(s)" }],
+    );
+    createGatewayActiveWorkSnapshot.mockReturnValue(blockedSnapshot);
+    listActiveEmbeddedRunSessionIds.mockReturnValue(["approval-session"]);
+    const releaseChecks: boolean[] = [];
+    waitForGatewayActiveWork.mockImplementationOnce(async (_timeoutMs, options) => {
+      releaseChecks.push(options?.release?.(blockedSnapshot) === true);
+      gatewayWorkAdmissionActual.markGatewayRestartBlockedSession("approval-session");
+      // Another session's in-flight delivery is not owned by the parked run.
+      const foreignReply = createActiveWorkSnapshot({
+        ...blockedSnapshot.counts,
+        pendingReplies: 2,
+      });
+      releaseChecks.push(options?.release?.(foreignReply) === true);
+      releaseChecks.push(options?.release?.(blockedSnapshot) === true);
+      return { drained: false, released: true, snapshot: blockedSnapshot };
+    });
+
+    await withIsolatedSignals(async ({ captureSignal }) => {
+      const { close, start, exited } = await createSignaledLoopHarness();
+      const sigterm = captureSignal("SIGTERM");
+
+      sigterm();
+      await waitForLoopTurn();
+      await waitForLoopTurn();
+
+      expect(releaseChecks).toEqual([false, false, true]);
+      expect(gatewayLog.warn).toHaveBeenCalledWith(
+        "restart drain ended early: remaining run(s) are parked on approvals the restarting gateway cannot grant; handing them to restart recovery queueSize=2 pendingReplies=1 embeddedRuns=1 agentRuns=1 sessionAdmissions=1",
+      );
+      expect(close).toHaveBeenCalledWith(expect.objectContaining({ drainTimeoutMs: 0 }));
+      expect(start).toHaveBeenCalledOnce();
+
+      await expect(exited).resolves.toBe(0);
+    });
   });
 
   it("advances stale cron active markers after bounded restart cron-run drain", async () => {

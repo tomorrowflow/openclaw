@@ -4,6 +4,7 @@
  * timeout classification, and owner-provided approval outcomes.
  */
 import { addTimerTimeoutGraceMs } from "@openclaw/normalization-core/number-coercion";
+import { isGatewayRestartUnavailableError } from "../../packages/gateway-protocol/src/restart-unavailable.js";
 import { getRuntimeConfig } from "../config/config.js";
 import { GatewayClientRequestError } from "../gateway/client.js";
 import { sanitizeApprovalScope } from "../infra/approval-scope.js";
@@ -26,6 +27,7 @@ import {
   type PluginApprovalResolution,
   type PluginHookBeforeToolCallResult,
 } from "../plugins/types.js";
+import { markGatewayRestartBlockedSession } from "../process/gateway-work-admission.js";
 import { resolveSkillWorkshopToolApproval } from "../skills/workshop/policy.js";
 import { isPlainObject } from "../utils.js";
 import { resolveToolErrorDiagnostic } from "./agent-tools.before-tool-call.diagnostics.js";
@@ -406,6 +408,33 @@ async function requestPluginToolApproval(params: {
         : invalidRequest && gatewayApprovalPhase === "wait"
           ? `Plugin approval no longer available: ${formatErrorMessage(err)}`
           : "Plugin approval required (gateway unavailable)";
+    const releaseRestartBlock =
+      isGatewayRestartUnavailableError(err) && params.ctx?.sessionId && signal && !signal.aborted
+        ? markGatewayRestartBlockedSession(params.ctx.sessionId)
+        : undefined;
+    if (releaseRestartBlock && signal) {
+      // No approval can be granted until the successor Gateway is up. Park the
+      // call instead of failing it to the model, so the run stays blocked and
+      // the restart drain hands it to restart recovery instead of waiting.
+      log.warn(
+        `plugin approval unavailable during gateway restart; parking tool call: ${String(err)}`,
+      );
+      try {
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      } finally {
+        releaseRestartBlock();
+      }
+      return {
+        blocked: true,
+        kind: "failure",
+        disposition: resolveToolErrorDiagnostic(signal.reason, signal).terminalReason,
+        deniedReason: "plugin-approval",
+        reason: "Approval cancelled (run aborted)",
+        params: params.baseParams,
+      };
+    }
     log.warn(`plugin approval gateway request failed; blocking tool call: ${String(err)}`);
     return {
       blocked: true,
