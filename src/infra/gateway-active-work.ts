@@ -70,6 +70,8 @@ export type GatewayActiveWorkSnapshot = {
 
 type GatewayActiveWorkWaitResult = {
   drained: boolean;
+  /** The caller's release predicate ended the wait before the inventory was idle. */
+  released?: true;
   snapshot: GatewayActiveWorkSnapshot;
 };
 
@@ -213,7 +215,11 @@ const GATEWAY_ACTIVE_WORK_POLL_MS = 250;
 /** Waits for the complete process-wide active-work inventory to become idle. */
 export async function waitForGatewayActiveWork(
   timeoutMs?: number,
-  options: { onSnapshot?: (snapshot: GatewayActiveWorkSnapshot) => void } = {},
+  options: {
+    onSnapshot?: (snapshot: GatewayActiveWorkSnapshot) => void;
+    /** Ends the wait early when the remaining work cannot settle by waiting. */
+    release?: (snapshot: GatewayActiveWorkSnapshot) => boolean;
+  } = {},
 ): Promise<GatewayActiveWorkWaitResult> {
   const timeout =
     typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
@@ -226,6 +232,9 @@ export async function waitForGatewayActiveWork(
     options.onSnapshot?.(snapshot);
     if (snapshot.idle) {
       return { drained: true, snapshot };
+    }
+    if (options.release?.(snapshot)) {
+      return { drained: false, released: true, snapshot };
     }
     const remainingMs = deadlineAt === undefined ? undefined : deadlineAt - Date.now();
     if (remainingMs !== undefined && remainingMs <= 0) {

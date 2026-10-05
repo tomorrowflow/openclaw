@@ -799,7 +799,7 @@ export async function runGatewayLoop(params: {
           await failureWork.settled;
         }
         shutdownStep = "active-work-drain";
-        await drainGatewayActiveWork({
+        const drainOutcome = await drainGatewayActiveWork({
           request: acceptedRequest,
           runtime: eagerLifecycleRuntime,
           drainTimeoutMs: drainBudget.drainTimeoutMs,
@@ -861,7 +861,15 @@ export async function runGatewayLoop(params: {
             server?.close({
               reason: isRestart ? "gateway restarting" : "gateway stopping",
               restartExpectedMs: isRestart ? 1500 : null,
-              ...(isRestart ? { drainTimeoutMs: drainBudget.closeDrainTimeoutMs() } : {}),
+              ...(isRestart
+                ? {
+                    // Released runs cannot settle; joining them again would spend
+                    // the budget the active-work drain just declined to wait for.
+                    drainTimeoutMs: drainOutcome.releasedBlockedRuns
+                      ? 0
+                      : drainBudget.closeDrainTimeoutMs(),
+                  }
+                : {}),
             }),
         );
       } catch (err) {

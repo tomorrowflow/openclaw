@@ -66,6 +66,7 @@ export {
   waitForActiveCronTaskRuns,
 } from "../../cron/service/active-run-cancellation.js";
 export { markGatewayDraining, resetAllLanes } from "../../process/command-queue.js";
+export { isGatewayRestartBlockedSession } from "../../process/gateway-work-admission.js";
 export { abortPendingChannelReloads } from "../../gateway/server-reload-generation.js";
 
 export async function stopGatewayManagedProviderLocalServices(): Promise<void> {

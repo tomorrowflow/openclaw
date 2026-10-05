@@ -178,16 +178,21 @@ const scheduleGatewayRestart = vi.fn((_opts?: { delayMs?: number; reason?: strin
 }));
 const idleActiveWorkSnapshot = createActiveWorkSnapshot();
 const createGatewayActiveWorkSnapshot = vi.fn(() => idleActiveWorkSnapshot);
+type ActiveWorkWaitOptions = {
+  onSnapshot?: (snapshot: GatewayActiveWorkSnapshot) => void;
+  release?: (snapshot: GatewayActiveWorkSnapshot) => boolean;
+};
 const waitForGatewayActiveWork = vi.fn(
   async (
     _timeoutMs?: number,
-    options?: { onSnapshot?: (snapshot: GatewayActiveWorkSnapshot) => void },
-  ) => {
+    options?: ActiveWorkWaitOptions,
+  ): Promise<{ drained: boolean; released?: true; snapshot: GatewayActiveWorkSnapshot }> => {
     const snapshot = createGatewayActiveWorkSnapshot();
     options?.onSnapshot?.(snapshot);
     return { drained: snapshot.idle, snapshot };
   },
 );
+const listActiveEmbeddedRunSessionIds = vi.fn((): string[] => []);
 const advanceCronActiveJobGeneration = vi.fn();
 const resetCronActiveJobs = vi.fn();
 const abortActiveCronTaskRuns = vi.fn((_reason?: string) => 0);
@@ -336,10 +341,15 @@ vi.mock("../../infra/restart-handoff.js", () => ({
 
 vi.mock("../../infra/gateway-active-work.js", () => ({
   createGatewayActiveWorkSnapshot: () => createGatewayActiveWorkSnapshot(),
-  waitForGatewayActiveWork: (
-    timeoutMs?: number,
-    options?: { onSnapshot?: (snapshot: GatewayActiveWorkSnapshot) => void },
-  ) => waitForGatewayActiveWork(timeoutMs, options),
+  waitForGatewayActiveWork: (timeoutMs?: number, options?: ActiveWorkWaitOptions) =>
+    waitForGatewayActiveWork(timeoutMs, options),
+}));
+
+vi.mock("../../agents/embedded-agent-runner/active-run-projections.js", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("../../agents/embedded-agent-runner/active-run-projections.js")
+  >()),
+  listActiveEmbeddedRunSessionIds: () => listActiveEmbeddedRunSessionIds(),
 }));
 
 vi.mock("../../cron/active-jobs.js", () => ({
@@ -1693,6 +1703,49 @@ describe("runGatewayLoop", () => {
 
       await expect(exited).resolves.toBe(0);
     }).finally(() => clock.mockRestore());
+  });
+
+  it("releases runs blocked on refused approvals without a second close drain", async () => {
+    vi.clearAllMocks();
+    consumeGatewayRestartIntentPayloadSync.mockReturnValueOnce({});
+    // Mirrors the observed channel turn: one run holds every run-owned count.
+    const blockedSnapshot = createActiveWorkSnapshot(
+      { queueSize: 2, pendingReplies: 1, embeddedRuns: 1, agentRuns: 1, sessionAdmissions: 1 },
+      [{ kind: "embedded-run", count: 1, message: "1 active embedded run(s)" }],
+    );
+    createGatewayActiveWorkSnapshot.mockReturnValue(blockedSnapshot);
+    listActiveEmbeddedRunSessionIds.mockReturnValue(["approval-session"]);
+    const releaseChecks: boolean[] = [];
+    waitForGatewayActiveWork.mockImplementationOnce(async (_timeoutMs, options) => {
+      releaseChecks.push(options?.release?.(blockedSnapshot) === true);
+      gatewayWorkAdmissionActual.markGatewayRestartBlockedSession("approval-session");
+      // Another session's in-flight delivery is not owned by the parked run.
+      const foreignReply = createActiveWorkSnapshot({
+        ...blockedSnapshot.counts,
+        pendingReplies: 2,
+      });
+      releaseChecks.push(options?.release?.(foreignReply) === true);
+      releaseChecks.push(options?.release?.(blockedSnapshot) === true);
+      return { drained: false, released: true, snapshot: blockedSnapshot };
+    });
+
+    await withIsolatedSignals(async ({ captureSignal }) => {
+      const { close, start, exited } = await createSignaledLoopHarness();
+      const sigterm = captureSignal("SIGTERM");
+
+      sigterm();
+      await waitForLoopTurn();
+      await waitForLoopTurn();
+
+      expect(releaseChecks).toEqual([false, false, true]);
+      expect(gatewayLog.warn).toHaveBeenCalledWith(
+        "restart drain ended early: remaining run(s) are parked on approvals the restarting gateway cannot grant; handing them to restart recovery queueSize=2 pendingReplies=1 embeddedRuns=1 agentRuns=1 sessionAdmissions=1",
+      );
+      expect(close).toHaveBeenCalledWith(expect.objectContaining({ drainTimeoutMs: 0 }));
+      expect(start).toHaveBeenCalledOnce();
+
+      await expect(exited).resolves.toBe(0);
+    });
   });
 
   it("skips a second active-work drain after a SIGUSR2 deferral timeout intent", async () => {
