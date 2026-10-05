@@ -84,8 +84,14 @@ const corepackCache = `${cacheHome}/node/corepack`;
 // the same root the cron pipeline uses.
 const repoDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+// The lost-commit report lists every subject on a release branch (~5.7 MB on
+// 2026.9.9 and growing); execFileSync's 1 MB default aborts it with ENOBUFS.
 function git(...args: string[]): string {
-  return execFileSync("git", args, { cwd: repoDir, encoding: "utf8" }).trim();
+  return execFileSync("git", args, {
+    cwd: repoDir,
+    encoding: "utf8",
+    maxBuffer: 256 * 1024 * 1024,
+  }).trim();
 }
 
 // ── Preflight: reconcile this checkout with origin/main ─────────────────────
