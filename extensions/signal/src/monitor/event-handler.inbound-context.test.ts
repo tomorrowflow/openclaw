@@ -1295,6 +1295,42 @@ describe("signal createSignalEventHandler inbound context", () => {
     );
   });
 
+  it("keys group reactions by the dataMessage group when the reaction carries no groupInfo", async () => {
+    // signal-cli puts groupInfo beside dataMessage.reaction, not inside it.
+    const handler = createTestHandler({
+      cfg: createGroupAllowlistConfig({ signal: { groupAllowFrom: ["g1"] } }),
+      groupPolicy: "allowlist",
+      groupAllowFrom: ["g1"],
+      reactionMode: "all",
+    });
+
+    await handler(
+      createSignalReceiveEvent({
+        dataMessage: {
+          timestamp: 1700000000500,
+          groupInfo: { groupId: "g1", groupName: "Test Group" },
+          reaction: {
+            emoji: "👍",
+            targetAuthor: "+15550009999",
+            targetSentTimestamp: 1700000000000,
+          },
+        },
+      }),
+    );
+
+    expect(approvalReactionMocks.maybeResolveSignalApprovalReaction).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationKey: "group:g1", messageId: "1700000000000" }),
+    );
+    expect(dispatchInboundMessageMock).not.toHaveBeenCalled();
+    expect(enqueueSystemEventMock).toHaveBeenCalledWith(
+      "Signal reaction added: 👍 by Alice msg 1700000000000 from +15550009999 in Test Group id:g1",
+      {
+        sessionKey: "agent:main:signal:group:g1",
+        contextKey: "signal:reaction:added:1700000000000:+15550001111:👍:g1",
+      },
+    );
+  });
+
   it("checks approval reactions before dropping defaultTo-only senders at the generic access gate", async () => {
     approvalReactionMocks.maybeResolveSignalApprovalReaction.mockResolvedValueOnce(true);
     const cfg = {

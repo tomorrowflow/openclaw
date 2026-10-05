@@ -814,6 +814,8 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     sender: SignalSender;
     senderDisplay: string;
     reaction: SignalReactionMessage;
+    groupId: string | undefined;
+    groupName: string | undefined;
     hasBodyContent: boolean;
     accessDecision: { decision: "allow" | "block" | "pairing"; reasonCode: string };
   }): Promise<boolean> {
@@ -826,8 +828,7 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
     const emojiLabel = normalizeOptionalString(params.reaction.emoji) ?? "emoji";
     const senderName = params.envelope.sourceName ?? params.senderDisplay;
     logVerbose(`signal reaction: ${emojiLabel} from ${senderName}`);
-    const groupId = params.reaction.groupInfo?.groupId ?? undefined;
-    const groupName = params.reaction.groupInfo?.groupName ?? undefined;
+    const { groupId, groupName } = params;
     const isGroup = Boolean(groupId);
     const messageId = params.reaction.targetSentTimestamp
       ? String(params.reaction.targetSentTimestamp)
@@ -1028,6 +1029,9 @@ export function createSignalEventHandler(deps: SignalEventHandlerDeps) {
         sender,
         senderDisplay,
         reaction,
+        // signal-cli carries groupInfo beside dataMessage.reaction, not inside it.
+        groupId,
+        groupName: dataMessage?.groupInfo?.groupName ?? reaction.groupInfo?.groupName ?? undefined,
         hasBodyContent,
         accessDecision: senderAccess,
       }))
