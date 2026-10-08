@@ -8,13 +8,21 @@ import type {
   SessionFileEntry,
   SessionFileRelevance,
 } from "../../../packages/gateway-protocol/src/index.js";
-import { resolveToCwd as resolveSessionToolPathToCwd } from "../../agents/sessions/tools/path-utils.js";
+import { SANDBOX_STATE_DIR } from "../../agents/sandbox/constants.js";
+import { resolveSandboxContainerPathMount } from "../../agents/sandbox/fs-paths.js";
+import { resolveSandboxHostPathViaExistingAncestor } from "../../agents/sandbox/host-paths.js";
 import { insideGitCheckout } from "../../agents/worktrees/git.js";
 import { FsSafeError } from "../../infra/fs-safe.js";
 import { isPathInside } from "../../infra/path-guards.js";
 import { BROWSER_IMAGE_MIME_TYPES } from "../../shared/browser-image-mime-types.js";
 import { WORKSPACE_PREVIEW_MAX_BYTES } from "../workspace-file-limits.js";
-import { resolveSessionFileReadTarget, type SessionFileReadBoundary } from "./session-file-read.js";
+import {
+  resolveSandboxContainerFilePath,
+  resolveSessionFileReadTarget,
+  resolveSessionRootFilePath,
+  type SessionFileReadBoundary,
+  type SessionSandboxPaths,
+} from "./session-file-read.js";
 import {
   decodeUtf8Strict,
   listWorkspacePath,
@@ -69,16 +77,9 @@ function resolveTouchedFilePath(params: {
   root: string | undefined;
   fileRoot: string | undefined;
   filePath: string;
+  sandbox?: SessionSandboxPaths;
 }): string | undefined {
-  if (!params.root) {
-    return undefined;
-  }
-  const base = params.fileRoot ?? params.root;
-  const resolved = resolveSessionToolPathToCwd(params.filePath, base);
-  if (!isPathInside(params.root, resolved)) {
-    return undefined;
-  }
-  return resolved;
+  return resolveSessionRootFilePath(params, params.filePath);
 }
 
 export function resolveFileRoot(params: {
@@ -100,6 +101,7 @@ function buildSessionRelevanceMap(
   files: readonly TouchedFile[],
   root: string | undefined,
   fileRoot: string | undefined,
+  sandbox?: SessionSandboxPaths,
 ): Map<string, SessionFileRelevance> {
   const relevance = new Map<string, SessionFileRelevance>();
   if (!root) {
@@ -109,7 +111,7 @@ function buildSessionRelevanceMap(
     return relevance;
   }
   for (const file of files) {
-    const resolved = resolveTouchedFilePath({ root, fileRoot, filePath: file.path });
+    const resolved = resolveTouchedFilePath({ root, fileRoot, filePath: file.path, sandbox });
     if (!resolved) {
       continue;
     }
@@ -169,10 +171,11 @@ async function toSessionFileEntry(
     assertCurrent?: () => void;
     authorizeHostRead?: () => Promise<boolean>;
     onOutsideBoundary?: () => void;
+    sandbox?: SessionSandboxPaths;
   } = {},
 ): Promise<SessionFileEntry> {
   const target = await resolveSessionFileReadTarget(
-    { root, fileRoot, authorizeHostRead: opts.authorizeHostRead },
+    { root, fileRoot, authorizeHostRead: opts.authorizeHostRead, sandbox: opts.sandbox },
     touched.path,
   );
   const base = {
@@ -238,6 +241,7 @@ function resolveSessionFileCandidates(params: {
   root: string;
   fileRoot: string | undefined;
   filePath: string;
+  sandbox?: SessionSandboxPaths;
 }): string[] {
   return [
     resolveTouchedFilePath(params),
@@ -293,6 +297,26 @@ async function searchBrowserEntries(params: {
   return { entries: sortWorkspaceEntries(entries), ...(truncated ? { truncated } : {}) };
 }
 
+/** Reveal-in-workspace hands browsing the same path a file link carried. */
+function toBrowserRequestPath(params: {
+  root: string;
+  path?: string;
+  sandbox?: SessionSandboxPaths;
+}): string {
+  const requested = params.path ?? "";
+  if (params.sandbox && path.posix.isAbsolute(requested.replaceAll("\\", "/"))) {
+    const resolved = resolveSandboxContainerFilePath({
+      root: params.root,
+      filePath: requested,
+      sandbox: params.sandbox,
+    });
+    if (resolved) {
+      return toDisplayPath(params.root, resolved);
+    }
+  }
+  return normalizeRelativePath(requested);
+}
+
 async function buildBrowserResult(params: {
   assertCurrent?: () => void;
   root: string | undefined;
@@ -301,12 +325,18 @@ async function buildBrowserResult(params: {
   path?: string;
   search?: string;
   files: readonly TouchedFile[];
+  sandbox?: SessionSandboxPaths;
 }): Promise<SessionFileBrowserResult | undefined> {
   if (!params.root) {
     return undefined;
   }
   const search = normalizeOptionalString(params.search);
-  const relevance = buildSessionRelevanceMap(params.files, params.root, params.fileRoot);
+  const relevance = buildSessionRelevanceMap(
+    params.files,
+    params.root,
+    params.fileRoot,
+    params.sandbox,
+  );
   if (search) {
     const result = await searchBrowserEntries({
       root: params.workspaceRoot ?? params.root,
@@ -320,7 +350,11 @@ async function buildBrowserResult(params: {
       ...result,
     };
   }
-  const browserPath = normalizeRelativePath(params.path);
+  const browserPath = toBrowserRequestPath({
+    root: params.root,
+    path: params.path,
+    sandbox: params.sandbox,
+  });
   const resolved = resolveWorkspacePath(params.root, browserPath);
   if (!resolved) {
     return undefined;
@@ -380,13 +414,26 @@ export async function listSessionWorkspaceFiles(
   const allowOutside =
     root &&
     params.files.some(
-      (file) => !resolveTouchedFilePath({ root, fileRoot: params.fileRoot, filePath: file.path }),
+      (file) =>
+        !resolveTouchedFilePath({
+          root,
+          fileRoot: params.fileRoot,
+          filePath: file.path,
+          sandbox: params.sandbox,
+        }),
     ) &&
     (await params.authorizeHostRead?.());
   const workspaceFiles =
     root && !allowOutside
       ? params.files.filter((file) =>
-          Boolean(resolveTouchedFilePath({ root, fileRoot: params.fileRoot, filePath: file.path })),
+          Boolean(
+            resolveTouchedFilePath({
+              root,
+              fileRoot: params.fileRoot,
+              filePath: file.path,
+              sandbox: params.sandbox,
+            }),
+          ),
         )
       : params.files;
   const files = await Promise.all(
@@ -395,6 +442,7 @@ export async function listSessionWorkspaceFiles(
         workspaceRoot,
         assertCurrent: params.assertCurrent,
         authorizeHostRead: params.authorizeHostRead,
+        sandbox: params.sandbox,
       }),
     ),
   );
@@ -406,6 +454,7 @@ export async function listSessionWorkspaceFiles(
     search: params.search,
     files: workspaceFiles,
     assertCurrent: params.assertCurrent,
+    sandbox: params.sandbox,
   });
   return {
     ...(root ? { root } : {}),
@@ -418,11 +467,67 @@ export async function listSessionWorkspaceFiles(
 export async function getSessionWorkspaceFile(
   params: LoadedSessionFiles & { path: string; assertCurrent?: () => void },
 ): Promise<{ root?: string; file?: SessionFileEntry; reason?: "outside_session_boundary" }> {
+  const result = await getSessionRootFile(params);
+  if (result.file && !result.file.missing) {
+    return result;
+  }
+  const mounted = await getSandboxMountedFile(params);
+  return mounted ? { root: result.root, file: mounted } : result;
+}
+
+/**
+ * A sandboxed agent also reads files whose mount source lives outside the
+ * session root, such as the materialized skills workspace under the sandbox
+ * state dir. The session root cannot serve those, so the preview opens the
+ * mount's own host root instead; fs-safe containment then applies to what the
+ * container was actually given. Only mounts sourced from the Gateway-owned
+ * sandbox state dir qualify: custom binds keep daemon-host paths that may name
+ * a different Gateway-local file, and widening previews to every operator bind
+ * is not this fallback's job. The entry carries no hash, which keeps it
+ * read-only: sessions.files.set still only writes inside the session root.
+ */
+async function getSandboxMountedFile(
+  params: LoadedSessionFiles & { path: string; assertCurrent?: () => void },
+): Promise<SessionFileEntry | undefined> {
+  if (!params.sandbox) {
+    return undefined;
+  }
+  const target = resolveSandboxContainerPathMount({
+    containerPath: params.path,
+    mounts: params.sandbox.mounts,
+  });
+  if (
+    !target?.relativePath ||
+    !isPathInside(
+      resolveSandboxHostPathViaExistingAncestor(SANDBOX_STATE_DIR),
+      resolveSandboxHostPathViaExistingAncestor(target.hostRoot),
+    )
+  ) {
+    return undefined;
+  }
+  const touched = params.files.find((file) => file.path === params.path);
+  const entry = await toSessionFileEntry(
+    { path: target.relativePath, kind: touched?.kind ?? "read" },
+    target.hostRoot,
+    target.hostRoot,
+    { includeContent: true, assertCurrent: params.assertCurrent },
+  );
+  if (entry.missing) {
+    return undefined;
+  }
+  const { hash: _hash, workspacePath: _workspacePath, ...readOnly } = entry;
+  return { ...readOnly, path: params.path };
+}
+
+async function getSessionRootFile(
+  params: LoadedSessionFiles & { path: string; assertCurrent?: () => void },
+): Promise<{ root?: string; file?: SessionFileEntry; reason?: "outside_session_boundary" }> {
   let outsideBoundary = false;
   const options = {
     includeContent: true,
     assertCurrent: params.assertCurrent,
     authorizeHostRead: params.authorizeHostRead,
+    sandbox: params.sandbox,
     onOutsideBoundary: () => {
       outsideBoundary = true;
     },
@@ -445,10 +550,16 @@ export async function getSessionWorkspaceFile(
     root: params.root,
     fileRoot: params.fileRoot,
     filePath: params.path,
+    sandbox: params.sandbox,
   });
   if (
     candidates.length === 0 ||
-    !resolveTouchedFilePath({ root: params.root, fileRoot: params.fileRoot, filePath: params.path })
+    !resolveTouchedFilePath({
+      root: params.root,
+      fileRoot: params.fileRoot,
+      filePath: params.path,
+      sandbox: params.sandbox,
+    })
   ) {
     const file = await toSessionFileEntry(
       { path: params.path, kind: "read" },
@@ -462,7 +573,12 @@ export async function getSessionWorkspaceFile(
       ...(outsideBoundary ? { reason: "outside_session_boundary" as const } : {}),
     };
   }
-  const relevance = buildSessionRelevanceMap(params.files, params.root, params.fileRoot);
+  const relevance = buildSessionRelevanceMap(
+    params.files,
+    params.root,
+    params.fileRoot,
+    params.sandbox,
+  );
   for (const candidate of candidates) {
     const browserPath = toDisplayPath(params.root, candidate);
     const sessionKind = relevance.get(browserPath);
@@ -492,6 +608,7 @@ export async function setSessionWorkspaceFile(params: {
   content: string;
   expectedHash: string;
   assertCurrent?: () => void;
+  sandbox?: SessionSandboxPaths;
 }): Promise<SessionWorkspaceWriteResult> {
   // Reject content the preview cannot round-trip, before encoding oversized input.
   if (params.content.includes("\0")) {
@@ -507,10 +624,13 @@ export async function setSessionWorkspaceFile(params: {
   if (!params.root) {
     return { status: "missing" };
   }
+  // The preview can open a file by container path, so saving it back must reach
+  // the same candidate; containment against the root still gates the write.
   const candidates = resolveSessionFileCandidates({
     root: params.root,
     fileRoot: params.fileRoot,
     filePath: params.path,
+    sandbox: params.sandbox,
   });
   let browserPath: string | undefined;
   for (const candidate of candidates) {
