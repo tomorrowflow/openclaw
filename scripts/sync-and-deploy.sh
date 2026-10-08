@@ -280,8 +280,10 @@ node scripts/prepare-global-install-package-json.mjs --restore
 STAGE="deploy: pnpm deploy:globally (gateway still up)"
 CI=true corepack pnpm deploy:globally
 
-# Sanity checks — timestamps must match the fresh build.
-ls -l "$(npm root -g)/openclaw/dist/reply-"*.js
+# Sanity checks — timestamps must match the fresh build. Chunk names and
+# extensions change between releases (2026.10.2 emits .mjs), so check the
+# stable build identity instead of a hashed chunk.
+ls -l "$(npm root -g)/openclaw/dist/build-info.json"
 ls "$(npm root -g)/openclaw/dist/control-ui/index.html"
 
 # Update OPENCLAW_SERVICE_VERSION in the systemd unit.
