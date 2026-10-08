@@ -19,6 +19,13 @@ import {
   resolveDispatchWorkspaceAccess,
   type ResolveAgentWorkspaceRuntime,
 } from "./dispatcher-workspace.js";
+import {
+  buildNodeTicketMessage,
+  createNodeTicketWorktree,
+  nodeTicketTarget,
+  startNodeTicketSession,
+  type WorkboardNodeTicketRuntime,
+} from "./node-ticket.js";
 import { workboardSessionKeyForCard } from "./session-link.js";
 import { cardBoardId } from "./store-card-helpers.js";
 import { workboardCardConsumesOwnerSlot, workboardCardSlotOwner } from "./store-constants.js";
@@ -31,6 +38,8 @@ import {
 } from "./workspace-access.js";
 
 const DEFAULT_DISPATCH_MAX_STARTS = 3;
+// Node tickets cannot heartbeat their claim; hold it for a whole turn instead.
+const NODE_TICKET_DEFAULT_CLAIM_TTL_SECONDS = 2 * 60 * 60;
 
 type WorkboardSubagentRuntime = Pick<PluginRuntime["subagent"], "run">;
 type WorkboardWorktreeRuntime = PluginRuntime["worktrees"];
@@ -75,6 +84,8 @@ type WorkboardDispatchStartParams = {
   store: WorkboardStore;
   subagent: WorkboardSubagentRuntime;
   worktrees?: WorkboardWorktreeRuntime;
+  /** Gateway access for cards whose execution target is a paired node. */
+  nodeTickets?: WorkboardNodeTicketRuntime;
   options?: WorkboardDispatchStartOptions;
 };
 
@@ -310,6 +321,7 @@ async function runWorkboardDispatch(
     let workspaceMutation: { before: WorkboardCard; after: WorkboardCard } | undefined;
     let preparedLaunch: WorkboardPreparedLaunch | undefined;
     const requestedWorkspace = card.metadata?.automation?.workspace;
+    const nodeTarget = nodeTicketTarget(card);
     let workspaceAccess: WorkboardWorkspaceAccess;
     let targetWorkspace: string | undefined;
     let persistWorkspaceAccess: boolean;
@@ -332,7 +344,19 @@ async function runWorkboardDispatch(
           currentAccess: params.options?.workspaceAccess,
           resolveAgentWorkspace: params.options?.resolveAgentWorkspace,
         }));
-      if (!requestedWorkspace || requestedWorkspace.kind === "scratch") {
+      if (nodeTarget) {
+        // A node ticket runs code on another machine; only unrestricted
+        // dispatchers may start one, and its worktree lives on that node.
+        if (!workspaceAccess.unrestricted) {
+          throw new Error("node-claude targets require unrestricted Workboard dispatch");
+        }
+        if (requestedWorkspace && requestedWorkspace.kind !== "scratch") {
+          throw new Error("node-claude targets use a node worktree; remove the card workspace");
+        }
+        if (!params.nodeTickets) {
+          throw new Error("node ticket runtime is unavailable for this dispatch");
+        }
+      } else if (!requestedWorkspace || requestedWorkspace.kind === "scratch") {
         if (!workspaceAccess.unrestricted) {
           if (!targetWorkspace) {
             startFailures.push({
@@ -374,7 +398,12 @@ async function runWorkboardDispatch(
     try {
       const claimed = await params.store.claim(
         card.id,
-        { ownerId, ttlSeconds: card.metadata?.automation?.maxRuntimeSeconds },
+        {
+          ownerId,
+          ttlSeconds:
+            card.metadata?.automation?.maxRuntimeSeconds ??
+            (nodeTarget ? NODE_TICKET_DEFAULT_CLAIM_TTL_SECONDS : undefined),
+        },
         {
           expectedAuthority: {
             boardId: cardBoardId(card),
@@ -382,6 +411,7 @@ async function runWorkboardDispatch(
             agentId: card.agentId,
             workspace: card.metadata?.automation?.workspace,
             workspaceAccess: card.metadata?.automation?.workspaceAccess,
+            target: card.metadata?.automation?.target,
           },
           adoptWorkspaceAccess: persistWorkspaceAccess ? workspaceAccess : undefined,
           assertOwnerCurrent,
@@ -392,6 +422,15 @@ async function runWorkboardDispatch(
       // provider-outage budget or starve a later healthy candidate.
       attemptedStarts += 1;
       const context = await params.store.buildWorkerContext(card.id);
+      assertOwnerCurrent?.();
+      const nodeWorktree =
+        nodeTarget && params.nodeTickets
+          ? await createNodeTicketWorktree({
+              runtime: params.nodeTickets,
+              card: claimed.card,
+              target: nodeTarget,
+            })
+          : undefined;
       const materialized = await materializeWorkspace({
         card: claimed.card,
         worktrees: params.worktrees,
@@ -421,38 +460,53 @@ async function runWorkboardDispatch(
         now,
         scope: { ownerId, token: claimValue },
         assertOwnerCurrent,
+        ...(nodeWorktree ? { nodeWorktree } : {}),
       });
       const launched = prepared.card;
       preparedLaunch = prepared.launch;
       const runId = prepared.launch.provisionalRunId;
       assertOwnerCurrent?.();
-      const run = await params.subagent.run({
-        sessionKey,
-        ...(assertOwnerCurrent ? { assertCurrent: assertOwnerCurrent } : {}),
-        message: [
-          `Work on this OpenClaw Workboard card: ${claimed.card.title}`,
-          "",
-          "## Worker protocol",
-          `Card id: ${claimed.card.id}`,
-          `Claim ownerId: ${ownerId}`,
-          `Claim token: ${claimValue}`,
-          "",
-          "Heartbeat with workboard_heartbeat using the card id and token while working.",
-          "When done, call workboard_complete with the card id, token, summary, and proof.",
-          "If you recorded proof separately, pass its returned proofId to workboard_complete.",
-          "If blocked, call workboard_block with the card id, token, and reason.",
-          "",
-          context,
-        ].join("\n"),
-        toolsAlsoAllow: [...WORKBOARD_REQUIRED_WORKER_TOOLS],
-        ...(params.options?.provider ? { provider: params.options.provider } : {}),
-        ...(params.options?.model ? { model: params.options.model } : {}),
-        lane: `workboard:${cardBoardId(card)}:${card.id}`,
-        idempotencyKey: runId,
-        lightContext: true,
-        deliver: false,
-        ...(runCwd ? { cwd: runCwd } : {}),
-      });
+      const run =
+        nodeTarget && nodeWorktree && params.nodeTickets
+          ? await startNodeTicketSession({
+              runtime: params.nodeTickets,
+              card: claimed.card,
+              target: nodeTarget,
+              worktree: nodeWorktree,
+              sessionKey,
+              message: buildNodeTicketMessage({
+                card: claimed.card,
+                worktree: nodeWorktree,
+                context,
+              }),
+            })
+          : await params.subagent.run({
+              sessionKey,
+              ...(assertOwnerCurrent ? { assertCurrent: assertOwnerCurrent } : {}),
+              message: [
+                `Work on this OpenClaw Workboard card: ${claimed.card.title}`,
+                "",
+                "## Worker protocol",
+                `Card id: ${claimed.card.id}`,
+                `Claim ownerId: ${ownerId}`,
+                `Claim token: ${claimValue}`,
+                "",
+                "Heartbeat with workboard_heartbeat using the card id and token while working.",
+                "When done, call workboard_complete with the card id, token, summary, and proof.",
+                "If you recorded proof separately, pass its returned proofId to workboard_complete.",
+                "If blocked, call workboard_block with the card id, token, and reason.",
+                "",
+                context,
+              ].join("\n"),
+              toolsAlsoAllow: [...WORKBOARD_REQUIRED_WORKER_TOOLS],
+              ...(params.options?.provider ? { provider: params.options.provider } : {}),
+              ...(params.options?.model ? { model: params.options.model } : {}),
+              lane: `workboard:${cardBoardId(card)}:${card.id}`,
+              idempotencyKey: runId,
+              lightContext: true,
+              deliver: false,
+              ...(runCwd ? { cwd: runCwd } : {}),
+            });
       runStarted = true;
       const acceptedSessionKey = run.sessionKey?.trim() || sessionKey;
       const acceptedExecution: WorkboardExecution = {

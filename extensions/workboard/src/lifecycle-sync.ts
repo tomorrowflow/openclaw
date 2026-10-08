@@ -7,6 +7,7 @@ import {
   isWorkboardWorktreeCleanupCandidate,
   type WorkboardWorktreeCleanupRuntime,
 } from "./dispatcher-workspace.js";
+import { applyNodeTicketReport, nodeTicketTarget } from "./node-ticket.js";
 import {
   workboardCardMatchesLifecycleLink,
   workboardCardSessionLookupKey,
@@ -187,19 +188,38 @@ export async function syncWorkboardSubagentEnded(params: {
 
 export async function syncWorkboardAgentEnded(params: {
   store: WorkboardStore;
-  event: { runId?: string; success: boolean };
+  event: { runId?: string; success: boolean; messages?: unknown[] };
   context: { runId?: string; sessionKey?: string };
   now?: number;
   onMatched?: WorkboardLifecycleMatchHandler;
 }): Promise<number> {
   const now = params.now ?? Date.now();
+  const source = {
+    sessionKey: params.context.sessionKey,
+    runId: params.event.runId ?? params.context.runId,
+  };
+  // Node tickets report through their final message, not Workboard tools.
+  // Map the report first: a block holds, and a done report lets the lifecycle
+  // move below take the card to review.
+  for (const card of await params.store.list()) {
+    if (
+      card.status === "running" &&
+      !card.metadata?.archivedAt &&
+      nodeTicketTarget(card) &&
+      workboardCardMatchesLifecycleLink(card, source)
+    ) {
+      await applyNodeTicketReport({
+        store: params.store,
+        card,
+        messages: params.event.messages ?? [],
+        success: params.event.success,
+      });
+    }
+  }
   return (
     await syncWorkboardLifecycleEvent({
       store: params.store,
-      source: {
-        sessionKey: params.context.sessionKey,
-        runId: params.event.runId ?? params.context.runId,
-      },
+      source,
       observation: {
         state: params.event.success ? "succeeded" : "failed",
         sourceUpdatedAt: now,
@@ -320,7 +340,13 @@ async function syncWorkboardLifecycleSessions(params: {
     if (!session) {
       continue;
     }
-    const observation = lifecycleFromSession(session, now);
+    const sessionObservation = lifecycleFromSession(session, now);
+    // Only the agent_end report may move a node ticket to review; a sweep
+    // that missed it leaves the card running so stale detection surfaces it.
+    const observation: WorkboardLifecycleObservation =
+      sessionObservation.state === "succeeded" && nodeTicketTarget(card)
+        ? { state: "idle", sourceUpdatedAt: sessionObservation.sourceUpdatedAt }
+        : sessionObservation;
     if (
       await params.store.syncLifecycle(card.id, {
         ...LIFECYCLE_TARGETS[observation.state],

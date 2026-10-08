@@ -150,6 +150,7 @@ export function createWorkboardDispatchHandler(params: {
       store: params.store,
       subagent: params.api.runtime.subagent,
       worktrees: params.api.runtime.worktrees,
+      nodeTickets: params.api.runtime.gateway,
       options: {
         ...(cardId ? { cardId, maxStarts: 1 } : {}),
         boardId: typeof boardId === "string" ? boardId : undefined,

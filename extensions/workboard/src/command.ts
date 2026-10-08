@@ -158,6 +158,7 @@ async function handleWorkboardCommand(params: {
       store: params.store,
       subagent: params.api.runtime.subagent,
       worktrees: params.api.runtime.worktrees,
+      nodeTickets: params.api.runtime.gateway,
       options: {
         materializeWorktree: true,
         resolveAgentWorkspace: params.resolveAgentWorkspace,

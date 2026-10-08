@@ -1,0 +1,158 @@
+// Workboard tests cover dispatching cards to paired-node Claude Code sessions.
+import { describe, expect, it, vi } from "vitest";
+import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
+import {
+  BASE_COMMIT,
+  createNodeCard,
+  createNodeGateway,
+  NODE_TARGET as TARGET,
+} from "./node-ticket.test-support.js";
+import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
+
+describe("dispatchAndStartWorkboardCards node-claude target", () => {
+  it("creates the node worktree and starts a Claude session in it", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const card = await createNodeCard(store);
+    const nodeTickets = createNodeGateway();
+    const run = vi.fn();
+
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run },
+      nodeTickets,
+      options: { now: 10, maxStarts: 1 },
+    });
+
+    expect(result.startFailures).toEqual([]);
+    expect(run).not.toHaveBeenCalled();
+    const worktreePath = `${TARGET.worktreesRoot}/wb-${card.id}`;
+    expect(nodeTickets.respond.mock.calls.map(([method, params]) => [method, params])).toEqual([
+      [
+        "node.invoke",
+        expect.objectContaining({
+          nodeId: "mac-factory",
+          command: "system.run",
+          params: expect.objectContaining({
+            command: [
+              "git",
+              "-C",
+              TARGET.repoPath,
+              "worktree",
+              "add",
+              "-b",
+              `factory/${card.id}`,
+              worktreePath,
+              "main",
+            ],
+          }),
+        }),
+      ],
+      [
+        "node.invoke",
+        expect.objectContaining({
+          params: expect.objectContaining({
+            command: ["git", "-C", worktreePath, "rev-parse", "HEAD"],
+          }),
+        }),
+      ],
+      [
+        "sessions.create",
+        expect.objectContaining({
+          key: result.started[0]?.sessionKey,
+          agentId: "dev",
+          execNode: "mac-factory",
+          cwd: worktreePath,
+          model: TARGET.model,
+          message: expect.stringContaining("```workboard-report"),
+        }),
+      ],
+    ]);
+    await expect(store.get(card.id)).resolves.toMatchObject({
+      status: "running",
+      runId: "run-node",
+      execution: { engine: "claude-cli", model: "claude-cli/claude-sonnet-5-5", runId: "run-node" },
+      metadata: {
+        automation: {
+          target: {
+            worktree: { path: worktreePath, branch: `factory/${card.id}`, baseCommit: BASE_COMMIT },
+          },
+        },
+      },
+    });
+  });
+
+  it("refuses restricted dispatch before claiming or touching the node", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const card = await createNodeCard(store);
+    const nodeTickets = createNodeGateway();
+
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets,
+      options: {
+        now: 10,
+        maxStarts: 1,
+        workspaceAccess: { unrestricted: false, roots: ["/tmp"], writable: true },
+      },
+    });
+
+    expect(result.startFailures).toEqual([
+      expect.objectContaining({
+        cardId: card.id,
+        error: "node-claude targets require unrestricted Workboard dispatch",
+      }),
+    ]);
+    expect(nodeTickets.respond).not.toHaveBeenCalled();
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("ready");
+    expect(stored?.metadata?.claim).toBeUndefined();
+  });
+
+  it("blocks the card with the node's error when the worktree cannot be created", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const card = await createNodeCard(store);
+    const nodeTickets = createNodeGateway({ failGit: "worktree" });
+
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets,
+      options: { now: 10, maxStarts: 1 },
+    });
+
+    expect(result.startFailures[0]?.error).toContain("fatal: branch exists");
+    expect(nodeTickets.respond.mock.calls.map(([method]) => method)).not.toContain(
+      "sessions.create",
+    );
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("blocked");
+    expect(stored?.metadata?.claim).toBeUndefined();
+  });
+
+  it("reuses the worktree a failed launch left on the card's branch", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const card = await createNodeCard(store);
+    const nodeTickets = createNodeGateway({
+      failGit: "worktree",
+      existingBranch: `factory/${card.id}`,
+    });
+
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets,
+      options: { now: 10, maxStarts: 1 },
+    });
+
+    expect(result.startFailures).toEqual([]);
+    await expect(store.get(card.id)).resolves.toMatchObject({
+      status: "running",
+      metadata: {
+        automation: {
+          target: { worktree: { branch: `factory/${card.id}`, baseCommit: BASE_COMMIT } },
+        },
+      },
+    });
+  });
+});

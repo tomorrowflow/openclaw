@@ -8,6 +8,7 @@ import type {
   WorkboardExecutionStatus,
   WorkboardLaunchState,
   WorkboardMetadata,
+  WorkboardNodeWorktree,
   WorkboardStaleState,
   WorkboardStatus,
 } from "@openclaw/workboard-contract";
@@ -198,6 +199,8 @@ export class WorkboardStore extends WorkboardNotificationStore {
       now: number;
       scope: WorkboardMutationScope;
       assertOwnerCurrent?: () => void;
+      /** Persists the node worktree with the launch, so a later bundle import or retry finds it. */
+      nodeWorktree?: WorkboardNodeWorktree;
     },
   ): Promise<{ card: WorkboardCard; launch: WorkboardPreparedLaunch }> {
     return await this.enqueueMutation(async () => {
@@ -227,7 +230,15 @@ export class WorkboardStore extends WorkboardNotificationStore {
             },
             metadata: {
               ...card.metadata,
-              automation: { ...card.metadata?.automation, launch },
+              automation: {
+                ...card.metadata?.automation,
+                launch,
+                ...(input.nodeWorktree && card.metadata?.automation?.target
+                  ? {
+                      target: { ...card.metadata.automation.target, worktree: input.nodeWorktree },
+                    }
+                  : {}),
+              },
             },
           };
         },

@@ -6,11 +6,8 @@ import {
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { WorkboardBoardInput } from "./store-inputs.js";
-import {
-  normalizeBoardId,
-  normalizeBoundedString,
-  normalizeWorkspace,
-} from "./store-normalizers.js";
+import { normalizeBoardId, normalizeWorkspace } from "./store-normalizers.js";
+import { normalizeBoundedString } from "./store-value-normalizers.js";
 
 export function normalizeBoardMetadata(
   input: WorkboardBoardInput,

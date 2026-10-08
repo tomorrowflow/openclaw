@@ -2,7 +2,8 @@ import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { appendComment, assertCanMutateClaimedCard } from "./store-card-helpers.js";
 import { WorkboardEnrichmentStore } from "./store-enrichment.js";
 import type { WorkboardMutationScope, WorkboardPromoteInput } from "./store-inputs.js";
-import { clearDiagnostics, normalizeBoundedString } from "./store-normalizers.js";
+import { clearDiagnostics } from "./store-normalizers.js";
+import { normalizeBoundedString } from "./store-value-normalizers.js";
 
 export class WorkboardPromoteStore extends WorkboardEnrichmentStore {
   async move(

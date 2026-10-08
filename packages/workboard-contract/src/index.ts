@@ -258,6 +258,28 @@ export type WorkboardWorkspaceAccess =
   | { unrestricted: true }
   | { unrestricted: false; roots: string[]; writable: boolean };
 
+/** A ticket worktree the dispatcher created on a paired node. */
+export type WorkboardNodeWorktree = {
+  path: string;
+  branch: string;
+  baseCommit: string;
+};
+
+/**
+ * Runs the card as a fresh Claude Code session on a paired node instead of a
+ * Gateway subagent. The node keeps its own clone; the dispatcher creates one
+ * worktree per card under `worktreesRoot` and records it as `worktree`.
+ */
+export type WorkboardExecutionTarget = {
+  kind: "node-claude";
+  nodeId: string;
+  repoPath: string;
+  worktreesRoot: string;
+  baseRef?: string;
+  model?: string;
+  worktree?: WorkboardNodeWorktree;
+};
+
 type WorkboardLaunchIdentity = {
   requestedSessionKey: string;
   provisionalRunId: string;
@@ -286,6 +308,7 @@ export type WorkboardAutomation = {
   skills?: string[];
   workspace?: WorkboardWorkspace;
   workspaceAccess?: WorkboardWorkspaceAccess;
+  target?: WorkboardExecutionTarget;
   maxRuntimeSeconds?: number;
   maxRetries?: number;
   scheduledAt?: number;

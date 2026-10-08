@@ -46,7 +46,6 @@ import {
   metadataIsEmpty,
   normalizeAutomation,
   normalizeBoardId,
-  normalizeBoundedString,
   normalizeExecution,
   normalizeLabels,
   normalizeLinkType,
@@ -62,6 +61,7 @@ import {
   trimMetadataToBudget,
 } from "./store-normalizers.js";
 import { readCards } from "./store-read.js";
+import { normalizeBoundedString } from "./store-value-normalizers.js";
 
 type WorkboardMutationJournalEntry = {
   before?: WorkboardCard;

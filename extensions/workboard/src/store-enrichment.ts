@@ -35,9 +35,9 @@ import {
   clearDiagnostics,
   normalizeArtifact,
   normalizeAttachmentInput,
-  normalizeBoundedString,
   normalizeProofInput,
 } from "./store-normalizers.js";
+import { normalizeBoundedString } from "./store-value-normalizers.js";
 
 export class WorkboardEnrichmentStore extends WorkboardCoreStore {
   async addProof(

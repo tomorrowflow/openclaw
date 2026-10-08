@@ -13,6 +13,7 @@ import {
   syncWorkboardSubagentEnded,
 } from "./lifecycle-sync.js";
 import { createDeferred, createLinkedCard } from "./lifecycle-sync.test-support.js";
+import { startNodeCard } from "./node-ticket.test-support.js";
 import { workboardSessionKeyForCard } from "./session-link.js";
 import type { WorkboardStore } from "./store.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
@@ -782,5 +783,102 @@ describe("Workboard lifecycle service", () => {
       runOperation.mockRestore();
       vi.useRealTimers();
     }
+  });
+
+  const report = (value: unknown) => [
+    { role: "user", content: "Work on this ticket" },
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: `Done.\n\n\`\`\`workboard-report\n${JSON.stringify(value)}\n\`\`\`` },
+      ],
+    },
+  ];
+
+  it.each([
+    {
+      name: "a done report with passing proof moves the card to review",
+      success: true,
+      messages: report({
+        outcome: "done",
+        summary: "Parser accepts empty input",
+        proof: [{ command: "pytest", status: "passed" }],
+      }),
+      status: "review",
+      comment: "Parser accepts empty input",
+    },
+    {
+      name: "open questions block the card with the questions",
+      success: true,
+      messages: report({
+        outcome: "needs_input",
+        summary: "Two schemas fit",
+        questions: ["Keep v1 fields?"],
+      }),
+      status: "blocked",
+      comment: "Needs input: Two schemas fit\n- Keep v1 fields?",
+    },
+    {
+      name: "done with failing proof blocks the card",
+      success: true,
+      messages: report({
+        outcome: "done",
+        summary: "Tried",
+        proof: [{ command: "pytest", status: "failed" }],
+      }),
+      status: "blocked",
+      comment: "Reported done without passing proof: Tried",
+    },
+    {
+      name: "done with only skipped proof blocks the card",
+      success: true,
+      messages: report({
+        outcome: "done",
+        summary: "Untested",
+        proof: [{ command: "pytest", status: "skipped" }],
+      }),
+      status: "blocked",
+      comment: "Reported done without passing proof: Untested",
+    },
+    {
+      name: "a final message without a report blocks the card",
+      success: true,
+      messages: [{ role: "assistant", content: "All done!" }],
+      status: "blocked",
+      comment: "The ticket session ended without a workboard-report block.",
+    },
+    {
+      name: "a failed run without a report blocks the card",
+      success: false,
+      messages: [],
+      status: "blocked",
+      comment:
+        "The ticket session failed. The ticket session ended without a workboard-report block.",
+    },
+  ])("maps node ticket endings: $name", async ({ success, messages, status, comment }) => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success, messages },
+      context: { runId, sessionKey },
+    });
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe(status);
+    expect(stored?.metadata?.comments?.at(-1)?.body).toBe(comment);
+  });
+
+  it("leaves a finished node ticket running when only the sweep saw it end", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey } = await startNodeCard(store);
+
+    await runSessionSweep({
+      store,
+      sessions: [{ key: sessionKey, status: "done", updatedAt: card.updatedAt + 1_000 }],
+    });
+
+    expect((await store.get(card.id))?.status).toBe("running");
   });
 });
