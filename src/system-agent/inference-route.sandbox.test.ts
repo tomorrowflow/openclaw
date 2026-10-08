@@ -12,7 +12,6 @@ function sandboxedConfig(): OpenClawConfig {
     agents: {
       entries: {
         main: {
-          default: true,
           agentDir: "/tmp/openclaw-agent",
           sandbox: { mode: "all", workspaceAccess: "rw" },
         },
