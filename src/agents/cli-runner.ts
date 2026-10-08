@@ -530,14 +530,18 @@ async function runPreparedCliAgentOwned(
           output,
         });
         // A stateless backend may emit an id, but it never becomes continuity.
-        // Managed stdio sessions own continuity in-process and write no native transcript.
+        // Managed stdio sessions own continuity in-process and write no native transcript;
+        // node-placed sessions write it on the node, out of the Gateway's reach.
         const bindingFlushOk = sessionBindingDisabled
           ? true
           : await isCliBindingFlushed(
               effectiveCliSessionId,
               params.provider,
               context.cwd ?? context.workspaceDir,
-              { skipTranscriptProbe: acceptsCliLiveSession(context) },
+              {
+                skipTranscriptProbe:
+                  acceptsCliLiveSession(context) || context.executionTarget.kind === "node",
+              },
             );
         const interruptionError = terminalInterruption
           ? formatCliTerminalInterruption(terminalInterruption)

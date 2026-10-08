@@ -8,21 +8,32 @@ const mocks = vi.hoisted(() => ({
   resolveNodeCommandAllowlist: vi.fn(() => new Set<string>()),
 }));
 
-vi.mock("../plugins/runtime/gateway-request-scope.js", () => ({
-  getPluginRuntimeGatewayRequestScope: () => ({
-    context: {
-      getRuntimeConfig: mocks.getRuntimeConfig,
-      nodeRegistry: { get: mocks.get, invoke: mocks.invoke },
-    },
-  }),
-}));
-
 vi.mock("./node-command-policy.js", () => ({
   isNodeCommandAllowed: mocks.isNodeCommandAllowed,
   resolveNodeCommandAllowlist: mocks.resolveNodeCommandAllowlist,
 }));
 
-import { invokeNodeClaudeCliRun } from "./node-agent-cli-runtime.js";
+import {
+  withPluginRuntimeGatewayContextResolver,
+  withPluginRuntimeGatewayRequestScope,
+} from "../plugins/runtime/gateway-request-scope.js";
+import { invokeNodeClaudeCliRun as invokeDirect } from "./node-agent-cli-runtime.js";
+import type { GatewayRequestContext } from "./server-methods/types.js";
+
+const gateway = {
+  getRuntimeConfig: mocks.getRuntimeConfig,
+  nodeRegistry: { get: mocks.get, invoke: mocks.invoke },
+} as unknown as GatewayRequestContext;
+
+// Admitted turns run under the session-work lease, which replaces the request
+// context with the live resolver; exercise that shape, not a bare request scope.
+const invokeNodeClaudeCliRun = (params: Parameters<typeof invokeDirect>[0]) =>
+  withPluginRuntimeGatewayRequestScope({ context: gateway }, () =>
+    withPluginRuntimeGatewayContextResolver(
+      () => gateway,
+      () => invokeDirect(params),
+    ),
+  );
 
 describe("invokeNodeClaudeCliRun", () => {
   beforeEach(() => {
