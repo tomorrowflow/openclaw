@@ -29,8 +29,9 @@ closedOnly | packages/markdown-core/src/code-spans.ts | Code-span closedOnly opt
 
 # --- Sandbox ---
 mapSandboxSkillEntriesForPrompt | src/agents/embedded-agent-runner/sandbox-skills.ts | Sandbox skill prompt rebuild from in-container paths (upstreamed 2026.7.2; fixes host-path SKILL.md leak incl. rw sandboxes)
-mapSandboxSkillEntriesForPrompt\( | src/agents/embedded-agent-runner/skill-runtime.ts | Sandbox skill prompt rebuild wired into the skill runtime (upstreamed 2026.7.2; 2026.9.3 moved the call here from run/attempt-setup.ts). Matches the call, not the import.
-mapSandboxSkillEntriesForPrompt\( | src/auto-reply/reply/commands-system-prompt.ts | Sandbox skill prompt rebuild wired into the command system prompt (upstreamed 2026.7.2; 2026.9.3 moved the call here from prepared-compaction-runtime.ts). Matches the call, not the import.
+mapSandboxSkillEntriesForPrompt\( | src/agents/embedded-agent-runner/skills-prompt.ts | Sandbox skill prompt rebuild wired into the shared runtime skills-prompt owner (upstreamed 2026.7.2; 2026.10.2 consolidated the skill-runtime and command-system-prompt call sites here). Matches the call, not the import.
+prepareRuntimeSkillEntries\( | src/agents/embedded-agent-runner/skill-runtime.ts | The skill runtime builds its entries through the shared owner that maps sandbox paths. Matches the call, not the import.
+resolveRuntimeSkillsPrompt\( | src/auto-reply/reply/commands-system-prompt.ts | The command system prompt builds its skills block through the shared owner that maps sandbox paths. Matches the call, not the import.
 # Private-network navigation in the sandbox browser is NO LONGER a code patch.
 # Upstream 2026.7.2 plumbs browser.ssrfPolicy from config into the sandbox bridge
 # (context.ts -> ensureSandboxBrowser -> buildSandboxBrowserResolvedConfig), and
@@ -132,7 +133,7 @@ sandbox: \{ mode: "off" as const \} | src/system-agent/inference-route.ts | The 
 # --- Control UI auth (Tailscale identity) ---
 authMethod === "tailscale" && \(isBrowserOperatorUi | src/gateway/server/ws-connection/connect-auth.ts | A Tailscale-identity Control UI login gets a browser device token tagged with the current shared-auth generation. Without it, token/password auth rejects the issuer-less token as legacy-browser-token, every icon/avatar/bootstrap-config read answers 401, the per-client auth limiter escalates to 429, and the web UI loses file previews and Plugins > Customize UI. Asserts the issuance condition, not the state field: a rebase that keeps the type but drops this branch leaves the fix compiled and inactive.
 tailscaleBrowserDeviceTokenGeneration !== undefined, | src/gateway/server/ws-connection/connect-session.ts | The Tailscale browser session binds to that generation, so shared-auth rotation reconnects it and re-mints a valid token instead of stranding it on a rejected one.
-entry.rejectedAuthEpoch = browserAuthEpoch | ui/src/lib/authenticated-avatar-route.ts | The avatar loader holds an all-credentials-rejected route until browser auth is restored. Without it every Lit render replays refused credentials and feeds the Gateway's auth limiter, which also guards control-ui-config.json.
+entry.authRejected = true | ui/src/lib/authenticated-avatar-route.ts | The avatar loader holds an all-credentials-rejected route until browser auth is restored. Without it every Lit render replays refused credentials and feeds the Gateway's auth limiter, which also guards control-ui-config.json. 2026.10.2: the hold is released by the loader's own auth-recovery hook (upstream clears held entries there), not a module-level epoch.
 
 # --- Heartbeat delivery ---
 suppressHeartbeatReadOnlyFailure | src/agents/embedded-agent-runner/run/payloads.ts | A heartbeat that hit a proven read-only tool failure and then went quiet does not post a tool-failure notice to the owner's chat. Mutating or unknown failures still surface.

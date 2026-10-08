@@ -274,22 +274,21 @@ function resolveOwnerAuthorizationState(
   });
   const allowAll =
     !params.hadResolutionError &&
-    (params.allowFromList.length === 0 || hasWildcardAllowFrom(params.allowFromList));
-  const channelCommandOwners = resolveOwnerCandidatesForCommands({
-    plugin: params.plugin,
-    cfg: params.cfg,
-    accountId: params.accountId,
-    to: params.to,
-    allowAll,
-    allowFromList: params.allowFromList,
-  });
+    (params.allowFromList.length === 0 || params.allowFromList.some(isWildcardAllowFromEntry));
+  const channelCommandOwners = allowAll ? [] : stripWildcardAllowFrom(params.allowFromList);
+  if (!allowAll && channelCommandOwners.length === 0 && params.to) {
+    channelCommandOwners.push(...normalizeAllowFromEntry({ ...params, value: params.to }));
+  }
+  // Fork: a configured "*" stays visible in the owner list (see explicitOwnerAllowAll).
   const explicitOwners = Array.from(new Set(configOwnerAllowFromList));
-  const contextCommandOwners = contextOwnerAllowFromList;
+  const contextCommandOwners = stripWildcardAllowFrom(contextOwnerAllowFromList);
   // Channel and context lists can authorize commands within one transport, but only the global
   // owner list grants owner-only command and action authority.
+  // Fork: a wildcard owner entry makes every sender an owner. Only the global
+  // list waives owner-only enforcement; a context wildcard opens candidates.
+  const explicitOwnerAllowAll = configOwnerAllowFromList.some(isWildcardAllowFromEntry);
   const ownerAllowAll =
-    hasWildcardAllowFrom(configOwnerAllowFromList) ||
-    hasWildcardAllowFrom(contextOwnerAllowFromList);
+    explicitOwnerAllowAll || contextOwnerAllowFromList.some(isWildcardAllowFromEntry);
   const commandOwnerCandidates = Array.from(
     new Set(
       ownerAllowAll
@@ -304,6 +303,7 @@ function resolveOwnerAuthorizationState(
   return {
     commandOwnerCandidates,
     explicitOwners,
+    explicitOwnerAllowAll,
   };
 }
 
@@ -464,7 +464,7 @@ function resolveCommandAuthorizationState(params: CommandAuthorizationParams): {
     ctx.GatewayClientScopes.includes("operator.admin");
   const ownerAllowlistConfigured = ownerState.explicitOwners.length > 0;
   const assertOwnerCurrent = captureCommandOwnerAssertion(ctx);
-  const ownerAllowAll = ownerState.explicitOwners.includes("*");
+  const ownerAllowAll = ownerState.explicitOwnerAllowAll;
   const senderIsOwner =
     senderIsOwnerByIdentity ||
     senderIsOwnerByScope ||

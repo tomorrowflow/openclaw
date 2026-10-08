@@ -465,10 +465,6 @@ function extractOllamaThinking(content: unknown): string {
     .join("");
 }
 
-function ensureArgsObject(value: unknown): Record<string, unknown> {
-  return parseJsonObjectPreservingUnsafeIntegers(value) ?? {};
-}
-
 type OllamaToolCallNameOptions = {
   availableToolNames?: ReadonlySet<string>;
 };

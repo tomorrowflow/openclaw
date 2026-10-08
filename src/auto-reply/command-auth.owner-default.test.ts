@@ -104,12 +104,6 @@ describe("senderIsOwner only reflects explicit owner authorization", () => {
       expected: { senderIsOwner: true },
     },
     {
-      name: "ignores ownerAllowFrom wildcards",
-      cfg: { channels: { discord: {} }, commands: { ownerAllowFrom: ["*"] } },
-      ctx: { Provider: "discord", Surface: "discord", From: "discord:anyone", SenderId: "anyone" },
-      expected: { ownerList: [], senderIsOwner: false, isAuthorizedSender: true },
-    },
-    {
       name: "grants owner identity for internal operator.admin sessions",
       cfg: {},
       ctx: { Provider: "webchat", Surface: "webchat", GatewayClientScopes: ["operator.admin"] },
