@@ -236,6 +236,19 @@ describe("runPreparedCliAgent context engine lifecycle", () => {
     expect(afterTurn).not.toHaveBeenCalled();
   });
 
+  it("keeps a node-placed session id whose transcript lives on the node", async () => {
+    const context = buildPreparedContext(createContextEngine());
+    context.executionTarget = { kind: "node", placement: { nodeId: "node-a" } };
+    // The Gateway never sees a node transcript; a local probe always misses.
+    vi.mocked(cliTranscript.claudeCliSessionTranscriptHasContent).mockResolvedValue(false);
+    prepareMock.mockResolvedValue(context);
+
+    const result = await runCliAgent(context.params);
+
+    expect(result.meta.agentMeta?.sessionId).toBe("external-cli-session-1");
+    expect(cliTranscript.claudeCliSessionTranscriptHasContent).not.toHaveBeenCalled();
+  });
+
   it("finalizes full post-bootstrap history with transcript turn text", async () => {
     const { bootstrap, afterTurn, maintain, dispose } = createLifecycle();
     const history = Array.from({ length: 101 }, (_, index) =>

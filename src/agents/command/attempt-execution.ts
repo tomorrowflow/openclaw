@@ -35,6 +35,7 @@ import {
 } from "../cli-execution-auth.js";
 import { runCliAgent } from "../cli-runner.js";
 import { hasCliLiveSession } from "../cli-runner/cli-live-session-registry.js";
+import { resolveCliExecutionTarget } from "../cli-runner/execution-target.js";
 import { buildCliMcpDelegationCapabilityBinding } from "../cli-runner/mcp-grant-context.js";
 import { resolveCliRuntimeToolsAllow } from "../cli-runner/tool-policy.js";
 import {
@@ -566,6 +567,16 @@ export function runAgentAttempt(
         };
         const prepareCliSessionBinding = async () => {
           if (!isClaudeCliProvider(cliExecutionProvider) || !cliSessionBinding?.sessionId) {
+            return;
+          }
+          // A node-placed session's transcript lives on the node; the local probe
+          // would always miss and clear a valid binding.
+          if (
+            resolveCliExecutionTarget({
+              params: { sessionEntry: params.sessionEntry },
+              backendId: "claude-cli",
+            }).kind === "node"
+          ) {
             return;
           }
           if (

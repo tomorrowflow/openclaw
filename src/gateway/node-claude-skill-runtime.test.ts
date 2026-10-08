@@ -17,7 +17,10 @@ import { resolveNodeHostGatewayPlatformIdentity } from "../node-host/gateway-pla
 import { decodeClaudeCliNodeRunParams } from "../node-host/invoke-agent-cli-claude-params.js";
 import { runClaudeCliNodeCommand } from "../node-host/invoke-agent-cli-claude.js";
 import type { NodeInvokeRequestPayload } from "../node-host/invoke-types.js";
-import { withPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
+import {
+  withPluginRuntimeGatewayContextResolver,
+  withPluginRuntimeGatewayRequestScope,
+} from "../plugins/runtime/gateway-request-scope.js";
 import type { OpenClawPluginNodeHostCommandIo } from "../plugins/types.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import {
@@ -280,26 +283,31 @@ async function fixture(
     withPluginRuntimeGatewayRequestScope(
       { context: gateway, client: owner.client, isWebchatConnect: () => true },
       () =>
-        executeNodeClaudeRun({
-          context,
-          nodePlacement: { nodeId: "node-1", cwd: workspace },
-          executionArgs: ["-p"],
-          stdinPayload: stdin,
-          noOutputTimeoutMs: 5_000,
-          consumeStdout: (text) => {
-            output += text;
-          },
-          consumeStderr: () => {},
-          deps: {
-            invokeNodeClaudeCliRun,
-            registerExecApprovalRequestForHostOrThrow: async () => {
-              throw new Error("unexpected approval");
-            },
-            resolveRegisteredExecApprovalDecision: async () => {
-              throw new Error("unexpected approval");
-            },
-          },
-        }),
+        // Mirror the session-work lease, which swaps the request context for the live resolver.
+        withPluginRuntimeGatewayContextResolver(
+          () => gateway,
+          () =>
+            executeNodeClaudeRun({
+              context,
+              nodePlacement: { nodeId: "node-1", cwd: workspace },
+              executionArgs: ["-p"],
+              stdinPayload: stdin,
+              noOutputTimeoutMs: 5_000,
+              consumeStdout: (text) => {
+                output += text;
+              },
+              consumeStderr: () => {},
+              deps: {
+                invokeNodeClaudeCliRun,
+                registerExecApprovalRequestForHostOrThrow: async () => {
+                  throw new Error("unexpected approval");
+                },
+                resolveRegisteredExecApprovalDecision: async () => {
+                  throw new Error("unexpected approval");
+                },
+              },
+            }),
+        ),
     );
   return {
     saved,

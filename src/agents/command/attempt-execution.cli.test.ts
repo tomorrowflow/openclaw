@@ -1387,6 +1387,31 @@ describe("CLI attempt execution", () => {
     expect(persisted[sessionKey]?.claudeCliSessionId).toBeUndefined();
   });
 
+  it("keeps a node-placed Claude CLI binding whose transcript lives on the node", async () => {
+    const sessionKey = "agent:main:direct:claude-node-placed";
+    setTestEnvValue("HOME", path.join(tmpDir, "home-node-placed"));
+    const sessionEntry = {
+      ...makeClaudeCliSessionEntry("openclaw-session-node", "node-claude-session"),
+      execHost: "node" as const,
+      execNode: "node-1",
+      execCwd: "/work/repo",
+    };
+    const { sessionStore, runCli } = await createCliSession(sessionKey, sessionEntry);
+    runCliAgentMock.mockImplementationOnce(async () => {
+      expect(claudeBinding(readSessionStore()[sessionKey])).toEqual(
+        expect.objectContaining({ sessionId: "node-claude-session" }),
+      );
+      return makeCliResult("node cli response", "node-claude-session");
+    });
+
+    await runCli();
+
+    expect(firstRunCliAgentArg().cliSessionId).toBe("node-claude-session");
+    expect(claudeBinding(sessionStore[sessionKey])).toEqual(
+      expect.objectContaining({ sessionId: "node-claude-session" }),
+    );
+  });
+
   it("keeps the bound claude-cli session id as the reuse candidate when the native transcript is missing (so reseed can recover)", async () => {
     const sessionKey = "agent:main:direct:claude-missing-transcript-reseed";
     const cliSessionId = "cli-sid-abc";
@@ -2361,7 +2386,7 @@ describe("CLI attempt execution", () => {
       const sessionKey = "agent:main:direct:claude-announce-unverified";
       const sessionEntry = makeSessionEntry(
         "openclaw-session-cli-announce-unverified",
-        execHost ? { execHost } : {},
+        execHost ? { execHost, execNode: "node-1" } : {},
       );
       const sessionStore = seedChildLineage
         ? createSubagentAnnounceSessionStore(sessionKey, sessionEntry, {})
