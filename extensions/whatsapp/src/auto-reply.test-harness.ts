@@ -63,8 +63,8 @@ type MockSessionSocket = {
   };
   ws: EventEmitter & {
     close: ReturnType<typeof vi.fn>;
-    isClosed: boolean;
-    isClosing: boolean;
+    readonly isClosed: boolean;
+    readonly isClosing: boolean;
   };
   user: { id: string };
 };
@@ -85,17 +85,21 @@ vi.mock("./session.js", async () => {
   return {
     ...actual,
     createWaSocket: vi.fn(async () => {
+      let closed = false;
       const ws = new EventEmitter() as MockSessionSocket["ws"];
-      ws.isClosed = false;
-      ws.isClosing = false;
-      const closeTransport = () => {
-        ws.isClosing = true;
-        ws.isClosed = true;
+      Object.defineProperties(ws, {
+        isClosed: { get: () => closed },
+        isClosing: { get: () => false },
+      });
+      ws.close = vi.fn(() => {
+        closed = true;
         ws.emit("close");
-      };
-      ws.close = vi.fn(closeTransport);
+      });
       const socket: MockSessionSocket = {
-        end: vi.fn(closeTransport),
+        end: vi.fn(() => {
+          closed = true;
+          ws.emit("close");
+        }),
         ev: {
           on: vi.fn(),
           off: vi.fn(),

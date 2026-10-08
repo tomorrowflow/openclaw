@@ -6,10 +6,11 @@ scenario:
   runtimePairLane: core
   coverage:
     primary:
-      - scheduling.cron
-      - tools.invocation
+      - automation.agent-cron-tool
     secondary:
-      - scheduling.dedup
+      - automation.model-authored-cron-jobs
+      - automation.isolated-cron-execution-dedup
+      - automation.scheduler-persistence
   gatewayConfigPatch:
     commands:
       ownerAllowFrom:

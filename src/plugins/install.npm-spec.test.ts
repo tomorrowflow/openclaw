@@ -1884,8 +1884,7 @@ describe("installPluginFromNpmSpec", () => {
             return {
               code: 1,
               stdout: "",
-              stderr:
-                'npm error code EINVALIDTAGNAME\nnpm error Invalid tag name "0.2.2>ip" of package "werift-ice@0.2.2>ip"',
+              stderr: "npm ERR! Invalid comparator: npm:@nolyfill/domexception@1.0.28",
               signal: null,
               killed: false,
               termination: "exit" as const,
