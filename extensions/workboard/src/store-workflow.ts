@@ -53,12 +53,12 @@ import {
   deriveChildIdempotencyKey,
   normalizeArtifact,
   normalizeAutomation,
-  normalizeBoundedString,
   normalizeProofInput,
   normalizeStatus,
   normalizeStringList,
 } from "./store-normalizers.js";
 import { WorkboardPromoteStore } from "./store-promote.js";
+import { normalizeBoundedString } from "./store-value-normalizers.js";
 
 function assertClaimIdentity(claim: WorkboardClaim, input: WorkboardHeartbeatInput): void {
   const token = normalizeOptionalString(input.token);
@@ -107,7 +107,8 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
           !isDeepStrictEqual(
             guarded.metadata?.automation?.workspaceAccess,
             expectedAuthority.workspaceAccess,
-          ))
+          ) ||
+          !isDeepStrictEqual(guarded.metadata?.automation?.target, expectedAuthority.target))
       ) {
         throw new Error("card workspace authority changed before claim.");
       }

@@ -68,6 +68,8 @@ import type {
   WorkboardNotificationSubscribeInput,
   WorkboardProofInput,
 } from "./store-inputs.js";
+import { normalizeExecutionTarget } from "./store-target-normalizers.js";
+import { normalizeBoundedString } from "./store-value-normalizers.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
 
 export function normalizeBoardId(value: unknown, fallback?: string): string | undefined {
@@ -153,24 +155,6 @@ export function normalizeNotes(value: unknown): string | undefined {
     throw new Error("notes must be 4000 characters or fewer.");
   }
   return notes;
-}
-
-export function normalizeBoundedString(
-  value: unknown,
-  fallback: string | undefined,
-  maxLength: number,
-  fieldName: string,
-): string | undefined {
-  const normalized = normalizeOptionalString(value);
-  if (!normalized) {
-    return fallback;
-  }
-  if (normalized.length > maxLength) {
-    throw new Error(
-      `${fieldName} must be ${maxLength} characters or fewer (got ${normalized.length}).`,
-    );
-  }
-  return normalized;
 }
 
 export function capText(value: string | undefined, max: number): string | undefined {
@@ -359,6 +343,9 @@ export function normalizeAutomation(
     : fallback.workspace;
   // Raw metadata preserves host-issued authority/state but cannot mint or widen either.
   const workspaceAccess = fallback.workspaceAccess;
+  const target = Object.hasOwn(record, "target")
+    ? normalizeExecutionTarget(record.target, fallback.target, options)
+    : fallback.target;
   const launch = normalizeLaunchState(
     options.allowLaunchState && Object.hasOwn(record, "launch") ? record.launch : fallback.launch,
   );
@@ -370,6 +357,7 @@ export function normalizeAutomation(
     ...(skills?.length ? { skills } : {}),
     ...(workspace ? { workspace } : {}),
     ...(workspaceAccess ? { workspaceAccess } : {}),
+    ...(target ? { target } : {}),
     ...(maxRuntimeSeconds ? { maxRuntimeSeconds } : {}),
     ...(maxRetries ? { maxRetries } : {}),
     ...(scheduledAt ? { scheduledAt } : {}),

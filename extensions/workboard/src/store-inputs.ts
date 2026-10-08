@@ -3,6 +3,7 @@ import type {
   WorkboardCard,
   WorkboardDiagnostic,
   WorkboardEvent,
+  WorkboardExecutionTarget,
   WorkboardWorkspace,
   WorkboardWorkspaceAccess,
 } from "@openclaw/workboard-contract";
@@ -100,6 +101,7 @@ export type WorkboardClaimOptions = {
     agentId?: string;
     workspace?: WorkboardWorkspace;
     workspaceAccess?: WorkboardWorkspaceAccess;
+    target?: WorkboardExecutionTarget;
   };
   /** Trusted legacy-card adoption; applied only while expectedAuthority still matches. */
   adoptWorkspaceAccess?: WorkboardWorkspaceAccess;

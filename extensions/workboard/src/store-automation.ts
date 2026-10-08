@@ -1,7 +1,8 @@
 import type { WorkboardAutomation, WorkboardWorkspaceAccess } from "@openclaw/workboard-contract";
 // Workboard automation helpers normalize trusted host-issued workspace provenance.
 import type { WorkboardLinkedCreateInput } from "./store-inputs.js";
-import { normalizeAutomation, normalizeBoundedString } from "./store-normalizers.js";
+import { normalizeAutomation } from "./store-normalizers.js";
+import { normalizeBoundedString } from "./store-value-normalizers.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
 
 function normalizeTrustedWorkspaceAccess(
