@@ -480,14 +480,6 @@
     "./plugin-sdk/sandbox": {
       "default": "./dist/plugin-sdk/sandbox.js"
     },
-    "./plugin-sdk/self-hosted-provider-setup": {
-      "types": "./dist/plugin-sdk/self-hosted-provider-setup.d.ts",
-      "default": "./dist/plugin-sdk/self-hosted-provider-setup.js"
-    },
-    "./plugin-sdk/question-gateway-runtime": {
-      "types": "./dist/plugin-sdk/question-gateway-runtime.d.ts",
-      "default": "./dist/plugin-sdk/question-gateway-runtime.js"
-    },
     "./plugin-sdk/routing": {
       "types": "./dist/plugin-sdk/routing.d.ts",
       "default": "./dist/plugin-sdk/routing.js"
@@ -615,6 +607,10 @@
     "./plugin-sdk/approval-runtime": {
       "types": "./dist/plugin-sdk/approval-runtime.d.ts",
       "default": "./dist/plugin-sdk/approval-runtime.js"
+    },
+    "./plugin-sdk/question-gateway-runtime": {
+      "types": "./dist/plugin-sdk/question-gateway-runtime.d.ts",
+      "default": "./dist/plugin-sdk/question-gateway-runtime.js"
     },
     "./plugin-sdk/config-contracts": {
       "types": "./dist/plugin-sdk/config-contracts.d.ts",
