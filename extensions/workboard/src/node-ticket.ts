@@ -191,7 +191,7 @@ export async function createNodeTicketWorktree(params: {
       };
     }
   }
-  if (published && previous && rework) {
+  if (previous && rework) {
     return { path: worktreePath, branch, baseCommit: previous.baseCommit, rework };
   }
   const baseCommit = await runNodeCommand(runtime, target.nodeId, [
