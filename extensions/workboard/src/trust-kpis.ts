@@ -45,7 +45,12 @@ function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
   return {
     taskClass: label?.slice("class:".length).trim() || UNCLASSIFIED,
     createdAt: card.createdAt,
-    ...(handoff?.phase === "published" ? { acceptedAt: handoff.publishedAt } : {}),
+    // The first publish is the acceptance; rework keeps it while the handoff restarts.
+    ...(worktree?.rework
+      ? { acceptedAt: worktree.rework.acceptedAt }
+      : handoff?.phase === "published"
+        ? { acceptedAt: handoff.publishedAt }
+        : {}),
     // A rework round drops the handoff until its own import, but the ticket was imported before.
     imported:
       handoff?.phase === "imported" ||

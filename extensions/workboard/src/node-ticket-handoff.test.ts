@@ -327,8 +327,11 @@ describe("node ticket draft PR", () => {
     expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.rework).toEqual({
       round: 1,
       pullRequestUrl,
+      acceptedAt: expect.any(Number),
       outsideCommits: 1,
     });
+    // The first publish stays the acceptance while the rework round runs.
+    expect((await store.trust({})).total).toMatchObject({ accepted: 1, reworkRounds: 1 });
 
     writeFileSync(path.join(worktree, "flags.py"), "strict\n");
     git(worktree, "add", "-A");
@@ -364,6 +367,17 @@ describe("node ticket draft PR", () => {
       outsideCommits: 1,
     });
     expect(trust.weeks.at(-1)).toMatchObject({ accepted: 1, autonomous: 0 });
+
+    // Once the PR branch is gone from origin, the node's earlier remote ref must not revive it.
+    git(repos.origin, "branch", "-D", branch);
+    await store.move(card.id, "todo", undefined);
+    const gone = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets: gateway,
+      options: { cardId: card.id, now: Date.now() },
+    });
+    expect(gone.startFailures[0]?.error).toContain("is no longer on origin");
   });
 
   it("refuses to rework an imported ticket before its draft PR exists", async () => {

@@ -92,6 +92,7 @@ describe("projectWorkboardTrust", () => {
           rework: {
             round: 2,
             pullRequestUrl: "https://github.com/acme/app/pull/1",
+            acceptedAt: MONDAY,
             outsideCommits: 1,
           },
         },

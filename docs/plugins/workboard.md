@@ -505,8 +505,8 @@ agent instead of the default agent.
    kept. The session gets the same session key, a "Review rework, round N"
    brief, and the recent comments. The import moves the host branch forward
    only from the commit it published. Accepting again pushes to the same draft
-   PR. The card records `rework.round` and `rework.outsideCommits` on its node
-   worktree. A card imported but not yet published can't be reworked; accept it
+   PR. The card records `rework.round`, `rework.outsideCommits`, and the first
+   acceptance (`rework.acceptedAt`) on its node worktree. A card imported but not yet published can't be reworked; accept it
    first. A branch that is gone from `origin` (merged or closed PR) needs a new
    card.
 

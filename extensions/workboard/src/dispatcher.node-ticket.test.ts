@@ -37,7 +37,7 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
       }),
     ];
     expect(nodeTickets.respond.mock.calls.map(([method, params]) => [method, params])).toEqual([
-      nodeGit("fetch", "--quiet", "origin"),
+      nodeGit("fetch", "--quiet", "--prune", "origin"),
       nodeGit("rev-parse", "--verify", "--quiet", "main^{commit}"),
       nodeGit("worktree", "add", "-b", `factory/${card.id}`, worktreePath, BASE_COMMIT),
       [
