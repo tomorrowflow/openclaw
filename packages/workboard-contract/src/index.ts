@@ -271,6 +271,13 @@ export type WorkboardNodeHandoff =
       importedAt: number;
       publishedAt: number;
       pullRequestUrl: string;
+      /**
+       * Card comments up to this time are not review feedback for the next
+       * rework round (D56): Workboard's own notices since the publish.
+       */
+      reviewFrom?: number;
+      /** When Workboard noted that the reopened ticket waits for a node-ticket slot. */
+      slotWaitNotedAt?: number;
     };
 
 /**

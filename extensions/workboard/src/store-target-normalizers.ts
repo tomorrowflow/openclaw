@@ -40,9 +40,20 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
     500,
     "node handoff pull request url",
   );
-  return publishedAt === undefined || !pullRequestUrl
-    ? undefined
-    : { phase: "published", headCommit, importedAt, publishedAt, pullRequestUrl };
+  if (publishedAt === undefined || !pullRequestUrl) {
+    return undefined;
+  }
+  const reviewFrom = resolveOptionalIntegerOption(value.reviewFrom, { min: 0 });
+  const slotWaitNotedAt = resolveOptionalIntegerOption(value.slotWaitNotedAt, { min: 0 });
+  return {
+    phase: "published",
+    headCommit,
+    importedAt,
+    publishedAt,
+    pullRequestUrl,
+    ...(reviewFrom !== undefined ? { reviewFrom } : {}),
+    ...(slotWaitNotedAt !== undefined ? { slotWaitNotedAt } : {}),
+  };
 }
 
 function normalizeNodeRework(value: unknown): WorkboardNodeRework | undefined {

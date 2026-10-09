@@ -64,7 +64,18 @@ async function finishNodeTicket(params: {
   });
   const warn = vi.fn();
   const github = createFakeGitHub(repos.origin);
-  const handoffs = createNodeTicketHandoffs({ store, runtime: gateway, github: github.access });
+  const handoffs = createNodeTicketHandoffs({
+    store,
+    runtime: gateway,
+    github: github.access,
+    start: async (cardId) =>
+      await dispatchAndStartWorkboardCards({
+        store,
+        subagent: { run: vi.fn() },
+        nodeTickets: gateway,
+        options: { cardId },
+      }),
+  });
   return { store, card, repos, worktree, handoffs, warn, gateway, github };
 }
 
@@ -446,6 +457,91 @@ describe("node ticket draft PR", () => {
     expect(stored?.metadata?.comments?.at(-1)?.body).toContain(
       "Rework round 1 was pushed to https://github.com/acme/app/pull/7, but its PR comment failed: GitHub POST /repos/acme/app/issues/7/comments returned 403",
     );
+
+    // Workboard's own failure note is not review feedback for round 2.
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+    expect((await store.get(card.id))?.status).toBe("backlog");
+  });
+
+  it("starts the rework round when a published ticket is reopened with a review comment", async () => {
+    const { store, card, handoffs, warn, github, gateway } = await acceptImportedTicket();
+    github.tokens.set("acme/app", "token-app");
+    await handoffs.resume(warn);
+    github.openPulls.push("https://github.com/acme/app/pull/7");
+
+    await store.addComment(card.id, { body: "Rename the flag to --strict." });
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("running");
+    expect(stored?.metadata?.automation?.target?.worktree?.rework).toMatchObject({ round: 1 });
+    expect(gateway.respond).toHaveBeenLastCalledWith(
+      "sessions.create",
+      expect.objectContaining({
+        message: expect.stringMatching(
+          /Review rework, round 1[\s\S]*Rename the flag to --strict\./,
+        ),
+      }),
+    );
+  });
+
+  it("sends a reopen without a review comment back to backlog with the next step", async () => {
+    const { store, card, handoffs, warn, github, gateway } = await acceptImportedTicket();
+    github.tokens.set("acme/app", "token-app");
+    await handoffs.resume(warn);
+    const sessionsBefore = gateway.respond.mock.calls.filter(
+      ([method]) => method === "sessions.create",
+    );
+
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+    await handoffs.resume(warn);
+
+    const bounced = await store.get(card.id);
+    expect(bounced?.status).toBe("backlog");
+    const note =
+      "Reopened without a review comment; add what should change and move it to todo again to start rework round 1.";
+    expect(bounced?.metadata?.comments?.filter((comment) => comment.body === note)).toHaveLength(1);
+
+    // The note itself never counts as the review comment.
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+    const again = await store.get(card.id);
+    expect(again?.status).toBe("backlog");
+    expect(again?.metadata?.comments?.filter((comment) => comment.body === note)).toHaveLength(2);
+    expect(
+      gateway.respond.mock.calls.filter(([method]) => method === "sessions.create"),
+    ).toHaveLength(sessionsBefore.length);
+  });
+
+  it("waits once for a free node-ticket slot and starts the rework when one frees", async () => {
+    const { store, card, handoffs, warn, github } = await acceptImportedTicket();
+    github.tokens.set("acme/app", "token-app");
+    await handoffs.resume(warn);
+    store.nodeTicketConcurrency = 1;
+    const other = await startNodeCard(store);
+
+    await store.addComment(card.id, { body: "Add a test." });
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+    await handoffs.resume(warn);
+
+    const waiting = await store.get(card.id);
+    expect(waiting?.status).toBe("todo");
+    expect(
+      waiting?.metadata?.comments?.filter((comment) =>
+        comment.body.startsWith("Rework round 1 waits for a node-ticket slot"),
+      ),
+    ).toHaveLength(1);
+
+    await store.block(other.card.id, { reason: "node offline" }, null);
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect((await store.get(card.id))?.status).toBe("running");
   });
 
   it("refuses to rework an imported ticket before its draft PR exists", async () => {

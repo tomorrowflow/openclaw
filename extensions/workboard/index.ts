@@ -5,6 +5,7 @@ import { registerWorkboardGatewayMethods } from "./runtime-api.js";
 import { createWorkboardAutomationNudgeService } from "./src/automation-nudge.js";
 import { createWorkboardChangeEventService } from "./src/change-events.js";
 import { registerWorkboardCommand } from "./src/command.js";
+import { dispatchAndStartWorkboardCards } from "./src/dispatcher.js";
 import {
   createWorkboardLifecycleService,
   readWorkboardLifecycleSessions,
@@ -61,6 +62,16 @@ export default definePluginEntry({
           getPreparedPluginSecretInput("workboard", `github.repos[${JSON.stringify(repo)}].token`)
             .value,
       },
+      // Rework rounds (D56) take the same exact start as workboard.cards.start;
+      // node tickets need no Gateway workspace, so no caller authority applies.
+      start: async (cardId) =>
+        await dispatchAndStartWorkboardCards({
+          store,
+          subagent: api.runtime.subagent,
+          worktrees: api.runtime.worktrees,
+          nodeTickets: api.runtime.gateway,
+          options: { cardId, maxStarts: 1 },
+        }),
     });
     const lifecycleSync = createWorkboardLifecycleService({
       store,
