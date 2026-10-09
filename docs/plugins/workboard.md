@@ -482,6 +482,12 @@ checks the dispatcher's access, not the access of the card's creator. Set
 `orchestration.defaultAssignee` too, so those cards run under the project's
 agent instead of the default agent.
 
+Saving a board that sets the target or the assignee checks the target `model`
+against that agent's `modelPolicy.allow` (the default agent when no assignee is
+set) and refuses a model the agent may not run, naming both. Other board edits
+skip the check, so a board whose agent policy narrowed later still saves; its
+cards then block at start with the core `model not allowed` reason.
+
 1. **Start:** the dispatcher fetches `origin` in the node clone, creates branch
    `factory/<cardId>` at `baseRef` (default `origin/HEAD`) in
    `<worktreesRoot>/wb-<cardId>`, and starts the session there.

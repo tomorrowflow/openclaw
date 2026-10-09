@@ -34,6 +34,7 @@ import type {
 import { normalizeBoardId, normalizeBoardIdRequired } from "./store-normalizers.js";
 import { freezeCardList, readCards } from "./store-read.js";
 import { WorkboardStoreRuntime } from "./store-runtime.js";
+import type { WorkboardTargetModelCheck } from "./target-model-policy.js";
 import { projectWorkboardTrust } from "./trust-kpis.js";
 
 export class WorkboardBoardStore extends WorkboardStoreRuntime {
@@ -42,6 +43,8 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
   protected readonly subscriptionStore: WorkboardSubscriptionStore;
   protected readonly attachmentStore: WorkboardKeyedStore<PersistedWorkboardAttachment>;
   private readonly sessionsBoardStore: WorkboardSessionsBoardStore;
+  /** Installed by the plugin entry; tests without model policy leave it unset. */
+  checkTargetModel?: WorkboardTargetModelCheck;
 
   constructor(
     store: WorkboardCardStore,
@@ -253,9 +256,34 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
       const id = normalizeBoardIdRequired(input.id);
       const existing = await this.boardStore.lookup(id);
       const board = normalizeBoardMetadata({ ...input, id }, existing?.board);
+      this.assertTargetModelAllowed(input, board);
       await this.boardStore.register(id, { version: 1, board });
       return board.kind === "sessions" ? await this.getSessionsBoard(id) : board;
     });
+  }
+
+  /**
+   * Checks only writes that set the target or the assignee, so a board saved
+   * before its agent's policy changed can still be renamed or archived;
+   * dispatch still meets core's refusal for those.
+   */
+  private assertTargetModelAllowed(input: WorkboardBoardInput, board: WorkboardBoardMetadata) {
+    const requested = isRecord(input.orchestration) ? input.orchestration : {};
+    const model = board.orchestration?.defaultTarget?.model;
+    if (
+      !this.checkTargetModel ||
+      !model ||
+      (!Object.hasOwn(requested, "defaultTarget") && !Object.hasOwn(requested, "defaultAssignee"))
+    ) {
+      return;
+    }
+    const agentId = board.orchestration?.defaultAssignee;
+    const refusal = this.checkTargetModel({ agentId, model });
+    if (refusal) {
+      throw new Error(
+        `Board ${board.id} default target model ${model} is not allowed for agent ${agentId ?? "default"} (${refusal}). Add it to that agent's modelPolicy.allow or choose an allowed model.`,
+      );
+    }
   }
 
   getSessionsBoard(boardId: string): Promise<WorkboardSessionsBoard> {

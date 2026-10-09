@@ -16,6 +16,7 @@ import { createWorkboardSessionsBoardService } from "./src/sessions-board.js";
 import { resolveWorkboardSqliteWorkerModuleUrl } from "./src/sqlite-store-paths.js";
 import { registerWorkboardStoreLifecycle } from "./src/store-lifecycle.js";
 import { WorkboardStore } from "./src/store.js";
+import { createWorkboardTargetModelCheck } from "./src/target-model-policy.js";
 import { createWorkboardSessionsBoardTools } from "./src/tools-sessions-board.js";
 import { createWorkboardTools } from "./src/tools.js";
 import {
@@ -36,6 +37,7 @@ export default definePluginEntry({
     if (isRecord(nodeTickets) && typeof nodeTickets.maxConcurrent === "number") {
       store.nodeTicketConcurrency = nodeTickets.maxConcurrent;
     }
+    store.checkTargetModel = createWorkboardTargetModelCheck(api.runtime);
     const resourceServices: Array<{ stop(): void | Promise<void> }> = [];
     registerWorkboardStoreLifecycle(api, store, async () => {
       await Promise.all(resourceServices.map(async (service) => await service.stop()));
