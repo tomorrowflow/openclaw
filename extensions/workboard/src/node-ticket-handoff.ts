@@ -36,7 +36,16 @@ type HandoffCard = {
 function handoffCard(card: WorkboardCard): HandoffCard | undefined {
   const target = nodeTicketTarget(card);
   const worktree = target?.worktree;
-  if (!target || !worktree?.handoff || card.status !== "running" || card.metadata?.archivedAt) {
+  // A rework start (D54) claims the card, so it is running, before it swaps
+  // out the published worktree record. That record's handoff is finished, not
+  // an import to resume.
+  if (
+    !target ||
+    !worktree?.handoff ||
+    worktree.handoff.phase === "published" ||
+    card.status !== "running" ||
+    card.metadata?.archivedAt
+  ) {
     return undefined;
   }
   return {
