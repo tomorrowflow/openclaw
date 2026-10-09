@@ -307,14 +307,24 @@ describe("node ticket draft PR", () => {
 
     await store.move(card.id, "todo", undefined);
     await store.addComment(card.id, { body: "Rename the flag to --strict." });
+    // The handoff sweep runs on every card change; let it fire while the
+    // claimed card still carries its published worktree record.
+    const request: typeof gateway.request = async (method, params) => {
+      const argv = (params?.params as { command?: string[] } | undefined)?.command ?? [];
+      if (argv.includes("worktree") && argv.includes("add")) {
+        await handoffs.resume(warn);
+      }
+      return await gateway.request(method, params);
+    };
     const result = await dispatchAndStartWorkboardCards({
       store,
       subagent: { run: vi.fn() },
-      nodeTickets: gateway,
+      nodeTickets: { request },
       options: { cardId: card.id, now: Date.now() },
     });
 
     expect(result.startFailures).toEqual([]);
+    expect((await store.get(card.id))?.status).toBe("running");
     expect(git(worktree, "rev-parse", "HEAD")).toBe(reviewed);
     expect(gateway.respond).toHaveBeenLastCalledWith(
       "sessions.create",
