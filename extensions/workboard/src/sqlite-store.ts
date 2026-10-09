@@ -119,7 +119,7 @@ export function createWorkboardSqliteStores(options: {
       ),
     );
     // A rejected comparison has accepted no mutation; a retry still needs authority.
-    if (result !== false && result !== "conflict" && result !== "owner_busy") {
+    if (result !== false && result !== "conflict" && result !== "slot_busy") {
       authority.assertCurrent = undefined;
     }
     return result;
@@ -169,8 +169,8 @@ export function createWorkboardSqliteStores(options: {
       registerIfUpdatedAt: bindOperation((input) =>
         execute("cards.registerIfUpdatedAt", input, true),
       ),
-      claimIfOwnerAvailable: bindOperation((input) =>
-        execute("cards.claimIfOwnerAvailable", input, true),
+      claimIfSlotAvailable: bindOperation((input) =>
+        execute("cards.claimIfSlotAvailable", input, true),
       ),
       deleteIfUpdatedAt: bindOperation((input) => execute("cards.deleteIfUpdatedAt", input, true)),
       lookup: bindOperation((input) => execute("cards.lookup", input)),

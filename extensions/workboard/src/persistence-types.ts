@@ -7,6 +7,7 @@ import type {
   WorkboardSessionsBoard,
   WorkboardSessionsBoardSpec,
 } from "@openclaw/workboard-contract";
+import type { WorkboardClaimSlot } from "./store-constants.js";
 
 /**
  * Guard the first accepted write (including CAS retries), then allow its settlement.
@@ -90,7 +91,7 @@ export type WorkboardCardStatsAggregate = {
   oldestReadyAt: number | undefined;
 };
 
-export type WorkboardOwnerClaimResult = "updated" | "conflict" | "owner_busy";
+export type WorkboardSlotClaimResult = "updated" | "conflict" | "slot_busy";
 
 export type WorkboardCardReadScope =
   | { kind: "board"; boardId: string }
@@ -114,13 +115,13 @@ export type WorkboardCardStore = Omit<WorkboardKeyedStore, "entries"> & {
     expectedUpdatedAt: number,
   ): Promise<boolean>;
   deleteIfUpdatedAt(key: string, expectedUpdatedAt: number): Promise<boolean>;
-  claimIfOwnerAvailable(
+  claimIfSlotAvailable(
     key: string,
     value: PersistedWorkboardCard,
     expectedUpdatedAt: number,
-    ownerId: string,
+    slot: WorkboardClaimSlot,
     now: number,
-  ): Promise<WorkboardOwnerClaimResult>;
+  ): Promise<WorkboardSlotClaimResult>;
   listCardStatuses(ids: readonly string[]): Promise<Array<{ id: string; status: string }>>;
   listBoardAggregates(): Promise<WorkboardBoardCardAggregate[]>;
   listStatsAggregates(boardId?: string): Promise<WorkboardCardStatsAggregate[]>;

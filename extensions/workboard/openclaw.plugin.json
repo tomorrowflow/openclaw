@@ -251,7 +251,12 @@
                   "properties": {
                     "source": {
                       "type": "string",
-                      "enum": ["env", "file", "exec", "store"]
+                      "enum": [
+                        "env",
+                        "file",
+                        "exec",
+                        "store"
+                      ]
                     },
                     "provider": {
                       "type": "string"
@@ -260,11 +265,31 @@
                       "type": "string"
                     }
                   },
-                  "required": ["source", "provider", "id"]
+                  "required": [
+                    "source",
+                    "provider",
+                    "id"
+                  ]
                 }
               },
-              "required": ["token"]
+              "required": [
+                "token"
+              ]
             }
+          }
+        }
+      },
+      "nodeTickets": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Node tickets (cards with a node-claude target).",
+        "properties": {
+          "maxConcurrent": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16,
+            "default": 2,
+            "description": "How many node tickets may run at once across all nodes. Tickets in review do not count."
           }
         }
       }

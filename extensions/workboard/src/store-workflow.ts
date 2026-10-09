@@ -28,7 +28,9 @@ import {
 import {
   addWorkboardDurationMs,
   DEFAULT_CLAIM_TTL_MS,
+  DEFAULT_NODE_TICKET_CONCURRENCY,
   isWorkboardClaimReclaimable,
+  isWorkboardNodeTicket,
   MAX_CARD_ARTIFACTS,
   MAX_CARD_NOTIFICATIONS,
   secondsToDurationMs,
@@ -72,6 +74,9 @@ function assertClaimIdentity(claim: WorkboardClaim, input: WorkboardHeartbeatInp
 }
 
 export class WorkboardWorkflowStore extends WorkboardPromoteStore {
+  /** D41 pool size for node tickets with a running turn; set once from plugin config. */
+  nodeTicketConcurrency = DEFAULT_NODE_TICKET_CONCURRENCY;
+
   async claim(
     id: string,
     input: WorkboardClaimInput,
@@ -155,7 +160,12 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
         },
         {
           expectedUpdatedAt: guarded.updatedAt,
-          ownerSlot: { ownerId, now },
+          claimSlot: {
+            slot: isWorkboardNodeTicket(guarded)
+              ? { kind: "node-tickets", limit: this.nodeTicketConcurrency }
+              : { kind: "owner", ownerId },
+            now,
+          },
         },
       );
       return { card, token };

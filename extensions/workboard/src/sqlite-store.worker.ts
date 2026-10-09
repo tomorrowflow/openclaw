@@ -48,8 +48,8 @@ export function createSqliteWorkerBackend(
         return kernel.cards.registerIfAbsent(...command.input.args);
       case "cards.registerIfUpdatedAt":
         return kernel.cards.registerIfUpdatedAt(...command.input.args);
-      case "cards.claimIfOwnerAvailable":
-        return kernel.cards.claimIfOwnerAvailable(...command.input.args);
+      case "cards.claimIfSlotAvailable":
+        return kernel.cards.claimIfSlotAvailable(...command.input.args);
       case "cards.deleteIfUpdatedAt":
         return kernel.cards.deleteIfUpdatedAt(...command.input.args);
       case "cards.lookup":

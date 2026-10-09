@@ -49,9 +49,9 @@ it before opening the dashboard. See [Apply changes and inspect](/plugins/manage
 
 ## Configuration
 
-Enable/disable Workboard with the standard plugin entry. Its only
-plugin-specific config is the GitHub token map for
-[node ticket draft PRs](#node-tickets):
+Enable/disable Workboard with the standard plugin entry. Its plugin-specific
+config covers [node tickets](#node-tickets): how many may run at once, and the
+GitHub token map for their draft PRs:
 
 ```json5
 {
@@ -60,6 +60,8 @@ plugin-specific config is the GitHub token map for
       workboard: {
         enabled: true,
         config: {
+          // Node tickets running at once across all nodes (default 2).
+          nodeTickets: { maxConcurrent: 2 },
           github: {
             repos: {
               // Keyed by the owner/name of the host clone's origin.
@@ -501,12 +503,20 @@ agent instead of the default agent.
 Nodes and ticket sessions never hold the GitHub token; only the Gateway's
 publish step reads it.
 
+Node tickets share one pool instead of their owner's single slot: up to
+`nodeTickets.maxConcurrent` (default 2) run at once across all nodes, even for
+the same agent. A ticket holds its pool slot only while it is `running`
+(including the import). In `review` it waits for a person, so an un-accepted
+draft PR never holds back the next ticket. A start beyond the pool reports
+`All 2 node ticket slots are in use`; scheduled passes skip it until a slot
+frees.
+
 ### Worker selection
 
 Each pass starts **at most 3 workers by default**. Ready cards are ordered by
 priority, then position, then creation time. A pass starts only one card per
 owner/agent and skips owners that already have running or review work on the
-board. Archived cards, cards with an active claim, and cards not in `ready`
+board. [Node tickets](#node-tickets) use their own pool instead. Archived cards, cards with an active claim, and cards not in `ready`
 status are never selected for worker starts (they can still be affected by the
 data side of dispatch: stale-claim cleanup, dependency promotion, timeout
 cleanup).
