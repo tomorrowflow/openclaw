@@ -1,4 +1,4 @@
-import type { WorkboardCard } from "@openclaw/workboard-contract";
+import type { WorkboardCard, WorkboardNodeRework } from "@openclaw/workboard-contract";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { readResponseWithLimit } from "openclaw/plugin-sdk/response-limit-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
@@ -8,6 +8,9 @@ import type { WorkboardStore } from "./store.js";
 const GITHUB_API_URL = "https://api.github.com";
 const GITHUB_API_TIMEOUT_MS = 30_000;
 const GITHUB_API_MAX_BYTES = 1024 * 1024;
+// Keeps a rework PR comment well under GitHub's 65,536-character body limit.
+const REWORK_COMMENT_MAX_CHARS = 1500;
+const REWORK_COMMENT_MAX_ENTRIES = 10;
 const GITHUB_ORIGIN_PATTERN =
   /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/;
 
@@ -30,6 +33,7 @@ type PublishCard = {
   branch: string;
   headCommit: string;
   importedAt: number;
+  rework?: WorkboardNodeRework;
 };
 
 export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
@@ -52,6 +56,7 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
     branch: worktree.branch,
     headCommit: handoff.headCommit,
     importedAt: handoff.importedAt,
+    ...(worktree.rework ? { rework: worktree.rework } : {}),
   };
 }
 
@@ -103,12 +108,18 @@ function htmlUrl(value: unknown): string | undefined {
   return isRecord(value) && typeof value.html_url === "string" ? value.html_url : undefined;
 }
 
+/** The PR the branch was pushed to; `reused` carries what commenting on an already open one needs. */
+type DraftPullRequest = {
+  url: string;
+  reused?: { repo: string; token: string; number: number };
+};
+
 /** Pushes the imported commit and returns the open draft PR for it, creating one when needed. */
 async function pushAndOpenDraft(
   access: WorkboardGitHubAccess,
   item: PublishCard,
   assertCurrent: () => Promise<void>,
-): Promise<string> {
+): Promise<DraftPullRequest> {
   const { hostRepoPath, branch, headCommit, card } = item;
   const origin = await requireHostGit(hostRepoPath, ["remote", "get-url", "origin"]);
   const repo = GITHUB_ORIGIN_PATTERN.exec(origin)?.[1];
@@ -157,9 +168,14 @@ async function pushAndOpenDraft(
     "GET",
     `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(`${owner}:${branch}`)}`,
   );
-  const existing = Array.isArray(open) ? htmlUrl(open[0]) : undefined;
+  const first: unknown = Array.isArray(open) ? open[0] : undefined;
+  const existing = htmlUrl(first);
   if (existing) {
-    return existing;
+    const number = isRecord(first) ? first.number : undefined;
+    return {
+      url: existing,
+      ...(typeof number === "number" ? { reused: { repo, token, number } } : {}),
+    };
   }
   const repository = await githubApi(access, token, "GET", `/repos/${repo}`);
   const base = isRecord(repository) ? repository.default_branch : undefined;
@@ -178,7 +194,47 @@ async function pushAndOpenDraft(
   if (!created) {
     throw new Error(`GitHub created no pull request URL for ${repo} ${branch}`);
   }
-  return created;
+  return { url: created };
+}
+
+function quote(text: string): string {
+  const capped =
+    text.length > REWORK_COMMENT_MAX_CHARS ? `${text.slice(0, REWORK_COMMENT_MAX_CHARS)}…` : text;
+  return capped
+    .trim()
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n");
+}
+
+/**
+ * The reused PR keeps the first round's body, so a rework round (D54) is told
+ * as a PR comment. The card comments since the previous publish carry the
+ * review feedback that reopened it and the session's done summary.
+ */
+function reworkCommentBody(item: PublishCard, rework: WorkboardNodeRework): string {
+  const { card } = item;
+  const previousPublish = card.metadata?.proof?.findLast(
+    (entry) => entry.label === "draft PR" && entry.status === "passed",
+  )?.createdAt;
+  const comments = (card.metadata?.comments ?? [])
+    .filter((comment) => previousPublish === undefined || comment.createdAt >= previousPublish)
+    .slice(-REWORK_COMMENT_MAX_ENTRIES);
+  const outside = rework.outsideCommits;
+  return [
+    `Rework round ${rework.round} pushed \`${item.headCommit.slice(0, 12)}\` to this PR.`,
+    outside > 0
+      ? `${outside} commit${outside === 1 ? "" : "s"} pushed by others since the first publish.`
+      : undefined,
+    comments.length > 0
+      ? ["Card comments this round:", ...comments.map((comment) => quote(comment.body))].join(
+          "\n\n",
+        )
+      : undefined,
+    `Workboard card \`${card.id}\`.`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /**
@@ -196,9 +252,9 @@ export async function publishNodeTicket(params: {
   const { card } = item;
   const claim = card.metadata?.claim;
   const scope = claim ? { ownerId: claim.ownerId, token: claim.token } : undefined;
-  let pullRequestUrl: string;
+  let pullRequest: DraftPullRequest;
   try {
-    pullRequestUrl = await pushAndOpenDraft(params.github, item, async () => {
+    pullRequest = await pushAndOpenDraft(params.github, item, async () => {
       const current = await store.get(card.id);
       const fresh = current ? publishCandidate(current) : undefined;
       if (
@@ -223,6 +279,7 @@ export async function publishNodeTicket(params: {
     );
     return;
   }
+  const pullRequestUrl = pullRequest.url;
   await store.setNodeHandoff(
     card.id,
     {
@@ -247,4 +304,27 @@ export async function publishNodeTicket(params: {
     },
     scope,
   );
+  // Posting after the published record keeps it to one comment per round: a
+  // published handoff is never a publish candidate again.
+  const { reused } = pullRequest;
+  if (!item.rework || !reused) {
+    return;
+  }
+  try {
+    await githubApi(
+      params.github,
+      reused.token,
+      "POST",
+      `/repos/${reused.repo}/issues/${reused.number}/comments`,
+      { body: reworkCommentBody(item, item.rework) },
+    );
+  } catch (error) {
+    await store.addComment(
+      card.id,
+      {
+        body: `Rework round ${item.rework.round} was pushed to ${pullRequestUrl}, but its PR comment failed: ${formatErrorMessage(error)}`,
+      },
+      scope,
+    );
+  }
 }

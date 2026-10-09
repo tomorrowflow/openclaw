@@ -511,7 +511,11 @@ cards then block at start with the core `model not allowed` reason.
    kept. The session gets the same session key, a "Review rework, round N"
    brief, and the recent comments. The import moves the host branch forward
    only from the commit it published. Accepting again pushes to the same draft
-   PR. The card records `rework.round`, `rework.outsideCommits`, and the first
+   PR, whose body stays as first written, and posts a PR comment for the round:
+   the new head, commits others pushed, and the card comments since the
+   previous publish (the review feedback and the session's summary). If the
+   comment fails, the push still counts and the card gets a comment saying so.
+   The card records `rework.round`, `rework.outsideCommits`, and the first
    acceptance (`rework.acceptedAt`) on its node worktree. A card imported but not yet published can't be reworked; accept it
    first. A branch that is gone from `origin` (merged or closed PR) needs a new
    card.
