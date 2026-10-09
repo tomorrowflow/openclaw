@@ -464,3 +464,43 @@ export type {
   WorkboardSessionsColumnMatch,
   WorkboardSessionsObserverHealth,
 } from "./sessions-board.js";
+
+/** Trust KPI counts for one task class or for all node tickets (dev loop D9/D53). */
+export type WorkboardTrustCounts = {
+  /** Node tickets in scope, archived ones included. */
+  tickets: number;
+  /** Published as a draft PR, i.e. accepted at least once. */
+  accepted: number;
+  /** Accepted with no rework round and no outside commit. */
+  cleanAccepted: number;
+  /** Reached the import without ever being blocked. */
+  firstPass: number;
+  /** Blocked at least once (each block needed a person or a re-plan). */
+  blocked: number;
+  reworkRounds: number;
+  outsideCommits: number;
+  attempts: number;
+};
+
+/** Accepted tickets in one UTC week (Monday 00:00), by acceptance time. */
+export type WorkboardTrustWeek = {
+  weekStart: number;
+  accepted: number;
+  /** Accepted with zero human touches: no rework, outside commit, or block. */
+  autonomous: number;
+  medianLeadTimeMs?: number;
+};
+
+/**
+ * A read-time projection of node ticket card facts, never stored. Task class
+ * comes from a `class:<name>` label. Blocks are counted from card events,
+ * which keep the newest 50 per card.
+ */
+export type WorkboardTrustResult = {
+  boardId: string;
+  generatedAt: number;
+  total: WorkboardTrustCounts;
+  classes: Array<WorkboardTrustCounts & { taskClass: string }>;
+  /** The last 8 weeks, oldest first, including the current one. */
+  weeks: WorkboardTrustWeek[];
+};

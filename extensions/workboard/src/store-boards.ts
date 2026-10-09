@@ -9,6 +9,7 @@ import type {
   WorkboardSessionsBoard,
   WorkboardSessionsBoardSpec,
   WorkboardStatus,
+  WorkboardTrustResult,
 } from "@openclaw/workboard-contract";
 import { WORKBOARD_STATUSES } from "@openclaw/workboard-contract";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
@@ -33,6 +34,7 @@ import type {
 import { normalizeBoardId, normalizeBoardIdRequired } from "./store-normalizers.js";
 import { freezeCardList, readCards } from "./store-read.js";
 import { WorkboardStoreRuntime } from "./store-runtime.js";
+import { projectWorkboardTrust } from "./trust-kpis.js";
 
 export class WorkboardBoardStore extends WorkboardStoreRuntime {
   protected readonly store: WorkboardCardStore;
@@ -209,6 +211,11 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
       ...(oldestReadyAt ? { oldestReadyAgeMs: Math.max(0, now - oldestReadyAt) } : {}),
       ...(updatedAt ? { updatedAt } : {}),
     };
+  }
+
+  async trust(input: WorkboardListOptions = {}, now = Date.now()): Promise<WorkboardTrustResult> {
+    const boardId = normalizeBoardId(input.boardId);
+    return projectWorkboardTrust(await this.list({ boardId }), boardId ?? "all", now);
   }
 
   /**

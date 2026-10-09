@@ -124,6 +124,15 @@ export function buildWorkboardMocks(
     name: "Product Operations",
     description: "Shared product delivery queue",
     automationJobId: "job-product-operations-daily",
+    orchestration: {
+      defaultTarget: {
+        kind: "node-claude",
+        nodeId: "mock-node",
+        repoPath: "/repos/app",
+        worktreesRoot: "/worktrees",
+        hostRepoPath: "/host/repos/app",
+      },
+    },
     ...summarizeBoard(cards),
   };
   const stateCard = (
@@ -610,8 +619,44 @@ export function buildWorkboardMocks(
       "workboard.boards.list": { boards },
       "workboard.cards.list": { boards, cards: allCards, statuses },
       "workboard.cards.stats": { ...board, byAgent: {} },
+      "workboard.cards.trust": buildWorkboardTrustFixture(boardId, baseTime),
       "workboard.cards.move": { card: cards[0] },
       "progressCard.get": buildWorkboardProgressResponses(baseTime, sessionKey, cardSessions),
     },
+  };
+}
+
+/** Eight weeks of node ticket trust KPIs for the Product Operations board. */
+function buildWorkboardTrustFixture(boardId: string, baseTime: number) {
+  const week = 7 * 24 * 60 * 60 * 1000;
+  const monday =
+    Math.floor((baseTime + 3 * 24 * 60 * 60 * 1000) / week) * week - 3 * 24 * 60 * 60 * 1000;
+  const accepted = [1, 2, 2, 3, 2, 4, 3, 3];
+  const autonomous = [0, 1, 1, 2, 1, 3, 3, 2];
+  const counts = (tickets: number, acceptedCount: number, clean: number) => ({
+    tickets,
+    accepted: acceptedCount,
+    cleanAccepted: clean,
+    firstPass: clean + 1,
+    blocked: tickets - clean - 1,
+    reworkRounds: acceptedCount - clean,
+    outsideCommits: 1,
+    attempts: tickets + 2,
+  });
+  return {
+    boardId,
+    generatedAt: baseTime,
+    total: counts(24, 20, 13),
+    classes: [
+      { taskClass: "dead-code", ...counts(6, 6, 5) },
+      { taskClass: "docs", ...counts(11, 9, 7) },
+      { taskClass: "ios-ui", ...counts(7, 5, 1) },
+    ],
+    weeks: accepted.map((count, index) => ({
+      weekStart: monday - (7 - index) * week,
+      accepted: count,
+      autonomous: autonomous[index] ?? 0,
+      medianLeadTimeMs: (6 - index * 0.5) * 60 * 60 * 1000,
+    })),
   };
 }
