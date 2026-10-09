@@ -146,15 +146,23 @@ async function importNodeBundle(
       throw new Error(`${worktree.branch} does not descend from base ${worktree.baseCommit}`);
     }
     const existing = await hostGit(hostRepoPath, ["rev-parse", "--verify", "--quiet", ref]);
-    if (existing.code === 0 && existing.stdout.trim() !== headCommit) {
+    const existingHead = existing.code === 0 ? existing.stdout.trim() : "";
+    // Only a rework round (D54) may move the branch, and only forward from what it published.
+    if (
+      existingHead &&
+      existingHead !== headCommit &&
+      (!worktree.rework ||
+        (await hostGit(hostRepoPath, ["merge-base", "--is-ancestor", existingHead, headCommit]))
+          .code !== 0)
+    ) {
       throw new Error(
-        `the host clone already has ${worktree.branch} at ${existing.stdout.trim()}; delete or rename it`,
+        `the host clone already has ${worktree.branch} at ${existingHead}; delete or rename it`,
       );
     }
     await assertCurrent();
-    if (existing.code !== 0) {
-      // The empty old value makes git refuse if another writer created the ref meanwhile.
-      await requireHostGit(hostRepoPath, ["update-ref", ref, headCommit, ""]);
+    if (existingHead !== headCommit) {
+      // The old value makes git refuse if another writer moved or created the ref meanwhile.
+      await requireHostGit(hostRepoPath, ["update-ref", ref, headCommit, existingHead]);
     }
     return headCommit;
   } finally {
@@ -274,6 +282,12 @@ async function runNodeTicketHandoff(params: {
         }
       : {}),
   });
+  // The claim fenced the node turn, which is over. Holding it through review
+  // would refuse a rework start until it expires (D54).
+  const current = claim ? await store.get(card.id) : undefined;
+  if (current?.status === "review" && current.metadata?.claim?.token === claim?.token) {
+    await store.releaseClaim(card.id, { ownerId: claim?.ownerId, token: claim?.token });
+  }
 }
 
 /**

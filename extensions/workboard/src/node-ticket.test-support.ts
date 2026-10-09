@@ -16,7 +16,7 @@ export const NODE_TARGET = {
   worktreesRoot: "/Users/factory/factory/worktrees",
   hostRepoPath: "/home/openclaw/repos/app",
   baseRef: "main",
-  model: "claude-cli/claude-sonnet-5-5",
+  model: "anthropic/claude-sonnet-5-5",
 } as const;
 
 export function createNodeGateway(options: { failGit?: string; existingBranch?: string } = {}) {
@@ -55,7 +55,7 @@ function sessionsCreateReply(params?: Record<string, unknown>, runId = "run-node
     key: params?.key,
     runId,
     runStarted: true,
-    resolved: { modelProvider: "claude-cli", model: "claude-sonnet-5-5" },
+    resolved: { modelProvider: "anthropic", model: "claude-sonnet-5-5" },
   };
 }
 

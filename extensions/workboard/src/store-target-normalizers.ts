@@ -1,6 +1,7 @@
 import type {
   WorkboardExecutionTarget,
   WorkboardNodeHandoff,
+  WorkboardNodeRework,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
@@ -44,6 +45,23 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
     : { phase: "published", headCommit, importedAt, publishedAt, pullRequestUrl };
 }
 
+function normalizeNodeRework(value: unknown): WorkboardNodeRework | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const round = resolveOptionalIntegerOption(value.round, { min: 1 });
+  const outsideCommits = resolveOptionalIntegerOption(value.outsideCommits, { min: 0 });
+  const pullRequestUrl = normalizeBoundedString(
+    value.pullRequestUrl,
+    undefined,
+    500,
+    "node rework pull request url",
+  );
+  return round === undefined || outsideCommits === undefined || !pullRequestUrl
+    ? undefined
+    : { round, pullRequestUrl, outsideCommits };
+}
+
 function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -57,8 +75,15 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
     "node worktree base commit",
   );
   const handoff = normalizeNodeHandoff(value.handoff);
+  const rework = normalizeNodeRework(value.rework);
   return worktreePath && branch && baseCommit
-    ? { path: worktreePath, branch, baseCommit, ...(handoff ? { handoff } : {}) }
+    ? {
+        path: worktreePath,
+        branch,
+        baseCommit,
+        ...(handoff ? { handoff } : {}),
+        ...(rework ? { rework } : {}),
+      }
     : undefined;
 }
 
