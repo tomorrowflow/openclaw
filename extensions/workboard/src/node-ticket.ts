@@ -6,6 +6,10 @@ import type {
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
+import {
+  runPluginCommandWithTimeout,
+  type PluginCommandRunResult,
+} from "openclaw/plugin-sdk/run-command";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { WorkboardStore } from "./store.js";
 
@@ -15,6 +19,7 @@ export type WorkboardNodeTicketRuntime = Pick<PluginRuntime["gateway"], "request
 type NodeTicketTarget = WorkboardExecutionTarget & { kind: "node-claude" };
 
 const NODE_COMMAND_TIMEOUT_MS = 120_000;
+const HOST_GIT_TIMEOUT_MS = 120_000;
 const REPORT_FENCE = "workboard-report";
 const REPORT_PATTERN = new RegExp("```" + REPORT_FENCE + "\\s*\\n([\\s\\S]*?)\\n```", "g");
 
@@ -35,6 +40,38 @@ export function nodeInvokePayload(result: unknown): Record<string, unknown> {
     throw new Error("node returned an invalid node.invoke result");
   }
   return payload;
+}
+
+/** Thrown when the card changed while handoff work was in flight; the newer state wins. */
+export class HandoffSupersededError extends Error {
+  constructor() {
+    super("the card changed during the node ticket handoff");
+  }
+}
+
+export async function hostGit(
+  repoPath: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+): Promise<PluginCommandRunResult> {
+  return await runPluginCommandWithTimeout({
+    argv: ["git", "-C", repoPath, ...args],
+    timeoutMs: HOST_GIT_TIMEOUT_MS,
+    ...(env ? { env } : {}),
+  });
+}
+
+export async function requireHostGit(
+  repoPath: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+): Promise<string> {
+  const result = await hostGit(repoPath, args, env);
+  if (result.code !== 0) {
+    const detail = (result.stderr || result.stdout).trim() || `exit ${result.code}`;
+    throw new Error(`host \`git ${args.join(" ")}\` failed: ${detail}`);
+  }
+  return result.stdout.trim();
 }
 
 /** Runs one argv on the node through `system.run` and returns its trimmed stdout. */
@@ -76,18 +113,23 @@ export async function createNodeTicketWorktree(params: {
   const { runtime, card, target } = params;
   const branch = `factory/${card.id}`;
   const worktreePath = path.posix.join(target.worktreesRoot, `wb-${card.id}`);
+  const git = (...args: string[]) =>
+    runNodeCommand(runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);
   try {
-    await runNodeCommand(runtime, target.nodeId, [
-      "git",
-      "-C",
-      target.repoPath,
-      "worktree",
-      "add",
-      "-b",
-      branch,
-      worktreePath,
-      target.baseRef ?? "HEAD",
-    ]);
+    // The node clone only moves here; without the fetch every ticket after the
+    // first merged PR would start from a stale base.
+    await git("fetch", "--quiet", "origin");
+    const baseRef = target.baseRef ?? "origin/HEAD";
+    const base = await git("rev-parse", "--verify", "--quiet", `${baseRef}^{commit}`).catch(() => {
+      throw new Error(
+        `node ${target.nodeId} cannot resolve base ${baseRef} in ${target.repoPath}; ` +
+          (target.baseRef
+            ? "fix the target baseRef"
+            : "run `git remote set-head origin --auto` there or set the target baseRef"),
+      );
+    });
+    // A commit start point creates the branch without upstream tracking.
+    await git("worktree", "add", "-b", branch, worktreePath, base);
   } catch (error) {
     // A retried card finds the worktree its failed launch already created.
     const existingBranch = await runNodeCommand(runtime, target.nodeId, [

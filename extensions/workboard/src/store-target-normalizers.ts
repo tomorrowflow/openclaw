@@ -16,19 +16,32 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
     const reportedAt = resolveOptionalIntegerOption(value.reportedAt, { min: 0 });
     return reportedAt === undefined ? undefined : { phase: "pending", reportedAt };
   }
-  if (value.phase === "imported") {
-    const importedAt = resolveOptionalIntegerOption(value.importedAt, { min: 0 });
-    const headCommit = normalizeBoundedString(
-      value.headCommit,
-      undefined,
-      64,
-      "node handoff head commit",
-    );
-    return importedAt === undefined || !headCommit
-      ? undefined
-      : { phase: "imported", headCommit, importedAt };
+  if (value.phase !== "imported" && value.phase !== "published") {
+    return undefined;
   }
-  return undefined;
+  const importedAt = resolveOptionalIntegerOption(value.importedAt, { min: 0 });
+  const headCommit = normalizeBoundedString(
+    value.headCommit,
+    undefined,
+    64,
+    "node handoff head commit",
+  );
+  if (importedAt === undefined || !headCommit) {
+    return undefined;
+  }
+  if (value.phase === "imported") {
+    return { phase: "imported", headCommit, importedAt };
+  }
+  const publishedAt = resolveOptionalIntegerOption(value.publishedAt, { min: 0 });
+  const pullRequestUrl = normalizeBoundedString(
+    value.pullRequestUrl,
+    undefined,
+    500,
+    "node handoff pull request url",
+  );
+  return publishedAt === undefined || !pullRequestUrl
+    ? undefined
+    : { phase: "published", headCommit, importedAt, publishedAt, pullRequestUrl };
 }
 
 function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefined {

@@ -72,26 +72,24 @@ export function git(cwd: string, ...args: string[]): string {
 }
 
 /**
- * A node clone, a host clone of it, and a worktrees root under `root`; the
- * node side is reached only through {@link createLocalNodeGateway}.
+ * An origin, a node clone and a host clone of it, and a worktrees root under
+ * `root`; the node side is reached only through {@link createLocalNodeGateway}.
  */
 export function createNodeRepos(root: string) {
+  const origin = path.join(root, "origin");
   const nodeRepo = path.join(root, "node-repo");
   const hostRepo = path.join(root, "host-repo");
   const worktreesRoot = path.join(root, "worktrees");
   mkdirSync(worktreesRoot, { recursive: true });
-  spawnSync("git", ["init", "-q", "-b", "main", nodeRepo]);
-  git(nodeRepo, "commit", "-q", "--allow-empty", "-m", "base");
-  spawnSync("git", ["clone", "-q", nodeRepo, hostRepo]);
+  spawnSync("git", ["init", "-q", "-b", "main", origin]);
+  git(origin, "commit", "-q", "--allow-empty", "-m", "base");
+  spawnSync("git", ["clone", "-q", origin, nodeRepo]);
+  spawnSync("git", ["clone", "-q", origin, hostRepo]);
+  const { baseRef: _baseRef, ...target } = NODE_TARGET;
   return {
+    origin,
     hostRepo,
-    target: {
-      ...NODE_TARGET,
-      repoPath: nodeRepo,
-      worktreesRoot,
-      hostRepoPath: hostRepo,
-      baseRef: "main",
-    },
+    target: { ...target, repoPath: nodeRepo, worktreesRoot, hostRepoPath: hostRepo },
   };
 }
 

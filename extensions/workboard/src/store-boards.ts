@@ -4,11 +4,14 @@ import type {
   WorkboardCard,
   WorkboardChange,
   WorkboardListResult,
+  WorkboardMetadata,
   WorkboardSessionPlacement,
   WorkboardSessionsBoard,
   WorkboardSessionsBoardSpec,
+  WorkboardStatus,
 } from "@openclaw/workboard-contract";
 import { WORKBOARD_STATUSES } from "@openclaw/workboard-contract";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { redactClaimToken } from "./card-redaction.js";
 import type {
   PersistedWorkboardAttachment,
@@ -21,7 +24,12 @@ import type {
   WorkboardWriteAuthority,
 } from "./persistence-types.js";
 import { normalizeBoardMetadata } from "./store-board-normalizers.js";
-import type { WorkboardBoardInput, WorkboardListOptions } from "./store-inputs.js";
+import type {
+  WorkboardBoardInput,
+  WorkboardLinkedCreateInput,
+  WorkboardListOptions,
+  WorkboardStatsResult,
+} from "./store-inputs.js";
 import { normalizeBoardId, normalizeBoardIdRequired } from "./store-normalizers.js";
 import { freezeCardList, readCards } from "./store-read.js";
 import { WorkboardStoreRuntime } from "./store-runtime.js";
@@ -169,6 +177,59 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
         a.id === "default" ? -1 : b.id === "default" ? 1 : a.id.localeCompare(b.id),
       ),
     };
+  }
+
+  async stats(input: WorkboardListOptions = {}, now = Date.now()): Promise<WorkboardStatsResult> {
+    const boardId = normalizeBoardId(input.boardId);
+    const aggregates = await this.store.listStatsAggregates(boardId);
+    const byStatus: Partial<Record<WorkboardStatus, number>> = {};
+    const byAgent: Record<string, number> = Object.create(null);
+    let oldestReadyAt: number | undefined;
+    let updatedAt: number | undefined;
+    let archived = 0;
+    let total = 0;
+    for (const aggregate of aggregates) {
+      byStatus[aggregate.status] = (byStatus[aggregate.status] ?? 0) + aggregate.total;
+      const agentId = aggregate.agentId ?? "(default)";
+      byAgent[agentId] = (byAgent[agentId] ?? 0) + aggregate.total;
+      total += aggregate.total;
+      archived += aggregate.archived;
+      if (aggregate.oldestReadyAt !== undefined) {
+        oldestReadyAt = Math.min(oldestReadyAt ?? aggregate.oldestReadyAt, aggregate.oldestReadyAt);
+      }
+      updatedAt = Math.max(updatedAt ?? 0, aggregate.updatedAt);
+    }
+    return {
+      id: boardId ?? "all",
+      total,
+      active: total - archived,
+      archived,
+      byStatus,
+      byAgent,
+      ...(oldestReadyAt ? { oldestReadyAgeMs: Math.max(0, now - oldestReadyAt) } : {}),
+      ...(updatedAt ? { updatedAt } : {}),
+    };
+  }
+
+  /** New work on a project board inherits its node target; explicit choices and linked sessions keep theirs. */
+  protected async withBoardTarget(
+    metadata: WorkboardMetadata,
+    input: WorkboardLinkedCreateInput,
+    sessionKey: string | undefined,
+  ): Promise<WorkboardMetadata> {
+    const automation = metadata.automation;
+    const requestedAutomation = isRecord(input.metadata) ? input.metadata.automation : undefined;
+    const workspace = automation?.workspace;
+    if (
+      sessionKey ||
+      (isRecord(requestedAutomation) && Object.hasOwn(requestedAutomation, "target")) ||
+      (workspace && workspace.kind !== "scratch")
+    ) {
+      return metadata;
+    }
+    const boardId = automation?.boardId ?? "default";
+    const target = (await this.boardStore.lookup(boardId))?.board.orchestration?.defaultTarget;
+    return target ? { ...metadata, automation: { ...automation, target } } : metadata;
   }
 
   async upsertBoard(input: WorkboardBoardInput): Promise<WorkboardBoardMetadata> {

@@ -1,3 +1,4 @@
+import { getPreparedPluginSecretInput } from "openclaw/plugin-sdk/secret-input-runtime";
 import { definePluginEntry } from "./api.js";
 import { registerWorkboardGatewayMethods } from "./runtime-api.js";
 import { createWorkboardAutomationNudgeService } from "./src/automation-nudge.js";
@@ -45,7 +46,15 @@ export default definePluginEntry({
       gateway: api.runtime.gateway,
     });
     resourceServices.push(sessionsBoard);
-    const nodeHandoffs = createNodeTicketHandoffs({ store, runtime: api.runtime.gateway });
+    const nodeHandoffs = createNodeTicketHandoffs({
+      store,
+      runtime: api.runtime.gateway,
+      github: {
+        token: (repo) =>
+          getPreparedPluginSecretInput("workboard", `github.repos[${JSON.stringify(repo)}].token`)
+            .value,
+      },
+    });
     const lifecycleSync = createWorkboardLifecycleService({
       store,
       worktrees: api.runtime.worktrees,
