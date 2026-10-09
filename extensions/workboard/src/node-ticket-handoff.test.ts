@@ -72,14 +72,18 @@ async function finishNodeTicket(params: {
 function createFakeGitHub(remote: string) {
   const tokens = new Map<string, string>();
   const openPulls: string[] = [];
+  const failComments = { value: false };
   const requests: Array<{ method: string; url: string; auth?: string; body?: unknown }> = [];
   const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
     const headers = new Headers(init?.headers);
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
     requests.push({ method, url, auth: headers.get("authorization") ?? undefined, body });
+    if (url.endsWith("/comments") && failComments.value) {
+      return new Response(JSON.stringify({ message: "Resource not accessible" }), { status: 403 });
+    }
     const reply = url.includes("/pulls?")
-      ? openPulls.map((html_url) => ({ html_url }))
+      ? openPulls.map((html_url) => ({ html_url, number: Number(html_url.split("/").at(-1)) }))
       : method === "POST"
         ? { html_url: "https://github.com/acme/app/pull/7" }
         : { default_branch: "main" };
@@ -88,6 +92,7 @@ function createFakeGitHub(remote: string) {
   return {
     tokens,
     openPulls,
+    failComments,
     requests,
     access: {
       token: (repo: string) => tokens.get(repo),
@@ -362,7 +367,18 @@ describe("node ticket draft PR", () => {
 
     expect(warn).not.toHaveBeenCalled();
     expect(git(repos.origin, "rev-parse", branch)).toBe(reworked);
-    expect(github.requests.filter((request) => request.method === "POST")).toHaveLength(1);
+    // The reused PR keeps the first round's body, so each rework round is told as a PR comment.
+    const posts = github.requests.filter((call) => call.method === "POST");
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toMatchObject({
+      url: "https://api.github.com/repos/acme/app/issues/7/comments",
+      auth: "Bearer token-app",
+      body: { body: expect.any(String) },
+    });
+    const comment = (posts[1]?.body as { body: string } | undefined)?.body ?? "";
+    expect(comment).toContain(`Rework round 1 pushed \`${reworked.slice(0, 12)}\``);
+    expect(comment).toContain("1 commit pushed by others");
+    expect(comment).toMatch(/> Rename the flag to --strict\.[\s\S]*> Parser accepts empty input/);
     expect((await store.get(card.id))?.metadata?.automation?.target?.worktree).toMatchObject({
       handoff: { phase: "published", headCommit: reworked, pullRequestUrl },
       rework: { round: 1, outsideCommits: 1 },
@@ -388,6 +404,48 @@ describe("node ticket draft PR", () => {
       options: { cardId: card.id, now: Date.now() },
     });
     expect(gone.startFailures[0]?.error).toContain("is no longer on origin");
+  });
+
+  it("keeps a rework publish and says so on the card when the PR comment fails", async () => {
+    const { store, card, repos, worktree, handoffs, warn, github, gateway } =
+      await acceptImportedTicket();
+    const branch = `factory/${card.id}`;
+    github.tokens.set("acme/app", "token-app");
+    await handoffs.resume(warn);
+    github.openPulls.push("https://github.com/acme/app/pull/7");
+    await store.move(card.id, "todo", undefined);
+    await store.addComment(card.id, { body: "Add a test." });
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets: gateway,
+      options: { cardId: card.id, now: Date.now() },
+    });
+    writeFileSync(path.join(worktree, "test_parser.py"), "test\n");
+    git(worktree, "add", "-A");
+    git(worktree, "commit", "-q", "-m", "add test");
+    const started = result.started[0];
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId: started?.runId, success: true, messages: doneReport },
+      context: { runId: started?.runId, sessionKey: started?.sessionKey },
+    });
+    await handoffs.resume(warn);
+    await store.move(card.id, "done", undefined);
+    github.failComments.value = true;
+
+    await handoffs.resume(warn);
+
+    const stored = await store.get(card.id);
+    expect(warn).not.toHaveBeenCalled();
+    expect(stored?.status).toBe("done");
+    expect(stored?.metadata?.automation?.target?.worktree?.handoff).toMatchObject({
+      phase: "published",
+      headCommit: git(repos.hostRepo, "rev-parse", branch),
+    });
+    expect(stored?.metadata?.comments?.at(-1)?.body).toContain(
+      "Rework round 1 was pushed to https://github.com/acme/app/pull/7, but its PR comment failed: GitHub POST /repos/acme/app/issues/7/comments returned 403",
+    );
   });
 
   it("refuses to rework an imported ticket before its draft PR exists", async () => {
