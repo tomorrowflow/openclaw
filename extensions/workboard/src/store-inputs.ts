@@ -47,7 +47,7 @@ export type WorkboardUpdateCardOptions = {
   event?: Omit<WorkboardEvent, "id" | "at">;
   eventAt?: number;
   expectedUpdatedAt?: number;
-  claimSlot?: { slot: WorkboardClaimSlot; now: number };
+  claimSlot?: { slot: WorkboardClaimSlot; busyMessage: string; now: number };
   preserveProofId?: string;
 };
 export type WorkboardCommentInput = { body?: unknown };

@@ -30,12 +30,7 @@ import {
   invertWorkboardWorkspaceMutation,
   sameWorkboardCardState,
 } from "./store-compensation.js";
-import {
-  MAX_CARD_COMMENTS,
-  MAX_CARD_WORKER_LOGS,
-  POSITION_STEP,
-  workboardSlotBusyMessage,
-} from "./store-constants.js";
+import { MAX_CARD_COMMENTS, MAX_CARD_WORKER_LOGS, POSITION_STEP } from "./store-constants.js";
 import type {
   WorkboardCardPatch,
   WorkboardCommentInput,
@@ -698,7 +693,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
         options.claimSlot.now,
       );
       if (result === "slot_busy") {
-        throw new Error(workboardSlotBusyMessage(options.claimSlot.slot));
+        throw new Error(options.claimSlot.busyMessage);
       }
       updated = result === "updated";
     } else {

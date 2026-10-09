@@ -31,6 +31,8 @@ import {
   DEFAULT_NODE_TICKET_CONCURRENCY,
   isWorkboardClaimReclaimable,
   isWorkboardNodeTicket,
+  type WorkboardClaimSlot,
+  workboardSlotBusyMessage,
   MAX_CARD_ARTIFACTS,
   MAX_CARD_NOTIFICATIONS,
   secondsToDurationMs,
@@ -143,6 +145,9 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
         throw new Error(`card already claimed by ${activeClaim.ownerId}.`);
       }
       const metadata = clearDiagnostics(guarded.metadata, ["stranded_ready"]);
+      const slot: WorkboardClaimSlot = isWorkboardNodeTicket(guarded)
+        ? { kind: "node-tickets", limit: this.nodeTicketConcurrency }
+        : { kind: "owner", ownerId };
       const card = await this.updateCard(
         await this.requireCard(id),
         {
@@ -160,12 +165,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
         },
         {
           expectedUpdatedAt: guarded.updatedAt,
-          claimSlot: {
-            slot: isWorkboardNodeTicket(guarded)
-              ? { kind: "node-tickets", limit: this.nodeTicketConcurrency }
-              : { kind: "owner", ownerId },
-            now,
-          },
+          claimSlot: { slot, busyMessage: workboardSlotBusyMessage(slot), now },
         },
       );
       return { card, token };

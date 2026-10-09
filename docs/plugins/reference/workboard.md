@@ -21,7 +21,7 @@ Dashboard workboard for agent-owned issues and sessions.
 
 - CLI commands: `openclaw workboard`
 - Contracts: `tools`
-- Dashboard data bindings: `workboard.cards.list`, `workboard.stats`, `workboard.boards.list`
+- Dashboard data bindings: `workboard.cards.list`, `workboard.stats`, `workboard.trust`, `workboard.boards.list`
 - Dashboard action verbs: `workboard.dispatch`
 
 ## Related docs

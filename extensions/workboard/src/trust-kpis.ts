@@ -47,7 +47,10 @@ function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
     createdAt: card.createdAt,
     ...(handoff?.phase === "published" ? { acceptedAt: handoff.publishedAt } : {}),
     // A rework round drops the handoff until its own import, but the ticket was imported before.
-    imported: handoff?.phase === "imported" || handoff?.phase === "published" || !!worktree?.rework,
+    imported:
+      handoff?.phase === "imported" ||
+      handoff?.phase === "published" ||
+      worktree?.rework !== undefined,
     blocks: (card.events ?? []).filter((event) => event.toStatus === "blocked").length,
     reworkRounds: worktree?.rework?.round ?? 0,
     outsideCommits: worktree?.rework?.outsideCommits ?? 0,
@@ -121,7 +124,7 @@ export function projectWorkboardTrust(
     generatedAt: now,
     total: countTickets(tickets),
     classes: [...byClass]
-      .map(([taskClass, entries]) => ({ taskClass, ...countTickets(entries) }))
+      .map(([taskClass, entries]) => Object.assign({ taskClass }, countTickets(entries)))
       .toSorted((a, b) => a.taskClass.localeCompare(b.taskClass)),
     weeks,
   };
