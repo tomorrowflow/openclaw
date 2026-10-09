@@ -30,7 +30,7 @@ export function createKernelStores(
       entries: async (scope) => kernel.cards.entries(scope),
       registerIfAbsent: async (...args) => kernel.cards.registerIfAbsent(...args),
       registerIfUpdatedAt: async (...args) => kernel.cards.registerIfUpdatedAt(...args),
-      claimIfOwnerAvailable: async (...args) => kernel.cards.claimIfOwnerAvailable(...args),
+      claimIfSlotAvailable: async (...args) => kernel.cards.claimIfSlotAvailable(...args),
       deleteIfUpdatedAt: async (...args) => kernel.cards.deleteIfUpdatedAt(...args),
       listCardStatuses: async (ids) => kernel.cards.listCardStatuses(ids),
       listBoardAggregates: async () => kernel.cards.listBoardAggregates(),

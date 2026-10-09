@@ -1,4 +1,5 @@
 import type {
+  WorkboardAutomation,
   WorkboardCard,
   WorkboardClaim,
   WorkboardExecution,
@@ -40,21 +41,71 @@ export function isWorkboardClaimReclaimable(
   return Boolean(claim?.expiresAt && now - claim.expiresAt > CLAIM_RECLAIM_MS);
 }
 
+export const DEFAULT_NODE_TICKET_CONCURRENCY = 2;
+
 type WorkboardOwnerSlotCard = Pick<WorkboardCard, "status" | "agentId"> & {
   execution?: Pick<WorkboardExecution, "status">;
-  metadata?: Pick<WorkboardMetadata, "claim" | "archivedAt">;
+  metadata?: Pick<WorkboardMetadata, "claim" | "archivedAt"> & {
+    automation?: Pick<WorkboardAutomation, "target">;
+  };
 };
+
+/**
+ * D41: node tickets share one dispatcher-wide pool sized by plugin config;
+ * every other card holds its owner's single slot.
+ */
+export type WorkboardClaimSlot =
+  | { kind: "owner"; ownerId: string }
+  | { kind: "node-tickets"; limit: number };
+
+export function isWorkboardNodeTicket(card: WorkboardOwnerSlotCard): boolean {
+  return card.metadata?.automation?.target?.kind === "node-claude";
+}
 
 export function workboardCardConsumesOwnerSlot(card: WorkboardOwnerSlotCard, now: number): boolean {
   const claim = card.metadata?.claim;
   const activeClaim = claim && isFutureDateTimestampMs(claim.expiresAt, { nowMs: now });
   return (
+    !isWorkboardNodeTicket(card) &&
     !card.metadata?.archivedAt &&
     !isWorkboardClaimReclaimable(claim, now) &&
     (card.status === "running" ||
       (card.status !== "done" && activeClaim) ||
       card.execution?.status === "running")
   );
+}
+
+/**
+ * A node ticket holds a pool slot only while its turn and import run. In
+ * review it waits on a human, not a node, so an un-accepted PR never blocks
+ * the next ticket (D52).
+ */
+export function workboardCardConsumesNodeTicketSlot(
+  card: WorkboardOwnerSlotCard,
+  now: number,
+): boolean {
+  return (
+    isWorkboardNodeTicket(card) &&
+    card.status === "running" &&
+    !card.metadata?.archivedAt &&
+    !isWorkboardClaimReclaimable(card.metadata?.claim, now)
+  );
+}
+
+export function workboardCardOccupiesSlot(
+  card: WorkboardOwnerSlotCard,
+  slot: WorkboardClaimSlot,
+  now: number,
+): boolean {
+  return slot.kind === "node-tickets"
+    ? workboardCardConsumesNodeTicketSlot(card, now)
+    : workboardCardConsumesOwnerSlot(card, now) && workboardCardSlotOwner(card) === slot.ownerId;
+}
+
+export function workboardSlotBusyMessage(slot: WorkboardClaimSlot): string {
+  return slot.kind === "node-tickets"
+    ? `All ${slot.limit} node ticket slots are in use; a slot frees when a running node ticket reaches review.`
+    : `Owner ${slot.ownerId} already has active Workboard work.`;
 }
 
 export function workboardCardSlotOwner(card: WorkboardOwnerSlotCard, now?: number): string {

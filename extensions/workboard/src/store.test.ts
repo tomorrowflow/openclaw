@@ -103,13 +103,13 @@ function createPausedCardStore(delegate: WorkboardCardStore) {
         }
         return updated;
       },
-      async claimIfOwnerAvailable(key, value, expectedUpdatedAt, ownerId, now) {
+      async claimIfSlotAvailable(key, value, expectedUpdatedAt, slot, now) {
         await beforeWrite();
-        const result = await delegate.claimIfOwnerAvailable(
+        const result = await delegate.claimIfSlotAvailable(
           key,
           value,
           expectedUpdatedAt,
-          ownerId,
+          slot,
           now,
         );
         if (result === "updated") {

@@ -1,4 +1,5 @@
 import { getPreparedPluginSecretInput } from "openclaw/plugin-sdk/secret-input-runtime";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { definePluginEntry } from "./api.js";
 import { registerWorkboardGatewayMethods } from "./runtime-api.js";
 import { createWorkboardAutomationNudgeService } from "./src/automation-nudge.js";
@@ -31,6 +32,10 @@ export default definePluginEntry({
     const store = WorkboardStore.openSqlite(
       resolveWorkboardSqliteWorkerModuleUrl(api.runtimeSource),
     );
+    const nodeTickets = api.pluginConfig?.nodeTickets;
+    if (isRecord(nodeTickets) && typeof nodeTickets.maxConcurrent === "number") {
+      store.nodeTicketConcurrency = nodeTickets.maxConcurrent;
+    }
     const resourceServices: Array<{ stop(): void | Promise<void> }> = [];
     registerWorkboardStoreLifecycle(api, store, async () => {
       await Promise.all(resourceServices.map(async (service) => await service.stop()));

@@ -123,9 +123,9 @@ export class WorkboardStoreRuntime {
         this.trackMutation(() => store.registerIfUpdatedAt(key, value, expectedUpdatedAt)),
       deleteIfUpdatedAt: (key, expectedUpdatedAt) =>
         this.trackMutation(() => store.deleteIfUpdatedAt(key, expectedUpdatedAt)),
-      claimIfOwnerAvailable: (key, value, expectedUpdatedAt, ownerId, now) =>
+      claimIfSlotAvailable: (key, value, expectedUpdatedAt, slot, now) =>
         this.trackMutation(
-          () => store.claimIfOwnerAvailable(key, value, expectedUpdatedAt, ownerId, now),
+          () => store.claimIfSlotAvailable(key, value, expectedUpdatedAt, slot, now),
           (result) => result === "updated",
         ),
       listCardStatuses: (ids) => this.runOperation(() => store.listCardStatuses(ids)),

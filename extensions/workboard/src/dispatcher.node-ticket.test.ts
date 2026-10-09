@@ -139,6 +139,47 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     );
   });
 
+  it("runs node tickets up to the pool size regardless of owner, and review frees a slot", async () => {
+    const store = createWorkboardSqliteTestStore();
+    store.nodeTicketConcurrency = 2;
+    const cards = [
+      await createNodeCard(store),
+      await createNodeCard(store),
+      await createNodeCard(store),
+    ];
+    const nodeTickets = createNodeGateway();
+    const dispatch = async (cardId?: string) =>
+      await dispatchAndStartWorkboardCards({
+        store,
+        subagent: { run: vi.fn() },
+        nodeTickets,
+        options: { now: Date.now(), maxStarts: 3, ...(cardId ? { cardId } : {}) },
+      });
+
+    const first = await dispatch();
+    expect(first.started.map((run) => run.cardId)).toEqual([cards[0]?.id, cards[1]?.id]);
+    expect(first.startFailures).toEqual([]);
+    const full = await dispatch(cards[2]?.id);
+    expect(full.startFailures).toEqual([
+      expect.objectContaining({
+        cardId: cards[2]?.id,
+        error:
+          "All 2 node ticket slots are in use; a slot frees when a running node ticket reaches review.",
+      }),
+    ]);
+
+    // An un-accepted ticket in review keeps its claim but no longer holds a node slot.
+    const reviewed = await store.get(cards[0]?.id ?? "");
+    const claim = reviewed?.metadata?.claim;
+    await store.move(reviewed?.id ?? "", "review", undefined, {
+      ownerId: claim?.ownerId ?? "",
+      token: claim?.token ?? "",
+    });
+    const next = await dispatch(cards[2]?.id);
+    expect(next.startFailures).toEqual([]);
+    expect(next.started.map((run) => run.cardId)).toEqual([cards[2]?.id]);
+  });
+
   it("blocks the card with the node's error when the worktree cannot be created", async () => {
     const store = createWorkboardSqliteTestStore();
     const card = await createNodeCard(store);

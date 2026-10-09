@@ -13,6 +13,7 @@ import type {
 } from "./persistence-types.js";
 import { workboardSqliteBackendEntrypoint } from "./sqlite-backend-entrypoint.test-support.js";
 import { createWorkboardSqliteStores } from "./sqlite-store.js";
+import type { WorkboardClaimSlot } from "./store-constants.js";
 import { WorkboardStore } from "./store.js";
 import { createKernelStores } from "./test/sqlite-kernel.js";
 import { sqliteTestAuxStores } from "./test/sqlite-store.js";
@@ -321,8 +322,8 @@ describe("workboard sqlite batch card read", () => {
   );
 
   it.each([
-    { fault: "later JSON", expected: "owner_busy", revisionMatches: true, targetOnly: false },
-    { fault: "later integer", expected: "owner_busy", revisionMatches: true, targetOnly: false },
+    { fault: "later JSON", expected: "slot_busy", revisionMatches: true, targetOnly: false },
+    { fault: "later integer", expected: "slot_busy", revisionMatches: true, targetOnly: false },
     { fault: "later integer", expected: "conflict", revisionMatches: false, targetOnly: false },
     { fault: "target integer", expected: "native-error", revisionMatches: true, targetOnly: true },
   ] as const)(
@@ -349,11 +350,11 @@ describe("workboard sqlite batch card read", () => {
               .run(9007199254740993n, targetOnly ? target.id : "card-1");
           }
           const before = sqliteStatements.count;
-          const claim = stores.cards.claimIfOwnerAvailable(
+          const claim = stores.cards.claimIfSlotAvailable(
             target.id,
             { version: 1, card: { ...target, updatedAt: target.updatedAt + 1 } },
             revisionMatches ? target.updatedAt : target.updatedAt - 1,
-            "slot-owner",
+            { kind: "owner", ownerId: "slot-owner" },
             3000,
           );
           if (expected === "native-error") {
@@ -377,15 +378,15 @@ describe("workboard sqlite batch card read", () => {
 
   it.each([
     { name: "idle", status: "todo", expected: "updated" },
-    { name: "running", status: "running", expected: "owner_busy" },
+    { name: "running", status: "running", expected: "slot_busy" },
     { name: "another owner", status: "running", agentId: "other", expected: "updated" },
     { name: "archived", status: "running", archivedAt: 1, expected: "updated" },
-    { name: "zero archive time", status: "running", archivedAt: 0, expected: "owner_busy" },
-    { name: "active review claim", status: "review", expiresAt: 1_000_001, expected: "owner_busy" },
+    { name: "zero archive time", status: "running", archivedAt: 0, expected: "slot_busy" },
+    { name: "active review claim", status: "review", expiresAt: 1_000_001, expected: "slot_busy" },
     { name: "completed claim", status: "done", expiresAt: 1_000_001, expected: "updated" },
-    { name: "running execution", status: "done", execution: true, expected: "owner_busy" },
+    { name: "running execution", status: "done", execution: true, expected: "slot_busy" },
     { name: "expired review claim", status: "review", expiresAt: 1_000_000, expected: "updated" },
-    { name: "heartbeat grace", status: "running", expiresAt: 700_000, expected: "owner_busy" },
+    { name: "heartbeat grace", status: "running", expiresAt: 700_000, expected: "slot_busy" },
     { name: "reclaimable claim", status: "running", expiresAt: 699_999, expected: "updated" },
     {
       name: "reclaimable execution",
@@ -399,7 +400,7 @@ describe("workboard sqlite batch card read", () => {
       status: "running",
       agentId: "other",
       expiresAt: 1_000_001,
-      expected: "owner_busy",
+      expected: "slot_busy",
     },
     {
       name: "another claim owner",
@@ -413,7 +414,7 @@ describe("workboard sqlite batch card read", () => {
       status: "running",
       agentId: "",
       ownerId: "workboard-dispatcher",
-      expected: "owner_busy",
+      expected: "slot_busy",
     },
     {
       name: "invalid future expiry",
@@ -421,7 +422,53 @@ describe("workboard sqlite batch card read", () => {
       expiresAt: Number.MAX_VALUE,
       expected: "updated",
     },
-  ])("preserves owner capacity for $name", async (scenario) => {
+    {
+      name: "node ticket outside the owner slot",
+      status: "running",
+      nodeTicket: true,
+      expected: "updated",
+    },
+    {
+      name: "running node ticket fills the pool",
+      status: "running",
+      nodeTicket: true,
+      slot: { kind: "node-tickets", limit: 1 },
+      expected: "slot_busy",
+    },
+    {
+      name: "node ticket pool with room",
+      status: "running",
+      nodeTicket: true,
+      slot: { kind: "node-tickets", limit: 2 },
+      expected: "updated",
+    },
+    {
+      name: "node ticket in review frees the pool",
+      status: "review",
+      nodeTicket: true,
+      expiresAt: 1_000_001,
+      slot: { kind: "node-tickets", limit: 1 },
+      expected: "updated",
+    },
+    {
+      name: "owner cards outside the node ticket pool",
+      status: "running",
+      slot: { kind: "node-tickets", limit: 1 },
+      expected: "updated",
+    },
+  ] satisfies Array<{
+    name: string;
+    status: string;
+    expected: string;
+    agentId?: string;
+    archivedAt?: number;
+    expiresAt?: number;
+    execution?: boolean;
+    claimOwner?: string;
+    ownerId?: string;
+    nodeTicket?: boolean;
+    slot?: WorkboardClaimSlot;
+  }>)("preserves owner and node ticket capacity for $name", async (scenario) => {
     await withStores(async (dbPath) => {
       const stores = createKernelStores(dbPath);
       const occupied = fixtureCard(0);
@@ -431,6 +478,19 @@ describe("workboard sqlite batch card read", () => {
       occupied.metadata = {
         ...occupied.metadata,
         archivedAt: scenario.archivedAt,
+        ...(scenario.nodeTicket
+          ? {
+              automation: {
+                target: {
+                  kind: "node-claude" as const,
+                  nodeId: "node-1",
+                  repoPath: "/repo",
+                  worktreesRoot: "/worktrees",
+                  hostRepoPath: "/host/repo",
+                },
+              },
+            }
+          : {}),
         claim:
           scenario.expiresAt === undefined
             ? undefined
@@ -457,11 +517,11 @@ describe("workboard sqlite batch card read", () => {
         await stores.cards.register(target.id, { version: 1, card: target });
         const next = { ...target, updatedAt: target.updatedAt + 1 };
         await expect(
-          stores.cards.claimIfOwnerAvailable(
+          stores.cards.claimIfSlotAvailable(
             target.id,
             { version: 1, card: next },
             target.updatedAt,
-            scenario.ownerId ?? "slot-owner",
+            scenario.slot ?? { kind: "owner", ownerId: scenario.ownerId ?? "slot-owner" },
             1_000_000,
           ),
         ).resolves.toBe(scenario.expected);
@@ -488,11 +548,11 @@ describe("workboard sqlite batch card read", () => {
           .run(9007199254740993n);
         const next = { ...target, updatedAt: target.updatedAt + 1 };
         await expect(
-          stores.cards.claimIfOwnerAvailable(
+          stores.cards.claimIfSlotAvailable(
             target.id,
             { version: 1, card: next },
             target.updatedAt,
-            "slot-owner",
+            { kind: "owner", ownerId: "slot-owner" },
             3000,
           ),
         ).resolves.toBe("updated");
@@ -535,11 +595,11 @@ describe("workboard sqlite batch card read", () => {
             },
           };
           await expect(
-            stores.cards.claimIfOwnerAvailable(
+            stores.cards.claimIfSlotAvailable(
               target.id,
               { version: 1, card: next },
               target.updatedAt,
-              "slot-owner",
+              { kind: "owner", ownerId: "slot-owner" },
               3000,
             ),
           ).rejects.toThrow(fault === "constraint" ? "UNIQUE constraint failed" : TypeError);

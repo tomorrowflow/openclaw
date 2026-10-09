@@ -7,6 +7,7 @@ import type {
   WorkboardWorkspace,
   WorkboardWorkspaceAccess,
 } from "@openclaw/workboard-contract";
+import type { WorkboardClaimSlot } from "./store-constants.js";
 
 type WorkboardCardInput = {
   title?: unknown;
@@ -46,7 +47,7 @@ export type WorkboardUpdateCardOptions = {
   event?: Omit<WorkboardEvent, "id" | "at">;
   eventAt?: number;
   expectedUpdatedAt?: number;
-  ownerSlot?: { ownerId: string; now: number };
+  claimSlot?: { slot: WorkboardClaimSlot; now: number };
   preserveProofId?: string;
 };
 export type WorkboardCommentInput = { body?: unknown };

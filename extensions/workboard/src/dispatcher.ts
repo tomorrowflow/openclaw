@@ -28,7 +28,13 @@ import {
 } from "./node-ticket.js";
 import { workboardSessionKeyForCard } from "./session-link.js";
 import { cardBoardId } from "./store-card-helpers.js";
-import { workboardCardConsumesOwnerSlot, workboardCardSlotOwner } from "./store-constants.js";
+import {
+  isWorkboardNodeTicket,
+  workboardCardConsumesNodeTicketSlot,
+  workboardCardConsumesOwnerSlot,
+  workboardCardSlotOwner,
+  workboardSlotBusyMessage,
+} from "./store-constants.js";
 import { WorkboardStore, type WorkboardDispatchResult } from "./store.js";
 import {
   assertCanonicalWorkboardRootAccess,
@@ -193,16 +199,19 @@ function selectStartableCards(
   ownerOverride: string | undefined,
   now: number,
   mode: "scheduled" | "exact",
+  nodeTicketLimit: number,
 ): { cards: WorkboardCard[]; rejection?: WorkboardStartFailure } {
   if (limit <= 0) {
     return { cards: [] };
   }
   const runningOwners = new Set<string>();
+  let nodeTicketsInUse = 0;
   for (const card of cards) {
-    if (!workboardCardConsumesOwnerSlot(card, now)) {
-      continue;
+    if (workboardCardConsumesNodeTicketSlot(card, now)) {
+      nodeTicketsInUse += 1;
+    } else if (workboardCardConsumesOwnerSlot(card, now)) {
+      runningOwners.add(workboardCardSlotOwner(card));
     }
-    runningOwners.add(workboardCardSlotOwner(card));
   }
   const selected: WorkboardCard[] = [];
   const fallback: WorkboardCard[] = [];
@@ -210,6 +219,7 @@ function selectStartableCards(
   const ordered = mode === "scheduled" ? candidates.toSorted(sortReadyCards) : candidates;
   for (const card of ordered) {
     const owner = ownerOverride || workboardCardSlotOwner(card, now);
+    const nodeTicket = isWorkboardNodeTicket(card);
     const rejection = card.metadata?.archivedAt
       ? "Card is archived; restore it before starting."
       : cardHasActiveClaim(card, now)
@@ -221,9 +231,13 @@ function selectStartableCards(
               card.status !== "todo" &&
               card.status !== "ready"
             ? `Card cannot start from ${card.status}; move it to backlog, todo, or ready first.`
-            : runningOwners.has(owner)
-              ? `Owner ${owner} already has active Workboard work; complete or stop it before starting another card.`
-              : undefined;
+            : nodeTicket
+              ? nodeTicketsInUse >= nodeTicketLimit
+                ? workboardSlotBusyMessage({ kind: "node-tickets", limit: nodeTicketLimit })
+                : undefined
+              : runningOwners.has(owner)
+                ? `Owner ${owner} already has active Workboard work; complete or stop it before starting another card.`
+                : undefined;
     if (rejection !== undefined) {
       if (mode === "exact") {
         return {
@@ -231,6 +245,12 @@ function selectStartableCards(
           rejection: { cardId: card.id, title: card.title, error: rejection },
         };
       }
+      continue;
+    }
+    if (nodeTicket) {
+      // Node tickets share the pool, not their owner's slot.
+      nodeTicketsInUse += 1;
+      selected.push(card);
       continue;
     }
     if (selectedOwners.has(owner)) {
@@ -302,6 +322,7 @@ async function runWorkboardDispatch(
     ownerOverride,
     now,
     directCardId ? "exact" : "scheduled",
+    params.store.nodeTicketConcurrency,
   );
   if (selection.rejection) {
     startFailures.push(selection.rejection);
@@ -311,7 +332,8 @@ async function runWorkboardDispatch(
     if (acceptedStarts >= maxStarts || attemptedStarts >= maxAttempts) {
       break;
     }
-    if (startedOwners.has(ownerId)) {
+    const nodeTarget = nodeTicketTarget(card);
+    if (!nodeTarget && startedOwners.has(ownerId)) {
       continue;
     }
     const sessionKey = workboardSessionKeyForCard(card);
@@ -321,7 +343,6 @@ async function runWorkboardDispatch(
     let workspaceMutation: { before: WorkboardCard; after: WorkboardCard } | undefined;
     let preparedLaunch: WorkboardPreparedLaunch | undefined;
     const requestedWorkspace = card.metadata?.automation?.workspace;
-    const nodeTarget = nodeTicketTarget(card);
     let workspaceAccess: WorkboardWorkspaceAccess;
     let targetWorkspace: string | undefined;
     let persistWorkspaceAccess: boolean;
@@ -551,7 +572,9 @@ async function runWorkboardDispatch(
           })
           .catch(() => undefined)) ?? acceptedCard;
       acceptedStarts += 1;
-      startedOwners.add(ownerId);
+      if (!nodeTarget) {
+        startedOwners.add(ownerId);
+      }
       started.push({
         cardId: updated.id,
         title: updated.title,

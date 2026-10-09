@@ -23,7 +23,7 @@ import type {
   WorkboardCardReadScope,
   WorkboardCardStatsAggregate,
   WorkboardKeyedStore,
-  WorkboardOwnerClaimResult,
+  WorkboardSlotClaimResult,
   WorkboardPersistence,
   WorkboardSubscriptionStore,
 } from "./persistence-types.js";
@@ -48,8 +48,8 @@ import { bindNull, insertCard, prepareWorkboardUpsert } from "./sqlite-store-wri
 import {
   MAX_WORKER_CONTEXT_PARENTS,
   MAX_WORKER_CONTEXT_RECENT_CARDS,
-  workboardCardConsumesOwnerSlot,
-  workboardCardSlotOwner,
+  type WorkboardClaimSlot,
+  workboardCardOccupiesSlot,
 } from "./store-constants.js";
 
 type SyncStore<T> = {
@@ -113,13 +113,13 @@ class WorkboardSqliteCardStore implements SyncStore<WorkboardCardStore> {
     });
   }
 
-  claimIfOwnerAvailable(
+  claimIfSlotAvailable(
     key: string,
     value: PersistedWorkboardCard,
     expectedUpdatedAt: number,
-    ownerId: string,
+    slot: WorkboardClaimSlot,
     now: number,
-  ): WorkboardOwnerClaimResult {
+  ): WorkboardSlotClaimResult {
     this.validatePayload(key, value);
     return runSqliteImmediateTransactionSync(this.db, () => {
       const query = getNodeSqliteKysely<WorkboardCardDatabase>(this.db);
@@ -134,11 +134,18 @@ class WorkboardSqliteCardStore implements SyncStore<WorkboardCardStore> {
       if (!current) {
         return "conflict";
       }
-      // Child records cannot occupy an owner slot. Keep lease and owner decisions
+      // Child records cannot occupy a slot. Keep lease and slot decisions
       // with the shared policy, after SQLite excludes archived and inactive cards.
       const candidates = query
         .selectFrom("workboard_cards")
-        .select(["status", "agent_id", "claim_json", "execution_id", "execution_status"])
+        .select([
+          "status",
+          "agent_id",
+          "claim_json",
+          "automation_json",
+          "execution_id",
+          "execution_status",
+        ])
         .where("id", "!=", key)
         .where((eb) => eb.or([eb("archived_at", "is", null), eb("archived_at", "=", 0)]))
         .where((eb) =>
@@ -148,13 +155,20 @@ class WorkboardSqliteCardStore implements SyncStore<WorkboardCardStore> {
             eb.and([eb("claim_json", "is not", null), eb("status", "!=", "done")]),
           ]),
         );
+      let occupied = 0;
+      const capacity = slot.kind === "node-tickets" ? slot.limit : 1;
       for (const row of iterateSqliteQuerySync(this.db, candidates)) {
+        // SAFETY: insertCard serializes WorkboardMetadata.automation; only its target kind is read.
+        const automation = parseJson(row.automation_json) as WorkboardMetadata["automation"];
         const card = {
           // SAFETY: insertCard persists WorkboardCard.status; this keeps readCard's required-string boundary.
           status: requiredString(row, "status") as WorkboardCard["status"],
           agentId: stringValue(row, "agent_id"),
-          // SAFETY: insertCard serializes WorkboardMetadata.claim; this keeps readMetadata's optional JSON boundary.
-          metadata: { claim: parseJson(row.claim_json) as WorkboardMetadata["claim"] },
+          metadata: {
+            // SAFETY: insertCard serializes WorkboardMetadata.claim; this keeps readMetadata's optional JSON boundary.
+            claim: parseJson(row.claim_json) as WorkboardMetadata["claim"],
+            automation: automation?.target ? { target: automation.target } : undefined,
+          },
           execution: stringValue(row, "execution_id")
             ? {
                 // SAFETY: insertCard persists WorkboardExecution.status; this keeps readExecution's required-string boundary.
@@ -162,8 +176,8 @@ class WorkboardSqliteCardStore implements SyncStore<WorkboardCardStore> {
               }
             : undefined,
         };
-        if (workboardCardConsumesOwnerSlot(card, now) && workboardCardSlotOwner(card) === ownerId) {
-          return "owner_busy";
+        if (workboardCardOccupiesSlot(card, slot, now) && ++occupied >= capacity) {
+          return "slot_busy";
         }
       }
       // Validate the target's stored tree before replacing it, without decoding

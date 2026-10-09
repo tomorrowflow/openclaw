@@ -30,7 +30,12 @@ import {
   invertWorkboardWorkspaceMutation,
   sameWorkboardCardState,
 } from "./store-compensation.js";
-import { MAX_CARD_COMMENTS, MAX_CARD_WORKER_LOGS, POSITION_STEP } from "./store-constants.js";
+import {
+  MAX_CARD_COMMENTS,
+  MAX_CARD_WORKER_LOGS,
+  POSITION_STEP,
+  workboardSlotBusyMessage,
+} from "./store-constants.js";
 import type {
   WorkboardCardPatch,
   WorkboardCommentInput,
@@ -684,16 +689,16 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     const expectedUpdatedAt = options.expectedUpdatedAt ?? existing.updatedAt;
     const nextEntry: PersistedWorkboardCard = { version: 1, card: next };
     let updated: boolean;
-    if (options.ownerSlot) {
-      const result = await this.store.claimIfOwnerAvailable(
+    if (options.claimSlot) {
+      const result = await this.store.claimIfSlotAvailable(
         next.id,
         nextEntry,
         expectedUpdatedAt,
-        options.ownerSlot.ownerId,
-        options.ownerSlot.now,
+        options.claimSlot.slot,
+        options.claimSlot.now,
       );
-      if (result === "owner_busy") {
-        throw new Error(`Owner ${options.ownerSlot.ownerId} already has active Workboard work.`);
+      if (result === "slot_busy") {
+        throw new Error(workboardSlotBusyMessage(options.claimSlot.slot));
       }
       updated = result === "updated";
     } else {
