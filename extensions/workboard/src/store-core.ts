@@ -36,9 +36,7 @@ import type {
   WorkboardCommentInput,
   WorkboardLinkInput,
   WorkboardLinkedCreateInput,
-  WorkboardListOptions,
   WorkboardMutationScope,
-  WorkboardStatsResult,
   WorkboardUpdateCardOptions,
 } from "./store-inputs.js";
 import {
@@ -239,38 +237,6 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     return this.lastNotificationSequence;
   }
 
-  async stats(input: WorkboardListOptions = {}, now = Date.now()): Promise<WorkboardStatsResult> {
-    const boardId = normalizeBoardId(input.boardId);
-    const aggregates = await this.store.listStatsAggregates(boardId);
-    const byStatus: Partial<Record<WorkboardStatus, number>> = {};
-    const byAgent = Object.create(null) as Record<string, number>;
-    let oldestReadyAt: number | undefined;
-    let updatedAt: number | undefined;
-    let archived = 0;
-    let total = 0;
-    for (const aggregate of aggregates) {
-      byStatus[aggregate.status] = (byStatus[aggregate.status] ?? 0) + aggregate.total;
-      const agentId = aggregate.agentId ?? "(default)";
-      byAgent[agentId] = (byAgent[agentId] ?? 0) + aggregate.total;
-      total += aggregate.total;
-      archived += aggregate.archived;
-      if (aggregate.oldestReadyAt !== undefined) {
-        oldestReadyAt = Math.min(oldestReadyAt ?? aggregate.oldestReadyAt, aggregate.oldestReadyAt);
-      }
-      updatedAt = Math.max(updatedAt ?? 0, aggregate.updatedAt);
-    }
-    return {
-      id: boardId ?? "all",
-      total,
-      active: total - archived,
-      archived,
-      byStatus,
-      byAgent,
-      ...(oldestReadyAt ? { oldestReadyAgeMs: Math.max(0, now - oldestReadyAt) } : {}),
-      ...(updatedAt ? { updatedAt } : {}),
-    };
-  }
-
   async get(id: string): Promise<WorkboardCard | undefined> {
     const entry = await this.store.lookup(id.trim());
     return entry?.version === 1 ? entry.card : undefined;
@@ -397,13 +363,17 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
           ? now
           : undefined
         : normalizeTimestamp(input.completedAt, 0) || undefined;
-    const metadata = normalizeMetadata(
-      input.metadata,
-      {
-        templateId: normalizeTemplateId(input.templateId),
-        ...(childAutomation ? { automation: childAutomation } : {}),
-      },
-      { allowDependencyLinks: false, allowArchivedAt: false },
+    const metadata = await this.withBoardTarget(
+      normalizeMetadata(
+        input.metadata,
+        {
+          templateId: normalizeTemplateId(input.templateId),
+          ...(childAutomation ? { automation: childAutomation } : {}),
+        },
+        { allowDependencyLinks: false, allowArchivedAt: false },
+      ),
+      input,
+      sessionKey,
     );
     const syncedMetadata = trimMetadataToBudget(
       syncExecutionAttemptMetadata(metadata, execution, now),

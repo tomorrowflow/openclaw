@@ -7,6 +7,7 @@ import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { WorkboardBoardInput } from "./store-inputs.js";
 import { normalizeBoardId, normalizeWorkspace } from "./store-normalizers.js";
+import { normalizeExecutionTarget } from "./store-target-normalizers.js";
 import { normalizeBoundedString } from "./store-value-normalizers.js";
 
 export function normalizeBoardMetadata(
@@ -111,11 +112,16 @@ function normalizeOrchestration(
     120,
     "orchestrator profile",
   );
+  // Without a fallback the normalizer drops dispatcher-owned worktree state.
+  const defaultTarget = Object.hasOwn(record, "defaultTarget")
+    ? normalizeExecutionTarget(record.defaultTarget)
+    : fallback?.defaultTarget;
   const next: WorkboardOrchestrationSettings = {
     ...(autoDecompose !== undefined ? { autoDecompose } : {}),
     ...(autoDecomposePerDispatch ? { autoDecomposePerDispatch } : {}),
     ...(defaultAssignee ? { defaultAssignee } : {}),
     ...(orchestratorProfile ? { orchestratorProfile } : {}),
+    ...(defaultTarget ? { defaultTarget } : {}),
   };
   return Object.keys(next).length ? next : undefined;
 }

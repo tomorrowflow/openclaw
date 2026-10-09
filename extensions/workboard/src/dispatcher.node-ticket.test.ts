@@ -26,27 +26,18 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     expect(result.startFailures).toEqual([]);
     expect(run).not.toHaveBeenCalled();
     const worktreePath = `${TARGET.worktreesRoot}/wb-${card.id}`;
+    const nodeGit = (...args: string[]) => [
+      "node.invoke",
+      expect.objectContaining({
+        nodeId: "mac-factory",
+        command: "system.run",
+        params: expect.objectContaining({ command: ["git", "-C", TARGET.repoPath, ...args] }),
+      }),
+    ];
     expect(nodeTickets.respond.mock.calls.map(([method, params]) => [method, params])).toEqual([
-      [
-        "node.invoke",
-        expect.objectContaining({
-          nodeId: "mac-factory",
-          command: "system.run",
-          params: expect.objectContaining({
-            command: [
-              "git",
-              "-C",
-              TARGET.repoPath,
-              "worktree",
-              "add",
-              "-b",
-              `factory/${card.id}`,
-              worktreePath,
-              "main",
-            ],
-          }),
-        }),
-      ],
+      nodeGit("fetch", "--quiet", "origin"),
+      nodeGit("rev-parse", "--verify", "--quiet", "main^{commit}"),
+      nodeGit("worktree", "add", "-b", `factory/${card.id}`, worktreePath, BASE_COMMIT),
       [
         "node.invoke",
         expect.objectContaining({

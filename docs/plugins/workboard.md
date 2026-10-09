@@ -49,8 +49,9 @@ it before opening the dashboard. See [Apply changes and inspect](/plugins/manage
 
 ## Configuration
 
-Workboard has no plugin-specific config. Enable/disable it with the standard
-plugin entry:
+Enable/disable Workboard with the standard plugin entry. Its only
+plugin-specific config is the GitHub token map for
+[node ticket draft PRs](#node-tickets):
 
 ```json5
 {
@@ -58,12 +59,25 @@ plugin entry:
     entries: {
       workboard: {
         enabled: true,
-        config: {},
+        config: {
+          github: {
+            repos: {
+              // Keyed by the owner/name of the host clone's origin.
+              "acme/app": {
+                token: { source: "store", provider: "default", id: "GH_TOKEN_ACME_APP" },
+              },
+            },
+          },
+        },
       },
     },
   },
 }
 ```
+
+Each token is a [SecretRef](/gateway/secrets) to a fine-grained token with
+contents and pull request write access to that one repository. Run
+`openclaw secrets reload` after changing a referenced value.
 
 ```bash
 openclaw plugins disable workboard
@@ -446,6 +460,43 @@ Callers that may mutate Workboard cards can manually move them through the same
 statuses on every surface. Read-only workspace access only prevents worker
 dispatch that needs writes.
 
+### Node tickets
+
+A card whose `metadata.automation.target` has `kind: "node-claude"` runs as a
+fresh Claude Code session on a paired node instead of a Gateway subagent. The
+target names the node (`nodeId`), the node's clone (`repoPath`), where ticket
+worktrees go on the node (`worktreesRoot`), the Gateway host's clone
+(`hostRepoPath`), and optionally `baseRef` and `model`. Only full-host
+dispatch starts node tickets, and only operator clients set targets.
+
+A project board can carry the target once as
+`orchestration.defaultTarget` through `workboard.boards.upsert`. New cards on
+that board copy it, including cards an agent creates with `workboard_create`
+or `workboard_decompose`; agent board tools cannot set or change it. A card
+keeps its own target, opts out with `target: null`, and never inherits when it
+has a non-scratch workspace or a linked session.
+
+1. **Start:** the dispatcher fetches `origin` in the node clone, creates branch
+   `factory/<cardId>` at `baseRef` (default `origin/HEAD`) in
+   `<worktreesRoot>/wb-<cardId>`, and starts the session there.
+2. **Report:** the session ends with a `workboard-report` block. A `done`
+   report with passing proof starts the import; anything else blocks the card.
+3. **Import:** the node bundles the branch to `<worktreesRoot>/wb-<cardId>.bundle`
+   and the Gateway fetches it with File Transfer, so the node's
+   `allowReadPaths` must cover `<worktreesRoot>/*.bundle`. The host clone
+   fetches `origin` when it lacks the base commit, creates `factory/<cardId>`
+   (never moving an existing branch), the node worktree is removed, and the
+   card moves to `review`.
+4. **Accept:** moving the card from `review` to `done` pushes the imported
+   commit from the host clone to its GitHub origin and opens a draft PR, or
+   reuses an open one for the branch. The PR URL is recorded as proof. A
+   failure, such as a missing [token](#configuration), blocks the card with
+   the reason; move it to `done` again to retry. Archive a card instead of
+   moving it to `done` to close it without a PR.
+
+Nodes and ticket sessions never hold the GitHub token; only the Gateway's
+publish step reads it.
+
 ### Worker selection
 
 Each pass starts **at most 3 workers by default**. Ready cards are ordered by
@@ -488,7 +539,8 @@ failure when an explicit `--url`/`--token` target was given.
 Board metadata can set `autoDecompose`, `autoDecomposePerDispatch`,
 `defaultAssignee`, and `orchestratorProfile`. OpenClaw records this intent and
 exposes it in worker context. Actual specification/decomposition still runs
-through the normal Workboard tools.
+through the normal Workboard tools. The operator-only `defaultTarget` is
+described under [Node tickets](#node-tickets).
 
 ## CLI and slash command
 

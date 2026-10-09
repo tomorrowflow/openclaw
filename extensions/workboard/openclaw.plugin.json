@@ -229,7 +229,57 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "github": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Draft PRs for accepted node tickets. Each repo is keyed by the owner/name of its host clone's origin.",
+        "properties": {
+          "repos": {
+            "type": "object",
+            "propertyNames": {
+              "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "token": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "SecretRef to a fine-grained token with contents and pull request write access to this repo.",
+                  "properties": {
+                    "source": {
+                      "type": "string",
+                      "enum": ["env", "file", "exec", "store"]
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["source", "provider", "id"]
+                }
+              },
+              "required": ["token"]
+            }
+          }
+        }
+      }
+    }
+  },
+  "configContracts": {
+    "secretInputs": {
+      "paths": [
+        {
+          "path": "github.repos.*.token",
+          "expected": "string",
+          "ownerKind": "capability"
+        }
+      ]
+    }
   },
   "controlUi": {
     "entry": "dist/control-ui/1629cf73e21b79a3c88ca6624a53372f5a1f48aca1c8317476f8c977392fac0a/index.js",

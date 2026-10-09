@@ -264,7 +264,14 @@ export type WorkboardWorkspaceAccess =
  */
 export type WorkboardNodeHandoff =
   | { phase: "pending"; reportedAt: number }
-  | { phase: "imported"; headCommit: string; importedAt: number };
+  | { phase: "imported"; headCommit: string; importedAt: number }
+  | {
+      phase: "published";
+      headCommit: string;
+      importedAt: number;
+      publishedAt: number;
+      pullRequestUrl: string;
+    };
 
 /** A ticket worktree the dispatcher created on a paired node. */
 export type WorkboardNodeWorktree = {
@@ -359,6 +366,12 @@ export type WorkboardOrchestrationSettings = {
   autoDecomposePerDispatch?: number;
   defaultAssignee?: string;
   orchestratorProfile?: string;
+  /**
+   * Project boards name their node target once: new cards on the board copy
+   * it unless they bring their own target, a non-scratch workspace, or a
+   * linked session. Operator-set only; agent board tools cannot write it.
+   */
+  defaultTarget?: Omit<WorkboardExecutionTarget, "worktree">;
 };
 
 export type WorkboardNotificationSubscription = {

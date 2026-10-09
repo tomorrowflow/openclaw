@@ -7,6 +7,7 @@ import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../api.js";
 import plugin from "../index.js";
+import { NODE_TARGET } from "./node-ticket.test-support.js";
 import { WorkboardStore } from "./store.js";
 import { startEmptySessionsBoardService } from "./test/sessions-board.js";
 import {
@@ -614,6 +615,38 @@ describe("workboard tools", () => {
     }>;
     expect(promoted).toEqual([expect.objectContaining({ id: card.id })]);
     expect(promoted[0]?.metadata?.claim?.token).toBe("[redacted]");
+  });
+
+  it("hands a project board's operator-set node target to cards its agent creates", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({ id: "app", orchestration: { defaultTarget: NODE_TARGET } });
+    const tools = new Map(
+      createWorkboardTools({ store, context: { agentId: "dev" } }).map((tool) => [tool.name, tool]),
+    );
+    const boardCreate = expectDefined(tools.get("workboard_board_create"), "board create tool");
+    expect(
+      Value.Check(boardCreate.parameters, {
+        id: "app",
+        orchestration: { defaultTarget: NODE_TARGET },
+      }),
+    ).toBe(false);
+    await boardCreate.execute("call-board", { id: "app", orchestration: { autoDecompose: true } });
+
+    const created = readPayload(
+      await expectDefined(tools.get("workboard_create"), "create tool").execute("call-create", {
+        title: "Fix the parser",
+        boardId: "app",
+      }),
+    );
+    expect(created.card).toMatchObject({ metadata: { automation: { target: NODE_TARGET } } });
+    const optedOut = await store.create({
+      title: "Plan the batch",
+      boardId: "app",
+      metadata: { automation: { target: null } },
+    });
+    expect(optedOut.metadata?.automation?.target).toBeUndefined();
+    const elsewhere = await store.create({ title: "Elsewhere" });
+    expect(elsewhere.metadata?.automation?.target).toBeUndefined();
   });
 
   it("exposes board lifecycle, decomposition, runs, and notification tools", async () => {

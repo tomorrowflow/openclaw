@@ -4,17 +4,23 @@ import os from "node:os";
 import path from "node:path";
 import type { WorkboardCard, WorkboardNodeWorktree } from "@openclaw/workboard-contract";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import { runPluginCommandWithTimeout } from "openclaw/plugin-sdk/run-command";
 import {
+  publishCandidate,
+  publishNodeTicket,
+  type WorkboardGitHubAccess,
+} from "./node-ticket-publish.js";
+import {
+  HandoffSupersededError,
+  hostGit,
   nodeInvokePayload,
   nodeTicketTarget,
+  requireHostGit,
   runNodeCommand,
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
 import type { WorkboardStore } from "./store.js";
 
-const HOST_GIT_TIMEOUT_MS = 120_000;
 // file.fetch's hard cap; a larger bundle fails on the node with FILE_TOO_LARGE.
 const BUNDLE_MAX_BYTES = 16 * 1024 * 1024;
 
@@ -41,28 +47,6 @@ function handoffCard(card: WorkboardCard): HandoffCard | undefined {
     worktree: { ...worktree, handoff: worktree.handoff },
     bundlePath: path.posix.join(target.worktreesRoot, `wb-${card.id}.bundle`),
   };
-}
-
-class HandoffSupersededError extends Error {
-  constructor() {
-    super("the card changed during the bundle import");
-  }
-}
-
-async function hostGit(repoPath: string, args: string[]) {
-  return await runPluginCommandWithTimeout({
-    argv: ["git", "-C", repoPath, ...args],
-    timeoutMs: HOST_GIT_TIMEOUT_MS,
-  });
-}
-
-async function requireHostGit(repoPath: string, args: string[]): Promise<string> {
-  const result = await hostGit(repoPath, args);
-  if (result.code !== 0) {
-    const detail = (result.stderr || result.stdout).trim() || `exit ${result.code}`;
-    throw new Error(`host \`git ${args.join(" ")}\` failed: ${detail}`);
-  }
-  return result.stdout.trim();
 }
 
 async function fetchNodeBundle(
@@ -129,6 +113,15 @@ async function importNodeBundle(
   try {
     const localBundle = path.join(tempDir, path.posix.basename(bundlePath));
     await fs.writeFile(localBundle, bundle);
+    // The node based the ticket on a freshly fetched origin; the host clone may lag behind it.
+    const hasBase = await hostGit(hostRepoPath, [
+      "cat-file",
+      "-e",
+      `${worktree.baseCommit}^{commit}`,
+    ]);
+    if (hasBase.code !== 0) {
+      await requireHostGit(hostRepoPath, ["fetch", "--quiet", "origin"]);
+    }
     await requireHostGit(hostRepoPath, ["bundle", "verify", "--quiet", localBundle]);
     const ref = `refs/heads/${worktree.branch}`;
     const heads = (await requireHostGit(hostRepoPath, ["bundle", "list-heads", localBundle]))
@@ -284,31 +277,39 @@ async function runNodeTicketHandoff(params: {
 }
 
 /**
- * Owns moving finished node tickets from a pending handoff to review. The
- * agent_end report starts it right away and the lifecycle sweep resumes it
- * after a restart; each card runs at most once at a time.
+ * Owns moving finished node tickets from a pending handoff to review, and
+ * accepted ones from done to a draft PR. The agent_end report and card
+ * changes start it right away and the lifecycle sweep resumes it after a
+ * restart; each card runs at most once at a time.
  */
 export function createNodeTicketHandoffs(params: {
   store: WorkboardStore;
   runtime: WorkboardNodeTicketRuntime;
+  github: WorkboardGitHubAccess;
   now?: () => number;
 }) {
   const inFlight = new Set<string>();
+  const now = params.now ?? Date.now;
   return {
     async resume(warn: (message: string) => void): Promise<void> {
       for (const card of await params.store.list()) {
         const item = handoffCard(card);
-        if (!item || inFlight.has(card.id)) {
+        const publish = item ? undefined : publishCandidate(card);
+        if ((!item && !publish) || inFlight.has(card.id)) {
           continue;
         }
         inFlight.add(card.id);
         try {
-          await runNodeTicketHandoff({
-            runtime: params.runtime,
-            store: params.store,
-            item,
-            now: params.now ?? Date.now,
-          });
+          if (item) {
+            await runNodeTicketHandoff({ runtime: params.runtime, store: params.store, item, now });
+          } else if (publish) {
+            await publishNodeTicket({
+              store: params.store,
+              github: params.github,
+              item: publish,
+              now,
+            });
+          }
         } catch (error) {
           warn(`workboard node handoff failed for card ${card.id}: ${formatErrorMessage(error)}`);
         } finally {

@@ -34,10 +34,17 @@ const doneReport = [
 ];
 
 /** Starts a node card on local repos and lets it commit `files` in its worktree. */
-async function finishNodeTicket(params: { files?: Record<string, string>; uncommitted?: boolean }) {
+async function finishNodeTicket(params: {
+  files?: Record<string, string>;
+  uncommitted?: boolean;
+  originCommits?: number;
+}) {
   const root = mkdtempSync(path.join(os.tmpdir(), "workboard-handoff-"));
   roots.push(root);
   const repos = createNodeRepos(root);
+  for (let index = 0; index < (params.originCommits ?? 0); index += 1) {
+    git(repos.origin, "commit", "-q", "--allow-empty", "-m", `merged ${index}`);
+  }
   const store = createWorkboardSqliteTestStore();
   const gateway = createLocalNodeGateway();
   const { card, sessionKey, runId } = await startNodeCard(store, gateway, repos.target);
@@ -56,8 +63,47 @@ async function finishNodeTicket(params: { files?: Record<string, string>; uncomm
     context: { runId, sessionKey },
   });
   const warn = vi.fn();
-  const handoffs = createNodeTicketHandoffs({ store, runtime: gateway });
-  return { store, card, repos, worktree, handoffs, warn, gateway };
+  const github = createFakeGitHub(repos.origin);
+  const handoffs = createNodeTicketHandoffs({ store, runtime: gateway, github: github.access });
+  return { store, card, repos, worktree, handoffs, warn, gateway, github };
+}
+
+/** GitHub as the publish step sees it: a local remote for the push and a recorded REST API. */
+function createFakeGitHub(remote: string) {
+  const tokens = new Map<string, string>();
+  const openPulls: string[] = [];
+  const requests: Array<{ method: string; url: string; auth?: string; body?: unknown }> = [];
+  const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    const headers = new Headers(init?.headers);
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    requests.push({ method, url, auth: headers.get("authorization") ?? undefined, body });
+    const reply = url.includes("/pulls?")
+      ? openPulls.map((html_url) => ({ html_url }))
+      : method === "POST"
+        ? { html_url: "https://github.com/acme/app/pull/7" }
+        : { default_branch: "main" };
+    return new Response(JSON.stringify(reply), { status: method === "POST" ? 201 : 200 });
+  });
+  return {
+    tokens,
+    openPulls,
+    requests,
+    access: {
+      token: (repo: string) => tokens.get(repo),
+      fetch: fetchImpl as unknown as typeof fetch,
+      remoteUrl: () => remote,
+    },
+  };
+}
+
+/** Imports the ticket, points the host clone at a GitHub origin, and accepts the card. */
+async function acceptImportedTicket() {
+  const ticket = await finishNodeTicket({});
+  await ticket.handoffs.resume(ticket.warn);
+  git(ticket.repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
+  await ticket.store.move(ticket.card.id, "done", undefined);
+  return ticket;
 }
 
 describe("node ticket handoff", () => {
@@ -86,6 +132,22 @@ describe("node ticket handoff", () => {
     expect(existsSync(worktree)).toBe(false);
     expect(existsSync(`${worktree}.bundle`)).toBe(false);
     expect(git(repos.target.repoPath, "branch", "--list", branch)).toBe("");
+  });
+
+  it("bases the ticket on the fetched origin even when both clones are stale", async () => {
+    const { store, card, repos, worktree, handoffs, warn } = await finishNodeTicket({
+      originCommits: 1,
+    });
+    const originHead = git(repos.origin, "rev-parse", "main");
+    expect(git(repos.hostRepo, "rev-parse", "origin/main")).not.toBe(originHead);
+
+    await handoffs.resume(warn);
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("review");
+    expect(stored?.metadata?.automation?.target?.worktree?.baseCommit).toBe(originHead);
+    expect(git(repos.hostRepo, "rev-parse", `factory/${card.id}~1`)).toBe(originHead);
+    expect(existsSync(worktree)).toBe(false);
   });
 
   it("blocks the card and keeps the node worktree when work is uncommitted", async () => {
@@ -184,5 +246,69 @@ describe("node ticket handoff", () => {
     expect(stored?.metadata?.comments?.at(-1)?.body).toMatch(
       /^Bundle import failed: node mac-factory failed `git .* bundle create .*`: .*empty bundle/,
     );
+  });
+});
+
+describe("node ticket draft PR", () => {
+  it("pushes the accepted commit and opens one draft PR with the repo's token", async () => {
+    const { store, card, repos, worktree, handoffs, warn, github } = await acceptImportedTicket();
+    const branch = `factory/${card.id}`;
+    const head = git(repos.hostRepo, "rev-parse", branch);
+    github.tokens.set("acme/app", "token-app");
+
+    await handoffs.resume(warn);
+
+    const stored = await store.get(card.id);
+    expect(warn).not.toHaveBeenCalled();
+    expect(stored?.status).toBe("done");
+    expect(stored?.metadata?.automation?.target?.worktree?.handoff).toMatchObject({
+      phase: "published",
+      headCommit: head,
+      pullRequestUrl: "https://github.com/acme/app/pull/7",
+    });
+    expect(stored?.metadata?.proof?.at(-1)).toMatchObject({
+      label: "draft PR",
+      status: "passed",
+      url: "https://github.com/acme/app/pull/7",
+    });
+    expect(git(repos.origin, "rev-parse", branch)).toBe(head);
+    expect(existsSync(worktree)).toBe(false);
+    expect(github.requests.at(-1)).toEqual({
+      method: "POST",
+      url: "https://api.github.com/repos/acme/app/pulls",
+      auth: "Bearer token-app",
+      body: expect.objectContaining({ head: branch, base: "main", draft: true }),
+    });
+
+    await handoffs.resume(warn);
+    expect(github.requests.filter((request) => request.method === "POST")).toHaveLength(1);
+  });
+
+  it("blocks with the config step when the repo has no token, and retries on the next accept", async () => {
+    const { store, card, repos, handoffs, warn, github } = await acceptImportedTicket();
+    const branch = `factory/${card.id}`;
+
+    await handoffs.resume(warn);
+
+    const blocked = await store.get(card.id);
+    expect(blocked?.status).toBe("blocked");
+    expect(blocked?.metadata?.comments?.at(-1)?.body).toContain(
+      'Draft PR failed: no GitHub token for acme/app; set plugins.entries.workboard.config.github.repos["acme/app"].token',
+    );
+    expect(github.requests).toEqual([]);
+    expect(git(repos.origin, "branch", "--list", branch)).toBe("");
+
+    github.tokens.set("acme/app", "token-app");
+    github.openPulls.push("https://github.com/acme/app/pull/3");
+    await store.move(card.id, "done", undefined);
+    await handoffs.resume(warn);
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("done");
+    expect(stored?.metadata?.automation?.target?.worktree?.handoff).toMatchObject({
+      phase: "published",
+      pullRequestUrl: "https://github.com/acme/app/pull/3",
+    });
+    expect(github.requests.map((request) => request.method)).toEqual(["GET"]);
   });
 });

@@ -476,8 +476,11 @@ export function createWorkboardLifecycleService(params: {
       }
     }
   };
+  let removeChangeListener: (() => void) | undefined;
   const stop = () => {
     scheduleNodeHandoffs = undefined;
+    removeChangeListener?.();
+    removeChangeListener = undefined;
     removeDrainListener?.();
     removeDrainListener = undefined;
     generation += 1;
@@ -528,6 +531,12 @@ export function createWorkboardLifecycleService(params: {
               });
             }
           : undefined;
+      // Accepting a node ticket is a plain move to done; any card change wakes
+      // the handoff owner, which finds the card and opens its draft PR.
+      removeChangeListener?.();
+      removeChangeListener = scheduleNodeHandoffs
+        ? params.store.subscribeChanges(() => scheduleNodeHandoffs?.())
+        : undefined;
       const reconcile = async () => {
         try {
           await params.store.runOperation(async () => {
@@ -565,7 +574,13 @@ export function createWorkboardLifecycleService(params: {
               await cleanupWorktrees(cards, (message) => ctx.logger.warn(message));
             }
             if (generation === owner) {
-              await params.nodeHandoffs?.resume((message) => ctx.logger.warn(message));
+              // Scheduled runs carry the plugin's own scope, which the draft PR
+              // step's prepared token read requires.
+              if (scheduleNodeHandoffs) {
+                scheduleNodeHandoffs();
+              } else {
+                await params.nodeHandoffs?.resume((message) => ctx.logger.warn(message));
+              }
             }
           });
         } catch (error) {
