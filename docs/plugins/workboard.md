@@ -517,7 +517,8 @@ cards then block at start with the core `model not allowed` reason.
    with that reason; fix it and move the card to `todo` again. The node worktree
    restarts at the PR branch tip on `origin`, so commits a reviewer pushed are
    kept. The session gets the same session key, a "Review rework, round N"
-   brief, and the recent comments. The import moves the host branch forward
+   brief with the full text of the review comments (the last five), and the
+   recent comments. The import moves the host branch forward
    only from the commit it published. Accepting again pushes to the same draft
    PR, whose body stays as first written, and posts a PR comment for the round:
    the new head, commits others pushed, and the card comments since the

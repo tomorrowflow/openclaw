@@ -469,8 +469,10 @@ describe("node ticket draft PR", () => {
     github.tokens.set("acme/app", "token-app");
     await handoffs.resume(warn);
     github.openPulls.push("https://github.com/acme/app/pull/7");
+    // Longer than the worker context's 400-char comment preview.
+    const review = `Rename the flag to --strict. ${"Check each renamed call site. ".repeat(20)}Then update the README.`;
 
-    await store.addComment(card.id, { body: "Rename the flag to --strict." });
+    await store.addComment(card.id, { body: review });
     await store.move(card.id, "todo", undefined);
     await handoffs.resume(warn);
 
@@ -481,11 +483,13 @@ describe("node ticket draft PR", () => {
     expect(gateway.respond).toHaveBeenLastCalledWith(
       "sessions.create",
       expect.objectContaining({
-        message: expect.stringMatching(
-          /Review rework, round 1[\s\S]*Rename the flag to --strict\./,
-        ),
+        message: expect.stringContaining("Review rework, round 1"),
       }),
     );
+    const message = gateway.respond.mock.calls.findLast(
+      ([method]) => method === "sessions.create",
+    )?.[1]?.message;
+    expect(message).toContain(review);
   });
 
   it("sends a reopen without a review comment back to backlog with the next step", async () => {
