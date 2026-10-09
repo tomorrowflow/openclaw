@@ -62,6 +62,10 @@ import {
   MAX_CARD_NOTIFICATIONS,
   MAX_CARD_PROOF,
   MAX_CARD_WORKER_LOGS,
+  MAX_ATTEMPT_ERROR_CHARS,
+  MAX_COMMENT_BODY_CHARS,
+  MAX_PROOF_COMMAND_CHARS,
+  MAX_PROOF_NOTE_CHARS,
 } from "./store-constants.js";
 import type {
   WorkboardAttachmentInput,
@@ -486,7 +490,12 @@ function normalizeAttempt(record: Record<string, unknown>): WorkboardRunAttempt 
   const endedAt = normalizeTimestamp(record.endedAt, 0);
   const sessionKey = normalizeOptionalString(record.sessionKey);
   const runId = normalizeOptionalString(record.runId);
-  const error = normalizeBoundedString(record.error, undefined, 800, "attempt error");
+  const error = normalizeBoundedString(
+    record.error,
+    undefined,
+    MAX_ATTEMPT_ERROR_CHARS,
+    "attempt error",
+  );
   const engine = normalizeBoundedString(record.engine, undefined, 160, "attempt engine");
   const model = normalizeBoundedString(record.model, undefined, 160, "attempt model");
   const mode = normalizeEnumValue(record.mode, WORKBOARD_EXECUTION_MODES, undefined);
@@ -506,7 +515,12 @@ function normalizeAttempt(record: Record<string, unknown>): WorkboardRunAttempt 
 
 function normalizeComment(record: Record<string, unknown>): WorkboardComment | null {
   const id = normalizeOptionalString(record.id);
-  const body = normalizeBoundedString(record.body, undefined, 2000, "comment body");
+  const body = normalizeBoundedString(
+    record.body,
+    undefined,
+    MAX_COMMENT_BODY_CHARS,
+    "comment body",
+  );
   const createdAt = normalizeTimestamp(record.createdAt, 0);
   if (!id || !body || !createdAt) {
     return null;
@@ -785,9 +799,14 @@ export function normalizeProofInput(
   id?: string,
 ): WorkboardProof {
   const label = normalizeBoundedString(input.label, undefined, 160, "proof label");
-  const command = normalizeBoundedString(input.command, undefined, 1000, "proof command");
+  const command = normalizeBoundedString(
+    input.command,
+    undefined,
+    MAX_PROOF_COMMAND_CHARS,
+    "proof command",
+  );
   const url = normalizeBoundedString(input.url, undefined, 2000, "proof URL");
-  const note = normalizeBoundedString(input.note, undefined, 2000, "proof note");
+  const note = normalizeBoundedString(input.note, undefined, MAX_PROOF_NOTE_CHARS, "proof note");
   return {
     id: id ?? randomUUID(),
     status: normalizeEnumValue(input.status, WORKBOARD_PROOF_STATUSES, "unknown"),

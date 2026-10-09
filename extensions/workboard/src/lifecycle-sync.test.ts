@@ -870,6 +870,47 @@ describe("Workboard lifecycle service", () => {
     expect(stored?.metadata?.comments?.at(-1)?.body).toBe(comment);
   });
 
+  it.each([
+    {
+      name: "a block reason longer than an attempt error",
+      value: { outcome: "blocked", summary: "x".repeat(900), questions: ["Run pytest?"] },
+      lead: "Blocked: xxx",
+    },
+    {
+      name: "a block reason longer than a comment",
+      value: { outcome: "needs_input", summary: "x".repeat(1500), questions: ["y".repeat(1500)] },
+      lead: "Needs input: xxx",
+    },
+    {
+      name: "failing proof with oversized report fields",
+      value: {
+        outcome: "done",
+        summary: "x".repeat(3000),
+        proof: [{ command: "c".repeat(1500), status: "failed", note: "n".repeat(3000) }],
+      },
+      lead: "Reported done without passing proof: xxx",
+    },
+  ])("blocks a node ticket on $name", async ({ value, lead }) => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: true, messages: report(value) },
+      context: { runId, sessionKey },
+    });
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("blocked");
+    const comment = stored?.metadata?.comments?.at(-1)?.body ?? "";
+    expect(comment.startsWith(lead)).toBe(true);
+    expect(comment.length).toBeLessThanOrEqual(2000);
+    const attempt = stored?.metadata?.attempts?.at(-1);
+    expect(attempt?.status).toBe("blocked");
+    expect(attempt?.error?.length).toBeLessThanOrEqual(800);
+    expect(attempt?.error?.startsWith(lead)).toBe(true);
+  });
+
   it("leaves a finished node ticket running when only the sweep saw it end", async () => {
     const store = createWorkboardSqliteTestStore();
     const { card, sessionKey } = await startNodeCard(store);

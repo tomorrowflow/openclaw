@@ -14,6 +14,13 @@ import {
   type PluginCommandRunResult,
 } from "openclaw/plugin-sdk/run-command";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import {
+  MAX_BLOCK_REASON_CHARS,
+  MAX_COMMENT_BODY_CHARS,
+  MAX_PROOF_COMMAND_CHARS,
+  MAX_PROOF_NOTE_CHARS,
+} from "./store-constants.js";
+import { capText } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
 
 /** Gateway methods a node ticket needs; both run with the dispatcher's admin authority. */
@@ -394,8 +401,9 @@ function lastAssistantText(messages: readonly unknown[]): string | undefined {
   return undefined;
 }
 
-function optionalText(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+// Report fields are session output; bound them to the store limits they land in.
+function optionalText(value: unknown, max: number): string | undefined {
+  return typeof value === "string" ? capText(value.trim(), max) : undefined;
 }
 
 /** Reads the last report block of the final assistant message; anything else is a contract miss. */
@@ -416,7 +424,7 @@ function parseNodeTicketReport(
   if (!isRecord(value)) {
     return { ok: false, reason: "The ticket session's workboard-report block is not an object." };
   }
-  const summary = optionalText(value.summary) ?? "";
+  const summary = optionalText(value.summary, MAX_COMMENT_BODY_CHARS) ?? "";
   if (value.outcome === "done") {
     const proof = (Array.isArray(value.proof) ? value.proof : []).flatMap(
       (entry): NodeTicketProof[] => {
@@ -426,8 +434,8 @@ function parseNodeTicketReport(
         if (!isRecord(entry) || !status) {
           return [];
         }
-        const command = optionalText(entry.command);
-        const note = optionalText(entry.note);
+        const command = optionalText(entry.command, MAX_PROOF_COMMAND_CHARS);
+        const note = optionalText(entry.note, MAX_PROOF_NOTE_CHARS);
         return [{ status, ...(command ? { command } : {}), ...(note ? { note } : {}) }];
       },
     );
@@ -435,7 +443,7 @@ function parseNodeTicketReport(
   }
   if (value.outcome === "blocked" || value.outcome === "needs_input") {
     const questions = (Array.isArray(value.questions) ? value.questions : []).flatMap((entry) => {
-      const question = optionalText(entry);
+      const question = optionalText(entry, MAX_BLOCK_REASON_CHARS);
       return question ? [question] : [];
     });
     return { ok: true, report: { outcome: value.outcome, summary, questions } };
@@ -466,15 +474,16 @@ export async function applyNodeTicketReport(params: {
   const { store, card } = params;
   const claim = card.metadata?.claim;
   const scope = claim ? { ownerId: claim.ownerId, token: claim.token } : undefined;
+  const block = async (reason: string) =>
+    await store.block(card.id, { reason: capText(reason, MAX_BLOCK_REASON_CHARS) }, scope);
   const parsed = parseNodeTicketReport(params.messages);
   if (!parsed.ok) {
-    const reason = params.success ? parsed.reason : `The ticket session failed. ${parsed.reason}`;
-    await store.block(card.id, { reason }, scope);
+    await block(params.success ? parsed.reason : `The ticket session failed. ${parsed.reason}`);
     return;
   }
   const { report } = parsed;
   if (report.outcome !== "done") {
-    await store.block(card.id, { reason: blockReason(report) }, scope);
+    await block(blockReason(report));
     return;
   }
   for (const proof of report.proof) {
@@ -484,13 +493,7 @@ export async function applyNodeTicketReport(params: {
     !report.proof.some((proof) => proof.status === "passed") ||
     report.proof.some((proof) => proof.status === "failed")
   ) {
-    await store.block(
-      card.id,
-      {
-        reason: `Reported done without passing proof: ${report.summary || "no summary given"}`,
-      },
-      scope,
-    );
+    await block(`Reported done without passing proof: ${report.summary || "no summary given"}`);
     return;
   }
   if (report.summary) {
@@ -498,11 +501,7 @@ export async function applyNodeTicketReport(params: {
   }
   const worktree = nodeTicketTarget(card)?.worktree;
   if (!worktree) {
-    await store.block(
-      card.id,
-      { reason: "Reported done, but the card has no recorded node worktree to import." },
-      scope,
-    );
+    await block("Reported done, but the card has no recorded node worktree to import.");
     return;
   }
   await store.setNodeHandoff(

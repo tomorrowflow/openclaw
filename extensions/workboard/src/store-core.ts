@@ -30,7 +30,12 @@ import {
   invertWorkboardWorkspaceMutation,
   sameWorkboardCardState,
 } from "./store-compensation.js";
-import { MAX_CARD_COMMENTS, MAX_CARD_WORKER_LOGS, POSITION_STEP } from "./store-constants.js";
+import {
+  MAX_CARD_COMMENTS,
+  MAX_CARD_WORKER_LOGS,
+  MAX_COMMENT_BODY_CHARS,
+  POSITION_STEP,
+} from "./store-constants.js";
 import type {
   WorkboardCardPatch,
   WorkboardCommentInput,
@@ -780,7 +785,12 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     scope?: WorkboardMutationScope,
   ): Promise<WorkboardCard> {
     const now = Date.now();
-    const body = normalizeBoundedString(input.body, undefined, 2000, "comment body");
+    const body = normalizeBoundedString(
+      input.body,
+      undefined,
+      MAX_COMMENT_BODY_CHARS,
+      "comment body",
+    );
     if (!body) {
       throw new Error("comment body is required.");
     }
