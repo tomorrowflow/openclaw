@@ -2,6 +2,11 @@
 import { fileURLToPath } from "node:url";
 import { expectDefined } from "@openclaw/normalization-core";
 import { isToolResultError } from "openclaw/plugin-sdk/agent-harness-runtime";
+import {
+  resolveAllowedModelRef,
+  resolveDefaultModelForAgent,
+} from "openclaw/plugin-sdk/agent-runtime";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
@@ -647,6 +652,65 @@ describe("workboard tools", () => {
     expect(optedOut.metadata?.automation?.target).toBeUndefined();
     const elsewhere = await store.create({ title: "Elsewhere" });
     expect(elsewhere.metadata?.automation?.target).toBeUndefined();
+  });
+
+  it("refuses a board node target whose model the assignee's modelPolicy does not allow", async () => {
+    const store = createWorkboardSqliteTestStore();
+    using openStore = vi.spyOn(WorkboardStore, "openSqlite");
+    openStore.mockReturnValue(store);
+    let config: OpenClawConfig = {
+      agents: {
+        defaults: { model: { primary: NODE_TARGET.model } },
+        entries: {
+          main: {},
+          dev: { modelPolicy: { allow: [NODE_TARGET.model] } },
+          ops: { modelPolicy: { allow: ["openai/gpt-5.5"] } },
+        },
+      },
+    };
+    plugin.register(
+      createTestPluginApi({
+        runtimeSource: fileURLToPath(new URL("../index.ts", import.meta.url)),
+        runtime: {
+          config: { current: () => config },
+          modelConfig: { resolveAllowedModelRef, resolveDefaultModelForAgent },
+        } as unknown as OpenClawPluginApi["runtime"],
+      }),
+    );
+
+    await store.upsertBoard({
+      id: "app",
+      orchestration: { defaultAssignee: "dev", defaultTarget: NODE_TARGET },
+    });
+    await expect(
+      store.upsertBoard({
+        id: "app",
+        orchestration: { defaultTarget: { ...NODE_TARGET, model: "openai/gpt-5.5" } },
+      }),
+    ).rejects.toThrow(
+      "Board app default target model openai/gpt-5.5 is not allowed for agent dev (model not allowed: openai/gpt-5.5). Add it to that agent's modelPolicy.allow or choose an allowed model.",
+    );
+    // An agent moving the default assignee would strand the operator's target too.
+    const boardCreate = expectDefined(
+      createWorkboardTools({ store, context: { agentId: "main" } }).find(
+        (tool) => tool.name === "workboard_board_create",
+      ),
+      "board create tool",
+    );
+    await expect(
+      boardCreate.execute("call-board", { id: "app", orchestration: { defaultAssignee: "ops" } }),
+    ).rejects.toThrow("is not allowed for agent ops");
+    // A board saved before its agent's policy narrowed can still be edited;
+    // dispatch meets core's refusal for its target instead.
+    config = {
+      agents: { entries: { main: {}, dev: { modelPolicy: { allow: ["openai/gpt-5.5"] } } } },
+    };
+    await store.upsertBoard({ id: "app", name: "App" });
+    const board = (await store.listBoards()).boards.find((entry) => entry.id === "app");
+    expect(board).toMatchObject({
+      name: "App",
+      orchestration: { defaultAssignee: "dev", defaultTarget: { model: NODE_TARGET.model } },
+    });
   });
 
   it("assigns new cards to the board's default assignee unless the creator names one", async () => {
