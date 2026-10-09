@@ -276,11 +276,13 @@ export type WorkboardNodeHandoff =
 /**
  * Review rework on a published ticket (D54): the worktree restarts at the
  * draft PR branch tip. `round` counts rework rounds so far; `outsideCommits`
- * counts commits others pushed to the branch between rounds.
+ * counts commits others pushed to the branch between rounds. `acceptedAt` is
+ * the first publish, which stays the ticket's acceptance through rework.
  */
 export type WorkboardNodeRework = {
   round: number;
   pullRequestUrl: string;
+  acceptedAt: number;
   outsideCommits: number;
 };
 

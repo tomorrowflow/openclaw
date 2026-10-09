@@ -131,8 +131,9 @@ export async function createNodeTicketWorktree(params: {
   let rework: WorkboardNodeRework | undefined;
   try {
     // The node clone only moves here; without the fetch every ticket after the
-    // first merged PR would start from a stale base.
-    await git("fetch", "--quiet", "origin");
+    // first merged PR would start from a stale base. Pruning drops the refs of
+    // merged or closed PR branches, so rework never restarts from a stale one.
+    await git("fetch", "--quiet", "--prune", "origin");
     let start: string;
     if (published && previous) {
       start = await git(
@@ -152,6 +153,7 @@ export async function createNodeTicketWorktree(params: {
       rework = {
         round: (previous.rework?.round ?? 0) + 1,
         pullRequestUrl: published.pullRequestUrl,
+        acceptedAt: previous.rework?.acceptedAt ?? published.publishedAt,
         outsideCommits: (previous.rework?.outsideCommits ?? 0) + outside,
       };
     } else {

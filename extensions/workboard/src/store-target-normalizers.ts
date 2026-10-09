@@ -51,15 +51,19 @@ function normalizeNodeRework(value: unknown): WorkboardNodeRework | undefined {
   }
   const round = resolveOptionalIntegerOption(value.round, { min: 1 });
   const outsideCommits = resolveOptionalIntegerOption(value.outsideCommits, { min: 0 });
+  const acceptedAt = resolveOptionalIntegerOption(value.acceptedAt, { min: 0 });
   const pullRequestUrl = normalizeBoundedString(
     value.pullRequestUrl,
     undefined,
     500,
     "node rework pull request url",
   );
-  return round === undefined || outsideCommits === undefined || !pullRequestUrl
+  return round === undefined ||
+    outsideCommits === undefined ||
+    acceptedAt === undefined ||
+    !pullRequestUrl
     ? undefined
-    : { round, pullRequestUrl, outsideCommits };
+    : { round, pullRequestUrl, acceptedAt, outsideCommits };
 }
 
 function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefined {
