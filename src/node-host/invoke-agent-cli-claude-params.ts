@@ -64,7 +64,9 @@ const ENV_ALLOWLIST = new Set([
   "NO_COLOR",
   "TERM",
 ]);
-const CLEAR_ENV_ALLOWLIST = new Set([
+// Node protocol contract: deployed nodes reject any other key, so callers must
+// bound what they send to this set rather than to their own backend lists.
+export const NODE_CLAUDE_CLEAR_ENV_KEYS: ReadonlySet<string> = new Set([
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_API_KEY_OLD",
   "ANTHROPIC_API_TOKEN",
@@ -264,13 +266,13 @@ export async function decodeClaudeCliNodeRunParams(raw?: string | null) {
   }
   let clearEnv: string[] | undefined;
   if (value.clearEnv !== undefined) {
-    if (!Array.isArray(value.clearEnv) || value.clearEnv.length > CLEAR_ENV_ALLOWLIST.size) {
+    if (!Array.isArray(value.clearEnv) || value.clearEnv.length > NODE_CLAUDE_CLEAR_ENV_KEYS.size) {
       throw new Error("INVALID_REQUEST: clearEnv must be a bounded array");
     }
     clearEnv = [];
     for (const candidate of value.clearEnv) {
       const key = requireBoundedString(candidate, "clearEnv entry", MAX_ARG_BYTES);
-      if (!CLEAR_ENV_ALLOWLIST.has(key)) {
+      if (!NODE_CLAUDE_CLEAR_ENV_KEYS.has(key)) {
         throw new Error(`INVALID_REQUEST: clearEnv key is not allowed: ${key}`);
       }
       if (!clearEnv.includes(key)) {

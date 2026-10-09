@@ -11,6 +11,7 @@ import {
 } from "../../infra/installation-target-context.js";
 import { compareValidSemver } from "../../infra/semver.js";
 import { getAgentScopedMediaLocalRoots } from "../../media/local-roots.js";
+import { NODE_CLAUDE_CLEAR_ENV_KEYS } from "../../node-host/invoke-agent-cli-claude-params.js";
 import { applySkillEnvOverridesFromSnapshot } from "../../skills/runtime/env-overrides.js";
 import {
   fingerprintCliRuntimeArtifact,
@@ -374,7 +375,7 @@ export async function executePreparedCliRun(
         : [];
       const nodeClearEnv = [
         ...new Set([...(selectedClaudeClearEnv ?? []), ...nodeRuntimeClearEnv]),
-      ];
+      ].filter((key) => NODE_CLAUDE_CLEAR_ENV_KEYS.has(key));
       const env = sanitizeHostExecEnv({ baseEnv: process.env, blockPathOverrides: true });
       const preservedEnv = parseCliBackendPreserveEnv(process.env[CLI_BACKEND_PRESERVE_ENV]);
       for (const key of backend.clearEnv ?? []) {
