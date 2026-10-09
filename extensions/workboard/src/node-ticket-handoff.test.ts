@@ -283,6 +283,11 @@ describe("node ticket draft PR", () => {
 
     await handoffs.resume(warn);
     expect(github.requests.filter((request) => request.method === "POST")).toHaveLength(1);
+    const trust = await store.trust({});
+    expect(trust.classes).toEqual([
+      expect.objectContaining({ taskClass: "unclassified", accepted: 1, cleanAccepted: 1 }),
+    ]);
+    expect(trust.weeks.at(-1)).toMatchObject({ accepted: 1, autonomous: 1 });
   });
 
   it("reworks a published ticket on its PR branch, keeping a reviewer's commit", async () => {
@@ -349,6 +354,16 @@ describe("node ticket draft PR", () => {
       handoff: { phase: "published", headCommit: reworked, pullRequestUrl },
       rework: { round: 1, outsideCommits: 1 },
     });
+    const trust = await store.trust({});
+    expect(trust.total).toMatchObject({
+      tickets: 1,
+      accepted: 1,
+      cleanAccepted: 0,
+      firstPass: 1,
+      reworkRounds: 1,
+      outsideCommits: 1,
+    });
+    expect(trust.weeks.at(-1)).toMatchObject({ accepted: 1, autonomous: 0 });
   });
 
   it("refuses to rework an imported ticket before its draft PR exists", async () => {

@@ -513,6 +513,20 @@ agent instead of the default agent.
 Nodes and ticket sessions never hold the GitHub token; only the Gateway's
 publish step reads it.
 
+#### Trust KPIs
+
+`workboard.cards.trust {boardId}` (and `workboard_stats {trust: true}` for
+agents) projects node ticket facts on read; nothing extra is stored. Per task
+class (a `class:<name>` label, else `unclassified`) it counts tickets,
+accepted (published), clean accepts (no rework round or outside commit),
+first-pass imports (never blocked), blocks, rework rounds, outside commits,
+and attempts. A weekly series for the last 8 UTC weeks gives the accepted
+count, the **autonomous** count (accepted with no rework, outside commit, or
+block), and the median lead time from create to accept. On a board with an
+`orchestration.defaultTarget`, the Control UI shows "N of M autonomous this
+week" under the board title; select it for the weekly and per-class tables.
+Blocks come from card events, which keep the newest 50 per card.
+
 Node tickets share one pool instead of their owner's single slot: up to
 `nodeTickets.maxConcurrent` (default 2) run at once across all nodes, even for
 the same agent. A ticket holds its pool slot only while it is `running`

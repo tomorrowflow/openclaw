@@ -43,6 +43,11 @@
         "description": "Read Workboard card statistics."
       },
       {
+        "id": "trust",
+        "method": "workboard.cards.trust",
+        "description": "Read node ticket trust KPIs: per task class, and the weekly autonomy and lead time trend."
+      },
+      {
         "id": "boards.list",
         "method": "workboard.boards.list",
         "description": "List Workboard boards."

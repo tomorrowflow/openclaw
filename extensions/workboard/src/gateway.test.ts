@@ -298,6 +298,7 @@ describe("workboard gateway methods", () => {
       "workboard.boards.archive",
       "workboard.boards.delete",
       "workboard.cards.stats",
+      "workboard.cards.trust",
       "workboard.cards.runs",
       "workboard.cards.specify",
       "workboard.cards.decompose",

@@ -2332,6 +2332,7 @@ async function createChatPickerScenario(
             "workboard.cards.archive",
             "workboard.cards.delete",
             "workboard.cards.stats",
+            "workboard.cards.trust",
           ]
         : []),
     ],

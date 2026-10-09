@@ -43,6 +43,12 @@ import {
   type WorkboardProps,
 } from "./view-helpers.ts";
 import { renderSessionsBoard } from "./view-sessions-board.ts";
+import {
+  boardTrustKey,
+  loadBoardTrust,
+  renderBoardTrustHeading,
+  type BoardTrustState,
+} from "./view-trust.ts";
 import { renderWorkboard } from "./view.ts";
 
 export function workboardPageTarget(boardId?: string) {
@@ -75,6 +81,7 @@ export function createWorkboardPage(
     let disposed = false;
     let boardDraft: BoardDraft | null = null;
     const automations = new Map<string, BoardAutomationState>();
+    let trust: BoardTrustState | undefined;
     let queued = false;
     let connected = false;
     let refreshActive = false;
@@ -254,6 +261,25 @@ export function createWorkboardPage(
           requestUpdate();
         });
       }
+      const trustKey = connected && context.presented ? boardTrustKey(selectedBoard) : undefined;
+      if (!trustKey) {
+        trust = undefined;
+      } else if (selectedBoard && trust?.key !== trustKey) {
+        const pending: BoardTrustState = { key: trustKey, status: "loading" };
+        // A reload of the same board keeps its numbers until the new ones arrive.
+        trust =
+          trust?.status === "loaded" && trust.result.boardId === selectedBoard.id
+            ? { ...trust, key: trustKey }
+            : pending;
+        const requested = trust;
+        void loadBoardTrust(client, selectedBoard.id, trustKey).then((loaded) => {
+          if (disposed || trust !== requested) {
+            return;
+          }
+          trust = loaded;
+          requestUpdate();
+        });
+      }
       const focusedCard = state.draftOpen
         ? state.cards.find((card) => card.id === state.editingCardId)
         : getVisibleDetailCard(state);
@@ -341,6 +367,7 @@ export function createWorkboardPage(
                     ? renderBoardAutomationHeading(automations.get(selectedBoard.automationJobId))
                     : nothing
                 }
+                ${renderBoardTrustHeading(trust)}
               </div>
             `,
             scopeControl:
@@ -392,6 +419,7 @@ export function createWorkboardPage(
             onOpenSession: host.sessions.open,
             onRefresh: () => {
               automations.clear();
+              trust = undefined;
               void refreshMetadata();
               sessionResolver.refresh();
               void refreshWorkboard({

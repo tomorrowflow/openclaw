@@ -19,6 +19,25 @@ function normalizeCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0;
 }
 
+/** The UI only needs to know a project board sends its cards to a node (trust KPIs). */
+function normalizeBoardDefaultTarget(value: unknown): Pick<WorkboardBoardSummary, "orchestration"> {
+  const target = isRecord(value) ? value.defaultTarget : undefined;
+  if (!isRecord(target) || target.kind !== "node-claude") {
+    return {};
+  }
+  const { nodeId, repoPath, worktreesRoot, hostRepoPath } = target;
+  return typeof nodeId === "string" &&
+    typeof repoPath === "string" &&
+    typeof worktreesRoot === "string" &&
+    typeof hostRepoPath === "string"
+    ? {
+        orchestration: {
+          defaultTarget: { kind: "node-claude", nodeId, repoPath, worktreesRoot, hostRepoPath },
+        },
+      }
+    : {};
+}
+
 function normalizeBoardSummary(value: unknown): WorkboardBoardSummary | null {
   if (!isRecord(value)) {
     return null;
@@ -53,6 +72,7 @@ function normalizeBoardSummary(value: unknown): WorkboardBoardSummary | null {
     ...(typeof value.icon === "string" && value.icon.trim() ? { icon: value.icon.trim() } : {}),
     ...(typeof value.color === "string" && value.color.trim() ? { color: value.color.trim() } : {}),
     ...(automationJobId && automationJobId.length <= 128 ? { automationJobId } : {}),
+    ...normalizeBoardDefaultTarget(value.orchestration),
     ...(typeof value.updatedAt === "number" ? { updatedAt: value.updatedAt } : {}),
     ...(typeof value.archivedAt === "number" ? { archivedAt: value.archivedAt } : {}),
   };

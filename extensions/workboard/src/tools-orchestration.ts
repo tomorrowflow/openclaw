@@ -105,13 +105,22 @@ export function createWorkboardOrchestrationTools(params: {
     {
       name: "workboard_stats",
       label: "Workboard Stats",
-      description: "Summarize Workboard counts by status and assignee for one board or all boards.",
+      description:
+        "Summarize Workboard counts by status and assignee for one board or all boards. With trust, also return the node ticket trust KPIs: per task class, and a weekly autonomy and lead time trend.",
       parameters: strictObject({
         boardId: Type.Optional(Type.String({ description: "Optional board id filter." })),
+        trust: Type.Optional(
+          Type.Boolean({ description: "Include node ticket trust KPIs (for retros and digests)." }),
+        ),
       }),
       execute: async (_toolCallId, rawParams) => {
         const record = asNonArrayRecord(rawParams);
-        return jsonResult(await store.stats({ boardId: record.boardId }));
+        const stats = await store.stats({ boardId: record.boardId });
+        return jsonResult(
+          record.trust === true
+            ? { ...stats, trust: await store.trust({ boardId: record.boardId }) }
+            : stats,
+        );
       },
     },
     {
