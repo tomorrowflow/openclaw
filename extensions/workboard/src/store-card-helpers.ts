@@ -15,6 +15,7 @@ import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   BLOCKED_TOO_LONG_MS,
+  MAX_ATTEMPT_ERROR_CHARS,
   MAX_CARD_ATTEMPTS,
   MAX_CARD_COMMENTS,
   MAX_CARD_EVENTS,
@@ -684,7 +685,13 @@ export function closeRunningAttempts(
   }
   return attempts.map((attempt) =>
     attempt.status === "running"
-      ? { ...attempt, status, endedAt: now, ...(reason ? { error: reason } : {}) }
+      ? {
+          ...attempt,
+          status,
+          endedAt: now,
+          // Block reasons outgrow the attempt error bound; the full reason stays a card comment.
+          ...(reason ? { error: capText(reason, MAX_ATTEMPT_ERROR_CHARS) } : {}),
+        }
       : attempt,
   );
 }

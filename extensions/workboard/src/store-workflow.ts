@@ -35,6 +35,7 @@ import {
   workboardSlotBusyMessage,
   MAX_CARD_ARTIFACTS,
   MAX_CARD_COMMENTS,
+  MAX_BLOCK_REASON_CHARS,
   MAX_CARD_NOTIFICATIONS,
   secondsToDurationMs,
 } from "./store-constants.js";
@@ -373,7 +374,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
       assertCanMutateClaimedCard(existing, scope === null ? undefined : scope);
       const now = Date.now();
       const reason =
-        normalizeBoundedString(input.reason, undefined, 2000, "block reason") ??
+        normalizeBoundedString(input.reason, undefined, MAX_BLOCK_REASON_CHARS, "block reason") ??
         "Workboard card blocked.";
       return await this.updateCard(
         await this.requireCard(id),
