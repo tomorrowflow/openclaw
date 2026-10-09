@@ -273,12 +273,24 @@ export type WorkboardNodeHandoff =
       pullRequestUrl: string;
     };
 
+/**
+ * Review rework on a published ticket (D54): the worktree restarts at the
+ * draft PR branch tip. `round` counts rework rounds so far; `outsideCommits`
+ * counts commits others pushed to the branch between rounds.
+ */
+export type WorkboardNodeRework = {
+  round: number;
+  pullRequestUrl: string;
+  outsideCommits: number;
+};
+
 /** A ticket worktree the dispatcher created on a paired node. */
 export type WorkboardNodeWorktree = {
   path: string;
   branch: string;
   baseCommit: string;
   handoff?: WorkboardNodeHandoff;
+  rework?: WorkboardNodeRework;
 };
 
 /**

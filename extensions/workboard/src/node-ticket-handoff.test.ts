@@ -119,6 +119,7 @@ describe("node ticket handoff", () => {
     const stored = await store.get(card.id);
     expect(warn).not.toHaveBeenCalled();
     expect(stored?.status).toBe("review");
+    expect(stored?.metadata?.claim).toBeUndefined();
     expect(stored?.metadata?.automation?.target?.worktree?.handoff).toMatchObject({
       phase: "imported",
       headCommit: head,
@@ -282,6 +283,88 @@ describe("node ticket draft PR", () => {
 
     await handoffs.resume(warn);
     expect(github.requests.filter((request) => request.method === "POST")).toHaveLength(1);
+  });
+
+  it("reworks a published ticket on its PR branch, keeping a reviewer's commit", async () => {
+    const { store, card, repos, worktree, handoffs, warn, github, gateway } =
+      await acceptImportedTicket();
+    const branch = `factory/${card.id}`;
+    const pullRequestUrl = "https://github.com/acme/app/pull/7";
+    github.tokens.set("acme/app", "token-app");
+    await handoffs.resume(warn);
+    github.openPulls.push(pullRequestUrl);
+    const review = path.join(path.dirname(repos.origin), "review");
+    git(repos.origin, "worktree", "add", "-q", review, branch);
+    writeFileSync(path.join(review, "parser.py"), "reviewed\n");
+    git(review, "commit", "-q", "-am", "review fixup");
+    const reviewed = git(review, "rev-parse", "HEAD");
+    git(repos.origin, "worktree", "remove", review);
+
+    await store.move(card.id, "todo", undefined);
+    await store.addComment(card.id, { body: "Rename the flag to --strict." });
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets: gateway,
+      options: { cardId: card.id, now: Date.now() },
+    });
+
+    expect(result.startFailures).toEqual([]);
+    expect(git(worktree, "rev-parse", "HEAD")).toBe(reviewed);
+    expect(gateway.respond).toHaveBeenLastCalledWith(
+      "sessions.create",
+      expect.objectContaining({
+        message: expect.stringMatching(
+          /Review rework, round 1[\s\S]*pull\/7[\s\S]*Rename the flag to --strict\./,
+        ),
+      }),
+    );
+    expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.rework).toEqual({
+      round: 1,
+      pullRequestUrl,
+      outsideCommits: 1,
+    });
+
+    writeFileSync(path.join(worktree, "flags.py"), "strict\n");
+    git(worktree, "add", "-A");
+    git(worktree, "commit", "-q", "-m", "rename flag");
+    const reworked = git(worktree, "rev-parse", "HEAD");
+    const started = result.started[0];
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId: started?.runId, success: true, messages: doneReport },
+      context: { runId: started?.runId, sessionKey: started?.sessionKey },
+    });
+    await handoffs.resume(warn);
+    expect((await store.get(card.id))?.status).toBe("review");
+    expect(git(repos.hostRepo, "rev-parse", branch)).toBe(reworked);
+
+    await store.move(card.id, "done", undefined);
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(git(repos.origin, "rev-parse", branch)).toBe(reworked);
+    expect(github.requests.filter((request) => request.method === "POST")).toHaveLength(1);
+    expect((await store.get(card.id))?.metadata?.automation?.target?.worktree).toMatchObject({
+      handoff: { phase: "published", headCommit: reworked, pullRequestUrl },
+      rework: { round: 1, outsideCommits: 1 },
+    });
+  });
+
+  it("refuses to rework an imported ticket before its draft PR exists", async () => {
+    const { store, card, handoffs, warn, gateway } = await finishNodeTicket({});
+    await handoffs.resume(warn);
+    await store.move(card.id, "todo", undefined);
+
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets: gateway,
+      options: { cardId: card.id, now: Date.now() },
+    });
+
+    expect(result.startFailures[0]?.error).toContain("has no draft PR yet");
+    expect(gateway.respond).not.toHaveBeenLastCalledWith("sessions.create", expect.anything());
   });
 
   it("blocks with the config step when the repo has no token, and retries on the next accept", async () => {

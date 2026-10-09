@@ -64,7 +64,7 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     await expect(store.get(card.id)).resolves.toMatchObject({
       status: "running",
       runId: "run-node",
-      execution: { engine: "claude-cli", model: "claude-cli/claude-sonnet-5-5", runId: "run-node" },
+      execution: { engine: "anthropic", model: "anthropic/claude-sonnet-5-5", runId: "run-node" },
       metadata: {
         automation: {
           target: {

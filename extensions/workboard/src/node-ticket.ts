@@ -3,6 +3,7 @@ import path from "node:path";
 import type {
   WorkboardCard,
   WorkboardExecutionTarget,
+  WorkboardNodeRework,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
@@ -104,7 +105,12 @@ export async function runNodeCommand(
   return typeof payload.stdout === "string" ? payload.stdout.trim() : "";
 }
 
-/** Creates the card's worktree in the node's own clone; the branch name is what D40 bundles back. */
+/**
+ * Creates the card's worktree in the node's own clone; the branch name is what
+ * D40 bundles back. A published ticket reopened for review rework (D54)
+ * restarts at the draft PR branch tip on origin, so commits a reviewer pushed
+ * are kept, and keeps the original base so the next import carries them too.
+ */
 export async function createNodeTicketWorktree(params: {
   runtime: WorkboardNodeTicketRuntime;
   card: WorkboardCard;
@@ -113,23 +119,54 @@ export async function createNodeTicketWorktree(params: {
   const { runtime, card, target } = params;
   const branch = `factory/${card.id}`;
   const worktreePath = path.posix.join(target.worktreesRoot, `wb-${card.id}`);
+  const previous = target.worktree;
+  if (previous?.handoff?.phase === "imported") {
+    throw new Error(
+      "this ticket's branch was imported but has no draft PR yet; move the card to done to publish it, then reopen it for rework",
+    );
+  }
+  const published = previous?.handoff?.phase === "published" ? previous.handoff : undefined;
   const git = (...args: string[]) =>
     runNodeCommand(runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);
+  let rework: WorkboardNodeRework | undefined;
   try {
     // The node clone only moves here; without the fetch every ticket after the
     // first merged PR would start from a stale base.
     await git("fetch", "--quiet", "origin");
-    const baseRef = target.baseRef ?? "origin/HEAD";
-    const base = await git("rev-parse", "--verify", "--quiet", `${baseRef}^{commit}`).catch(() => {
-      throw new Error(
-        `node ${target.nodeId} cannot resolve base ${baseRef} in ${target.repoPath}; ` +
-          (target.baseRef
-            ? "fix the target baseRef"
-            : "run `git remote set-head origin --auto` there or set the target baseRef"),
-      );
-    });
+    let start: string;
+    if (published && previous) {
+      start = await git(
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        `refs/remotes/origin/${branch}^{commit}`,
+      ).catch(() => {
+        throw new Error(
+          `${branch} is no longer on origin, so its draft PR was merged or closed; create a new card for further changes`,
+        );
+      });
+      const outside = Number(await git("rev-list", "--count", `${published.headCommit}..${start}`));
+      if (!Number.isInteger(outside)) {
+        throw new Error(`node ${target.nodeId} reported an invalid commit count for ${branch}`);
+      }
+      rework = {
+        round: (previous.rework?.round ?? 0) + 1,
+        pullRequestUrl: published.pullRequestUrl,
+        outsideCommits: (previous.rework?.outsideCommits ?? 0) + outside,
+      };
+    } else {
+      const baseRef = target.baseRef ?? "origin/HEAD";
+      start = await git("rev-parse", "--verify", "--quiet", `${baseRef}^{commit}`).catch(() => {
+        throw new Error(
+          `node ${target.nodeId} cannot resolve base ${baseRef} in ${target.repoPath}; ` +
+            (target.baseRef
+              ? "fix the target baseRef"
+              : "run `git remote set-head origin --auto` there or set the target baseRef"),
+        );
+      });
+    }
     // A commit start point creates the branch without upstream tracking.
-    await git("worktree", "add", "-b", branch, worktreePath, base);
+    await git("worktree", "add", "-b", branch, worktreePath, start);
   } catch (error) {
     // A retried card finds the worktree its failed launch already created.
     const existingBranch = await runNodeCommand(runtime, target.nodeId, [
@@ -144,9 +181,18 @@ export async function createNodeTicketWorktree(params: {
       throw error;
     }
     // A re-run after earlier commits must bundle from the original base, not the branch tip.
-    if (target.worktree?.path === worktreePath) {
-      return { path: worktreePath, branch, baseCommit: target.worktree.baseCommit };
+    if (previous?.path === worktreePath) {
+      const kept = rework ?? previous.rework;
+      return {
+        path: worktreePath,
+        branch,
+        baseCommit: previous.baseCommit,
+        ...(kept ? { rework: kept } : {}),
+      };
     }
+  }
+  if (published && previous && rework) {
+    return { path: worktreePath, branch, baseCommit: previous.baseCommit, rework };
   }
   const baseCommit = await runNodeCommand(runtime, target.nodeId, [
     "git",
@@ -215,9 +261,17 @@ export function buildNodeTicketMessage(params: {
   worktree: WorkboardNodeWorktree;
   context: string;
 }): string {
+  const rework = params.worktree.rework;
   return [
     `Work on this ticket: ${params.card.title}`,
     "",
+    ...(rework
+      ? [
+          `## Review rework, round ${rework.round}`,
+          `This ticket already has a draft PR: ${rework.pullRequestUrl}. The worktree starts at the PR branch tip, including commits a reviewer pushed. Address the review feedback in the recent comments below with new commits on top; never rewrite or drop existing commits.`,
+          "",
+        ]
+      : []),
     "## Turn contract",
     `- Your working directory is the ticket worktree ${params.worktree.path} on branch ${params.worktree.branch}. Stay inside it.`,
     "- Commit your work on this branch. Never push, add remotes, or change other branches.",

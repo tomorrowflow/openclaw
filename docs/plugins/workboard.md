@@ -492,13 +492,23 @@ agent instead of the default agent.
    `allowReadPaths` must cover `<worktreesRoot>/*.bundle`. The host clone
    fetches `origin` when it lacks the base commit, creates `factory/<cardId>`
    (never moving an existing branch), the node worktree is removed, and the
-   card moves to `review`.
+   card moves to `review` with its claim released.
 4. **Accept:** moving the card from `review` to `done` pushes the imported
    commit from the host clone to its GitHub origin and opens a draft PR, or
    reuses an open one for the branch. The PR URL is recorded as proof. A
    failure, such as a missing [token](#configuration), blocks the card with
    the reason; move it to `done` again to retry. Archive a card instead of
    moving it to `done` to close it without a PR.
+5. **Rework:** to address review feedback, add a comment with the feedback,
+   move the published card back to `todo`, and start it. The node worktree
+   restarts at the PR branch tip on `origin`, so commits a reviewer pushed are
+   kept. The session gets the same session key, a "Review rework, round N"
+   brief, and the recent comments. The import moves the host branch forward
+   only from the commit it published. Accepting again pushes to the same draft
+   PR. The card records `rework.round` and `rework.outsideCommits` on its node
+   worktree. A card imported but not yet published can't be reworked; accept it
+   first. A branch that is gone from `origin` (merged or closed PR) needs a new
+   card.
 
 Nodes and ticket sessions never hold the GitHub token; only the Gateway's
 publish step reads it.
