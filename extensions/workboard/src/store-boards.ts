@@ -281,7 +281,7 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
     const refusal = this.checkTargetModel({ agentId, model });
     if (refusal) {
       throw new Error(
-        `Board ${board.id} default target model ${model} is not allowed for agent ${agentId ?? "default"} (${refusal}). Add it to that agent's modelPolicy.allow or choose an allowed model.`,
+        `Board ${board.id} default target model ${model} is not allowed for ${agentId ? `agent ${agentId}` : "the default agent"} (${refusal}). Add it to that agent's modelPolicy.allow or choose an allowed model.`,
       );
     }
   }
