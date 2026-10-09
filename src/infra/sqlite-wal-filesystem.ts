@@ -232,23 +232,34 @@ export function prepareSqliteDatabaseDirectory(databasePath: string): void {
   }
 }
 
+function isUnaliasedDarwinApfsPath([originalPath, canonicalPath]: readonly [
+  string,
+  string,
+]): boolean {
+  if (process.platform !== "darwin" || originalPath !== canonicalPath) {
+    return false;
+  }
+  try {
+    // This read-only probe identifies APFS by its native name, not a numeric type.
+    // Aliased paths still require mount metadata for both original and real locations.
+    return probeTreeClone(canonicalPath) === "apfs";
+  } catch {
+    // Failed native inspection cannot override the unknown-filesystem policy.
+    return false;
+  }
+}
+
 function combineMountEntryJournalPolicies(
   targetPaths: readonly [string, string],
 ): SqliteFilesystemJournalPolicy {
+  // Probe before listing mounts: macOS `mount` blocks in uninterruptible kernel
+  // wait while any network share stalls (e.g. Time Machine to SMB), and the
+  // timeout's SIGKILL cannot end it, so the listing would hang database open.
+  if (isUnaliasedDarwinApfsPath(targetPaths)) {
+    return "wal";
+  }
   const mountResult = readMountEntries();
   if (!mountResult.ok) {
-    const [originalPath, canonicalPath] = targetPaths;
-    if (process.platform === "darwin" && originalPath === canonicalPath) {
-      try {
-        // This read-only probe identifies APFS by its native name, not a numeric type.
-        // Aliased paths still require mount metadata for both original and real locations.
-        if (probeTreeClone(canonicalPath) === "apfs") {
-          return "wal";
-        }
-      } catch {
-        // Failed native inspection cannot override the unknown-filesystem policy.
-      }
-    }
     return "rollback";
   }
   const policies = new Set(
