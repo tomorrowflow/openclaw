@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
   WorkboardCard,
+  WorkboardComment,
   WorkboardExecutionTarget,
   WorkboardNodeRework,
   WorkboardNodeWorktree,
@@ -23,6 +24,8 @@ type NodeTicketTarget = WorkboardExecutionTarget & { kind: "node-claude" };
 const NODE_COMMAND_TIMEOUT_MS = 120_000;
 const HOST_GIT_TIMEOUT_MS = 120_000;
 const REPORT_FENCE = "workboard-report";
+// Comments are capped at 2000 chars on write, so this bounds the brief's feedback section.
+const REWORK_FEEDBACK_MAX_ENTRIES = 5;
 const REPORT_PATTERN = new RegExp("```" + REPORT_FENCE + "\\s*\\n([\\s\\S]*?)\\n```", "g");
 
 export function nodeTicketTarget(card: WorkboardCard): NodeTicketTarget | undefined {
@@ -42,6 +45,22 @@ export type NodeTicketReopen = {
   slotWaitNoted: boolean;
 };
 
+/**
+ * The review feedback for a published ticket's next rework round: card
+ * comments newer than the publish and Workboard's own notices since. The slot
+ * wait notice is written after a review comment and is not feedback either.
+ */
+export function nodeTicketReviewComments(card: WorkboardCard): WorkboardComment[] {
+  const handoff = nodeTicketTarget(card)?.worktree?.handoff;
+  if (handoff?.phase !== "published") {
+    return [];
+  }
+  const reviewFrom = handoff.reviewFrom ?? handoff.publishedAt;
+  return (card.metadata?.comments ?? []).filter(
+    (comment) => comment.createdAt > reviewFrom && comment.createdAt !== handoff.slotWaitNotedAt,
+  );
+}
+
 export function nodeTicketReopen(card: WorkboardCard, now: number): NodeTicketReopen | undefined {
   const worktree = nodeTicketTarget(card)?.worktree;
   const handoff = worktree?.handoff;
@@ -56,11 +75,10 @@ export function nodeTicketReopen(card: WorkboardCard, now: number): NodeTicketRe
   ) {
     return undefined;
   }
-  const reviewFrom = handoff.reviewFrom ?? handoff.publishedAt;
   return {
     worktreePath: worktree.path,
     round: (worktree.rework?.round ?? 0) + 1,
-    reviewed: (card.metadata?.comments ?? []).some((comment) => comment.createdAt > reviewFrom),
+    reviewed: nodeTicketReviewComments(card).length > 0,
     slotWaitNoted: handoff.slotWaitNotedAt !== undefined,
   };
 }
@@ -300,14 +318,27 @@ export function buildNodeTicketMessage(params: {
   context: string;
 }): string {
   const rework = params.worktree.rework;
+  // The card still carries its published worktree record when the round starts.
+  const feedback = rework
+    ? nodeTicketReviewComments(params.card).slice(-REWORK_FEEDBACK_MAX_ENTRIES)
+    : [];
   return [
     `Work on this ticket: ${params.card.title}`,
     "",
     ...(rework
       ? [
           `## Review rework, round ${rework.round}`,
-          `This ticket already has a draft PR: ${rework.pullRequestUrl}. The worktree starts at the PR branch tip, including commits a reviewer pushed. Address the review feedback in the recent comments below with new commits on top; never rewrite or drop existing commits.`,
+          `This ticket already has a draft PR: ${rework.pullRequestUrl}. The worktree starts at the PR branch tip, including commits a reviewer pushed. Address the review feedback ${feedback.length > 0 ? "below" : "in the recent comments below"} with new commits on top; never rewrite or drop existing commits.`,
           "",
+          ...(feedback.length > 0
+            ? [
+                "### Review feedback",
+                "The Recent comments list further down shortens long comments; this is the full text.",
+                "",
+                feedback.map((comment) => comment.body.trim()).join("\n\n---\n\n"),
+                "",
+              ]
+            : []),
         ]
       : []),
     "## Turn contract",
