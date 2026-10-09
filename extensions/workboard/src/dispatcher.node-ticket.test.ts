@@ -8,6 +8,8 @@ import {
   NODE_TARGET as TARGET,
 } from "./node-ticket.test-support.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
+import { createWorkboardTools } from "./tools.js";
+import { guardWorkboardToolsForWorkspaceAccess } from "./workspace-access.js";
 
 describe("dispatchAndStartWorkboardCards node-claude target", () => {
   it("creates the node worktree and starts a Claude session in it", async () => {
@@ -99,6 +101,42 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     const stored = await store.get(card.id);
     expect(stored?.status).toBe("ready");
     expect(stored?.metadata?.claim).toBeUndefined();
+  });
+
+  it("starts a project board ticket a sandboxed agent created, owned by the board's assignee", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({
+      id: "app",
+      orchestration: { defaultTarget: TARGET, defaultAssignee: "dev" },
+    });
+    const context = {
+      agentId: "dev",
+      workspaceDir: "/workspace",
+      fsPolicy: { workspaceOnly: true },
+    } as const;
+    const create = guardWorkboardToolsForWorkspaceAccess(
+      createWorkboardTools({ store, context }),
+      context,
+    ).find((tool) => tool.name === "workboard_create");
+    await create?.execute("call-create", {
+      title: "Fix the parser",
+      boardId: "app",
+      status: "ready",
+    });
+    const nodeTickets = createNodeGateway();
+
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets,
+      options: { now: Date.now(), maxStarts: 1 },
+    });
+
+    expect(result.startFailures).toEqual([]);
+    expect(nodeTickets.respond).toHaveBeenCalledWith(
+      "sessions.create",
+      expect.objectContaining({ agentId: "dev", execNode: "mac-factory" }),
+    );
   });
 
   it("blocks the card with the node's error when the worktree cannot be created", async () => {

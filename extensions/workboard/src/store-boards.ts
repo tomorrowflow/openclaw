@@ -11,7 +11,7 @@ import type {
   WorkboardStatus,
 } from "@openclaw/workboard-contract";
 import { WORKBOARD_STATUSES } from "@openclaw/workboard-contract";
-import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { redactClaimToken } from "./card-redaction.js";
 import type {
   PersistedWorkboardAttachment,
@@ -211,25 +211,34 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
     };
   }
 
-  /** New work on a project board inherits its node target; explicit choices and linked sessions keep theirs. */
-  protected async withBoardTarget(
+  /**
+   * New work on a board inherits its assignee and, on a project board, its
+   * node target; explicit choices and linked sessions keep theirs.
+   */
+  protected async withBoardDefaults(
     metadata: WorkboardMetadata,
     input: WorkboardLinkedCreateInput,
     sessionKey: string | undefined,
-  ): Promise<WorkboardMetadata> {
+  ): Promise<{ metadata: WorkboardMetadata; agentId?: string }> {
+    const requestedAgentId = normalizeOptionalString(input.agentId);
+    if (sessionKey) {
+      return { metadata, agentId: requestedAgentId };
+    }
     const automation = metadata.automation;
+    const orchestration = (await this.boardStore.lookup(automation?.boardId ?? "default"))?.board
+      .orchestration;
+    const agentId = requestedAgentId ?? orchestration?.defaultAssignee;
     const requestedAutomation = isRecord(input.metadata) ? input.metadata.automation : undefined;
     const workspace = automation?.workspace;
-    if (
-      sessionKey ||
+    const target =
       (isRecord(requestedAutomation) && Object.hasOwn(requestedAutomation, "target")) ||
       (workspace && workspace.kind !== "scratch")
-    ) {
-      return metadata;
-    }
-    const boardId = automation?.boardId ?? "default";
-    const target = (await this.boardStore.lookup(boardId))?.board.orchestration?.defaultTarget;
-    return target ? { ...metadata, automation: { ...automation, target } } : metadata;
+        ? undefined
+        : orchestration?.defaultTarget;
+    return {
+      metadata: target ? { ...metadata, automation: { ...automation, target } } : metadata,
+      ...(agentId ? { agentId } : {}),
+    };
   }
 
   async upsertBoard(input: WorkboardBoardInput): Promise<WorkboardBoardMetadata> {

@@ -649,6 +649,28 @@ describe("workboard tools", () => {
     expect(elsewhere.metadata?.automation?.target).toBeUndefined();
   });
 
+  it("assigns new cards to the board's default assignee unless the creator names one", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({ id: "app", orchestration: { defaultAssignee: "dev" } });
+    const create = expectDefined(
+      createWorkboardTools({ store, context: { agentId: "main" } }).find(
+        (tool) => tool.name === "workboard_create",
+      ),
+      "create tool",
+    );
+
+    const inherited = readPayload(
+      await create.execute("call-inherit", { title: "Fix the parser", boardId: "app" }),
+    );
+    const named = readPayload(
+      await create.execute("call-named", { title: "Review", boardId: "app", agentId: "main" }),
+    );
+
+    expect(inherited.card).toMatchObject({ agentId: "dev" });
+    expect(named.card).toMatchObject({ agentId: "main" });
+    expect((await store.create({ title: "Elsewhere" })).agentId).toBeUndefined();
+  });
+
   it("exposes board lifecycle, decomposition, runs, and notification tools", async () => {
     const store = createWorkboardSqliteTestStore();
     const tools = new Map(

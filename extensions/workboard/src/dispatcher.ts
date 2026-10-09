@@ -338,15 +338,14 @@ async function runWorkboardDispatch(
     // Preflight failures leave the card unclaimed; keep them outside the
     // claim and launch compensation boundary below.
     try {
-      ({ workspaceAccess, targetWorkspace, persistWorkspaceAccess } =
-        await resolveDispatchWorkspaceAccess({
-          card,
-          currentAccess: params.options?.workspaceAccess,
-          resolveAgentWorkspace: params.options?.resolveAgentWorkspace,
-        }));
       if (nodeTarget) {
         // A node ticket runs code on another machine; only unrestricted
         // dispatchers may start one, and its worktree lives on that node.
+        // Only operators set targets and the run never touches a Gateway
+        // workspace, so the access recorded for the card's creator (a
+        // sandboxed agent on a project board) does not apply.
+        workspaceAccess = params.options?.workspaceAccess ?? { unrestricted: true };
+        persistWorkspaceAccess = false;
         if (!workspaceAccess.unrestricted) {
           throw new Error("node-claude targets require unrestricted Workboard dispatch");
         }
@@ -356,35 +355,43 @@ async function runWorkboardDispatch(
         if (!params.nodeTickets) {
           throw new Error("node ticket runtime is unavailable for this dispatch");
         }
-      } else if (!requestedWorkspace || requestedWorkspace.kind === "scratch") {
-        if (!workspaceAccess.unrestricted) {
-          if (!targetWorkspace) {
-            startFailures.push({
-              cardId: card.id,
-              title: card.title,
-              error: "target agent workspace is unavailable for restricted dispatch",
-            });
-            continue;
-          }
-          implicitWorkspaceCwd = targetWorkspace;
-          await assertCanonicalWorkboardRootAccess(implicitWorkspaceCwd, workspaceAccess);
-          await assertRestrictedTarget(implicitWorkspaceCwd);
-        }
       } else {
-        const canonicalSourcePath = await assertWorkboardWorkspaceSourceAccess(
-          requestedWorkspace,
-          workspaceAccess,
-        );
-        if (
-          canonicalSourcePath &&
-          requestedWorkspace.kind === "dir" &&
-          workspaceAccess.unrestricted
-        ) {
-          await assertCanonicalWorkboardRootAccess(canonicalSourcePath, workspaceAccess);
-        }
-        if (canonicalSourcePath && !workspaceAccess.unrestricted) {
-          await assertCanonicalWorkboardRootAccess(canonicalSourcePath, workspaceAccess);
-          await assertRestrictedTarget(canonicalSourcePath);
+        ({ workspaceAccess, targetWorkspace, persistWorkspaceAccess } =
+          await resolveDispatchWorkspaceAccess({
+            card,
+            currentAccess: params.options?.workspaceAccess,
+            resolveAgentWorkspace: params.options?.resolveAgentWorkspace,
+          }));
+        if (!requestedWorkspace || requestedWorkspace.kind === "scratch") {
+          if (!workspaceAccess.unrestricted) {
+            if (!targetWorkspace) {
+              startFailures.push({
+                cardId: card.id,
+                title: card.title,
+                error: "target agent workspace is unavailable for restricted dispatch",
+              });
+              continue;
+            }
+            implicitWorkspaceCwd = targetWorkspace;
+            await assertCanonicalWorkboardRootAccess(implicitWorkspaceCwd, workspaceAccess);
+            await assertRestrictedTarget(implicitWorkspaceCwd);
+          }
+        } else {
+          const canonicalSourcePath = await assertWorkboardWorkspaceSourceAccess(
+            requestedWorkspace,
+            workspaceAccess,
+          );
+          if (
+            canonicalSourcePath &&
+            requestedWorkspace.kind === "dir" &&
+            workspaceAccess.unrestricted
+          ) {
+            await assertCanonicalWorkboardRootAccess(canonicalSourcePath, workspaceAccess);
+          }
+          if (canonicalSourcePath && !workspaceAccess.unrestricted) {
+            await assertCanonicalWorkboardRootAccess(canonicalSourcePath, workspaceAccess);
+            await assertRestrictedTarget(canonicalSourcePath);
+          }
         }
       }
     } catch (error) {
