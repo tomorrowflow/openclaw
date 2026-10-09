@@ -258,23 +258,34 @@ export type WorkboardWorkspaceAccess =
   | { unrestricted: true }
   | { unrestricted: false; roots: string[]; writable: boolean };
 
+/**
+ * Bringing a finished node ticket's branch back to the host. `pending` is set
+ * by the done report and resumed until the import moves the card to review.
+ */
+export type WorkboardNodeHandoff =
+  | { phase: "pending"; reportedAt: number }
+  | { phase: "imported"; headCommit: string; importedAt: number };
+
 /** A ticket worktree the dispatcher created on a paired node. */
 export type WorkboardNodeWorktree = {
   path: string;
   branch: string;
   baseCommit: string;
+  handoff?: WorkboardNodeHandoff;
 };
 
 /**
  * Runs the card as a fresh Claude Code session on a paired node instead of a
  * Gateway subagent. The node keeps its own clone; the dispatcher creates one
- * worktree per card under `worktreesRoot` and records it as `worktree`.
+ * worktree per card under `worktreesRoot` and records it as `worktree`. The
+ * finished branch is bundled back into the host clone at `hostRepoPath`.
  */
 export type WorkboardExecutionTarget = {
   kind: "node-claude";
   nodeId: string;
   repoPath: string;
   worktreesRoot: string;
+  hostRepoPath: string;
   baseRef?: string;
   model?: string;
   worktree?: WorkboardNodeWorktree;

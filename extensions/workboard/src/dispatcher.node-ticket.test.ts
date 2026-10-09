@@ -63,6 +63,7 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
           execNode: "mac-factory",
           cwd: worktreePath,
           model: TARGET.model,
+          label: `Workboard ${card.id.slice(0, 8)}: Fix the parser`,
           message: expect.stringContaining("```workboard-report"),
         }),
       ],
