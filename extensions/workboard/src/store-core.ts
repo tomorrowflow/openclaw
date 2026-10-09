@@ -342,7 +342,6 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     );
     const normalizedPosition = resolveNonNegativeIntegerOption(input.position, Number.NaN);
     const notes = normalizeNotes(input.notes);
-    const agentId = normalizeOptionalString(input.agentId);
     const sessionKey = normalizeOptionalString(input.sessionKey);
     const runId = normalizeOptionalString(input.runId);
     const sourceUrl = normalizeOptionalString(input.sourceUrl);
@@ -363,7 +362,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
           ? now
           : undefined
         : normalizeTimestamp(input.completedAt, 0) || undefined;
-    const metadata = await this.withBoardTarget(
+    const { metadata, agentId } = await this.withBoardDefaults(
       normalizeMetadata(
         input.metadata,
         {

@@ -474,7 +474,11 @@ A project board can carry the target once as
 that board copy it, including cards an agent creates with `workboard_create`
 or `workboard_decompose`; agent board tools cannot set or change it. A card
 keeps its own target, opts out with `target: null`, and never inherits when it
-has a non-scratch workspace or a linked session.
+has a non-scratch workspace or a linked session. Because only operators set
+targets, a sandboxed agent's cards on that board still start: node dispatch
+checks the dispatcher's access, not the access of the card's creator. Set
+`orchestration.defaultAssignee` too, so those cards run under the project's
+agent instead of the default agent.
 
 1. **Start:** the dispatcher fetches `origin` in the node clone, creates branch
    `factory/<cardId>` at `baseRef` (default `origin/HEAD`) in
@@ -537,9 +541,11 @@ as unavailable. They surface as command errors, and so does any Gateway
 failure when an explicit `--url`/`--token` target was given.
 
 Board metadata can set `autoDecompose`, `autoDecomposePerDispatch`,
-`defaultAssignee`, and `orchestratorProfile`. OpenClaw records this intent and
-exposes it in worker context. Actual specification/decomposition still runs
-through the normal Workboard tools. The operator-only `defaultTarget` is
+`defaultAssignee`, and `orchestratorProfile`. New cards created without an
+`agentId` (and without a linked session) are assigned to `defaultAssignee`.
+OpenClaw records the other settings as intent and exposes them in worker
+context. Actual specification/decomposition still runs through the normal
+Workboard tools. The operator-only `defaultTarget` is
 described under [Node tickets](#node-tickets).
 
 ## CLI and slash command
