@@ -14,7 +14,7 @@ export type WorkboardNodeTicketRuntime = Pick<PluginRuntime["gateway"], "request
 
 type NodeTicketTarget = WorkboardExecutionTarget & { kind: "node-claude" };
 
-const NODE_GIT_TIMEOUT_MS = 120_000;
+const NODE_COMMAND_TIMEOUT_MS = 120_000;
 const REPORT_FENCE = "workboard-report";
 const REPORT_PATTERN = new RegExp("```" + REPORT_FENCE + "\\s*\\n([\\s\\S]*?)\\n```", "g");
 
@@ -23,7 +23,7 @@ export function nodeTicketTarget(card: WorkboardCard): NodeTicketTarget | undefi
   return target?.kind === "node-claude" ? target : undefined;
 }
 
-function nodeRunPayload(result: unknown): Record<string, unknown> {
+export function nodeInvokePayload(result: unknown): Record<string, unknown> {
   const envelope = isRecord(result) ? result : {};
   const payload =
     envelope.payload !== undefined
@@ -32,24 +32,25 @@ function nodeRunPayload(result: unknown): Record<string, unknown> {
         ? (JSON.parse(envelope.payloadJSON) as unknown)
         : undefined;
   if (!isRecord(payload)) {
-    throw new Error("node returned an invalid system.run result");
+    throw new Error("node returned an invalid node.invoke result");
   }
   return payload;
 }
 
-async function runNodeGit(
+/** Runs one argv on the node through `system.run` and returns its trimmed stdout. */
+export async function runNodeCommand(
   runtime: WorkboardNodeTicketRuntime,
   nodeId: string,
   argv: string[],
 ): Promise<string> {
-  const payload = nodeRunPayload(
+  const payload = nodeInvokePayload(
     await runtime.request(
       "node.invoke",
       {
         nodeId,
         command: "system.run",
-        timeoutMs: NODE_GIT_TIMEOUT_MS,
-        params: { command: argv, timeoutMs: NODE_GIT_TIMEOUT_MS },
+        timeoutMs: NODE_COMMAND_TIMEOUT_MS,
+        params: { command: argv, timeoutMs: NODE_COMMAND_TIMEOUT_MS },
         idempotencyKey: randomUUID(),
       },
       { scopes: ["operator.admin"] },
@@ -76,7 +77,7 @@ export async function createNodeTicketWorktree(params: {
   const branch = `factory/${card.id}`;
   const worktreePath = path.posix.join(target.worktreesRoot, `wb-${card.id}`);
   try {
-    await runNodeGit(runtime, target.nodeId, [
+    await runNodeCommand(runtime, target.nodeId, [
       "git",
       "-C",
       target.repoPath,
@@ -89,7 +90,7 @@ export async function createNodeTicketWorktree(params: {
     ]);
   } catch (error) {
     // A retried card finds the worktree its failed launch already created.
-    const existingBranch = await runNodeGit(runtime, target.nodeId, [
+    const existingBranch = await runNodeCommand(runtime, target.nodeId, [
       "git",
       "-C",
       worktreePath,
@@ -100,8 +101,12 @@ export async function createNodeTicketWorktree(params: {
     if (existingBranch !== branch) {
       throw error;
     }
+    // A re-run after earlier commits must bundle from the original base, not the branch tip.
+    if (target.worktree?.path === worktreePath) {
+      return { path: worktreePath, branch, baseCommit: target.worktree.baseCommit };
+    }
   }
-  const baseCommit = await runNodeGit(runtime, target.nodeId, [
+  const baseCommit = await runNodeCommand(runtime, target.nodeId, [
     "git",
     "-C",
     worktreePath,
@@ -136,7 +141,8 @@ export async function startNodeTicketSession(params: {
       execNode: target.nodeId,
       cwd: params.worktree.path,
       ...(target.model ? { model: target.model } : {}),
-      label: `Workboard: ${card.title}`.slice(0, 120),
+      // Session labels are unique per agent; the card id keeps same-titled cards apart.
+      label: `Workboard ${card.id.slice(0, 8)}: ${card.title}`.slice(0, 120),
       message: params.message,
     },
     { scopes: ["operator.admin"] },
@@ -282,8 +288,9 @@ function blockReason(report: NodeTicketStopReport): string {
 
 /**
  * Maps a finished node ticket turn onto its card. A done report records its
- * proof and leaves the lifecycle move to review; every other ending blocks the
- * card so `dev` sees the reason. Proof that did not pass also blocks.
+ * proof and marks the worktree's handoff pending, so only the bundle import
+ * moves the card to review; every other ending blocks the card so `dev` sees
+ * the reason. Proof that did not pass also blocks.
  */
 export async function applyNodeTicketReport(params: {
   store: WorkboardStore;
@@ -324,4 +331,18 @@ export async function applyNodeTicketReport(params: {
   if (report.summary) {
     await store.addComment(card.id, { body: report.summary }, scope);
   }
+  const worktree = nodeTicketTarget(card)?.worktree;
+  if (!worktree) {
+    await store.block(
+      card.id,
+      { reason: "Reported done, but the card has no recorded node worktree to import." },
+      scope,
+    );
+    return;
+  }
+  await store.setNodeHandoff(
+    card.id,
+    { worktreePath: worktree.path, handoff: { phase: "pending", reportedAt: Date.now() } },
+    scope,
+  );
 }

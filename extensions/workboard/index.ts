@@ -9,6 +9,7 @@ import {
   syncWorkboardAgentEnded,
   syncWorkboardSubagentEnded,
 } from "./src/lifecycle-sync.js";
+import { createNodeTicketHandoffs } from "./src/node-ticket-handoff.js";
 import { createWorkboardSessionsBoardService } from "./src/sessions-board.js";
 import { resolveWorkboardSqliteWorkerModuleUrl } from "./src/sqlite-store-paths.js";
 import { registerWorkboardStoreLifecycle } from "./src/store-lifecycle.js";
@@ -44,9 +45,11 @@ export default definePluginEntry({
       gateway: api.runtime.gateway,
     });
     resourceServices.push(sessionsBoard);
+    const nodeHandoffs = createNodeTicketHandoffs({ store, runtime: api.runtime.gateway });
     const lifecycleSync = createWorkboardLifecycleService({
       store,
       worktrees: api.runtime.worktrees,
+      nodeHandoffs,
       readSessions: async (options) =>
         await readWorkboardLifecycleSessions(api.runtime.gateway, options),
     });
@@ -104,6 +107,9 @@ export default definePluginEntry({
           context,
           onMatched: automationNudge.nudge,
         });
+        // Bundling and fetching outlast the agent_end hook budget; the sweep
+        // resumes the handoff if the scheduled run dies with the Gateway.
+        lifecycleSync.scheduleNodeHandoffs();
       }),
     );
     api.registerCli(

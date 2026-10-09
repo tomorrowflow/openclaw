@@ -7,6 +7,7 @@ import {
   isWorkboardWorktreeCleanupCandidate,
   type WorkboardWorktreeCleanupRuntime,
 } from "./dispatcher-workspace.js";
+import type { WorkboardNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import { applyNodeTicketReport, nodeTicketTarget } from "./node-ticket.js";
 import {
   workboardCardMatchesLifecycleLink,
@@ -75,6 +76,8 @@ type WorkboardLifecycleMatchHandler = (input: {
 
 type WorkboardLifecycleService = OpenClawPluginService & {
   stop: () => void;
+  /** Runs pending node handoffs soon, outside the caller's request authority. */
+  scheduleNodeHandoffs: () => void;
   onGatewayStart: (abortSignal?: AbortSignal) => void;
   onGatewayStop: () => void;
 };
@@ -199,8 +202,9 @@ export async function syncWorkboardAgentEnded(params: {
     runId: params.event.runId ?? params.context.runId,
   };
   // Node tickets report through their final message, not Workboard tools.
-  // Map the report first: a block holds, and a done report lets the lifecycle
-  // move below take the card to review.
+  // Map the report first: a block holds, and a done report leaves the card
+  // running with a pending handoff that only the bundle import moves to review.
+  let nodeTicket = false;
   for (const card of await params.store.list()) {
     if (
       card.status === "running" &&
@@ -208,6 +212,7 @@ export async function syncWorkboardAgentEnded(params: {
       nodeTicketTarget(card) &&
       workboardCardMatchesLifecycleLink(card, source)
     ) {
+      nodeTicket = true;
       await applyNodeTicketReport({
         store: params.store,
         card,
@@ -221,7 +226,7 @@ export async function syncWorkboardAgentEnded(params: {
       store: params.store,
       source,
       observation: {
-        state: params.event.success ? "succeeded" : "failed",
+        state: !params.event.success ? "failed" : nodeTicket ? "idle" : "succeeded",
         sourceUpdatedAt: now,
       },
       now,
@@ -341,8 +346,9 @@ async function syncWorkboardLifecycleSessions(params: {
       continue;
     }
     const sessionObservation = lifecycleFromSession(session, now);
-    // Only the agent_end report may move a node ticket to review; a sweep
-    // that missed it leaves the card running so stale detection surfaces it.
+    // Only the bundle import may move a node ticket to review; a sweep that
+    // missed the agent_end report leaves the card running so stale detection
+    // surfaces it.
     const observation: WorkboardLifecycleObservation =
       sessionObservation.state === "succeeded" && nodeTicketTarget(card)
         ? { state: "idle", sourceUpdatedAt: sessionObservation.sourceUpdatedAt }
@@ -434,6 +440,7 @@ export async function readWorkboardLifecycleSessions(
 export function createWorkboardLifecycleService(params: {
   store: WorkboardStore;
   worktrees?: WorkboardWorktreeCleanupRuntime;
+  nodeHandoffs?: WorkboardNodeTicketHandoffs;
   readSessions: (
     options: WorkboardLifecycleSessionReadOptions,
   ) => Promise<WorkboardLifecycleSessionSnapshot>;
@@ -444,6 +451,7 @@ export function createWorkboardLifecycleService(params: {
   let begin: (() => void) | undefined;
   let removeDrainListener: (() => void) | undefined;
   let cleanupCursor = 0;
+  let scheduleNodeHandoffs: (() => void) | undefined;
   const cleanupWorktrees = async (
     cards: readonly WorkboardCard[],
     warn: (message: string) => void,
@@ -469,6 +477,7 @@ export function createWorkboardLifecycleService(params: {
     }
   };
   const stop = () => {
+    scheduleNodeHandoffs = undefined;
     removeDrainListener?.();
     removeDrainListener = undefined;
     generation += 1;
@@ -502,6 +511,23 @@ export function createWorkboardLifecycleService(params: {
     start(ctx) {
       const owner = ++generation;
       let begun = false;
+      const { nodeHandoffs } = params;
+      const scheduler = ctx.scheduler;
+      // Scheduled callbacks run detached from the hook that asked for them, so
+      // node requests carry the service's authority, not an ended requester's.
+      scheduleNodeHandoffs =
+        nodeHandoffs && scheduler
+          ? () => {
+              scheduler.schedule({
+                id: "node-handoffs",
+                delayMs: 0,
+                run: () =>
+                  params.store.runOperation(() =>
+                    nodeHandoffs.resume((message) => ctx.logger.warn(message)),
+                  ),
+              });
+            }
+          : undefined;
       const reconcile = async () => {
         try {
           await params.store.runOperation(async () => {
@@ -538,6 +564,9 @@ export function createWorkboardLifecycleService(params: {
             if (generation === owner) {
               await cleanupWorktrees(cards, (message) => ctx.logger.warn(message));
             }
+            if (generation === owner) {
+              await params.nodeHandoffs?.resume((message) => ctx.logger.warn(message));
+            }
           });
         } catch (error) {
           if (generation === owner) {
@@ -562,6 +591,7 @@ export function createWorkboardLifecycleService(params: {
       beginWhenGatewayReady();
     },
     stop,
+    scheduleNodeHandoffs: () => scheduleNodeHandoffs?.(),
     onGatewayStart(abortSignal) {
       workboardLifecycleGatewayState.ready = true;
       workboardLifecycleGatewayState.abortSignal = abortSignal;

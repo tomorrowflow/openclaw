@@ -8,6 +8,7 @@ import type {
   WorkboardExecutionStatus,
   WorkboardLaunchState,
   WorkboardMetadata,
+  WorkboardNodeHandoff,
   WorkboardNodeWorktree,
   WorkboardStaleState,
   WorkboardStatus,
@@ -250,6 +251,37 @@ export class WorkboardStore extends WorkboardNotificationStore {
       }
       return { card: result.card, launch };
     }, input.assertOwnerCurrent);
+  }
+
+  /** Records the handoff phase on the card's node worktree; a replaced worktree is left alone. */
+  async setNodeHandoff(
+    id: string,
+    input: { worktreePath: string; handoff: WorkboardNodeHandoff },
+    scope?: WorkboardMutationScope,
+  ): Promise<WorkboardCard | undefined> {
+    return await this.enqueueMutation(async () => {
+      const result = await this.updateLatestCard(
+        id,
+        (card) => {
+          assertCanMutateClaimedCard(card, scope);
+          const target = card.metadata?.automation?.target;
+          if (!target?.worktree || target.worktree.path !== input.worktreePath) {
+            return undefined;
+          }
+          return {
+            metadata: {
+              ...card.metadata,
+              automation: {
+                ...card.metadata?.automation,
+                target: { ...target, worktree: { ...target.worktree, handoff: input.handoff } },
+              },
+            },
+          };
+        },
+        { allowAutomationLaunch: true },
+      );
+      return result.updated ? result.card : undefined;
+    });
   }
 
   async acceptExecutionLaunch(

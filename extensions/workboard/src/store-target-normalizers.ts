@@ -1,7 +1,35 @@
-import type { WorkboardExecutionTarget, WorkboardNodeWorktree } from "@openclaw/workboard-contract";
+import type {
+  WorkboardExecutionTarget,
+  WorkboardNodeHandoff,
+  WorkboardNodeWorktree,
+} from "@openclaw/workboard-contract";
+import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { normalizeBoundedString } from "./store-value-normalizers.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
+
+function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  if (value.phase === "pending") {
+    const reportedAt = resolveOptionalIntegerOption(value.reportedAt, { min: 0 });
+    return reportedAt === undefined ? undefined : { phase: "pending", reportedAt };
+  }
+  if (value.phase === "imported") {
+    const importedAt = resolveOptionalIntegerOption(value.importedAt, { min: 0 });
+    const headCommit = normalizeBoundedString(
+      value.headCommit,
+      undefined,
+      64,
+      "node handoff head commit",
+    );
+    return importedAt === undefined || !headCommit
+      ? undefined
+      : { phase: "imported", headCommit, importedAt };
+  }
+  return undefined;
+}
 
 function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefined {
   if (!isRecord(value)) {
@@ -15,8 +43,9 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
     64,
     "node worktree base commit",
   );
+  const handoff = normalizeNodeHandoff(value.handoff);
   return worktreePath && branch && baseCommit
-    ? { path: worktreePath, branch, baseCommit }
+    ? { path: worktreePath, branch, baseCommit, ...(handoff ? { handoff } : {}) }
     : undefined;
 }
 
@@ -43,10 +72,20 @@ export function normalizeExecutionTarget(
     2000,
     "target worktrees root",
   );
-  if (!nodeId || !repoPath || !worktreesRoot) {
-    throw new Error("node-claude target needs nodeId, repoPath, and worktreesRoot.");
+  const hostRepoPath = normalizeBoundedString(
+    value.hostRepoPath,
+    undefined,
+    2000,
+    "target host repo path",
+  );
+  if (!nodeId || !repoPath || !worktreesRoot || !hostRepoPath) {
+    throw new Error("node-claude target needs nodeId, repoPath, worktreesRoot, and hostRepoPath.");
   }
-  if (!isAbsoluteWorkspacePath(repoPath) || !isAbsoluteWorkspacePath(worktreesRoot)) {
+  if (
+    !isAbsoluteWorkspacePath(repoPath) ||
+    !isAbsoluteWorkspacePath(worktreesRoot) ||
+    !isAbsoluteWorkspacePath(hostRepoPath)
+  ) {
     throw new Error("node-claude target paths must be absolute.");
   }
   const baseRef = normalizeBoundedString(value.baseRef, undefined, 160, "target base ref");
@@ -65,6 +104,7 @@ export function normalizeExecutionTarget(
     nodeId,
     repoPath,
     worktreesRoot,
+    hostRepoPath,
     ...(baseRef ? { baseRef } : {}),
     ...(model ? { model } : {}),
     ...(worktree ? { worktree } : {}),

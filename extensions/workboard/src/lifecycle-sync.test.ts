@@ -797,14 +797,14 @@ describe("Workboard lifecycle service", () => {
 
   it.each([
     {
-      name: "a done report with passing proof moves the card to review",
+      name: "a done report with passing proof waits running for the bundle import",
       success: true,
       messages: report({
         outcome: "done",
         summary: "Parser accepts empty input",
         proof: [{ command: "pytest", status: "passed" }],
       }),
-      status: "review",
+      status: "running",
       comment: "Parser accepts empty input",
     },
     {
