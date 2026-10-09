@@ -512,6 +512,14 @@ describe("node ticket draft PR", () => {
     const again = await store.get(card.id);
     expect(again?.status).toBe("backlog");
     expect(again?.metadata?.comments?.filter((comment) => comment.body === note)).toHaveLength(2);
+    // A scheduled dispatch pass never starts a reopen that lacks review feedback either.
+    await store.move(card.id, "ready", undefined);
+    const scheduled = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets: gateway,
+    });
+    expect(scheduled.started).toEqual([]);
     expect(
       gateway.respond.mock.calls.filter(([method]) => method === "sessions.create"),
     ).toHaveLength(sessionsBefore.length);

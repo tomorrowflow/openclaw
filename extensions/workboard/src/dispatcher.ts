@@ -22,6 +22,7 @@ import {
 import {
   buildNodeTicketMessage,
   createNodeTicketWorktree,
+  nodeTicketReopen,
   nodeTicketTarget,
   startNodeTicketSession,
   type WorkboardNodeTicketRuntime,
@@ -224,7 +225,8 @@ function selectStartableCards(
       ? "Card is archived; restore it before starting."
       : cardHasActiveClaim(card, now)
         ? `Card is already claimed by ${card.metadata?.claim?.ownerId ?? "another worker"}.`
-        : mode === "scheduled" && card.status !== "ready"
+        : mode === "scheduled" &&
+            (card.status !== "ready" || nodeTicketReopen(card, now)?.reviewed === false)
           ? ""
           : mode === "exact" &&
               card.status !== "backlog" &&
