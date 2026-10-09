@@ -34,6 +34,7 @@ import {
   type WorkboardClaimSlot,
   workboardSlotBusyMessage,
   MAX_CARD_ARTIFACTS,
+  MAX_CARD_COMMENTS,
   MAX_CARD_NOTIFICATIONS,
   secondsToDurationMs,
 } from "./store-constants.js";
@@ -377,6 +378,70 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
       return await this.updateCard(
         await this.requireCard(id),
         this.buildBlockedCardPatch(existing, reason, now, options),
+      );
+    });
+  }
+
+  /**
+   * Adds a Workboard notice to a published node ticket (D56) in the same write
+   * that records it on the handoff, so the notice is never mistaken for the
+   * review comment that starts the next rework round. A `reviewFrom` notice
+   * moves that cutoff past itself; a slot wait is noted once per round.
+   */
+  async addNodeTicketNotice(
+    id: string,
+    input: {
+      worktreePath: string;
+      body: string;
+      kind: "reviewFrom" | "slotWait";
+      applies: (card: WorkboardCard) => boolean;
+      status?: "backlog";
+    },
+    scope?: WorkboardMutationScope,
+  ): Promise<void> {
+    await this.enqueueMutation(async () => {
+      await this.updateLatestCard(
+        id,
+        (card) => {
+          assertCanMutateClaimedCard(card, scope);
+          const target = card.metadata?.automation?.target;
+          const handoff = target?.worktree?.handoff;
+          if (
+            !target?.worktree ||
+            target.worktree.path !== input.worktreePath ||
+            handoff?.phase !== "published" ||
+            !input.applies(card)
+          ) {
+            return undefined;
+          }
+          const now = Date.now();
+          return {
+            ...(input.status ? { status: input.status } : {}),
+            metadata: {
+              ...card.metadata,
+              comments: [
+                ...(card.metadata?.comments ?? []),
+                { id: randomUUID(), body: input.body, createdAt: now },
+              ].slice(-MAX_CARD_COMMENTS),
+              automation: {
+                ...card.metadata?.automation,
+                target: {
+                  ...target,
+                  worktree: {
+                    ...target.worktree,
+                    handoff: {
+                      ...handoff,
+                      ...(input.kind === "reviewFrom"
+                        ? { reviewFrom: now }
+                        : { slotWaitNotedAt: now }),
+                    },
+                  },
+                },
+              },
+            },
+          };
+        },
+        { allowAutomationLaunch: true },
       );
     });
   }

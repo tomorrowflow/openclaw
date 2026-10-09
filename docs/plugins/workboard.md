@@ -506,7 +506,15 @@ cards then block at start with the core `model not allowed` reason.
    the reason; move it to `done` again to retry. Archive a card instead of
    moving it to `done` to close it without a PR.
 5. **Rework:** to address review feedback, add a comment with the feedback,
-   move the published card back to `todo`, and start it. The node worktree
+   then move the published card back to `todo`. The move starts the rework
+   round on its own; `workboard.cards.start` is not needed. Add the comment
+   first: a published card moved to `todo` with no comment newer than its
+   publish goes back to `backlog` with a comment naming the next step, and
+   Workboard's own comments never count as review feedback. When every
+   [node ticket slot](#configuration) is busy, the card stays in `todo` with
+   one comment saying it waits, and starts when a running node ticket reaches
+   review. If the start is refused for another reason, the card is blocked
+   with that reason; fix it and move the card to `todo` again. The node worktree
    restarts at the PR branch tip on `origin`, so commits a reviewer pushed are
    kept. The session gets the same session key, a "Review rework, round N"
    brief, and the recent comments. The import moves the host branch forward

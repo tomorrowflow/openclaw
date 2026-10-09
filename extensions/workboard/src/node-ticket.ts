@@ -6,6 +6,7 @@ import type {
   WorkboardNodeRework,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
+import { isFutureDateTimestampMs } from "openclaw/plugin-sdk/number-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import {
   runPluginCommandWithTimeout,
@@ -27,6 +28,41 @@ const REPORT_PATTERN = new RegExp("```" + REPORT_FENCE + "\\s*\\n([\\s\\S]*?)\\n
 export function nodeTicketTarget(card: WorkboardCard): NodeTicketTarget | undefined {
   const target = card.metadata?.automation?.target;
   return target?.kind === "node-claude" ? target : undefined;
+}
+
+/**
+ * A published ticket moved back to todo (D56). It starts its next rework
+ * round once a card comment newer than the publish (and Workboard's own
+ * notices since) says what should change.
+ */
+export type NodeTicketReopen = {
+  worktreePath: string;
+  round: number;
+  reviewed: boolean;
+  slotWaitNoted: boolean;
+};
+
+export function nodeTicketReopen(card: WorkboardCard, now: number): NodeTicketReopen | undefined {
+  const worktree = nodeTicketTarget(card)?.worktree;
+  const handoff = worktree?.handoff;
+  const claim = card.metadata?.claim;
+  if (
+    !worktree ||
+    handoff?.phase !== "published" ||
+    // Starting a card with finished parents promotes it to ready first.
+    (card.status !== "todo" && card.status !== "ready") ||
+    card.metadata?.archivedAt ||
+    (claim && isFutureDateTimestampMs(claim.expiresAt, { nowMs: now }))
+  ) {
+    return undefined;
+  }
+  const reviewFrom = handoff.reviewFrom ?? handoff.publishedAt;
+  return {
+    worktreePath: worktree.path,
+    round: (worktree.rework?.round ?? 0) + 1,
+    reviewed: (card.metadata?.comments ?? []).some((comment) => comment.createdAt > reviewFrom),
+    slotWaitNoted: handoff.slotWaitNotedAt !== undefined,
+  };
 }
 
 export function nodeInvokePayload(result: unknown): Record<string, unknown> {

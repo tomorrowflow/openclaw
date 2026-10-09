@@ -13,12 +13,14 @@ import {
   HandoffSupersededError,
   hostGit,
   nodeInvokePayload,
+  nodeTicketReopen,
   nodeTicketTarget,
   requireHostGit,
   runNodeCommand,
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
+import { workboardCardConsumesNodeTicketSlot } from "./store-constants.js";
 import type { WorkboardStore } from "./store.js";
 
 // file.fetch's hard cap; a larger bundle fails on the node with FILE_TOO_LARGE.
@@ -299,16 +301,84 @@ async function runNodeTicketHandoff(params: {
   }
 }
 
+/** Starts one card through the dispatcher's exact start path. */
+export type WorkboardNodeTicketStart = (
+  cardId: string,
+) => Promise<{ startFailures: ReadonlyArray<{ error: string }> }>;
+
 /**
- * Owns moving finished node tickets from a pending handoff to review, and
- * accepted ones from done to a draft PR. The agent_end report and card
- * changes start it right away and the lifecycle sweep resumes it after a
- * restart; each card runs at most once at a time.
+ * D56: a published ticket moved back to todo starts its rework round once it
+ * carries a review comment, waits while the node-ticket pool is full, and
+ * goes back to backlog with the next step when no review comment says what
+ * should change.
+ */
+async function reopenNodeTicket(params: {
+  store: WorkboardStore;
+  start: WorkboardNodeTicketStart;
+  card: WorkboardCard;
+  now: () => number;
+}): Promise<void> {
+  const { store, card } = params;
+  const reopen = nodeTicketReopen(card, params.now());
+  if (!reopen) {
+    return;
+  }
+  const { worktreePath, round } = reopen;
+  if (!reopen.reviewed) {
+    await store.addNodeTicketNotice(card.id, {
+      worktreePath,
+      kind: "reviewFrom",
+      status: "backlog",
+      body: `Reopened without a review comment; add what should change and move it to todo again to start rework round ${round}.`,
+      applies: (current) => nodeTicketReopen(current, params.now())?.reviewed === false,
+    });
+    return;
+  }
+  const { startFailures } = await params.start(card.id);
+  const failure = startFailures[0];
+  // A start that claimed the card already blocked it on failure; only a
+  // refusal before the claim leaves the reopened card in todo.
+  const current = failure ? await store.get(card.id) : undefined;
+  const still = current ? nodeTicketReopen(current, params.now()) : undefined;
+  if (!failure || !current || !still?.reviewed) {
+    return;
+  }
+  const at = params.now();
+  const busy =
+    (await store.list()).filter((entry) => workboardCardConsumesNodeTicketSlot(entry, at)).length >=
+    store.nodeTicketConcurrency;
+  if (busy) {
+    if (!still.slotWaitNoted) {
+      await store.addNodeTicketNotice(card.id, {
+        worktreePath,
+        kind: "slotWait",
+        body: `Rework round ${round} waits for a node-ticket slot; it starts when a running node ticket reaches review.`,
+        applies: (latest) => nodeTicketReopen(latest, params.now())?.slotWaitNoted === false,
+      });
+    }
+    return;
+  }
+  await store.block(
+    card.id,
+    {
+      reason: `Rework round ${round} could not start: ${failure.error}\nFix the cause, then move the card to todo again.`,
+    },
+    null,
+  );
+}
+
+/**
+ * Owns moving finished node tickets from a pending handoff to review,
+ * accepted ones from done to a draft PR, and reopened published ones into
+ * their next rework round. The agent_end report and card changes start it
+ * right away and the lifecycle sweep resumes it after a restart; each card
+ * runs at most once at a time.
  */
 export function createNodeTicketHandoffs(params: {
   store: WorkboardStore;
   runtime: WorkboardNodeTicketRuntime;
   github: WorkboardGitHubAccess;
+  start: WorkboardNodeTicketStart;
   now?: () => number;
 }) {
   const inFlight = new Set<string>();
@@ -318,7 +388,8 @@ export function createNodeTicketHandoffs(params: {
       for (const card of await params.store.list()) {
         const item = handoffCard(card);
         const publish = item ? undefined : publishCandidate(card);
-        if ((!item && !publish) || inFlight.has(card.id)) {
+        const reopen = item || publish ? undefined : nodeTicketReopen(card, now());
+        if ((!item && !publish && !reopen) || inFlight.has(card.id)) {
           continue;
         }
         inFlight.add(card.id);
@@ -332,6 +403,8 @@ export function createNodeTicketHandoffs(params: {
               item: publish,
               now,
             });
+          } else {
+            await reopenNodeTicket({ store: params.store, start: params.start, card, now });
           }
         } catch (error) {
           warn(`workboard node handoff failed for card ${card.id}: ${formatErrorMessage(error)}`);
