@@ -533,7 +533,10 @@ cards then block at start with the core `model not allowed` reason.
    `factory/<cardId>` at `baseRef` (default `origin/HEAD`) in
    `<worktreesRoot>/wb-<cardId>`, and starts the session there.
 2. **Report:** the session ends with a `workboard-report` block. A `done`
-   report with passing proof starts the import; anything else blocks the card.
+   report with passing proof starts the import; anything else blocks the card,
+   including a `done` report with any `failed` proof entry. The brief tells the
+   session to record red-first evidence (a test that failed before the fix) in
+   the note of its passing entry.
 3. **Import:** the node bundles the branch to `<worktreesRoot>/wb-<cardId>.bundle`
    and the Gateway fetches it with File Transfer, so the node's
    `allowReadPaths` must cover `<worktreesRoot>/*.bundle`. The host clone
