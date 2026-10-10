@@ -17,7 +17,7 @@ export type BoardTrustState = { key: string } & (
 
 /** Trust KPIs only exist for project boards that send cards to a node (D53). */
 export function boardTrustKey(board: WorkboardBoardSummary | null | undefined): string | undefined {
-  return board?.orchestration?.defaultTarget
+  return board?.orchestration?.defaultTarget || board?.orchestration?.targetRoutes?.length
     ? `${board.id}:${board.total}:${board.updatedAt ?? 0}`
     : undefined;
 }
