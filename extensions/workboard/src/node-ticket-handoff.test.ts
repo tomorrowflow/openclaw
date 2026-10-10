@@ -114,9 +114,12 @@ function createFakeGitHub(remote: string) {
 }
 
 /** Imports the ticket, points the host clone at a GitHub origin, and accepts the card. */
-async function acceptImportedTicket() {
+async function acceptImportedTicket(params: { sourceUrl?: string } = {}) {
   const ticket = await finishNodeTicket({});
   await ticket.handoffs.resume(ticket.warn);
+  if (params.sourceUrl) {
+    await ticket.store.update(ticket.card.id, { sourceUrl: params.sourceUrl });
+  }
   git(ticket.repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
   await ticket.store.move(ticket.card.id, "done", undefined);
   return ticket;
@@ -304,6 +307,20 @@ describe("node ticket draft PR", () => {
       expect.objectContaining({ taskClass: "unclassified", accepted: 1, cleanAccepted: 1 }),
     ]);
     expect(trust.weeks.at(-1)).toMatchObject({ accepted: 1, autonomous: 1 });
+  });
+
+  it("closes the card's source GitHub issue when the draft PR merges", async () => {
+    const { card, handoffs, warn, github } = await acceptImportedTicket({
+      sourceUrl: "https://github.com/acme/tracker/issues/41",
+    });
+    github.tokens.set("acme/app", "token-app");
+
+    await handoffs.resume(warn);
+
+    const opened = github.requests.find((request) => request.method === "POST");
+    expect(opened?.body).toMatchObject({
+      body: expect.stringContaining(`\n\nCloses acme/tracker#41\n\nWorkboard card \`${card.id}\``),
+    });
   });
 
   it("reworks a published ticket on its PR branch, keeping a reviewer's commit", async () => {

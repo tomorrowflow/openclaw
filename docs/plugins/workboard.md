@@ -545,7 +545,9 @@ cards then block at start with the core `model not allowed` reason.
    card moves to `review` with its claim released.
 4. **Accept:** moving the card from `review` to `done` pushes the imported
    commit from the host clone to its GitHub origin and opens a draft PR, or
-   reuses an open one for the branch. The PR URL is recorded as proof. A
+   reuses an open one for the branch. The PR URL is recorded as proof. When
+   the card's `sourceUrl` is a GitHub issue URL, the PR body says
+   `Closes <owner>/<repo>#<n>`, so merging the PR closes the issue. A
    failure, such as a missing [token](#configuration), blocks the card with
    the reason; move it to `done` again to retry. Archive a card instead of
    moving it to `done` to close it without a PR.
