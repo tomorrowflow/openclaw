@@ -157,6 +157,7 @@ restore_gateway_if_down() {
 on_exit() {
   local rc=$?
   # A failed deploy must not leave satellites staging a build that never went live.
+  [ -n "${SATELLITES_SRC_PID:-}" ] && kill "$SATELLITES_SRC_PID" 2>/dev/null || true
   [ -n "${SATELLITES_PREP_PID:-}" ] && kill "$SATELLITES_PREP_PID" 2>/dev/null || true
   # Always undo the temporary workspace->file: dependency rewrite so a failed
   # deploy never leaves the committed package.json mutated on disk (idempotent).
@@ -264,6 +265,11 @@ sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
 # gateway is still serving the old version at this point.
 STAGE="deploy: fork features (gateway still up)"
 node scripts/check-fork-features.mjs
+
+# Source satellites (macOS) build this commit themselves, in parallel with ours.
+SATELLITES_SRC_LOG="$LOG_DIR/satellites-prepare-source-$(date +%Y%m%d-%H%M%S).log"
+"$REPO_DIR/scripts/deploy-satellites.sh" prepare-source >"$SATELLITES_SRC_LOG" 2>&1 &
+SATELLITES_SRC_PID=$!
 
 STAGE="deploy: build (gateway still up)"
 OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 CI=true corepack pnpm build
@@ -704,9 +710,10 @@ step "Satellites"
 # Activate runs even after a partial prepare: each satellite stands alone, and
 # one without a staged build just fails its own activate.
 SATELLITE_PROBLEMS=""
+wait "$SATELLITES_SRC_PID" || SATELLITE_PROBLEMS="prepare"
 wait "$SATELLITES_PREP_PID" || SATELLITE_PROBLEMS="prepare"
-SATELLITES_PREP_PID=""
-cat "$SATELLITES_PREP_LOG"
+SATELLITES_SRC_PID="" SATELLITES_PREP_PID=""
+cat "$SATELLITES_SRC_LOG" "$SATELLITES_PREP_LOG"
 "$REPO_DIR/scripts/deploy-satellites.sh" activate || SATELLITE_PROBLEMS="${SATELLITE_PROBLEMS:+$SATELLITE_PROBLEMS and }activate"
 [ -z "$SATELLITE_PROBLEMS" ] || SATELLITE_PROBLEMS="$SATELLITE_PROBLEMS failed"
 if [ -n "$SATELLITE_PROBLEMS" ]; then
