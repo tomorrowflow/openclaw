@@ -1829,6 +1829,7 @@
                       "plugins/oc-path",
                       "plugins/session-share",
                       "plugins/workboard",
+                      "plugins/workboard-node-setup",
                       "plugins/zalouser"
                     ]
                   }
