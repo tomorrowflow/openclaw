@@ -8,7 +8,6 @@ import type {
   WorkboardExecutionStatus,
   WorkboardLaunchState,
   WorkboardMetadata,
-  WorkboardNodeHandoff,
   WorkboardNodeWorktree,
   WorkboardStaleState,
   WorkboardStatus,
@@ -46,6 +45,7 @@ import type {
 import { capText, normalizeBoardId, normalizeTimestamp } from "./store-normalizers.js";
 import { WorkboardNotificationStore } from "./store-notifications.js";
 import { readCards } from "./store-read.js";
+import { type WorkboardNodeHandoffInput, withNodeHandoff } from "./store-target-normalizers.js";
 
 export type { WorkboardDispatchResult } from "./store-inputs.js";
 export { WorkboardCardConflictError } from "./store-core.js";
@@ -256,7 +256,7 @@ export class WorkboardStore extends WorkboardNotificationStore {
   /** Records the handoff phase on the card's node worktree; a replaced worktree is left alone. */
   async setNodeHandoff(
     id: string,
-    input: { worktreePath: string; handoff: WorkboardNodeHandoff },
+    input: WorkboardNodeHandoffInput,
     scope?: WorkboardMutationScope,
   ): Promise<WorkboardCard | undefined> {
     return await this.enqueueMutation(async () => {
@@ -273,7 +273,7 @@ export class WorkboardStore extends WorkboardNotificationStore {
               ...card.metadata,
               automation: {
                 ...card.metadata?.automation,
-                target: { ...target, worktree: { ...target.worktree, handoff: input.handoff } },
+                target: { ...target, worktree: withNodeHandoff(target.worktree, input) },
               },
             },
           };

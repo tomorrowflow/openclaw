@@ -1,8 +1,17 @@
-import type { WorkboardCard, WorkboardNodeRework } from "@openclaw/workboard-contract";
+import type {
+  WorkboardCard,
+  WorkboardNodeReviewVerdict,
+  WorkboardNodeRework,
+} from "@openclaw/workboard-contract";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { readResponseWithLimit } from "openclaw/plugin-sdk/response-limit-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { HandoffSupersededError, nodeTicketTarget, requireHostGit } from "./node-ticket.js";
+import {
+  HandoffSupersededError,
+  nodeTicketTarget,
+  requireHostGit,
+  reviewVerdictOf,
+} from "./node-ticket.js";
 import type { WorkboardStore } from "./store.js";
 
 const GITHUB_API_URL = "https://api.github.com";
@@ -59,6 +68,22 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
     importedAt: handoff.importedAt,
     ...(worktree.rework ? { rework: worktree.rework } : {}),
   };
+}
+
+/**
+ * The shadow verdict on the round being published: the newest agent comment
+ * starting with `Verdict:` since the import and no later than the operator's
+ * move to done, so a verdict that arrives after the decision counts as missed.
+ */
+function reviewVerdict(item: PublishCard): WorkboardNodeReviewVerdict {
+  const { card } = item;
+  const decidedAt =
+    card.events?.findLast((event) => event.toStatus === "done")?.at ?? Number.POSITIVE_INFINITY;
+  const verdict = (card.metadata?.comments ?? [])
+    .filter((comment) => comment.createdAt >= item.importedAt && comment.createdAt <= decidedAt)
+    .flatMap((comment) => reviewVerdictOf(comment) ?? [])
+    .at(-1);
+  return { round: item.rework?.round ?? 0, verdict: verdict ?? "missed" };
 }
 
 /** A card created from a GitHub issue names it as its source; merging the PR closes it. */
@@ -299,6 +324,7 @@ export async function publishNodeTicket(params: {
         publishedAt: params.now(),
         pullRequestUrl,
       },
+      review: reviewVerdict(item),
     },
     scope,
   );

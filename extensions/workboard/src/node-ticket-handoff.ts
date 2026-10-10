@@ -396,6 +396,8 @@ export function createNodeTicketHandoffs(params: {
   runtime: WorkboardNodeTicketRuntime;
   github: WorkboardGitHubAccess;
   start: WorkboardNodeTicketStart;
+  /** Wakes the board automation once an import moved the card to review. */
+  onReview?: (card: WorkboardCard) => Promise<void>;
   now?: () => number;
 }) {
   const inFlight = new Set<string>();
@@ -414,6 +416,10 @@ export function createNodeTicketHandoffs(params: {
         try {
           if (item) {
             await runNodeTicketHandoff({ runtime: params.runtime, store: params.store, item, now });
+            const current = await params.store.get(card.id);
+            if (current?.status === "review") {
+              await params.onReview?.(current);
+            }
           } else if (publish) {
             await publishNodeTicket({
               store: params.store,

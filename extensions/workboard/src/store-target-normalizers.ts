@@ -3,11 +3,13 @@ import type {
   WorkboardNodeFeedback,
   WorkboardNodeHandoff,
   WorkboardNodeQuestions,
+  WorkboardNodeReviewVerdict,
   WorkboardNodeRework,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { MAX_NODE_REVIEW_VERDICTS } from "./store-constants.js";
 import { normalizeBoundedString } from "./store-value-normalizers.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
 
@@ -111,6 +113,21 @@ function normalizeNodeFeedback(value: unknown): WorkboardNodeFeedback | undefine
   return from === undefined ? undefined : { kind: value.kind, from };
 }
 
+function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
+  return (Array.isArray(value) ? value : [])
+    .flatMap((entry): WorkboardNodeReviewVerdict[] => {
+      const round = isRecord(entry)
+        ? resolveOptionalIntegerOption(entry.round, { min: 0 })
+        : undefined;
+      const verdict = isRecord(entry) ? entry.verdict : undefined;
+      return round !== undefined &&
+        (verdict === "accept" || verdict === "rework" || verdict === "missed")
+        ? [{ round, verdict }]
+        : [];
+    })
+    .slice(-MAX_NODE_REVIEW_VERDICTS);
+}
+
 function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -127,6 +144,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
   const rework = normalizeNodeRework(value.rework);
   const questions = normalizeNodeQuestions(value.questions);
   const feedback = normalizeNodeFeedback(value.feedback);
+  const reviews = normalizeNodeReviews(value.reviews);
   return worktreePath && branch && baseCommit
     ? {
         path: worktreePath,
@@ -136,8 +154,26 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         ...(rework ? { rework } : {}),
         ...(questions ? { questions } : {}),
         ...(feedback ? { feedback } : {}),
+        ...(reviews.length > 0 ? { reviews } : {}),
       }
     : undefined;
+}
+
+export type WorkboardNodeHandoffInput = {
+  worktreePath: string;
+  handoff: WorkboardNodeHandoff;
+  /** The shadow verdict on the round a publish closes; appended to the worktree's reviews. */
+  review?: WorkboardNodeReviewVerdict;
+};
+
+export function withNodeHandoff(
+  worktree: WorkboardNodeWorktree,
+  input: WorkboardNodeHandoffInput,
+): WorkboardNodeWorktree {
+  const reviews = input.review
+    ? [...(worktree.reviews ?? []), input.review].slice(-MAX_NODE_REVIEW_VERDICTS)
+    : worktree.reviews;
+  return { ...worktree, handoff: input.handoff, ...(reviews ? { reviews } : {}) };
 }
 
 /** The recorded worktree is dispatcher state; raw input can only keep it for the same target. */

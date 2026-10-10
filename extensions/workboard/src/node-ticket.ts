@@ -56,11 +56,22 @@ export type NodeTicketReopen = {
   slotWaitNoted: boolean;
 };
 
+const REVIEW_VERDICT_PATTERN = /^Verdict:\s*(accept|rework)\b/i;
+
+/** An agent's shadow verdict on a review round (`Verdict: accept|rework`), if the comment is one. */
+export function reviewVerdictOf(comment: WorkboardComment): "accept" | "rework" | undefined {
+  const match = comment.source?.startsWith("agent:")
+    ? REVIEW_VERDICT_PATTERN.exec(comment.body.trim())?.[1]?.toLowerCase()
+    : undefined;
+  return match === "accept" || match === "rework" ? match : undefined;
+}
+
 /**
  * The review feedback for a published ticket's next rework round, or the
  * answers to a ticket's questions: card comments newer than the publish or
  * the questions and Workboard's own notices since. The slot wait notice is
- * written after a review comment and is not feedback either.
+ * written after a review comment and is not feedback either, nor is a late
+ * shadow verdict.
  */
 export function nodeTicketReviewComments(card: WorkboardCard): WorkboardComment[] {
   const handoff = nodeTicketTarget(card)?.worktree?.handoff;
@@ -70,7 +81,10 @@ export function nodeTicketReviewComments(card: WorkboardCard): WorkboardComment[
   const from =
     handoff.reviewFrom ?? (handoff.phase === "published" ? handoff.publishedAt : handoff.askedAt);
   return (card.metadata?.comments ?? []).filter(
-    (comment) => comment.createdAt > from && comment.createdAt !== handoff.slotWaitNotedAt,
+    (comment) =>
+      comment.createdAt > from &&
+      comment.createdAt !== handoff.slotWaitNotedAt &&
+      !reviewVerdictOf(comment),
   );
 }
 
@@ -226,7 +240,11 @@ export async function createNodeTicketWorktree(params: {
     : asked
       ? { kind: "answer", from: asked.reviewFrom ?? asked.askedAt }
       : previous?.feedback;
-  const kept = { ...(questions ? { questions } : {}), ...(feedback ? { feedback } : {}) };
+  const kept = {
+    ...(questions ? { questions } : {}),
+    ...(feedback ? { feedback } : {}),
+    ...(previous?.reviews ? { reviews: previous.reviews } : {}),
+  };
   const git = (...args: string[]) =>
     runNodeCommand(runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);
   let rework: WorkboardNodeRework | undefined;

@@ -1,5 +1,6 @@
 import type {
   WorkboardCard,
+  WorkboardNodeReviewVerdict,
   WorkboardTrustCounts,
   WorkboardTrustResult,
   WorkboardTrustWeek,
@@ -23,6 +24,7 @@ type TicketFacts = {
   questionRounds: number;
   operatorAnswers: number;
   attempts: number;
+  reviews: readonly WorkboardNodeReviewVerdict[];
 };
 
 function weekStart(at: number): number {
@@ -64,7 +66,13 @@ function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
     questionRounds: worktree?.questions?.rounds ?? 0,
     operatorAnswers: worktree?.questions?.operatorAnswers ?? 0,
     attempts: card.metadata?.attempts?.length ?? 0,
+    reviews: worktree?.reviews ?? [],
   };
+}
+
+// The operator reworked a published round when the ticket went on to a later rework round.
+function verdictAgrees(ticket: TicketFacts, review: WorkboardNodeReviewVerdict): boolean {
+  return (review.verdict === "rework") === review.round < ticket.reworkRounds;
 }
 
 function isClean(ticket: TicketFacts): boolean {
@@ -84,8 +92,24 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
     questionRounds: 0,
     operatorAnswers: 0,
     attempts: 0,
+    verdictRounds: 0,
+    verdictAgreedRounds: 0,
+    verdictCards: 0,
+    verdictAgreedCards: 0,
+    verdictMissed: 0,
   };
   for (const ticket of tickets) {
+    const rounds = ticket.reviews.filter((review) => review.verdict !== "missed");
+    const agreed = rounds.filter((review) => verdictAgrees(ticket, review)).length;
+    const missed = ticket.reviews.length - rounds.length;
+    counts.verdictRounds += rounds.length;
+    counts.verdictAgreedRounds += agreed;
+    counts.verdictMissed += missed;
+    // A ticket with a missed round cannot show that every round agreed.
+    if (rounds.length > 0 && missed === 0) {
+      counts.verdictCards += 1;
+      counts.verdictAgreedCards += agreed === rounds.length ? 1 : 0;
+    }
     const accepted = ticket.acceptedAt !== undefined;
     counts.accepted += accepted ? 1 : 0;
     counts.cleanAccepted += accepted && isClean(ticket) ? 1 : 0;

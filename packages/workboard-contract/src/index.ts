@@ -327,6 +327,18 @@ export type WorkboardNodeFeedback = {
   from: number;
 };
 
+/**
+ * An agent's advisory verdict on one published review round (shadow
+ * acceptance): the `Verdict: accept|rework` comment it left before the
+ * operator moved the round to done, or `missed` when none came first. `round`
+ * is the rework round the publish closed (0 for the first publish); the
+ * operator reworked it when the ticket later reached rework round `round + 1`.
+ */
+export type WorkboardNodeReviewVerdict = {
+  round: number;
+  verdict: "accept" | "rework" | "missed";
+};
+
 /** A ticket worktree the dispatcher created on a paired node. */
 export type WorkboardNodeWorktree = {
   path: string;
@@ -336,6 +348,8 @@ export type WorkboardNodeWorktree = {
   rework?: WorkboardNodeRework;
   questions?: WorkboardNodeQuestions;
   feedback?: WorkboardNodeFeedback;
+  /** One entry per publish, oldest first; kept across rework rounds. */
+  reviews?: WorkboardNodeReviewVerdict[];
 };
 
 /**
@@ -539,6 +553,17 @@ export type WorkboardTrustCounts = {
   questionRounds: number;
   operatorAnswers: number;
   attempts: number;
+  /**
+   * Published review rounds with an agent verdict, and how many matched the
+   * operator: `accept` with no rework after the publish, or `rework` with one.
+   */
+  verdictRounds: number;
+  verdictAgreedRounds: number;
+  /** Tickets whose every round has a verdict, and those where every verdict matched. */
+  verdictCards: number;
+  verdictAgreedCards: number;
+  /** Rounds published before any verdict; excluded from both rates. */
+  verdictMissed: number;
 };
 
 /** Accepted tickets in one UTC week (Monday 00:00), by acceptance time. */
