@@ -68,6 +68,17 @@ describe("Workboard trust KPIs", () => {
     expect(loadTrust).not.toHaveBeenCalled();
   });
 
+  it("shows on a board that sends cards to a node only through label routes", async () => {
+    const page = mountTrust(
+      { orchestration: { targetRoutes: [{ labels: ["class:server-fix"], target: TARGET }] } },
+      () => trustResult(2, 1),
+    );
+
+    await vi.waitFor(() =>
+      expect(page.trigger()?.textContent).toContain("1 of 2 autonomous this week"),
+    );
+  });
+
   it("shows this week's autonomy on a project board and reloads on board changes", async () => {
     let result = trustResult(2, 1);
     const page = mountTrust({ orchestration: { defaultTarget: TARGET } }, () => result);
