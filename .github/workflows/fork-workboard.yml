@@ -1,0 +1,42 @@
+# Fork-only CI: the Workboard plugin's tests. Upstream CI is deleted on every
+# sync (.sandcastle/sync-prompt.md keeps fork-*.yml); keep this one lane small.
+name: Fork Workboard tests
+
+on:
+  pull_request:
+    paths:
+      - "extensions/workboard/**"
+      - "packages/workboard-contract/**"
+      - ".github/workflows/fork-workboard.yml"
+  push:
+    branches: [main]
+    paths:
+      - "extensions/workboard/**"
+      - "packages/workboard-contract/**"
+      - ".github/workflows/fork-workboard.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-workboard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+      - name: Activate pnpm from packageManager
+        run: corepack enable && corepack install
+      - name: Prepare the checkout
+        run: node scripts/worktree-setup.mjs gateway
+      - name: Workboard tests
+        run: pnpm test extensions/workboard --maxWorkers=1
