@@ -282,6 +282,36 @@ describe("node ticket handoff", () => {
   });
 });
 
+/** Makes the next sessions.create fail, as a launch that dies after its worktree record was prepared. */
+function failNextLaunch(gateway: ReturnType<typeof createLocalNodeGateway>) {
+  const respond = gateway.respond.getMockImplementation();
+  gateway.respond.mockImplementation((method, params) => {
+    if (method === "sessions.create") {
+      gateway.respond.mockImplementation(respond!);
+      throw new Error("node went offline");
+    }
+    return respond!(method, params);
+  });
+}
+
+/** Unblocks a card whose launch failed and starts it again the way an operator would. */
+async function retryStart(
+  store: Awaited<ReturnType<typeof finishNodeTicket>>["store"],
+  gateway: ReturnType<typeof createLocalNodeGateway>,
+  cardId: string,
+) {
+  expect((await store.get(cardId))?.status).toBe("blocked");
+  await store.unblock(cardId);
+  await dispatchAndStartWorkboardCards({
+    store,
+    subagent: { run: vi.fn() },
+    nodeTickets: gateway,
+    options: { cardId },
+  });
+  return gateway.respond.mock.calls.findLast(([method]) => method === "sessions.create")?.[1]
+    ?.message as string | undefined;
+}
+
 describe("node ticket questions", () => {
   it("waits in review with the questions, then resumes the same session with dev's answer", async () => {
     const { store, card, repos, worktree, handoffs, warn, gateway } = await finishNodeTicket({
@@ -341,6 +371,27 @@ describe("node ticket questions", () => {
       phase: "imported",
     });
     expect(git(repos.hostRepo, "rev-parse", `factory/${card.id}`)).toBeTruthy();
+  });
+
+  it("keeps the answers in the brief when the resumed launch fails and is retried", async () => {
+    const { store, card, handoffs, warn, gateway } = await finishNodeTicket({
+      messages: questionsReport,
+    });
+    await handoffs.resume(warn);
+    await store.addComment(card.id, { body: "Return []." }, undefined, "agent:dev");
+    await store.move(card.id, "todo", undefined);
+    failNextLaunch(gateway);
+    await handoffs.resume(warn);
+
+    const message = await retryStart(store, gateway, card.id);
+
+    expect(message).toContain("## Answers to your questions");
+    expect(message).toContain("Return [].");
+    expect(message?.split("## Turn contract")[0]).not.toContain("node went offline");
+    expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.questions).toEqual({
+      rounds: 1,
+      operatorAnswers: 0,
+    });
   });
 
   it("keeps the worktree of an answered ticket whose start claimed it before the swap", async () => {
@@ -631,6 +682,31 @@ describe("node ticket draft PR", () => {
       ([method]) => method === "sessions.create",
     )?.[1]?.message;
     expect(message).toContain(review);
+  });
+
+  it("keeps the review feedback in the brief when the rework launch fails and is retried", async () => {
+    const { store, card, handoffs, warn, github, gateway } = await acceptImportedTicket();
+    github.tokens.set("acme/app", "token-app");
+    await handoffs.resume(warn);
+    github.openPulls.push("https://github.com/acme/app/pull/7");
+    await store.addComment(
+      card.id,
+      { body: "Rename the flag to --strict." },
+      undefined,
+      "operator",
+    );
+    await store.move(card.id, "todo", undefined);
+    failNextLaunch(gateway);
+    await handoffs.resume(warn);
+
+    const message = await retryStart(store, gateway, card.id);
+
+    expect(message).toContain("Review rework, round 1");
+    expect(message).toContain("### Review feedback");
+    expect(message).toContain("Rename the flag to --strict.");
+    expect(
+      (await store.get(card.id))?.metadata?.automation?.target?.worktree?.rework,
+    ).toMatchObject({ round: 1 });
   });
 
   it("sends a reopen without a review comment back to backlog with the next step", async () => {

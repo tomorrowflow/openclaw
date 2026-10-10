@@ -4,6 +4,7 @@ import type {
   WorkboardCard,
   WorkboardComment,
   WorkboardExecutionTarget,
+  WorkboardNodeFeedback,
   WorkboardNodeQuestions,
   WorkboardNodeRework,
   WorkboardNodeWorktree,
@@ -218,7 +219,14 @@ export async function createNodeTicketWorktree(params: {
   }
   const published = previous?.handoff?.phase === "published" ? previous.handoff : undefined;
   const questions = answeredQuestions(card, previous);
-  const kept = questions ? { questions } : {};
+  const asked = previous?.handoff?.phase === "questions" ? previous.handoff : undefined;
+  // A retry of the same round carries the previous record's cutoff.
+  const feedback: WorkboardNodeFeedback | undefined = published
+    ? { kind: "rework", from: published.reviewFrom ?? published.publishedAt }
+    : asked
+      ? { kind: "answer", from: asked.reviewFrom ?? asked.askedAt }
+      : previous?.feedback;
+  const kept = { ...(questions ? { questions } : {}), ...(feedback ? { feedback } : {}) };
   const git = (...args: string[]) =>
     runNodeCommand(runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);
   let rework: WorkboardNodeRework | undefined;
@@ -357,13 +365,22 @@ export function buildNodeTicketMessage(params: {
   worktree: WorkboardNodeWorktree;
   context: string;
 }): string {
-  // The card still carries its published or questions record when the round starts.
-  const answering = nodeTicketTarget(params.card)?.worktree?.handoff?.phase === "questions";
+  const round = params.worktree.feedback;
+  const answering = round?.kind === "answer";
   const rework = answering ? undefined : params.worktree.rework;
-  const feedback =
-    rework || answering
-      ? nodeTicketReviewComments(params.card).slice(-REWORK_FEEDBACK_MAX_ENTRIES)
-      : [];
+  // The card still carries its published or questions record when the round
+  // starts. A retried launch lost that record, so it reads the comments after
+  // the carried cutoff, leaving out Workboard's own notices (no source).
+  const handoffPhase = nodeTicketTarget(params.card)?.worktree?.handoff?.phase;
+  const comments =
+    handoffPhase === "published" || handoffPhase === "questions"
+      ? nodeTicketReviewComments(params.card)
+      : round
+        ? (params.card.metadata?.comments ?? []).filter(
+            (comment) => comment.createdAt > round.from && comment.source !== undefined,
+          )
+        : [];
+  const feedback = rework || answering ? comments.slice(-REWORK_FEEDBACK_MAX_ENTRIES) : [];
   return [
     `Work on this ticket: ${params.card.title}`,
     "",
