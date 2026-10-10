@@ -115,6 +115,26 @@ describe("projectWorkboardTrust", () => {
     ]);
   });
 
+  it("leaves out archived tickets that were never accepted", () => {
+    const archived = (card: WorkboardCard): WorkboardCard => ({
+      ...card,
+      metadata: { ...card.metadata, archivedAt: MONDAY },
+    });
+    const cards = [
+      ticket("shipped", { createdAt: MONDAY, worktree: published(MONDAY + HOUR) }),
+      // Archiving a shipped ticket tidies the board; its acceptance stays history.
+      archived(ticket("tidied", { createdAt: MONDAY, worktree: published(MONDAY + 3 * HOUR) })),
+      // Archive closes a ticket without a PR, so it is no outcome to score.
+      archived(ticket("dropped", { createdAt: MONDAY })),
+      archived(ticket("duplicate", { createdAt: MONDAY, blocked: true })),
+    ];
+
+    const trust = projectWorkboardTrust(cards, "app", MONDAY + 24 * HOUR);
+
+    expect(trust.total).toMatchObject({ tickets: 2, accepted: 2, blocked: 0 });
+    expect(trust.weeks.at(-1)).toMatchObject({ accepted: 2, medianLeadTimeMs: 2 * HOUR });
+  });
+
   it("counts a question an operator answered as a human touch, one an agent answered not", () => {
     const answered = (operatorAnswers: number) => ({
       ...published(MONDAY),

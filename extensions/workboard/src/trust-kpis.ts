@@ -45,16 +45,19 @@ function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
   }
   const worktree = target.worktree;
   const handoff = worktree?.handoff;
+  // The first publish is the acceptance; rework keeps it while the handoff restarts.
+  const acceptedAt =
+    worktree?.rework?.acceptedAt ??
+    (handoff?.phase === "published" ? handoff.publishedAt : undefined);
+  // Archive closes a ticket without a PR; an accepted ticket archived later keeps its history.
+  if (card.metadata?.archivedAt && acceptedAt === undefined) {
+    return undefined;
+  }
   const label = card.labels.find((entry) => entry.startsWith("class:"));
   return {
     taskClass: label?.slice("class:".length).trim() || UNCLASSIFIED,
     createdAt: card.createdAt,
-    // The first publish is the acceptance; rework keeps it while the handoff restarts.
-    ...(worktree?.rework
-      ? { acceptedAt: worktree.rework.acceptedAt }
-      : handoff?.phase === "published"
-        ? { acceptedAt: handoff.publishedAt }
-        : {}),
+    ...(acceptedAt === undefined ? {} : { acceptedAt }),
     // A rework round drops the handoff until its own import, but the ticket was imported before.
     imported:
       handoff?.phase === "imported" ||
