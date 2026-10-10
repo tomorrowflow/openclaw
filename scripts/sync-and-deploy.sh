@@ -156,6 +156,8 @@ restore_gateway_if_down() {
 # through the gateway).
 on_exit() {
   local rc=$?
+  # A failed deploy must not leave satellites staging a build that never went live.
+  [ -n "${SATELLITES_PREP_PID:-}" ] && kill "$SATELLITES_PREP_PID" 2>/dev/null || true
   # Always undo the temporary workspace->file: dependency rewrite so a failed
   # deploy never leaves the committed package.json mutated on disk (idempotent).
   node "$REPO_DIR/scripts/prepare-global-install-package-json.mjs" --restore 2>/dev/null || true
@@ -279,6 +281,12 @@ node scripts/prepare-global-install-package-json.mjs --restore
 # cron (no TTY).
 STAGE="deploy: pnpm deploy:globally (gateway still up)"
 CI=true corepack pnpm deploy:globally
+
+# Factory node satellites stage this build in the background while the
+# preflights and cutover run; they switch to it only after the smoke below.
+SATELLITES_PREP_LOG="$LOG_DIR/satellites-prepare-$(date +%Y%m%d-%H%M%S).log"
+"$REPO_DIR/scripts/deploy-satellites.sh" prepare >"$SATELLITES_PREP_LOG" 2>&1 &
+SATELLITES_PREP_PID=$!
 
 # Sanity checks — timestamps must match the fresh build. Chunk names and
 # extensions change between releases (2026.10.2 emits .mjs), so check the
@@ -687,6 +695,24 @@ if [ -n "$SMOKE_PROBLEMS" ]; then
 Log: $LOG_FILE" 2>&1 | tail -3 || echo "  (smoke alert send failed — inbound may be down both ways)"
 else
   echo "  ✓ No inbound crash signatures or stuck ingress events"
+fi
+
+# ── Satellites ─────────────────────────────────────────────────────────────
+# Best effort: the Gateway is live on the new build either way. A satellite that
+# is offline or fails keeps its old build and gets a Signal warning naming it.
+step "Satellites"
+# Activate runs even after a partial prepare: each satellite stands alone, and
+# one without a staged build just fails its own activate.
+SATELLITE_PROBLEMS=""
+wait "$SATELLITES_PREP_PID" || SATELLITE_PROBLEMS="prepare"
+SATELLITES_PREP_PID=""
+cat "$SATELLITES_PREP_LOG"
+"$REPO_DIR/scripts/deploy-satellites.sh" activate || SATELLITE_PROBLEMS="${SATELLITE_PROBLEMS:+$SATELLITE_PROBLEMS and }activate"
+[ -z "$SATELLITE_PROBLEMS" ] || SATELLITE_PROBLEMS="$SATELLITE_PROBLEMS failed"
+if [ -n "$SATELLITE_PROBLEMS" ]; then
+  oc_openclaw message send --channel "$NOTIFY_CHANNEL" --target "$NOTIFY_TARGET" \
+    --message "⚠ OpenClaw deploy v$NEW_VER: gateway is live, but satellite $SATELLITE_PROBLEMS. Re-run scripts/deploy-satellites.sh prepare && … activate once they are reachable. Logs: $HOME/logs/satellites" \
+    2>&1 | tail -3 || echo "  (satellite warning send failed)"
 fi
 
 echo ""
