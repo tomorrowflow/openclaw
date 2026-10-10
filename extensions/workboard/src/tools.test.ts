@@ -654,6 +654,79 @@ describe("workboard tools", () => {
     expect(elsewhere.metadata?.automation?.target).toBeUndefined();
   });
 
+  it("routes a new card to the first board target route that shares one of its labels", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const linux = { ...NODE_TARGET, nodeId: "linux-factory" };
+    const spare = { ...NODE_TARGET, nodeId: "spare-factory" };
+    await store.upsertBoard({
+      id: "app",
+      orchestration: {
+        defaultTarget: NODE_TARGET,
+        targetRoutes: [
+          { labels: ["class:server-fix", "class:feature"], target: linux },
+          { labels: ["class:docs"], target: spare },
+        ],
+      },
+    });
+    const tools = new Map(
+      createWorkboardTools({ store, context: { agentId: "dev" } }).map((tool) => [tool.name, tool]),
+    );
+    const boardCreate = expectDefined(tools.get("workboard_board_create"), "board create tool");
+    expect(
+      Value.Check(boardCreate.parameters, {
+        id: "app",
+        orchestration: { targetRoutes: [{ labels: ["x"], target: NODE_TARGET }] },
+      }),
+    ).toBe(false);
+    // An agent editing the board keeps the operator's routes.
+    await boardCreate.execute("call-board", { id: "app", orchestration: { autoDecompose: true } });
+
+    const routed = readPayload(
+      await expectDefined(tools.get("workboard_create"), "create tool").execute("call-create", {
+        title: "Fix the parser",
+        boardId: "app",
+        labels: ["class:docs", "class:feature"],
+      }),
+    );
+    expect(routed.card).toMatchObject({ metadata: { automation: { target: linux } } });
+    const unrouted = await store.create({ title: "Polish", boardId: "app", labels: ["ui"] });
+    expect(unrouted.metadata?.automation?.target).toEqual(NODE_TARGET);
+    const optedOut = await store.create({
+      title: "Plan the batch",
+      boardId: "app",
+      labels: ["class:feature"],
+      metadata: { automation: { target: null } },
+    });
+    expect(optedOut.metadata?.automation?.target).toBeUndefined();
+    // Routing is create-time only; relabeling keeps the inherited target.
+    const relabeled = await store.update(unrouted.id, { labels: ["class:docs"] });
+    expect(relabeled.metadata?.automation?.target).toEqual(NODE_TARGET);
+    await store.upsertBoard({ id: "app", orchestration: { targetRoutes: null } });
+    const cleared = await store.create({ title: "Add", boardId: "app", labels: ["class:feature"] });
+    expect(cleared.metadata?.automation?.target).toEqual(NODE_TARGET);
+  });
+
+  it("refuses board target routes with no labels or a label another route claims", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await expect(
+      store.upsertBoard({
+        id: "app",
+        orchestration: { targetRoutes: [{ labels: [], target: NODE_TARGET }] },
+      }),
+    ).rejects.toThrow("target route labels must name at least one label.");
+    await expect(
+      store.upsertBoard({
+        id: "app",
+        orchestration: {
+          targetRoutes: [
+            { labels: ["class:feature"], target: NODE_TARGET },
+            { labels: ["class:refactor", "class:feature"], target: NODE_TARGET },
+          ],
+        },
+      }),
+    ).rejects.toThrow("target route label class:feature appears in more than one route.");
+  });
+
   it("refuses a board node target whose model the assignee's modelPolicy does not allow", async () => {
     const store = createWorkboardSqliteTestStore();
     using openStore = vi.spyOn(WorkboardStore, "openSqlite");
@@ -690,6 +763,16 @@ describe("workboard tools", () => {
     ).rejects.toThrow(
       "Board app default target model openai/gpt-5.5 is not allowed for agent dev (model not allowed: openai/gpt-5.5). Add it to that agent's modelPolicy.allow or choose an allowed model.",
     );
+    await expect(
+      store.upsertBoard({
+        id: "app",
+        orchestration: {
+          targetRoutes: [
+            { labels: ["class:feature"], target: { ...NODE_TARGET, model: "openai/gpt-5.5" } },
+          ],
+        },
+      }),
+    ).rejects.toThrow("Board app route target model openai/gpt-5.5 is not allowed for agent dev");
     // An agent moving the default assignee would strand the operator's target too.
     const boardCreate = expectDefined(
       createWorkboardTools({ store, context: { agentId: "main" } }).find(

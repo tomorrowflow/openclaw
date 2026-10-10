@@ -139,6 +139,40 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     );
   });
 
+  it("starts a card created with a routed label on the route's node", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({
+      id: "app",
+      orchestration: {
+        defaultTarget: TARGET,
+        defaultAssignee: "dev",
+        targetRoutes: [
+          { labels: ["class:server-fix"], target: { ...TARGET, nodeId: "linux-factory" } },
+        ],
+      },
+    });
+    await store.create({
+      title: "Fix the upload endpoint",
+      boardId: "app",
+      status: "ready",
+      labels: ["class:server-fix"],
+    });
+    const nodeTickets = createNodeGateway();
+
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets,
+      options: { now: Date.now(), maxStarts: 1 },
+    });
+
+    expect(result.startFailures).toEqual([]);
+    expect(nodeTickets.respond).toHaveBeenCalledWith(
+      "sessions.create",
+      expect.objectContaining({ agentId: "dev", execNode: "linux-factory" }),
+    );
+  });
+
   it("runs node tickets up to the pool size regardless of owner, and review frees a slot", async () => {
     const store = createWorkboardSqliteTestStore();
     store.nodeTicketConcurrency = 2;

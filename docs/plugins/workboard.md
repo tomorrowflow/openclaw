@@ -482,9 +482,50 @@ checks the dispatcher's access, not the access of the card's creator. Set
 `orchestration.defaultAssignee` too, so those cards run under the project's
 agent instead of the default agent.
 
-Saving a board that sets the target or the assignee checks the target `model`
-against that agent's `modelPolicy.allow` (the default agent when no assignee is
-set) and refuses a model the agent may not run, naming both. Other board edits
+To send some kinds of work to a different node, add label routes as
+`orchestration.targetRoutes`, also set only through `workboard.boards.upsert`.
+This board runs server work on a Linux node and everything else on a Mac:
+
+```json5
+{
+  id: "voice-diary",
+  orchestration: {
+    defaultAssignee: "dev",
+    defaultTarget: {
+      kind: "node-claude",
+      nodeId: "mac-node",
+      repoPath: "/Users/factory/repos/voice-diary",
+      worktreesRoot: "/Users/factory/worktrees",
+      hostRepoPath: "/home/openclaw/repos/voice-diary",
+    },
+    targetRoutes: [
+      {
+        labels: ["class:server-fix", "class:feature", "class:refactor"],
+        target: {
+          kind: "node-claude",
+          nodeId: "linux-node",
+          repoPath: "/home/factory/repos/voice-diary",
+          worktreesRoot: "/home/factory/worktrees",
+          hostRepoPath: "/home/openclaw/repos/voice-diary",
+        },
+      },
+    ],
+  },
+}
+```
+
+A new card takes the target of the first route that shares any of its labels;
+labels match exactly. A card with no routed label gets `defaultTarget`. Routes
+follow the same rules as `defaultTarget`: a card's own target, `target: null`,
+a non-scratch workspace, or a linked session skips them. Saving refuses a route
+with no labels and a label that appears in more than one route. Pass
+`targetRoutes: null` or `[]` to remove the routes. Routing happens only when a
+card is created: changing a card's labels later, or the board's routes, does
+not move existing cards to another node.
+
+Saving a board that sets the target, the routes, or the assignee checks each
+target `model` against that agent's `modelPolicy.allow` (the default agent when
+no assignee is set) and refuses a model the agent may not run, naming both. Other board edits
 skip the check, so a board whose agent policy narrowed later still saves; its
 cards then block at start with the core `model not allowed` reason.
 
@@ -598,7 +639,7 @@ Board metadata can set `autoDecompose`, `autoDecomposePerDispatch`,
 `agentId` (and without a linked session) are assigned to `defaultAssignee`.
 OpenClaw records the other settings as intent and exposes them in worker
 context. Actual specification/decomposition still runs through the normal
-Workboard tools. The operator-only `defaultTarget` is
+Workboard tools. The operator-only `defaultTarget` and `targetRoutes` are
 described under [Node tickets](#node-tickets).
 
 ## CLI and slash command
