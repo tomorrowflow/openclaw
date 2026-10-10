@@ -541,7 +541,9 @@ cards then block at start with the core `model not allowed` reason.
    **Questions:** a `needs_input` report posts its questions as a card
    comment and moves the card to `review`, keeping the node worktree. To
    answer, add a comment and move the card to `todo`. The same session resumes
-   in the same worktree, and its brief carries the answer in full. A move to
+   in the same worktree, and its brief carries the answer in full. When that
+   start fails and the card is started again, the retry's brief still carries
+   the answers; a rework round's retry keeps its review feedback the same way. A move to
    `todo` without a newer comment, or a move to `done`, sends the card back to
    `review` with a comment naming the next step. When the board has an
    automation job, the end of the ticket's turn nudges it, so the assignee

@@ -316,6 +316,17 @@ export type WorkboardNodeQuestions = {
   operatorAnswers: number;
 };
 
+/**
+ * What the round this worktree record started answers: the questions
+ * (`answer`) or the review (`rework`), with card comments after `from` as the
+ * input. Preparing the launch drops the handoff that held the cutoff, so a
+ * retried launch reads it from here.
+ */
+export type WorkboardNodeFeedback = {
+  kind: "answer" | "rework";
+  from: number;
+};
+
 /** A ticket worktree the dispatcher created on a paired node. */
 export type WorkboardNodeWorktree = {
   path: string;
@@ -324,6 +335,7 @@ export type WorkboardNodeWorktree = {
   handoff?: WorkboardNodeHandoff;
   rework?: WorkboardNodeRework;
   questions?: WorkboardNodeQuestions;
+  feedback?: WorkboardNodeFeedback;
 };
 
 /**

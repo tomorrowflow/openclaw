@@ -1,5 +1,6 @@
 import type {
   WorkboardExecutionTarget,
+  WorkboardNodeFeedback,
   WorkboardNodeHandoff,
   WorkboardNodeQuestions,
   WorkboardNodeRework,
@@ -102,6 +103,14 @@ function normalizeNodeQuestions(value: unknown): WorkboardNodeQuestions | undefi
     : { rounds, operatorAnswers };
 }
 
+function normalizeNodeFeedback(value: unknown): WorkboardNodeFeedback | undefined {
+  if (!isRecord(value) || (value.kind !== "answer" && value.kind !== "rework")) {
+    return undefined;
+  }
+  const from = resolveOptionalIntegerOption(value.from, { min: 0 });
+  return from === undefined ? undefined : { kind: value.kind, from };
+}
+
 function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -117,6 +126,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
   const handoff = normalizeNodeHandoff(value.handoff);
   const rework = normalizeNodeRework(value.rework);
   const questions = normalizeNodeQuestions(value.questions);
+  const feedback = normalizeNodeFeedback(value.feedback);
   return worktreePath && branch && baseCommit
     ? {
         path: worktreePath,
@@ -125,6 +135,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         ...(handoff ? { handoff } : {}),
         ...(rework ? { rework } : {}),
         ...(questions ? { questions } : {}),
+        ...(feedback ? { feedback } : {}),
       }
     : undefined;
 }
