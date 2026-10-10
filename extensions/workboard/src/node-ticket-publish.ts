@@ -11,6 +11,7 @@ const GITHUB_API_MAX_BYTES = 1024 * 1024;
 // Keeps a rework PR comment well under GitHub's 65,536-character body limit.
 const REWORK_COMMENT_MAX_CHARS = 1500;
 const REWORK_COMMENT_MAX_ENTRIES = 10;
+const GITHUB_ISSUE_URL_PATTERN = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)\/?$/;
 const GITHUB_ORIGIN_PATTERN =
   /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/;
 
@@ -60,6 +61,12 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
   };
 }
 
+/** A card created from a GitHub issue names it as its source; merging the PR closes it. */
+function closesIssue(card: WorkboardCard): string | undefined {
+  const match = card.sourceUrl?.match(GITHUB_ISSUE_URL_PATTERN);
+  return match ? `Closes ${match[1]}#${match[2]}` : undefined;
+}
+
 function pullRequestBody(card: WorkboardCard, headCommit: string): string {
   const proof = (card.metadata?.proof ?? [])
     .filter((entry) => entry.label === "ticket proof")
@@ -69,6 +76,7 @@ function pullRequestBody(card: WorkboardCard, headCommit: string): string {
   return [
     card.notes?.trim(),
     proof.length > 0 ? ["Ticket proof:", ...proof].join("\n") : undefined,
+    closesIssue(card),
     `Workboard card \`${card.id}\` at ${headCommit}.`,
   ]
     .filter(Boolean)

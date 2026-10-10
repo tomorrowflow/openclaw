@@ -149,6 +149,12 @@ export function createWorkboardTools(params: {
       parameters: strictObject({
         title: Type.String({ description: "Card title." }),
         notes: Type.Optional(Type.String({ description: "Card notes or acceptance criteria." })),
+        sourceUrl: Type.Optional(
+          Type.String({
+            description:
+              "Where the work came from. A GitHub issue URL makes the node ticket's PR close that issue.",
+          }),
+        ),
         status: Type.Optional(Type.String({ description: "Initial status." })),
         priority: Type.Optional(Type.String({ description: "low, normal, high, or urgent." })),
         labels: Type.Optional(Type.Array(Type.String(), { description: "Card labels." })),
