@@ -343,6 +343,26 @@ describe("node ticket questions", () => {
     expect(git(repos.hostRepo, "rev-parse", `factory/${card.id}`)).toBeTruthy();
   });
 
+  it("keeps the worktree of an answered ticket whose start claimed it before the swap", async () => {
+    const { store, card, worktree, handoffs, warn } = await finishNodeTicket({
+      messages: questionsReport,
+    });
+    await handoffs.resume(warn);
+    await store.addComment(card.id, { body: "Return []." }, undefined, "operator");
+    await store.move(card.id, "todo", undefined);
+    // A scheduled or exact start claims the card before it replaces the worktree record.
+    await store.claim(card.id, { ownerId: "dispatcher" });
+
+    await handoffs.resume(warn);
+
+    expect(existsSync(worktree)).toBe(true);
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("running");
+    expect(stored?.metadata?.automation?.target?.worktree?.handoff).toMatchObject({
+      phase: "questions",
+    });
+  });
+
   it("counts an operator's answer and bounces moves that carry no answer or skip to done", async () => {
     const { store, card, handoffs, warn } = await finishNodeTicket({ messages: questionsReport });
     await handoffs.resume(warn);

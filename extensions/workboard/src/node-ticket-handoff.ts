@@ -38,13 +38,15 @@ type HandoffCard = {
 function handoffCard(card: WorkboardCard): HandoffCard | undefined {
   const target = nodeTicketTarget(card);
   const worktree = target?.worktree;
-  // A rework start (D54) claims the card, so it is running, before it swaps
-  // out the published worktree record. That record's handoff is finished, not
-  // an import to resume.
+  // A rework start (D54) or an answered ticket's start claims the card, so it
+  // is running, before it swaps out the published or questions worktree
+  // record. Neither handoff is an import to resume; cleaning up after one
+  // would delete the worktree the start is about to reuse.
   if (
     !target ||
     !worktree?.handoff ||
     worktree.handoff.phase === "published" ||
+    worktree.handoff.phase === "questions" ||
     card.status !== "running" ||
     card.metadata?.archivedAt
   ) {
@@ -426,7 +428,7 @@ export function createNodeTicketHandoffs(params: {
               worktreePath: unanswered,
               kind: "reviewFrom",
               status: "review",
-              body: "This ticket stopped with open questions and has no commits to publish. Answer them in a comment and move it to todo, or archive the card to drop it.",
+              body: "This ticket stopped with open questions and has no commits to publish. Answer them in a comment and move it to todo, or archive the card; its node worktree stays until removed by hand.",
               applies: (current) => unansweredDone(current) === unanswered,
             });
           }
