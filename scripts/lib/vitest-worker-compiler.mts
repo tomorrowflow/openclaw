@@ -390,9 +390,17 @@ async function compileVitestWorkerArtifacts(directory: string): Promise<void> {
   }
   for (const [asset, relativeDestination] of [
     ...vitestWorkerRuntimeAssets.map((sourceAsset) => [sourceAsset, sourceAsset] as const),
-    ...preservedModuleBuildAssets.map(
-      (sourceAsset) => [sourceAsset, path.join("dist", legacyOutputPrefix, sourceAsset)] as const,
-    ),
+    // Fork: sync deletes upstream CI (.sandcastle/sync-prompt.md), so the workflow
+    // files only its release-script tests read are absent here; every other asset stays required.
+    ...preservedModuleBuildAssets
+      .filter(
+        (sourceAsset) =>
+          !sourceAsset.startsWith(".github/workflows/") ||
+          fs.existsSync(path.join(root, sourceAsset)),
+      )
+      .map(
+        (sourceAsset) => [sourceAsset, path.join("dist", legacyOutputPrefix, sourceAsset)] as const,
+      ),
   ]) {
     const source = path.join(root, asset);
     const destination = path.join(directory, relativeDestination);
