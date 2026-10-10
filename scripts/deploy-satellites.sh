@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Keep factory node satellites on the Gateway host's deployed OpenClaw build.
 #
-#   deploy-satellites.sh prepare   stage the deployed build next to each running node
-#   deploy-satellites.sh activate  switch each node to the staged build and restart it
+#   deploy-satellites.sh prepare-source  build the checked-out commit on source satellites
+#   deploy-satellites.sh prepare         stage the installed build next to each running node
+#   deploy-satellites.sh activate        switch each node to the staged build and restart it
 #
-# sync-and-deploy.sh starts `prepare` in the background once the new build is
-# installed (the Gateway still serves the old one) and runs `activate` only
+# sync-and-deploy.sh starts `prepare-source` in the background before its own
+# build (source satellites only need the commit), `prepare` once the new build
+# is installed (the Gateway still serves the old one), and `activate` only
 # after the cutover smoke passed, so a failed deploy never moves a satellite
 # ahead of its Gateway. Satellites run in parallel within each phase. Failures
 # are per satellite and never fail the Gateway deploy: the script reports them
@@ -25,6 +27,11 @@
 #   linux-tarball  a Linux node reached over SSH (key auth, passwordless sudo)
 #                  whose node user `factory` runs a CLI unpacked into
 #                  ~/.local/lib/openclaw from a packed copy of the global install.
+#   macos-source   a macOS node reached over SSH as its node user (<target> is
+#                  factory@host). Its native addons differ, so it builds the same
+#                  commit from a fork checkout in ~/factory/openclaw-src into
+#                  ~/.local/openclaw (npm --prefix); its LaunchDaemon wrapper puts
+#                  ~/.local/bin first on PATH. KeepAlive restarts the node.
 set -euo pipefail
 
 PHASE="${1:-}"
@@ -34,8 +41,8 @@ NODE_USER=factory
 GLOBAL_ROOT="$(npm root -g)/openclaw"
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10)
 
-[[ "$PHASE" == prepare || "$PHASE" == activate ]] || {
-  echo "usage: $(basename "$0") prepare|activate" >&2
+[[ "$PHASE" == prepare-source || "$PHASE" == prepare || "$PHASE" == activate ]] || {
+  echo "usage: $(basename "$0") prepare-source|prepare|activate" >&2
   exit 2
 }
 if [[ ! -f "$SATELLITES_FILE" ]]; then
@@ -44,9 +51,16 @@ if [[ ! -f "$SATELLITES_FILE" ]]; then
 fi
 mkdir -p "$LOG_DIR"
 
-# The build identity every satellite must end up on, from the installed CLI.
-SHA=$(cd /tmp && "$GLOBAL_ROOT/openclaw.mjs" --version | grep -o '([0-9a-f]*)' | tr -d '()')
-[[ -n "$SHA" ]] || { echo "[satellites] cannot read the installed build sha" >&2; exit 1; }
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FORK_REMOTE_URL="$(git -C "$REPO_DIR" remote get-url origin)"
+# The build identity every satellite must end up on: the commit about to be
+# built for prepare-source, otherwise the installed CLI's short sha.
+if [[ "$PHASE" == prepare-source ]]; then
+  SHA=$(git -C "$REPO_DIR" rev-parse HEAD)
+else
+  SHA=$(cd /tmp && "$GLOBAL_ROOT/openclaw.mjs" --version | grep -o '([0-9a-f]*)' | tr -d '()')
+fi
+[[ -n "$SHA" ]] || { echo "[satellites] cannot read the build sha" >&2; exit 1; }
 TARBALL="$HOME/openclaw-cli-$SHA.tar.zst"
 
 # as_node_user <target> <script>: run a bash script as the node user, locally
@@ -61,6 +75,34 @@ as_node_user() {
   fi
 }
 
+# as_mac <target> <script>: run a bash script as the macOS node user over SSH,
+# with the PATH its LaunchDaemon wrapper uses.
+as_mac() {
+  "${SSH[@]}" "$1" bash -s <<<"set -euo pipefail
+export PATH=\$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin CI=true COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+$2"
+}
+
+prepare-source_one() {
+  local name="$1" kind="$2" target="$3"
+  [[ "$kind" == macos-source ]] || { echo "nothing to build ($kind)"; return 0; }
+  # Staged beside the running install; the node keeps its files until activate.
+  as_mac "$target" "
+    SRC=\$HOME/factory/openclaw-src
+    [ -d \$SRC/.git ] || git clone --quiet $FORK_REMOTE_URL \$SRC
+    cd \$SRC
+    git fetch --quiet origin
+    git checkout --quiet --force --detach $SHA
+    corepack pnpm install --frozen-lockfile --reporter=silent
+    corepack pnpm build >/dev/null
+    node scripts/prepare-global-install-package-json.mjs
+    trap 'node scripts/prepare-global-install-package-json.mjs --restore' EXIT
+    rm -rf \$HOME/.local/openclaw.next
+    npm i -g . --install-links --prefix \$HOME/.local/openclaw.next --silent
+    echo $SHA > \$HOME/.local/openclaw.next/lib/node_modules/openclaw/.satellite-sha"
+  echo "built ${SHA:0:12} on ${target#*@}"
+}
+
 pack_tarball() {
   [[ -f "$TARBALL" ]] && return 0
   tar -I 'zstd -T0 -3' -cf "$TARBALL.partial" -C "$(dirname "$GLOBAL_ROOT")" openclaw
@@ -72,6 +114,7 @@ prepare_one() {
   local name="$1" kind="$2" target="$3"
   case "$kind" in
     local-systemd) echo "nothing to stage (global CLI)" ;;
+    macos-source) echo "staged by prepare-source" ;;
     linux-tarball)
       scp -q -o BatchMode=yes -o ConnectTimeout=10 "$TARBALL" "$target:/tmp/openclaw-cli-$SHA.tar.zst"
       "${SSH[@]}" "$target" "sudo chown $NODE_USER: /tmp/openclaw-cli-$SHA.tar.zst"
@@ -99,9 +142,46 @@ check_node() {
     openclaw --version | grep -q '($SHA)'"
 }
 
+# The macOS node has no unit to query; its KeepAlive brings the process back.
+check_mac_node() {
+  as_mac "$1" "
+    sleep 5
+    pgrep -f 'openclaw node run' >/dev/null
+    openclaw --version | grep -q '($SHA)'"
+}
+
 activate_one() {
   local name="$1" kind="$2" target="$3"
   case "$kind" in
+    macos-source)
+      as_mac "$target" "
+        cd \$HOME/.local
+        staged=\$(cat openclaw.next/lib/node_modules/openclaw/.satellite-sha 2>/dev/null || true)
+        live=\$(cat openclaw/lib/node_modules/openclaw/.satellite-sha 2>/dev/null || true)
+        if [ ! -d openclaw.next ] && [ \"\${live#$SHA}\" != \"\$live\" ]; then
+          : already on $SHA
+        elif [ -n \"\$staged\" ] && [ \"\${staged#$SHA}\" != \"\$staged\" ]; then
+          rm -rf openclaw.old
+          if [ -d openclaw ]; then mv openclaw openclaw.old; fi
+          mv openclaw.next openclaw
+          mkdir -p bin
+          ln -sfn ../openclaw/lib/node_modules/openclaw/openclaw.mjs bin/openclaw
+        else
+          echo 'no staged $SHA build' >&2
+          false
+        fi
+        pkill -f 'openclaw node run' || true"
+      if check_mac_node "$target"; then
+        as_mac "$target" "rm -rf \$HOME/.local/openclaw.old"
+      else
+        echo "new build did not come up; rolling back" >&2
+        as_mac "$target" "
+          cd \$HOME/.local
+          if [ -d openclaw.old ]; then rm -rf openclaw && mv openclaw.old openclaw; fi
+          pkill -f 'openclaw node run' || true" || true
+        return 1
+      fi
+      ;;
     local-systemd)
       as_node_user "$target" "systemctl --user restart openclaw-node"
       check_node "$target"
