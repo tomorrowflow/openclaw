@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
   WorkboardCard,
+  WorkboardCommentSource,
   WorkboardDeleteResult,
   WorkboardLink,
   WorkboardMetadata,
@@ -783,6 +784,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     id: string,
     input: WorkboardCommentInput,
     scope?: WorkboardMutationScope,
+    source?: WorkboardCommentSource,
   ): Promise<WorkboardCard> {
     const now = Date.now();
     const body = normalizeBoundedString(
@@ -794,7 +796,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     if (!body) {
       throw new Error("comment body is required.");
     }
-    const comment = { id: randomUUID(), body, createdAt: now };
+    const comment = { id: randomUUID(), body, createdAt: now, ...(source ? { source } : {}) };
     return await this.updateMetadata(id, (existing) => {
       assertCanMutateClaimedCard(existing, scope);
       return {

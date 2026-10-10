@@ -202,7 +202,9 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.delete", WRITE_SCOPE, ({ params: input }) =>
     store.delete(readId(input), { expectedUpdatedAt: readExpectedUpdatedAt(input) }),
   );
-  cardMutation("comment", (id, input) => store.addComment(id, input));
+  cardMutation("comment", (id, input) =>
+    store.addComment(id, { body: input.body }, undefined, "operator"),
+  );
   cardMutation("link", (id, input) => store.addLink(id, input));
   register("workboard.cards.linkDependency", WRITE_SCOPE, ({ params: input }) => {
     const { parentId, childId } = input;

@@ -808,15 +808,16 @@ describe("Workboard lifecycle service", () => {
       comment: "Parser accepts empty input",
     },
     {
-      name: "open questions block the card with the questions",
+      name: "open questions wait in review with the questions",
       success: true,
       messages: report({
         outcome: "needs_input",
         summary: "Two schemas fit",
         questions: ["Keep v1 fields?"],
       }),
-      status: "blocked",
-      comment: "Needs input: Two schemas fit\n- Keep v1 fields?",
+      status: "review",
+      comment:
+        "Needs input: Two schemas fit\n- Keep v1 fields?\n\nAnswer in a comment, then move the card to todo; the same session resumes with the answer.",
     },
     {
       name: "done with failing proof blocks the card",
@@ -878,8 +879,8 @@ describe("Workboard lifecycle service", () => {
     },
     {
       name: "a block reason longer than a comment",
-      value: { outcome: "needs_input", summary: "x".repeat(1500), questions: ["y".repeat(1500)] },
-      lead: "Needs input: xxx",
+      value: { outcome: "blocked", summary: "x".repeat(1500), questions: ["y".repeat(1500)] },
+      lead: "Blocked: xxx",
     },
     {
       name: "failing proof with oversized report fields",

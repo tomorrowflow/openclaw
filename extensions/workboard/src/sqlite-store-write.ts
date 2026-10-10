@@ -174,6 +174,7 @@ export function insertCard(db: DatabaseSync, card: WorkboardCard): void {
     body: (entry) => entry.body,
     created_at: (entry) => entry.createdAt,
     updated_at: (entry) => bindNull(entry.updatedAt),
+    source: (entry) => bindNull(entry.source),
   });
   insertChildren(db, "workboard_card_links", card.id, metadata?.links, {
     id: (entry) => entry.id,

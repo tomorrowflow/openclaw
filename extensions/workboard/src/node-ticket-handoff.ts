@@ -38,13 +38,15 @@ type HandoffCard = {
 function handoffCard(card: WorkboardCard): HandoffCard | undefined {
   const target = nodeTicketTarget(card);
   const worktree = target?.worktree;
-  // A rework start (D54) claims the card, so it is running, before it swaps
-  // out the published worktree record. That record's handoff is finished, not
-  // an import to resume.
+  // A rework start (D54) or an answered ticket's start claims the card, so it
+  // is running, before it swaps out the published or questions worktree
+  // record. Neither handoff is an import to resume; cleaning up after one
+  // would delete the worktree the start is about to reuse.
   if (
     !target ||
     !worktree?.handoff ||
     worktree.handoff.phase === "published" ||
+    worktree.handoff.phase === "questions" ||
     card.status !== "running" ||
     card.metadata?.archivedAt
   ) {
@@ -310,7 +312,8 @@ export type WorkboardNodeTicketStart = (
  * D56: a published ticket moved back to todo starts its rework round once it
  * carries a review comment, waits while the node-ticket pool is full, and
  * goes back to backlog with the next step when no review comment says what
- * should change.
+ * should change. A ticket waiting with questions resumes the same way once a
+ * comment answers them, and goes back to review without one.
  */
 async function reopenNodeTicket(params: {
   store: WorkboardStore;
@@ -324,12 +327,16 @@ async function reopenNodeTicket(params: {
     return;
   }
   const { worktreePath, round } = reopen;
+  const rework = reopen.kind === "rework";
+  const what = rework ? `Rework round ${round}` : "The answer";
   if (!reopen.reviewed) {
     await store.addNodeTicketNotice(card.id, {
       worktreePath,
       kind: "reviewFrom",
-      status: "backlog",
-      body: `Reopened without a review comment; add what should change and move it to todo again to start rework round ${round}.`,
+      status: rework ? "backlog" : "review",
+      body: rework
+        ? `Reopened without a review comment; add what should change and move it to todo again to start rework round ${round}.`
+        : "Moved to todo without an answer; answer the questions in a comment and move it to todo again to resume the session.",
       applies: (current) => nodeTicketReopen(current, params.now())?.reviewed === false,
     });
     return;
@@ -352,7 +359,7 @@ async function reopenNodeTicket(params: {
       await store.addNodeTicketNotice(card.id, {
         worktreePath,
         kind: "slotWait",
-        body: `Rework round ${round} waits for a node-ticket slot; it starts when a running node ticket reaches review.`,
+        body: `${what} waits for a node-ticket slot; it starts when a running node ticket reaches review.`,
         applies: (latest) => nodeTicketReopen(latest, params.now())?.slotWaitNoted === false,
       });
     }
@@ -361,16 +368,26 @@ async function reopenNodeTicket(params: {
   await store.block(
     card.id,
     {
-      reason: `Rework round ${round} could not start: ${failure.error}\nFix the cause, then move the card to todo again.`,
+      reason: `${what} could not start: ${failure.error}\nFix the cause, then move the card to todo again.`,
     },
     null,
   );
 }
 
+/** A ticket moved to done while it waits with questions has no commits to publish. */
+function unansweredDone(card: WorkboardCard): string | undefined {
+  const worktree = nodeTicketTarget(card)?.worktree;
+  return card.status === "done" &&
+    !card.metadata?.archivedAt &&
+    worktree?.handoff?.phase === "questions"
+    ? worktree.path
+    : undefined;
+}
+
 /**
  * Owns moving finished node tickets from a pending handoff to review,
- * accepted ones from done to a draft PR, and reopened published ones into
- * their next rework round. The agent_end report and card changes start it
+ * accepted ones from done to a draft PR, reopened published ones into
+ * their next rework round, and answered ones back into their session. The agent_end report and card changes start it
  * right away and the lifecycle sweep resumes it after a restart; each card
  * runs at most once at a time.
  */
@@ -389,7 +406,8 @@ export function createNodeTicketHandoffs(params: {
         const item = handoffCard(card);
         const publish = item ? undefined : publishCandidate(card);
         const reopen = item || publish ? undefined : nodeTicketReopen(card, now());
-        if ((!item && !publish && !reopen) || inFlight.has(card.id)) {
+        const unanswered = unansweredDone(card);
+        if ((!item && !publish && !reopen && !unanswered) || inFlight.has(card.id)) {
           continue;
         }
         inFlight.add(card.id);
@@ -403,8 +421,16 @@ export function createNodeTicketHandoffs(params: {
               item: publish,
               now,
             });
-          } else {
+          } else if (reopen) {
             await reopenNodeTicket({ store: params.store, start: params.start, card, now });
+          } else if (unanswered) {
+            await params.store.addNodeTicketNotice(card.id, {
+              worktreePath: unanswered,
+              kind: "reviewFrom",
+              status: "review",
+              body: "This ticket stopped with open questions and has no commits to publish. Answer them in a comment and move it to todo, or archive the card; its node worktree stays until removed by hand.",
+              applies: (current) => unansweredDone(current) === unanswered,
+            });
           }
         } catch (error) {
           warn(`workboard node handoff failed for card ${card.id}: ${formatErrorMessage(error)}`);

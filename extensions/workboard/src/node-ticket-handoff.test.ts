@@ -12,7 +12,9 @@ import {
   git,
   startNodeCard,
 } from "./node-ticket.test-support.js";
+import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
+import { createWorkboardTools } from "./tools.js";
 
 const roots: string[] = [];
 
@@ -22,22 +24,33 @@ afterEach(() => {
   }
 });
 
-const doneReport = [
-  {
-    role: "assistant",
-    content: `Done.\n\n\`\`\`workboard-report\n${JSON.stringify({
-      outcome: "done",
-      summary: "Parser accepts empty input",
-      proof: [{ command: "pytest", status: "passed" }],
-    })}\n\`\`\``,
-  },
-];
+function reportMessages(report: Record<string, unknown>) {
+  return [
+    {
+      role: "assistant",
+      content: `Done.\n\n\`\`\`workboard-report\n${JSON.stringify(report)}\n\`\`\``,
+    },
+  ];
+}
+
+const doneReport = reportMessages({
+  outcome: "done",
+  summary: "Parser accepts empty input",
+  proof: [{ command: "pytest", status: "passed" }],
+});
+
+const questionsReport = reportMessages({
+  outcome: "needs_input",
+  summary: "Empty input handling is ambiguous",
+  questions: ["Should empty input return [] or raise? Default: return []."],
+});
 
 /** Starts a node card on local repos and lets it commit `files` in its worktree. */
 async function finishNodeTicket(params: {
   files?: Record<string, string>;
   uncommitted?: boolean;
   originCommits?: number;
+  messages?: unknown[];
 }) {
   const root = mkdtempSync(path.join(os.tmpdir(), "workboard-handoff-"));
   roots.push(root);
@@ -59,7 +72,7 @@ async function finishNodeTicket(params: {
   }
   await syncWorkboardAgentEnded({
     store,
-    event: { runId, success: true, messages: doneReport },
+    event: { runId, success: true, messages: params.messages ?? doneReport },
     context: { runId, sessionKey },
   });
   const warn = vi.fn();
@@ -266,6 +279,117 @@ describe("node ticket handoff", () => {
     expect(stored?.metadata?.comments?.at(-1)?.body).toMatch(
       /^Bundle import failed: node mac-factory failed `git .* bundle create .*`: .*empty bundle/,
     );
+  });
+});
+
+describe("node ticket questions", () => {
+  it("waits in review with the questions, then resumes the same session with dev's answer", async () => {
+    const { store, card, repos, worktree, handoffs, warn, gateway } = await finishNodeTicket({
+      messages: questionsReport,
+    });
+    const firstSession = gateway.respond.mock.calls.find(
+      ([method]) => method === "sessions.create",
+    )?.[1]?.key;
+
+    await handoffs.resume(warn);
+
+    const asked = await store.get(card.id);
+    expect(asked?.status).toBe("review");
+    expect(asked?.metadata?.claim).toBeUndefined();
+    expect(asked?.metadata?.automation?.target?.worktree?.handoff).toMatchObject({
+      phase: "questions",
+    });
+    expect(asked?.metadata?.comments?.at(-1)?.body).toContain(
+      "Needs input: Empty input handling is ambiguous\n- Should empty input return [] or raise?",
+    );
+    expect(asked?.events?.some((event) => event.toStatus === "blocked")).toBe(false);
+    expect(existsSync(worktree)).toBe(true);
+
+    const devTools = new Map(
+      createWorkboardTools({ store, context: { agentId: "dev" } }).map((tool) => [tool.name, tool]),
+    );
+    await devTools
+      .get("workboard_comment")
+      ?.execute("answer", { id: card.id, body: "Return []; the CLI treats it as no-op." });
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    const resumed = await store.get(card.id);
+    expect(resumed?.status).toBe("running");
+    expect(resumed?.metadata?.automation?.target?.worktree).toMatchObject({
+      path: worktree,
+      questions: { rounds: 1, operatorAnswers: 0 },
+    });
+    const [, launch] =
+      gateway.respond.mock.calls.findLast(([method]) => method === "sessions.create") ?? [];
+    expect(launch).toMatchObject({ key: firstSession, cwd: worktree });
+    expect(launch?.message).toContain("## Answers to your questions");
+    expect(launch?.message).toContain("Return []; the CLI treats it as no-op.");
+    expect(launch?.message).not.toContain("Review rework");
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId: cardRunId(resumed!), success: true, messages: doneReport },
+      context: { runId: cardRunId(resumed!), sessionKey: cardSessionKey(resumed!) },
+    });
+    await handoffs.resume(warn);
+
+    const imported = await store.get(card.id);
+    expect(imported?.status).toBe("review");
+    expect(imported?.metadata?.automation?.target?.worktree?.handoff).toMatchObject({
+      phase: "imported",
+    });
+    expect(git(repos.hostRepo, "rev-parse", `factory/${card.id}`)).toBeTruthy();
+  });
+
+  it("keeps the worktree of an answered ticket whose start claimed it before the swap", async () => {
+    const { store, card, worktree, handoffs, warn } = await finishNodeTicket({
+      messages: questionsReport,
+    });
+    await handoffs.resume(warn);
+    await store.addComment(card.id, { body: "Return []." }, undefined, "operator");
+    await store.move(card.id, "todo", undefined);
+    // A scheduled or exact start claims the card before it replaces the worktree record.
+    await store.claim(card.id, { ownerId: "dispatcher" });
+
+    await handoffs.resume(warn);
+
+    expect(existsSync(worktree)).toBe(true);
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("running");
+    expect(stored?.metadata?.automation?.target?.worktree?.handoff).toMatchObject({
+      phase: "questions",
+    });
+  });
+
+  it("counts an operator's answer and bounces moves that carry no answer or skip to done", async () => {
+    const { store, card, handoffs, warn } = await finishNodeTicket({ messages: questionsReport });
+    await handoffs.resume(warn);
+
+    await store.move(card.id, "done", undefined);
+    await handoffs.resume(warn);
+    const refused = await store.get(card.id);
+    expect(refused?.status).toBe("review");
+    expect(refused?.metadata?.comments?.at(-1)?.body).toMatch(
+      /^This ticket stopped with open questions/,
+    );
+
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+    const unanswered = await store.get(card.id);
+    expect(unanswered?.status).toBe("review");
+    expect(unanswered?.metadata?.comments?.at(-1)?.body).toMatch(
+      /^Moved to todo without an answer/,
+    );
+
+    await store.addComment(card.id, { body: "Raise ValueError." }, undefined, "operator");
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+    expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.questions).toEqual({
+      rounds: 1,
+      operatorAnswers: 1,
+    });
   });
 });
 

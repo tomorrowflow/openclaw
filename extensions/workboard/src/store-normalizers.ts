@@ -73,7 +73,7 @@ import type {
   WorkboardProofInput,
 } from "./store-inputs.js";
 import { normalizeExecutionTarget } from "./store-target-normalizers.js";
-import { normalizeBoundedString } from "./store-value-normalizers.js";
+import { normalizeBoundedString, normalizeCommentSource } from "./store-value-normalizers.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
 
 export function normalizeBoardId(value: unknown, fallback?: string): string | undefined {
@@ -526,7 +526,14 @@ function normalizeComment(record: Record<string, unknown>): WorkboardComment | n
     return null;
   }
   const updatedAt = normalizeTimestamp(record.updatedAt, 0);
-  return { id, body, createdAt, ...(updatedAt ? { updatedAt } : {}) };
+  const source = normalizeCommentSource(record.source);
+  return {
+    id,
+    body,
+    createdAt,
+    ...(updatedAt ? { updatedAt } : {}),
+    ...(source ? { source } : {}),
+  };
 }
 
 function normalizeLink(record: unknown): WorkboardLink | null {

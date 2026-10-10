@@ -114,4 +114,26 @@ describe("projectWorkboardTrust", () => {
       }),
     ]);
   });
+
+  it("counts a question an operator answered as a human touch, one an agent answered not", () => {
+    const answered = (operatorAnswers: number) => ({
+      ...published(MONDAY),
+      questions: { rounds: 1, operatorAnswers },
+    });
+    const cards = [
+      ticket("agent", { createdAt: MONDAY, worktree: answered(0) }),
+      ticket("operator", { createdAt: MONDAY, worktree: answered(1) }),
+    ];
+
+    const trust = projectWorkboardTrust(cards, "app", MONDAY);
+
+    expect(trust.total).toMatchObject({
+      accepted: 2,
+      cleanAccepted: 1,
+      blocked: 0,
+      questionRounds: 2,
+      operatorAnswers: 1,
+    });
+    expect(trust.weeks.at(-1)).toMatchObject({ accepted: 2, autonomous: 1 });
+  });
 });

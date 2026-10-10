@@ -17,6 +17,7 @@ import {
   iterateSqliteQuerySync,
   sqliteStringSet,
 } from "openclaw/plugin-sdk/sqlite-worker-runtime";
+import { normalizeCommentSource } from "./store-value-normalizers.js";
 export type Row = Record<string, unknown>;
 
 export function jsonValue(value: unknown): string | null {
@@ -288,6 +289,7 @@ function readMetadata(
       body: requiredString(child, "body"),
       createdAt: requiredNumber(child, "created_at"),
       updatedAt: numberValue(child, "updated_at"),
+      source: normalizeCommentSource(stringValue(child, "source")),
     });
   });
   const links = childRows(db, "workboard_card_links", cardId, preloaded).map((child) => {

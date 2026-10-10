@@ -4,6 +4,7 @@ import type {
   WorkboardCard,
   WorkboardComment,
   WorkboardExecutionTarget,
+  WorkboardNodeQuestions,
   WorkboardNodeRework,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
@@ -41,11 +42,13 @@ export function nodeTicketTarget(card: WorkboardCard): NodeTicketTarget | undefi
 }
 
 /**
- * A published ticket moved back to todo (D56). It starts its next rework
- * round once a card comment newer than the publish (and Workboard's own
- * notices since) says what should change.
+ * A published ticket moved back to todo (D56), or a ticket waiting with
+ * questions moved to todo. It starts its next rework round, or resumes with
+ * the answer, once a card comment newer than the publish or the questions
+ * (and Workboard's own notices since) says what should change.
  */
 export type NodeTicketReopen = {
+  kind: "rework" | "answer";
   worktreePath: string;
   round: number;
   reviewed: boolean;
@@ -53,18 +56,20 @@ export type NodeTicketReopen = {
 };
 
 /**
- * The review feedback for a published ticket's next rework round: card
- * comments newer than the publish and Workboard's own notices since. The slot
- * wait notice is written after a review comment and is not feedback either.
+ * The review feedback for a published ticket's next rework round, or the
+ * answers to a ticket's questions: card comments newer than the publish or
+ * the questions and Workboard's own notices since. The slot wait notice is
+ * written after a review comment and is not feedback either.
  */
 export function nodeTicketReviewComments(card: WorkboardCard): WorkboardComment[] {
   const handoff = nodeTicketTarget(card)?.worktree?.handoff;
-  if (handoff?.phase !== "published") {
+  if (handoff?.phase !== "published" && handoff?.phase !== "questions") {
     return [];
   }
-  const reviewFrom = handoff.reviewFrom ?? handoff.publishedAt;
+  const from =
+    handoff.reviewFrom ?? (handoff.phase === "published" ? handoff.publishedAt : handoff.askedAt);
   return (card.metadata?.comments ?? []).filter(
-    (comment) => comment.createdAt > reviewFrom && comment.createdAt !== handoff.slotWaitNotedAt,
+    (comment) => comment.createdAt > from && comment.createdAt !== handoff.slotWaitNotedAt,
   );
 }
 
@@ -74,7 +79,7 @@ export function nodeTicketReopen(card: WorkboardCard, now: number): NodeTicketRe
   const claim = card.metadata?.claim;
   if (
     !worktree ||
-    handoff?.phase !== "published" ||
+    (handoff?.phase !== "published" && handoff?.phase !== "questions") ||
     // Starting a card with finished parents promotes it to ready first.
     (card.status !== "todo" && card.status !== "ready") ||
     card.metadata?.archivedAt ||
@@ -83,8 +88,12 @@ export function nodeTicketReopen(card: WorkboardCard, now: number): NodeTicketRe
     return undefined;
   }
   return {
+    kind: handoff.phase === "published" ? "rework" : "answer",
     worktreePath: worktree.path,
-    round: (worktree.rework?.round ?? 0) + 1,
+    round:
+      handoff.phase === "published"
+        ? (worktree.rework?.round ?? 0) + 1
+        : (worktree.questions?.rounds ?? 0) + 1,
     reviewed: nodeTicketReviewComments(card).length > 0,
     slotWaitNoted: handoff.slotWaitNotedAt !== undefined,
   };
@@ -167,10 +176,31 @@ export async function runNodeCommand(
 }
 
 /**
+ * Counts an answered question round when the ticket resumes from its
+ * questions; an operator's comment among the answers makes it a human touch.
+ */
+function answeredQuestions(
+  card: WorkboardCard,
+  previous: WorkboardNodeWorktree | undefined,
+): WorkboardNodeQuestions | undefined {
+  if (previous?.handoff?.phase !== "questions") {
+    return previous?.questions;
+  }
+  const byOperator = nodeTicketReviewComments(card).some(
+    (comment) => comment.source === "operator",
+  );
+  return {
+    rounds: (previous.questions?.rounds ?? 0) + 1,
+    operatorAnswers: (previous.questions?.operatorAnswers ?? 0) + (byOperator ? 1 : 0),
+  };
+}
+
+/**
  * Creates the card's worktree in the node's own clone; the branch name is what
  * D40 bundles back. A published ticket reopened for review rework (D54)
  * restarts at the draft PR branch tip on origin, so commits a reviewer pushed
  * are kept, and keeps the original base so the next import carries them too.
+ * A ticket resuming with answers to its questions reuses its worktree as is.
  */
 export async function createNodeTicketWorktree(params: {
   runtime: WorkboardNodeTicketRuntime;
@@ -187,6 +217,8 @@ export async function createNodeTicketWorktree(params: {
     );
   }
   const published = previous?.handoff?.phase === "published" ? previous.handoff : undefined;
+  const questions = answeredQuestions(card, previous);
+  const kept = questions ? { questions } : {};
   const git = (...args: string[]) =>
     runNodeCommand(runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);
   let rework: WorkboardNodeRework | undefined;
@@ -245,17 +277,18 @@ export async function createNodeTicketWorktree(params: {
     }
     // A re-run after earlier commits must bundle from the original base, not the branch tip.
     if (previous?.path === worktreePath) {
-      const kept = rework ?? previous.rework;
+      const keptRework = rework ?? previous.rework;
       return {
         path: worktreePath,
         branch,
         baseCommit: previous.baseCommit,
-        ...(kept ? { rework: kept } : {}),
+        ...(keptRework ? { rework: keptRework } : {}),
+        ...kept,
       };
     }
   }
   if (previous && rework) {
-    return { path: worktreePath, branch, baseCommit: previous.baseCommit, rework };
+    return { path: worktreePath, branch, baseCommit: previous.baseCommit, rework, ...kept };
   }
   const baseCommit = await runNodeCommand(runtime, target.nodeId, [
     "git",
@@ -267,7 +300,7 @@ export async function createNodeTicketWorktree(params: {
   if (!/^[0-9a-f]{40,64}$/.test(baseCommit)) {
     throw new Error(`node ${target.nodeId} reported an invalid base commit for ${worktreePath}`);
   }
-  return { path: worktreePath, branch, baseCommit };
+  return { path: worktreePath, branch, baseCommit, ...kept };
 }
 
 /** Starts a fresh Claude Code session on the node, in the worktree, under the card's session key. */
@@ -324,14 +357,26 @@ export function buildNodeTicketMessage(params: {
   worktree: WorkboardNodeWorktree;
   context: string;
 }): string {
-  const rework = params.worktree.rework;
-  // The card still carries its published worktree record when the round starts.
-  const feedback = rework
-    ? nodeTicketReviewComments(params.card).slice(-REWORK_FEEDBACK_MAX_ENTRIES)
-    : [];
+  // The card still carries its published or questions record when the round starts.
+  const answering = nodeTicketTarget(params.card)?.worktree?.handoff?.phase === "questions";
+  const rework = answering ? undefined : params.worktree.rework;
+  const feedback =
+    rework || answering
+      ? nodeTicketReviewComments(params.card).slice(-REWORK_FEEDBACK_MAX_ENTRIES)
+      : [];
   return [
     `Work on this ticket: ${params.card.title}`,
     "",
+    ...(answering
+      ? [
+          "## Answers to your questions",
+          `You stopped with open questions. Continue the ticket in the same worktree with the answers ${feedback.length > 0 ? "below" : "in the recent comments below"}.`,
+          "",
+          ...(feedback.length > 0
+            ? [feedback.map((comment) => comment.body.trim()).join("\n\n---\n\n"), ""]
+            : []),
+        ]
+      : []),
     ...(rework
       ? [
           `## Review rework, round ${rework.round}`,
@@ -359,7 +404,7 @@ export function buildNodeTicketMessage(params: {
     '{"outcome":"done|blocked|needs_input","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],"questions":["…"]}',
     "```",
     "",
-    "Use `done` only when the work is committed and its proof passed. Use `needs_input` for open questions and `blocked` for anything else that stops you.",
+    "Use `done` only when the work is committed and its proof passed. Use `needs_input` for open questions, each with your proposed default; the answers come back as the next turn of this session. Use `blocked` for anything else that stops you.",
     "Proof entries describe the final state. Any `failed` entry blocks a `done` report, so a test you ran red before the fix goes in the note of its passing entry, not in an entry of its own.",
     "",
     params.context,
@@ -463,8 +508,10 @@ function blockReason(report: NodeTicketStopReport): string {
 /**
  * Maps a finished node ticket turn onto its card. A done report records its
  * proof and marks the worktree's handoff pending, so only the bundle import
- * moves the card to review; every other ending blocks the card so `dev` sees
- * the reason. Proof that did not pass also blocks.
+ * moves the card to review. A needs_input report posts the questions and
+ * waits in review for an answer; the agent_end nudge wakes the board's
+ * automation so `dev` can answer. Every other ending blocks the card so `dev`
+ * sees the reason. Proof that did not pass also blocks.
  */
 export async function applyNodeTicketReport(params: {
   store: WorkboardStore;
@@ -483,6 +530,26 @@ export async function applyNodeTicketReport(params: {
     return;
   }
   const { report } = parsed;
+  const worktree = nodeTicketTarget(card)?.worktree;
+  if (report.outcome === "needs_input" && worktree) {
+    await store.addComment(
+      card.id,
+      {
+        body: capText(
+          `${blockReason(report)}\n\nAnswer in a comment, then move the card to todo; the same session resumes with the answer.`,
+          MAX_COMMENT_BODY_CHARS,
+        ),
+      },
+      scope,
+    );
+    await store.setNodeHandoff(
+      card.id,
+      { worktreePath: worktree.path, handoff: { phase: "questions", askedAt: Date.now() } },
+      scope,
+    );
+    await store.releaseClaim(card.id, { ...scope, status: "review" });
+    return;
+  }
   if (report.outcome !== "done") {
     await block(blockReason(report));
     return;
@@ -500,7 +567,6 @@ export async function applyNodeTicketReport(params: {
   if (report.summary) {
     await store.addComment(card.id, { body: report.summary }, scope);
   }
-  const worktree = nodeTicketTarget(card)?.worktree;
   if (!worktree) {
     await block("Reported done, but the card has no recorded node worktree to import.");
     return;

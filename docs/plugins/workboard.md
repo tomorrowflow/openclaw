@@ -533,10 +533,21 @@ cards then block at start with the core `model not allowed` reason.
    `factory/<cardId>` at `baseRef` (default `origin/HEAD`) in
    `<worktreesRoot>/wb-<cardId>`, and starts the session there.
 2. **Report:** the session ends with a `workboard-report` block. A `done`
-   report with passing proof starts the import; anything else blocks the card,
+   report with passing proof starts the import. A `needs_input` report waits
+   for an answer (see **Questions**). Anything else blocks the card,
    including a `done` report with any `failed` proof entry. The brief tells the
    session to record red-first evidence (a test that failed before the fix) in
    the note of its passing entry.
+   **Questions:** a `needs_input` report posts its questions as a card
+   comment and moves the card to `review`, keeping the node worktree. To
+   answer, add a comment and move the card to `todo`. The same session resumes
+   in the same worktree, and its brief carries the answer in full. A move to
+   `todo` without a newer comment, or a move to `done`, sends the card back to
+   `review` with a comment naming the next step. When the board has an
+   automation job, the end of the ticket's turn nudges it, so the assignee
+   agent can answer. The trust KPIs count answered question rounds. A round an
+   operator answered (a comment from the Control UI or the Gateway) is a human
+   touch; a round an agent answered with `workboard_comment` is not.
 3. **Import:** the node bundles the branch to `<worktreesRoot>/wb-<cardId>.bundle`
    and the Gateway fetches it with File Transfer, so the node's
    `allowReadPaths` must cover `<worktreesRoot>/*.bundle`. The host clone
