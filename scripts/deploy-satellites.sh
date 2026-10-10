@@ -89,10 +89,11 @@ prepare-source_one() {
   # Staged beside the running install; the node keeps its files until activate.
   as_mac "$target" "
     SRC=\$HOME/factory/openclaw-src
-    [ -d \$SRC/.git ] || git clone --quiet $FORK_REMOTE_URL \$SRC
+    # Shallow: the fork's full history is many GB; the build needs one commit.
+    [ -d \$SRC/.git ] || git init --quiet \$SRC
     cd \$SRC
-    git fetch --quiet origin
-    git checkout --quiet --force --detach $SHA
+    git fetch --quiet --depth 1 $FORK_REMOTE_URL $SHA
+    git checkout --quiet --force --detach FETCH_HEAD
     corepack pnpm install --frozen-lockfile --reporter=silent
     corepack pnpm build >/dev/null
     node scripts/prepare-global-install-package-json.mjs
@@ -183,6 +184,9 @@ activate_one() {
       fi
       ;;
     local-systemd)
+      # No rollback here: this node shares the Gateway's global install, which
+      # the deploy already moved forward; a failure surfaces as a satellite
+      # warning and is fixed by the deploy's own rollback or a redeploy.
       as_node_user "$target" "systemctl --user restart openclaw-node"
       check_node "$target"
       ;;
