@@ -841,3 +841,4 @@ owner.
 - [Manage plugins](/plugins/manage-plugins)
 - [Sessions](/concepts/session)
 - [Managed worktrees](/concepts/managed-worktrees)
+- [Workboard build nodes](/plugins/workboard-node-setup)

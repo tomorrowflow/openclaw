@@ -2140,6 +2140,10 @@
     "target": "Workboard 插件"
   },
   {
+    "source": "Workboard build nodes",
+    "target": "Workboard 构建节点"
+  },
+  {
     "source": "workboard",
     "target": "workboard"
   },
