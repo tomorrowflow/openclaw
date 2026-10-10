@@ -360,6 +360,7 @@ export function buildNodeTicketMessage(params: {
     "```",
     "",
     "Use `done` only when the work is committed and its proof passed. Use `needs_input` for open questions and `blocked` for anything else that stops you.",
+    "Proof entries describe the final state. Any `failed` entry blocks a `done` report, so a test you ran red before the fix goes in the note of its passing entry, not in an entry of its own.",
     "",
     params.context,
   ].join("\n");
