@@ -393,6 +393,17 @@ export type WorkboardOrchestrationSettings = {
    * linked session. Operator-set only; agent board tools cannot write it.
    */
   defaultTarget?: Omit<WorkboardExecutionTarget, "worktree">;
+  /**
+   * Label routes ahead of `defaultTarget`: a new card takes the target of the
+   * first route sharing one of its labels, under the same skip rules. Each
+   * label belongs to at most one route. Operator-set only.
+   */
+  targetRoutes?: WorkboardTargetRoute[];
+};
+
+export type WorkboardTargetRoute = {
+  labels: string[];
+  target: Omit<WorkboardExecutionTarget, "worktree">;
 };
 
 export type WorkboardNotificationSubscription = {

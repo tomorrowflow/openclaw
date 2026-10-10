@@ -31,7 +31,11 @@ import type {
   WorkboardListOptions,
   WorkboardStatsResult,
 } from "./store-inputs.js";
-import { normalizeBoardId, normalizeBoardIdRequired } from "./store-normalizers.js";
+import {
+  normalizeBoardId,
+  normalizeBoardIdRequired,
+  normalizeLabels,
+} from "./store-normalizers.js";
 import { freezeCardList, readCards } from "./store-read.js";
 import { WorkboardStoreRuntime } from "./store-runtime.js";
 import type { WorkboardTargetModelCheck } from "./target-model-policy.js";
@@ -222,8 +226,9 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
   }
 
   /**
-   * New work on a board inherits its assignee and, on a project board, its
-   * node target; explicit choices and linked sessions keep theirs.
+   * New work on a board inherits its assignee and, on a project board, the
+   * node target of its first matching label route or else the board default;
+   * explicit choices and linked sessions keep theirs.
    */
   protected async withBoardDefaults(
     metadata: WorkboardMetadata,
@@ -240,11 +245,14 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
     const agentId = requestedAgentId ?? orchestration?.defaultAssignee;
     const requestedAutomation = isRecord(input.metadata) ? input.metadata.automation : undefined;
     const workspace = automation?.workspace;
+    const labels = normalizeLabels(input.labels);
     const target =
       (isRecord(requestedAutomation) && Object.hasOwn(requestedAutomation, "target")) ||
       (workspace && workspace.kind !== "scratch")
         ? undefined
-        : orchestration?.defaultTarget;
+        : (orchestration?.targetRoutes?.find((route) =>
+            route.labels.some((label) => labels.includes(label)),
+          )?.target ?? orchestration?.defaultTarget);
     return {
       metadata: target ? { ...metadata, automation: { ...automation, target } } : metadata,
       ...(agentId ? { agentId } : {}),
@@ -269,20 +277,30 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
    */
   private assertTargetModelAllowed(input: WorkboardBoardInput, board: WorkboardBoardMetadata) {
     const requested = isRecord(input.orchestration) ? input.orchestration : {};
-    const model = board.orchestration?.defaultTarget?.model;
-    if (
-      !this.checkTargetModel ||
-      !model ||
-      (!Object.hasOwn(requested, "defaultTarget") && !Object.hasOwn(requested, "defaultAssignee"))
-    ) {
+    const orchestration = board.orchestration;
+    if (!this.checkTargetModel || !orchestration) {
       return;
     }
-    const agentId = board.orchestration?.defaultAssignee;
-    const refusal = this.checkTargetModel({ agentId, model });
-    if (refusal) {
-      throw new Error(
-        `Board ${board.id} default target model ${model} is not allowed for ${agentId ? `agent ${agentId}` : "the default agent"} (${refusal}). Add it to that agent's modelPolicy.allow or choose an allowed model.`,
-      );
+    const assigneeChanged = Object.hasOwn(requested, "defaultAssignee");
+    const targets = [
+      ...(assigneeChanged || Object.hasOwn(requested, "defaultTarget")
+        ? [{ kind: "default", model: orchestration.defaultTarget?.model }]
+        : []),
+      ...(assigneeChanged || Object.hasOwn(requested, "targetRoutes")
+        ? (orchestration.targetRoutes ?? []).map((route) => ({
+            kind: "route",
+            model: route.target.model,
+          }))
+        : []),
+    ];
+    const agentId = orchestration.defaultAssignee;
+    for (const { kind, model } of targets) {
+      const refusal = model ? this.checkTargetModel({ agentId, model }) : undefined;
+      if (refusal) {
+        throw new Error(
+          `Board ${board.id} ${kind} target model ${model} is not allowed for ${agentId ? `agent ${agentId}` : "the default agent"} (${refusal}). Add it to that agent's modelPolicy.allow or choose an allowed model.`,
+        );
+      }
     }
   }
 

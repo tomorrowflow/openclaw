@@ -2,11 +2,12 @@ import {
   createDefaultWorkboardSessionsBoardSpec,
   type WorkboardBoardMetadata,
   type WorkboardOrchestrationSettings,
+  type WorkboardTargetRoute,
 } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { WorkboardBoardInput } from "./store-inputs.js";
-import { normalizeBoardId, normalizeWorkspace } from "./store-normalizers.js";
+import { normalizeBoardId, normalizeLabels, normalizeWorkspace } from "./store-normalizers.js";
 import { normalizeExecutionTarget } from "./store-target-normalizers.js";
 import { normalizeBoundedString } from "./store-value-normalizers.js";
 
@@ -116,12 +117,53 @@ function normalizeOrchestration(
   const defaultTarget = Object.hasOwn(record, "defaultTarget")
     ? normalizeExecutionTarget(record.defaultTarget)
     : fallback?.defaultTarget;
+  const targetRoutes = Object.hasOwn(record, "targetRoutes")
+    ? normalizeTargetRoutes(record.targetRoutes)
+    : fallback?.targetRoutes;
   const next: WorkboardOrchestrationSettings = {
     ...(autoDecompose !== undefined ? { autoDecompose } : {}),
     ...(autoDecomposePerDispatch ? { autoDecomposePerDispatch } : {}),
     ...(defaultAssignee ? { defaultAssignee } : {}),
     ...(orchestratorProfile ? { orchestratorProfile } : {}),
     ...(defaultTarget ? { defaultTarget } : {}),
+    ...(targetRoutes?.length ? { targetRoutes } : {}),
   };
   return Object.keys(next).length ? next : undefined;
+}
+
+const MAX_TARGET_ROUTES = 20;
+
+/** Labels match card labels exactly, so they share the card label normalizer. */
+function normalizeTargetRoutes(value: unknown): WorkboardTargetRoute[] {
+  if (value === null) {
+    return [];
+  }
+  if (!Array.isArray(value) || value.length > MAX_TARGET_ROUTES) {
+    throw new Error(`target routes must be an array of at most ${MAX_TARGET_ROUTES} routes.`);
+  }
+  const claimed = new Set<string>();
+  return value.map((route) => {
+    if (!isRecord(route) || !Array.isArray(route.labels)) {
+      throw new Error("each target route needs labels and a target.");
+    }
+    // The card label normalizer stops at 12; refuse rather than drop a route label.
+    if (route.labels.length > 12) {
+      throw new Error("a target route can name at most 12 labels.");
+    }
+    const labels = normalizeLabels(route.labels);
+    if (!labels.length) {
+      throw new Error("target route labels must name at least one label.");
+    }
+    for (const label of labels) {
+      if (claimed.has(label)) {
+        throw new Error(`target route label ${label} appears in more than one route.`);
+      }
+      claimed.add(label);
+    }
+    const target = normalizeExecutionTarget(route.target);
+    if (!target) {
+      throw new Error("each target route needs labels and a target.");
+    }
+    return { labels, target };
+  });
 }
