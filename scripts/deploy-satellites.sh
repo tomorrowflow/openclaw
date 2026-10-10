@@ -107,24 +107,31 @@ activate_one() {
       check_node "$target"
       ;;
     linux-tarball)
+      # No `exit` in these scripts: a login shell's exit builtin runs
+      # ~/.bash_logout, whose clear_console fails without a terminal.
       as_node_user "$target" "
         set -euo pipefail
         cd ~/.local/lib
         if [ -f openclaw/.satellite-sha ] && [ \"\$(cat openclaw/.satellite-sha)\" = $SHA ] && [ ! -d openclaw.next ]; then
-          systemctl --user restart openclaw-node; exit 0
+          : already on $SHA
+        elif [ \"\$(cat openclaw.next/.satellite-sha 2>/dev/null)\" = $SHA ]; then
+          rm -rf openclaw.old
+          if [ -d openclaw ]; then mv openclaw openclaw.old; fi
+          mv openclaw.next openclaw
+          ln -sfn ../lib/openclaw/openclaw.mjs ~/.local/bin/openclaw
+        else
+          echo 'no staged $SHA build' >&2
+          false
         fi
-        [ \"\$(cat openclaw.next/.satellite-sha 2>/dev/null)\" = $SHA ] || { echo 'no staged $SHA build' >&2; exit 1; }
-        rm -rf openclaw.old
-        [ -d openclaw ] && mv openclaw openclaw.old
-        mv openclaw.next openclaw
-        ln -sfn ../lib/openclaw/openclaw.mjs ~/.local/bin/openclaw
-        systemctl --user restart openclaw-node"
+        # A failed restart is judged by check_node below, which rolls back.
+        systemctl --user restart openclaw-node || true"
       if check_node "$target"; then
         as_node_user "$target" "rm -rf ~/.local/lib/openclaw.old"
       else
         echo "new build did not come up; rolling back" >&2
         as_node_user "$target" "
-          cd ~/.local/lib && [ -d openclaw.old ] && rm -rf openclaw && mv openclaw.old openclaw
+          cd ~/.local/lib
+          if [ -d openclaw.old ]; then rm -rf openclaw && mv openclaw.old openclaw; fi
           systemctl --user restart openclaw-node" || true
         return 1
       fi
