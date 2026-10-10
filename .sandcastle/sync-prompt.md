@@ -155,10 +155,12 @@ resolves the large majority of stops on a release→release bump.
   these are generated/gitignored upstream and show up as modify/delete — resolve
   by deleting: `git rm <file> && git rebase --continue`
 - **GitHub Actions files** (`.github/workflows/`, `.github/actions/`, `.github/codeql/`,
-  `.github/dependabot.yml`, `.github/actionlint.yaml`): this fork removes CI — always delete:
+  `.github/dependabot.yml`, `.github/actionlint.yaml`): this fork removes upstream CI — always delete:
   `git rm <file> && git rebase --continue`
   After rebase also delete any new workflow files added by upstream (no conflict, just new):
-  `git rm .github/workflows/*.yml .github/actions/ .github/codeql/ .github/dependabot.yml .github/actionlint.yaml 2>/dev/null || true`
+  `git ls-files .github/workflows | grep -v '^\.github/workflows/fork-' | xargs -r git rm -q`
+  `git rm -r .github/actions/ .github/codeql/ .github/dependabot.yml .github/actionlint.yaml 2>/dev/null || true`
+  Exception: `.github/workflows/fork-*.yml` is the fork's own CI. Keep it; never delete it.
 - **Source code — trivial** (adjacent additions, import ordering, whitespace): resolve and continue.
 - **Fork patch whose upstream premise was deleted — drop it.** A fork commit can
   patch a code path that upstream has since removed outright. There is nothing to

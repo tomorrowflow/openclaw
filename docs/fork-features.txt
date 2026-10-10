@@ -72,6 +72,8 @@ deviceId | src/cli/devices-cli.ts | Device ID display in devices list
 # --- Local test tooling ---
 startsWith\("\.github/workflows/"\) | scripts/lib/vitest-worker-compiler.mts | Compiled vitest workers skip preserved upstream workflow assets the fork deleted. Sync removes every upstream .github/workflows file, and the compiler copied .github/workflows/plugin-npm-release.yml as an input for release-script tests, so every `pnpm test` in the fork died with "Compiled subprocess build failed" (ENOENT on the workflow) until someone copied the file back by hand.
 
+name: Fork Workboard tests | .github/workflows/fork-workboard.yml | The fork's only CI: Workboard plugin tests on PRs and main pushes that touch the plugin. Sync deletes upstream workflows but keeps fork-*.yml (.sandcastle/sync-prompt.md); a sync that deletes .github/workflows wholesale drops it.
+
 # --- ESM resolve fast path (deploy-layout compat) ---
 parentUrl\.includes\("/node_modules/"\) | src/entry.esm-resolve-fast-path.ts | Dist ESM resolve fast path skips vendored node_modules. scripts/deploy-globally.mjs installs each externalized extension's dependencies under dist/extensions/*/node_modules, which breaks the hook's assumption that everything below the dist root is ESM: it forced format "module" onto CommonJS (tslib.js), so memory-lancedb died at load with "'../tslib.js' does not provide an export named 'default'" and the memory slot lost its provider. Upstream's own layout has no node_modules under dist, so this only bites the fork's deploy.
 
