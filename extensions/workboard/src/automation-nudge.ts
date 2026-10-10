@@ -7,6 +7,9 @@ import { MAX_CARDS } from "./store-constants.js";
 import type { WorkboardStore } from "./store.js";
 
 const WORKBOARD_AUTOMATION_NUDGE_DEBOUNCE_MS = 60_000;
+// Re-runs one cooldown apart while the job is still busy: covers an automation
+// turn of 15 minutes, the longest the board jobs allow.
+const WORKBOARD_AUTOMATION_NUDGE_MAX_RERUNS = 15;
 
 type WorkboardAutomationNudgeInput = {
   cards: readonly WorkboardCard[];
@@ -20,6 +23,8 @@ type WorkboardAutomationNudgeService = OpenClawPluginService & {
 
 type PendingBoardNudge = {
   timer?: ReturnType<typeof setTimeout>;
+  rerun?: boolean;
+  rerunCount: number;
 };
 
 type NudgeOwner = Pick<Parameters<OpenClawPluginService["start"]>[0], "logger" | "getCron">;
@@ -65,9 +70,21 @@ export function createWorkboardAutomationNudgeService(params: {
 }): WorkboardAutomationNudgeService {
   let serviceOwner: NudgeOwner | undefined;
 
-  const nudgeBoard = async (boardId: string, jobId: string, owner: NudgeOwner) => {
+  const nudgeBoard = async (
+    boardId: string,
+    jobId: string,
+    owner: NudgeOwner,
+    rerunCount: number,
+  ) => {
     const state = getWorkboardAutomationNudgeState();
-    if (state.owner !== owner || state.pendingByBoard.has(boardId)) {
+    if (state.owner !== owner) {
+      return;
+    }
+    const existing = state.pendingByBoard.get(boardId);
+    if (existing) {
+      // A node ticket's done report nudges at agent_end, and its import reaches
+      // review moments later; the automation must still see the review.
+      existing.rerun = true;
       return;
     }
     if (state.pendingByBoard.size >= MAX_CARDS) {
@@ -76,7 +93,7 @@ export function createWorkboardAutomationNudgeService(params: {
       );
       return;
     }
-    const pending: PendingBoardNudge = {};
+    const pending: PendingBoardNudge = { rerunCount };
     const expiresAt = Date.now() + WORKBOARD_AUTOMATION_NUDGE_DEBOUNCE_MS;
     // The board entry owns both the in-flight request and its cooldown, so a
     // second lifecycle event can never overlap the first automation run request.
@@ -89,6 +106,10 @@ export function createWorkboardAutomationNudgeService(params: {
       const result = await enqueueRun(jobId, "if-enabled");
       if (!result.ok || ("ran" in result && !result.ran)) {
         const reason = "reason" in result ? result.reason : "not-run";
+        // The busy run may have read the board before this event's card changed.
+        if (reason === "already-running" && rerunCount < WORKBOARD_AUTOMATION_NUDGE_MAX_RERUNS) {
+          pending.rerun = true;
+        }
         owner.logger.warn(
           `workboard automation nudge skipped for board ${boardId}: job ${jobId} ${reason}`,
         );
@@ -112,11 +133,40 @@ export function createWorkboardAutomationNudgeService(params: {
           () => {
             if (state.pendingByBoard.get(boardId) === pending) {
               state.pendingByBoard.delete(boardId);
+              if (pending.rerun) {
+                // Reread the board: its automation may have changed or gone meanwhile.
+                void nudgeBoards(new Set([boardId]), owner, pending.rerunCount + 1);
+              }
             }
           },
           Math.max(0, expiresAt - Date.now()),
         );
         pending.timer.unref?.();
+      }
+    }
+  };
+
+  const nudgeBoards = async (
+    boardIds: ReadonlySet<string>,
+    owner: NudgeOwner,
+    rerunCount: number,
+  ) => {
+    const state = getWorkboardAutomationNudgeState();
+    try {
+      const automationByBoard = new Map(
+        (await params.store.listBoards()).boards.flatMap((board) =>
+          board.automationJobId ? [[board.id, board.automationJobId] as const] : [],
+        ),
+      );
+      await Promise.all(
+        [...boardIds].flatMap((boardId) => {
+          const jobId = automationByBoard.get(boardId);
+          return jobId ? [nudgeBoard(boardId, jobId, owner, rerunCount)] : [];
+        }),
+      );
+    } catch (error) {
+      if (state.owner === owner) {
+        owner.logger.warn(`workboard automation nudge failed: ${String(error)}`);
       }
     }
   };
@@ -142,24 +192,7 @@ export function createWorkboardAutomationNudgeService(params: {
       if (!owner || isCronOriginSession(input.sessionKey) || input.cards.length === 0) {
         return;
       }
-      try {
-        const automationByBoard = new Map(
-          (await params.store.listBoards()).boards.flatMap((board) =>
-            board.automationJobId ? [[board.id, board.automationJobId] as const] : [],
-          ),
-        );
-        const boardIds = new Set(input.cards.map((card) => cardBoardId(card)));
-        await Promise.all(
-          [...boardIds].flatMap((boardId) => {
-            const jobId = automationByBoard.get(boardId);
-            return jobId ? [nudgeBoard(boardId, jobId, owner)] : [];
-          }),
-        );
-      } catch (error) {
-        if (state.owner === owner) {
-          owner.logger.warn(`workboard automation nudge failed: ${String(error)}`);
-        }
-      }
+      await nudgeBoards(new Set(input.cards.map((card) => cardBoardId(card))), owner, 0);
     },
   };
 }

@@ -2,6 +2,7 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
@@ -51,6 +52,7 @@ async function finishNodeTicket(params: {
   uncommitted?: boolean;
   originCommits?: number;
   messages?: unknown[];
+  onReview?: (card: WorkboardCard) => Promise<void>;
 }) {
   const root = mkdtempSync(path.join(os.tmpdir(), "workboard-handoff-"));
   roots.push(root);
@@ -88,6 +90,7 @@ async function finishNodeTicket(params: {
         nodeTickets: gateway,
         options: { cardId },
       }),
+    ...(params.onReview ? { onReview: params.onReview } : {}),
   });
   return { store, card, repos, worktree, handoffs, warn, gateway, github };
 }
@@ -127,11 +130,14 @@ function createFakeGitHub(remote: string) {
 }
 
 /** Imports the ticket, points the host clone at a GitHub origin, and accepts the card. */
-async function acceptImportedTicket(params: { sourceUrl?: string } = {}) {
+async function acceptImportedTicket(params: { sourceUrl?: string; verdict?: string } = {}) {
   const ticket = await finishNodeTicket({});
   await ticket.handoffs.resume(ticket.warn);
   if (params.sourceUrl) {
     await ticket.store.update(ticket.card.id, { sourceUrl: params.sourceUrl });
+  }
+  if (params.verdict) {
+    await ticket.store.addComment(ticket.card.id, { body: params.verdict }, undefined, "agent:dev");
   }
   git(ticket.repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
   await ticket.store.move(ticket.card.id, "done", undefined);
@@ -498,9 +504,52 @@ describe("node ticket draft PR", () => {
     });
   });
 
+  it("wakes the board automation at review and scores dev's verdict on the publish", async () => {
+    const onReview = vi.fn(async (_card: WorkboardCard) => {});
+    const { store, card, repos, handoffs, warn, github } = await finishNodeTicket({ onReview });
+    await handoffs.resume(warn);
+    expect(onReview).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: card.id, status: "review" }),
+    );
+
+    git(repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
+    github.tokens.set("acme/app", "token-app");
+    // Only an agent's comment is a verdict; the operator's own note is not.
+    await store.addComment(card.id, { body: "Verdict: rework: looks off" });
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 1000 });
+    try {
+      await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
+      vi.advanceTimersByTime(1000);
+      await store.move(card.id, "done", undefined);
+      vi.advanceTimersByTime(1000);
+      // A verdict after the operator's decision is too late to count.
+      await store.addComment(card.id, { body: "Verdict: rework: late" }, undefined, "agent:dev");
+    } finally {
+      vi.useRealTimers();
+    }
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(onReview).toHaveBeenCalledOnce();
+    expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.reviews).toEqual([
+      { round: 0, verdict: "accept" },
+    ]);
+    expect((await store.trust({})).total).toMatchObject({
+      verdictRounds: 1,
+      verdictAgreedRounds: 1,
+      verdictCards: 1,
+      verdictAgreedCards: 1,
+    });
+
+    // The late verdict landed after the publish, yet is no review feedback.
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+    expect((await store.get(card.id))?.status).toBe("backlog");
+  });
+
   it("reworks a published ticket on its PR branch, keeping a reviewer's commit", async () => {
     const { store, card, repos, worktree, handoffs, warn, github, gateway } =
-      await acceptImportedTicket();
+      await acceptImportedTicket({ verdict: "Verdict: rework: the flag name is unclear" });
     const branch = `factory/${card.id}`;
     const pullRequestUrl = "https://github.com/acme/app/pull/7";
     github.tokens.set("acme/app", "token-app");
@@ -548,8 +597,17 @@ describe("node ticket draft PR", () => {
       acceptedAt: expect.any(Number),
       outsideCommits: 1,
     });
-    // The first publish stays the acceptance while the rework round runs.
-    expect((await store.trust({})).total).toMatchObject({ accepted: 1, reworkRounds: 1 });
+    // The first publish stays the acceptance while the rework round runs, and
+    // dev's rework verdict on it matched the operator's reopen.
+    expect((await store.trust({})).total).toMatchObject({
+      accepted: 1,
+      reworkRounds: 1,
+      verdictRounds: 1,
+      verdictAgreedRounds: 1,
+      verdictCards: 1,
+      verdictAgreedCards: 1,
+      verdictMissed: 0,
+    });
 
     writeFileSync(path.join(worktree, "flags.py"), "strict\n");
     git(worktree, "add", "-A");
@@ -585,6 +643,10 @@ describe("node ticket draft PR", () => {
     expect((await store.get(card.id))?.metadata?.automation?.target?.worktree).toMatchObject({
       handoff: { phase: "published", headCommit: reworked, pullRequestUrl },
       rework: { round: 1, outsideCommits: 1 },
+      reviews: [
+        { round: 0, verdict: "rework" },
+        { round: 1, verdict: "missed" },
+      ],
     });
     const trust = await store.trust({});
     expect(trust.total).toMatchObject({
@@ -594,6 +656,11 @@ describe("node ticket draft PR", () => {
       firstPass: 1,
       reworkRounds: 1,
       outsideCommits: 1,
+      // The second round went to done before any verdict: counted, not scored.
+      verdictRounds: 1,
+      verdictAgreedRounds: 1,
+      verdictCards: 0,
+      verdictMissed: 1,
     });
     expect(trust.weeks.at(-1)).toMatchObject({ accepted: 1, autonomous: 0 });
 

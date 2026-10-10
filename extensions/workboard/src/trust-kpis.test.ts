@@ -136,4 +136,39 @@ describe("projectWorkboardTrust", () => {
     });
     expect(trust.weeks.at(-1)).toMatchObject({ accepted: 2, autonomous: 1 });
   });
+
+  it("scores each verdict against whether the operator reworked that publish", () => {
+    const at = MONDAY + HOUR;
+    const reworked = { round: 1, pullRequestUrl: "u", acceptedAt: at, outsideCommits: 0 };
+    const cards = [
+      // Accepted after the first publish, then reworked: the accept verdict missed it.
+      ticket("reopened", {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(at),
+          rework: reworked,
+          reviews: [
+            { round: 0, verdict: "accept" },
+            { round: 1, verdict: "accept" },
+          ],
+        },
+      }),
+      ticket("agreed", {
+        createdAt: MONDAY,
+        worktree: { ...published(at), reviews: [{ round: 0, verdict: "accept" }] },
+      }),
+      ticket("late", {
+        createdAt: MONDAY,
+        worktree: { ...published(at), reviews: [{ round: 0, verdict: "missed" }] },
+      }),
+    ];
+
+    expect(projectWorkboardTrust(cards, "app", MONDAY).total).toMatchObject({
+      verdictRounds: 3,
+      verdictAgreedRounds: 2,
+      verdictCards: 2,
+      verdictAgreedCards: 1,
+      verdictMissed: 1,
+    });
+  });
 });

@@ -97,6 +97,13 @@ async function runSessionSweep(params: {
   }
 }
 
+/** Ends the nudge cooldown and lets its re-run's board lookup through the store worker. */
+async function advanceNudgeCooldown(store: WorkboardStore) {
+  await vi.advanceTimersByTimeAsync(60_000);
+  await store.listBoards();
+  await vi.advanceTimersByTimeAsync(0);
+}
+
 describe("Workboard gateway lifecycle sync", () => {
   it("uses the active service owner from a prepared plugin generation", async () => {
     const store = createWorkboardSqliteTestStore();
@@ -227,6 +234,59 @@ describe("Workboard gateway lifecycle sync", () => {
     await service.stop?.(context);
 
     expect(request).toHaveBeenCalledOnce();
+  });
+
+  it("runs a nudge that arrived during the cooldown once the cooldown ends", async () => {
+    vi.useFakeTimers();
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({ id: "planning", automationJobId: "job-categorize-planning" });
+    const card = await createLinkedCard(store, { boardId: "planning" });
+    const request = vi.fn().mockResolvedValue({ ok: true, ran: true });
+    const service = createWorkboardAutomationNudgeService({ store });
+    await service.start(nudgeContext(request));
+    try {
+      await service.nudge({ cards: [card] });
+      // A node ticket's import reaches review moments after its agent_end nudge.
+      await service.nudge({ cards: [card] });
+      await service.nudge({ cards: [card] });
+      expect(request).toHaveBeenCalledOnce();
+
+      await advanceNudgeCooldown(store);
+      expect(request).toHaveBeenCalledTimes(2);
+      await advanceNudgeCooldown(store);
+      expect(request).toHaveBeenCalledTimes(2);
+    } finally {
+      service.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a nudge the busy job skipped, with the board's current job", async () => {
+    vi.useFakeTimers();
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({ id: "planning", automationJobId: "job-old" });
+    const card = await createLinkedCard(store, { boardId: "planning" });
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, ran: false, reason: "already-running" })
+      .mockResolvedValue({ ok: true, ran: true });
+    const service = createWorkboardAutomationNudgeService({ store });
+    await service.start(nudgeContext(request));
+    try {
+      await service.nudge({ cards: [card] });
+      await store.upsertBoard({ id: "planning", automationJobId: "job-new" });
+
+      await advanceNudgeCooldown(store);
+      expect(request.mock.calls).toEqual([
+        ["job-old", "if-enabled"],
+        ["job-new", "if-enabled"],
+      ]);
+      await advanceNudgeCooldown(store);
+      expect(request).toHaveBeenCalledTimes(2);
+    } finally {
+      service.stop();
+      vi.useRealTimers();
+    }
   });
 
   it("swallows nudge failures without affecting lifecycle sync", async () => {

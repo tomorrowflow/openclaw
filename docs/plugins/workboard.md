@@ -336,7 +336,8 @@ owns its AI-categorization prompt, model, schedule, and run history. The board
 page shows an **Automation** link when that reference is present. Matching
 session events nudge the attached automation through the active Workboard service's
 scheduler authority, including after the worker's tool authority closes, with events
-for the same board coalesced for 60 seconds. The automation's schedule remains
+for the same board coalesced for 60 seconds; events during that window run the
+automation once more when it ends. The automation's schedule remains
 the backstop. Disabled and auto-disabled automations are never nudged. Deleting
 the board does not delete or otherwise mutate the
 operator-owned automation job.
@@ -555,7 +556,9 @@ cards then block at start with the core `model not allowed` reason.
    `allowReadPaths` must cover `<worktreesRoot>/*.bundle`. The host clone
    fetches `origin` when it lacks the base commit, creates `factory/<cardId>`
    (never moving an existing branch), the node worktree is removed, and the
-   card moves to `review` with its claim released.
+   card moves to `review` with its claim released. When the board has an
+   automation job, reaching `review` nudges it, so the assignee agent can
+   give a shadow verdict (see [Trust KPIs](#trust-kpis)).
 4. **Accept:** moving the card from `review` to `done` pushes the imported
    commit from the host clone to its GitHub origin and opens a draft PR, or
    reuses an open one for the branch. The PR URL is recorded as proof. When
@@ -594,7 +597,7 @@ publish step reads it.
 #### Trust KPIs
 
 `workboard.cards.trust {boardId}` (and `workboard_stats {trust: true}` for
-agents) projects node ticket facts on read; nothing extra is stored. Per task
+agents) projects node ticket facts on read. Per task
 class (a `class:<name>` label, else `unclassified`) it counts tickets,
 accepted (published), clean accepts (no rework round or outside commit),
 first-pass imports (never blocked), blocks, rework rounds, outside commits,
@@ -604,6 +607,19 @@ block), and the median lead time from create to accept. On a board with an
 `orchestration.defaultTarget`, the Control UI shows "N of M autonomous this
 week" under the board title; select it for the weekly and per-class tables.
 Blocks come from card events, which keep the newest 50 per card.
+
+**Shadow verdicts:** an agent reviewing a ticket in `review` can leave a
+comment starting with `Verdict: accept` or `Verdict: rework: <finding>`
+before the operator acts. Authority does not change; the verdict is advisory.
+Each accept (the publish) records the newest agent verdict since the import
+and up to the move to `done`, or `missed` when none came first, in the node
+worktree's `reviews` (the last 20 rounds). A round agrees when the verdict was
+`accept` and the card was not reopened for rework after that publish, or
+`rework` and it was. The counts report `verdictRounds` and
+`verdictAgreedRounds` per round, `verdictCards` and `verdictAgreedCards` for
+tickets whose every round had a verdict and every verdict agreed, and
+`verdictMissed` rounds, which count in neither rate. A round accepted and then
+reopened later counts as reworked once its rework round starts.
 
 Node tickets share one pool instead of their owner's single slot: up to
 `nodeTickets.maxConcurrent` (default 2) run at once across all nodes, even for

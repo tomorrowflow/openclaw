@@ -644,6 +644,11 @@ function buildWorkboardTrustFixture(boardId: string, baseTime: number) {
     questionRounds: 0,
     operatorAnswers: 0,
     attempts: tickets + 2,
+    verdictRounds: 0,
+    verdictAgreedRounds: 0,
+    verdictCards: 0,
+    verdictAgreedCards: 0,
+    verdictMissed: 0,
   });
   return {
     boardId,

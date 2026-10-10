@@ -72,6 +72,8 @@ export default definePluginEntry({
           nodeTickets: api.runtime.gateway,
           options: { cardId, maxStarts: 1 },
         }),
+      // The done report's agent_end nudge fires before the import reaches review.
+      onReview: async (card) => await automationNudge.nudge({ cards: [card] }),
     });
     const lifecycleSync = createWorkboardLifecycleService({
       store,
