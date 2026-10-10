@@ -20,6 +20,8 @@ type TicketFacts = {
   blocks: number;
   reworkRounds: number;
   outsideCommits: number;
+  questionRounds: number;
+  operatorAnswers: number;
   attempts: number;
 };
 
@@ -59,12 +61,15 @@ function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
     blocks: (card.events ?? []).filter((event) => event.toStatus === "blocked").length,
     reworkRounds: worktree?.rework?.round ?? 0,
     outsideCommits: worktree?.rework?.outsideCommits ?? 0,
+    questionRounds: worktree?.questions?.rounds ?? 0,
+    operatorAnswers: worktree?.questions?.operatorAnswers ?? 0,
     attempts: card.metadata?.attempts?.length ?? 0,
   };
 }
 
 function isClean(ticket: TicketFacts): boolean {
-  return ticket.reworkRounds === 0 && ticket.outsideCommits === 0;
+  // A question an agent answered is not a human touch; one an operator answered is.
+  return ticket.reworkRounds === 0 && ticket.outsideCommits === 0 && ticket.operatorAnswers === 0;
 }
 
 function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
@@ -76,6 +81,8 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
     blocked: 0,
     reworkRounds: 0,
     outsideCommits: 0,
+    questionRounds: 0,
+    operatorAnswers: 0,
     attempts: 0,
   };
   for (const ticket of tickets) {
@@ -86,6 +93,8 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
     counts.blocked += ticket.blocks > 0 ? 1 : 0;
     counts.reworkRounds += ticket.reworkRounds;
     counts.outsideCommits += ticket.outsideCommits;
+    counts.questionRounds += ticket.questionRounds;
+    counts.operatorAnswers += ticket.operatorAnswers;
     counts.attempts += ticket.attempts;
   }
   return counts;

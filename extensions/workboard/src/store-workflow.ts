@@ -384,10 +384,11 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
   }
 
   /**
-   * Adds a Workboard notice to a published node ticket (D56) in the same write
-   * that records it on the handoff, so the notice is never mistaken for the
-   * review comment that starts the next rework round. A `reviewFrom` notice
-   * moves that cutoff past itself; a slot wait is noted once per round.
+   * Adds a Workboard notice to a published node ticket (D56), or one waiting
+   * with questions, in the same write that records it on the handoff, so the
+   * notice is never mistaken for the review comment or answer that starts the
+   * next round. A `reviewFrom` notice moves that cutoff past itself; a slot
+   * wait is noted once per round.
    */
   async addNodeTicketNotice(
     id: string,
@@ -396,7 +397,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
       body: string;
       kind: "reviewFrom" | "slotWait";
       applies: (card: WorkboardCard) => boolean;
-      status?: "backlog";
+      status?: "backlog" | "review";
     },
     scope?: WorkboardMutationScope,
   ): Promise<void> {
@@ -410,7 +411,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
           if (
             !target?.worktree ||
             target.worktree.path !== input.worktreePath ||
-            handoff?.phase !== "published" ||
+            (handoff?.phase !== "published" && handoff?.phase !== "questions") ||
             !input.applies(card)
           ) {
             return undefined;

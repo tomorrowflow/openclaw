@@ -144,7 +144,8 @@ const WORKBOARD_SCHEMA_SQL = `
       ordinal INTEGER NOT NULL,
       body TEXT NOT NULL,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER
+      updated_at INTEGER,
+      source TEXT
     ) STRICT;
     CREATE INDEX IF NOT EXISTS workboard_card_comments_card_idx
       ON workboard_card_comments(card_id, ordinal);
@@ -277,6 +278,7 @@ function ensureWorkboardSchema(db: DatabaseSync): void {
   ensureColumn(db, "workboard_boards", "automation_job_id", "automation_job_id TEXT");
   ensureColumn(db, "workboard_boards", "kind", "kind TEXT");
   ensureColumn(db, "workboard_boards", "sessions_spec", "sessions_spec TEXT");
+  ensureColumn(db, "workboard_card_comments", "source", "source TEXT");
   const migrationId = `schema-${SCHEMA_VERSION}`;
   const current = db
     .prepare("SELECT 1 AS found FROM workboard_schema_migrations WHERE id = ?")

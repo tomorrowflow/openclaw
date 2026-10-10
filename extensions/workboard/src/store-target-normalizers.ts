@@ -1,6 +1,7 @@
 import type {
   WorkboardExecutionTarget,
   WorkboardNodeHandoff,
+  WorkboardNodeQuestions,
   WorkboardNodeRework,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
@@ -16,6 +17,19 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
   if (value.phase === "pending") {
     const reportedAt = resolveOptionalIntegerOption(value.reportedAt, { min: 0 });
     return reportedAt === undefined ? undefined : { phase: "pending", reportedAt };
+  }
+  if (value.phase === "questions") {
+    const askedAt = resolveOptionalIntegerOption(value.askedAt, { min: 0 });
+    const reviewFrom = resolveOptionalIntegerOption(value.reviewFrom, { min: 0 });
+    const slotWaitNotedAt = resolveOptionalIntegerOption(value.slotWaitNotedAt, { min: 0 });
+    return askedAt === undefined
+      ? undefined
+      : {
+          phase: "questions",
+          askedAt,
+          ...(reviewFrom !== undefined ? { reviewFrom } : {}),
+          ...(slotWaitNotedAt !== undefined ? { slotWaitNotedAt } : {}),
+        };
   }
   if (value.phase !== "imported" && value.phase !== "published") {
     return undefined;
@@ -77,6 +91,17 @@ function normalizeNodeRework(value: unknown): WorkboardNodeRework | undefined {
     : { round, pullRequestUrl, acceptedAt, outsideCommits };
 }
 
+function normalizeNodeQuestions(value: unknown): WorkboardNodeQuestions | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const rounds = resolveOptionalIntegerOption(value.rounds, { min: 1 });
+  const operatorAnswers = resolveOptionalIntegerOption(value.operatorAnswers, { min: 0 });
+  return rounds === undefined || operatorAnswers === undefined
+    ? undefined
+    : { rounds, operatorAnswers };
+}
+
 function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -91,6 +116,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
   );
   const handoff = normalizeNodeHandoff(value.handoff);
   const rework = normalizeNodeRework(value.rework);
+  const questions = normalizeNodeQuestions(value.questions);
   return worktreePath && branch && baseCommit
     ? {
         path: worktreePath,
@@ -98,6 +124,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         baseCommit,
         ...(handoff ? { handoff } : {}),
         ...(rework ? { rework } : {}),
+        ...(questions ? { questions } : {}),
       }
     : undefined;
 }

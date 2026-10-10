@@ -4,6 +4,7 @@ import { resolveIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import type { AnyAgentTool, OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "typebox";
 import { redactClaimToken } from "./card-redaction.js";
+import { normalizeCommentSource } from "./store-value-normalizers.js";
 import type { WorkboardStore } from "./store.js";
 import {
   cardIdField,
@@ -100,6 +101,9 @@ export function createWorkboardTools(params: {
 }): AnyAgentTool[] {
   const { store } = params;
   const ownerId = contextOwner(params.context);
+  const commentSource = normalizeCommentSource(
+    params.context?.agentId ? `agent:${params.context.agentId}` : undefined,
+  );
   const { readScopedCardToolParams, scopedCardMutation, claimedCardMutation } =
     createWorkboardCardMutations(store, ownerId);
   const tools: AnyAgentTool[] = [
@@ -283,7 +287,7 @@ export function createWorkboardTools(params: {
         token: ScopedClaimTokenField,
       }),
       execute: scopedCardMutation((id, record, scope) =>
-        store.addComment(id, { body: record.body }, scope),
+        store.addComment(id, { body: record.body }, scope, commentSource),
       ),
     },
     {

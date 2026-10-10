@@ -21,6 +21,8 @@ function trustResult(accepted: number, autonomous: number): WorkboardTrustResult
     blocked: 1,
     reworkRounds: 1,
     outsideCommits: 1,
+    questionRounds: 0,
+    operatorAnswers: 0,
     attempts: 4,
   };
   return {

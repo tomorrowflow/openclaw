@@ -1,3 +1,4 @@
+import type { WorkboardCommentSource } from "@openclaw/workboard-contract";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 export function normalizeBoundedString(
@@ -16,4 +17,16 @@ export function normalizeBoundedString(
     );
   }
   return normalized;
+}
+
+const COMMENT_AGENT_SOURCE_PATTERN = /^agent:([\w.-]{1,64})$/;
+
+/** Keeps a recorded comment source only in its two valid shapes. */
+export function normalizeCommentSource(value: unknown): WorkboardCommentSource | undefined {
+  if (value === "operator") {
+    return value;
+  }
+  const agentId =
+    typeof value === "string" ? COMMENT_AGENT_SOURCE_PATTERN.exec(value)?.[1] : undefined;
+  return agentId ? `agent:${agentId}` : undefined;
 }

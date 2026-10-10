@@ -641,6 +641,8 @@ function buildWorkboardTrustFixture(boardId: string, baseTime: number) {
     blocked: tickets - clean - 1,
     reworkRounds: acceptedCount - clean,
     outsideCommits: 1,
+    questionRounds: 0,
+    operatorAnswers: 0,
     attempts: tickets + 2,
   });
   return {

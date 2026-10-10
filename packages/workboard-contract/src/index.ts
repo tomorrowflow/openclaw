@@ -137,11 +137,19 @@ export type WorkboardRunAttempt = {
   error?: string;
 };
 
+/**
+ * Who wrote a comment: `operator` through the Gateway (Control UI, CLI),
+ * `agent:<id>` through the Workboard tools. Absent on Workboard's own notices
+ * and on comments written before sources were recorded.
+ */
+export type WorkboardCommentSource = "operator" | `agent:${string}`;
+
 export type WorkboardComment = {
   id: string;
   body: string;
   createdAt: number;
   updatedAt?: number;
+  source?: WorkboardCommentSource;
 };
 
 export type WorkboardLink = {
@@ -261,9 +269,14 @@ export type WorkboardWorkspaceAccess =
 /**
  * Bringing a finished node ticket's branch back to the host. `pending` is set
  * by the done report and resumed until the import moves the card to review.
+ * `questions` is set by a needs_input report: the card waits in review, and a
+ * comment newer than `askedAt` plus a move to todo resumes the same session
+ * with the answer. `reviewFrom` and `slotWaitNotedAt` mark Workboard's own
+ * notices since, as on a published ticket.
  */
 export type WorkboardNodeHandoff =
   | { phase: "pending"; reportedAt: number }
+  | { phase: "questions"; askedAt: number; reviewFrom?: number; slotWaitNotedAt?: number }
   | { phase: "imported"; headCommit: string; importedAt: number }
   | {
       phase: "published";
@@ -293,6 +306,16 @@ export type WorkboardNodeRework = {
   outsideCommits: number;
 };
 
+/**
+ * Question rounds a node ticket asked and got answered. `operatorAnswers`
+ * counts rounds an operator answered; those are human touches (D53), rounds
+ * only agents answered are not.
+ */
+export type WorkboardNodeQuestions = {
+  rounds: number;
+  operatorAnswers: number;
+};
+
 /** A ticket worktree the dispatcher created on a paired node. */
 export type WorkboardNodeWorktree = {
   path: string;
@@ -300,6 +323,7 @@ export type WorkboardNodeWorktree = {
   baseCommit: string;
   handoff?: WorkboardNodeHandoff;
   rework?: WorkboardNodeRework;
+  questions?: WorkboardNodeQuestions;
 };
 
 /**
@@ -491,7 +515,7 @@ export type WorkboardTrustCounts = {
   tickets: number;
   /** Published as a draft PR, i.e. accepted at least once. */
   accepted: number;
-  /** Accepted with no rework round and no outside commit. */
+  /** Accepted with no rework round, no outside commit, and no operator-answered question. */
   cleanAccepted: number;
   /** Reached the import without ever being blocked. */
   firstPass: number;
@@ -499,6 +523,9 @@ export type WorkboardTrustCounts = {
   blocked: number;
   reworkRounds: number;
   outsideCommits: number;
+  /** Answered needs_input rounds, and how many of them an operator answered. */
+  questionRounds: number;
+  operatorAnswers: number;
   attempts: number;
 };
 
