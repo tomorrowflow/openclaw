@@ -606,7 +606,9 @@ count, the **autonomous** count (accepted with no rework, outside commit, or
 block), and the median lead time from create to accept. On a board with an
 `orchestration.defaultTarget`, the Control UI shows "N of M autonomous this
 week" under the board title; select it for the weekly and per-class tables.
-Blocks come from card events, which keep the newest 50 per card.
+Blocks come from card events, which keep the newest 50 per card. An archived
+ticket counts only when it was accepted before; archiving one that never
+published (a probe, a duplicate, a dropped ticket) removes it from every count.
 
 **Shadow verdicts:** an agent reviewing a ticket in `review` can leave a
 comment starting with `Verdict: accept` or `Verdict: rework: <finding>`
