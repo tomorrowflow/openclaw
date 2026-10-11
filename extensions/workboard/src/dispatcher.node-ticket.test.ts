@@ -333,6 +333,11 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     });
     await store.claim(third.id, { ownerId: "dev" });
     await expect(nodeOf(third.id)).resolves.toBe("linux-3090");
+    // A ticket held to its node by its worktree is told which node it waits for.
+    await store.move(first.id, "todo", undefined);
+    await expect(store.claim(first.id, { ownerId: "dev" })).rejects.toThrow(
+      "The class:server-fix route's 1 node ticket slot on node linux-3090, where this ticket's worktree is, is in use; it frees when a running ticket of that route on linux-3090 reaches review.",
+    );
   });
 
   it("blocks the card with the node's error when the worktree cannot be created", async () => {

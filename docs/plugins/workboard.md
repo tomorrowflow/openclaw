@@ -544,11 +544,13 @@ its claim moves it to the first of `target` and `alternateTargets` whose
 `maxConcurrent` slots are not all in use, in the same transaction that counts
 them, so two starts never take one node's last slot. Once the ticket has a
 worktree on a node it stays there through questions, review, rework, retries,
-and a restart after a stop. A card whose target differs from the route's
-`target` (set by hand, or copied before the route's target changed) is not
-moved. The choice does not check whether a node is connected (claims run in
-the store, which has no Gateway access): a start on an offline node fails and
-blocks the card as with a single target.
+and a restart after a stop. A card on a node outside the route is not moved,
+and a card moved to another node takes that node's entry as its whole target.
+The choice does not check whether a node is connected (claims run in the store,
+which has no Gateway access): a start on an offline node fails and blocks the
+card as with a single target, and its next start may pick the same node again.
+A start that fails after creating the worktree but before recording it can
+leave that worktree behind when the next start picks another node.
 
 ```json5
 {

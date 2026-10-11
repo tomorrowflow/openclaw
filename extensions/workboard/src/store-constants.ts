@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import type {
   WorkboardAutomation,
   WorkboardCard,
@@ -75,6 +74,8 @@ export type WorkboardNodeTicketRouteSlot = {
    * whole pool for a ticket that has no worktree yet, else only its own node.
    */
   targets: readonly WorkboardRouteTarget[];
+  /** How many nodes the route has, so a waiting ticket pinned to one of them names it. */
+  nodes: number;
   limit: number;
   /** The board's routes, so a running ticket counts only toward its own first match. */
   routes: readonly Pick<WorkboardTargetRoute, "labels">[];
@@ -173,13 +174,12 @@ export function workboardNodeTicketRoute(
   if (!target || !own || !route?.maxConcurrent) {
     return undefined;
   }
-  // A ticket without a worktree still carries the target creation copied from
-  // the route, so it may start on any of the route's nodes. Once it has a
-  // worktree, or an operator gave it a different target, it stays put.
-  const { worktree, ...placement } = target;
+  // A ticket without a worktree may start on any of the route's nodes; once
+  // it has one, it stays on its node.
   return {
     boardId: card.metadata?.automation?.boardId ?? "default",
-    targets: !worktree && isDeepStrictEqual(placement, own) ? pool : [own],
+    targets: target.worktree ? [own] : pool,
+    nodes: pool.length,
     limit: route.maxConcurrent,
     routes,
     index,
@@ -252,6 +252,11 @@ export function workboardRouteName(route: WorkboardNodeTicketRouteSlot): string 
   return route.routes[route.index]?.labels.join(", ") ?? "";
 }
 
+/** The node a ticket's worktree holds it to when its route has several. */
+export function workboardRoutePinnedNode(route: WorkboardNodeTicketRouteSlot): string | undefined {
+  return route.nodes > 1 && route.targets.length === 1 ? route.targets[0]?.nodeId : undefined;
+}
+
 export function workboardSlotBusyMessage(
   slot: WorkboardClaimSlot,
   full: WorkboardSlotFull,
@@ -263,10 +268,15 @@ export function workboardSlotBusyMessage(
     return `All ${slot.limit} node ticket slots are in use; a slot frees when a running node ticket reaches review.`;
   }
   const route = slot.route;
+  const name = workboardRouteName(route);
   const slots = `${route.limit} node ticket ${route.limit === 1 ? "slot" : "slots"}`;
+  const pinned = workboardRoutePinnedNode(route);
+  if (pinned) {
+    return `The ${name} route's ${slots} on node ${pinned}, where this ticket's worktree is, ${route.limit === 1 ? "is" : "are"} in use; it frees when a running ticket of that route on ${pinned} reaches review.`;
+  }
   return route.targets.length > 1
-    ? `Each of the ${workboardRouteName(route)} route's ${route.targets.length} nodes has its ${slots} in use; one frees when a running ticket on that route reaches review.`
-    : `The ${workboardRouteName(route)} route's ${slots} ${route.limit === 1 ? "is" : "are"} in use; it frees when a running ticket on that route reaches review.`;
+    ? `Each of the ${name} route's ${route.targets.length} nodes has its ${slots} in use; one frees when a running ticket on that route reaches review.`
+    : `The ${name} route's ${slots} ${route.limit === 1 ? "is" : "are"} in use; it frees when a running ticket on that route reaches review.`;
 }
 
 export function workboardCardSlotOwner(card: WorkboardOwnerSlotCard, now?: number): string {

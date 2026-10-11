@@ -261,7 +261,10 @@ function selectStartableCards(
       // Node tickets share the pool, not their owner's slot. Count the pick
       // as the running, freshly claimed ticket its start makes it, on the
       // route node its claim will take.
-      const picked = placement?.target ? withWorkboardRouteTarget(card, placement.target) : card;
+      const picked =
+        placement?.target && placement.target.nodeId !== card.metadata?.automation?.target?.nodeId
+          ? withWorkboardRouteTarget(card, placement.target)
+          : card;
       nodeTicketOccupants.push({
         ...picked,
         status: "running",
