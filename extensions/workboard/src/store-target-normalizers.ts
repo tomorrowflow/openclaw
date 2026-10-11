@@ -120,10 +120,22 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
         ? resolveOptionalIntegerOption(entry.round, { min: 0 })
         : undefined;
       const verdict = isRecord(entry) ? entry.verdict : undefined;
-      return round !== undefined &&
-        (verdict === "accept" || verdict === "rework" || verdict === "missed")
-        ? [{ round, verdict }]
-        : [];
+      if (
+        round === undefined ||
+        (verdict !== "accept" && verdict !== "rework" && verdict !== "missed")
+      ) {
+        return [];
+      }
+      const importedAt = resolveOptionalIntegerOption(entry.importedAt, { min: 0 });
+      const publishedAt = resolveOptionalIntegerOption(entry.publishedAt, { min: 0 });
+      return [
+        {
+          round,
+          verdict,
+          ...(importedAt === undefined ? {} : { importedAt }),
+          ...(publishedAt === undefined ? {} : { publishedAt }),
+        },
+      ];
     })
     .slice(-MAX_NODE_REVIEW_VERDICTS);
 }

@@ -531,10 +531,21 @@ describe("node ticket draft PR", () => {
 
     expect(warn).not.toHaveBeenCalled();
     expect(onReview).toHaveBeenCalledOnce();
-    expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.reviews).toEqual([
-      { round: 0, verdict: "accept" },
+    const reviews = (await store.get(card.id))?.metadata?.automation?.target?.worktree?.reviews;
+    expect(reviews).toEqual([
+      {
+        round: 0,
+        verdict: "accept",
+        importedAt: expect.any(Number),
+        publishedAt: expect.any(Number),
+      },
     ]);
-    expect((await store.trust({})).total).toMatchObject({
+    const review = reviews![0]!;
+    const accepted = await store.trust({});
+    expect(accepted.weeks.findLast((week) => week.accepted > 0)?.medianReviewWaitMs).toBe(
+      review.publishedAt! - review.importedAt!,
+    );
+    expect(accepted.total).toMatchObject({
       verdictRounds: 1,
       verdictAgreedRounds: 1,
       verdictCards: 1,

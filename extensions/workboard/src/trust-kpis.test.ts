@@ -81,6 +81,45 @@ describe("projectWorkboardTrust", () => {
     expect(trust.total).toMatchObject({ tickets: 4, accepted: 3, blocked: 1, firstPass: 2 });
   });
 
+  it("reports the median review wait from import to publish per published round", () => {
+    const round = (importedAt: number, publishedAt: number) => ({
+      verdict: "missed" as const,
+      importedAt,
+      publishedAt,
+    });
+    const cards = [
+      ticket("a", {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(MONDAY + 3 * HOUR),
+          // Recorded before review times existed: no wait to report.
+          reviews: [{ round: 0, verdict: "accept" }],
+        },
+      }),
+      ticket("b", {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(MONDAY + 9 * HOUR),
+          rework: {
+            round: 1,
+            pullRequestUrl: "https://github.com/acme/app/pull/2",
+            acceptedAt: MONDAY + 3 * HOUR,
+            outsideCommits: 0,
+          },
+          reviews: [
+            { round: 0, ...round(MONDAY + HOUR, MONDAY + 3 * HOUR) },
+            { round: 1, ...round(MONDAY + 3 * HOUR, MONDAY + 9 * HOUR) },
+          ],
+        },
+      }),
+    ];
+
+    const trust = projectWorkboardTrust(cards, "app", MONDAY + 24 * HOUR);
+
+    expect(trust.weeks.at(-1)).toMatchObject({ accepted: 2, medianReviewWaitMs: 4 * HOUR });
+    expect(trust.weeks.at(-2)).not.toHaveProperty("medianReviewWaitMs");
+  });
+
   it("groups by class label and keeps rework out of clean acceptance", () => {
     const cards = [
       ticket("docs", { createdAt: MONDAY, labels: ["class:docs"], worktree: published(MONDAY) }),
