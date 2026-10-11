@@ -20,7 +20,12 @@ import {
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
-import { workboardRouteName, workboardSlotFull } from "./store-constants.js";
+import {
+  type WorkboardNodeTicketRouteSlot,
+  workboardRouteName,
+  workboardRoutePinnedNode,
+  workboardSlotPlacement,
+} from "./store-constants.js";
 import type { WorkboardStore } from "./store.js";
 
 // file.fetch's hard cap; a larger bundle fails on the node with FILE_TOO_LARGE.
@@ -315,6 +320,17 @@ export type WorkboardNodeTicketStart = (
  * should change. A ticket waiting with questions resumes the same way once a
  * comment answers them, and goes back to review without one.
  */
+function slotWaitNotice(what: string, route: WorkboardNodeTicketRouteSlot | undefined): string {
+  if (!route) {
+    return `${what} waits for a node-ticket slot; it starts when a running node ticket reaches review.`;
+  }
+  const name = workboardRouteName(route);
+  const pinned = workboardRoutePinnedNode(route);
+  return pinned
+    ? `${what} waits for a slot on node ${pinned}, where its worktree is, on the ${name} route; it starts when a running ticket of that route on ${pinned} reaches review.`
+    : `${what} waits for a slot on the ${name} route; it starts when a running ticket on that route reaches review.`;
+}
+
 async function reopenNodeTicket(params: {
   store: WorkboardStore;
   start: WorkboardNodeTicketStart;
@@ -352,16 +368,13 @@ async function reopenNodeTicket(params: {
   }
   const at = params.now();
   const slot = await store.nodeTicketSlot(current);
-  const full = workboardSlotFull(await store.list(), slot, at);
+  const { full } = workboardSlotPlacement(await store.list(), slot, at);
   if (full) {
     if (!still.slotWaitNoted) {
       await store.addNodeTicketNotice(card.id, {
         worktreePath,
         kind: "slotWait",
-        body:
-          full === "route_busy" && slot.route
-            ? `${what} waits for a slot on the ${workboardRouteName(slot.route)} route; it starts when a running ticket on that route reaches review.`
-            : `${what} waits for a node-ticket slot; it starts when a running node ticket reaches review.`,
+        body: slotWaitNotice(what, full === "route_busy" ? slot.route : undefined),
         applies: (latest) => nodeTicketReopen(latest, params.now())?.slotWaitNoted === false,
       });
     }

@@ -461,9 +461,15 @@ export type WorkboardTargetRoute = {
   labels: string[];
   target: Omit<WorkboardExecutionTarget, "worktree">;
   /**
-   * How many of the route's node tickets may run at once, within the plugin's
-   * node-ticket pool. A ticket counts toward it while its labels match the
-   * route and it runs on the route's node.
+   * More nodes for the route, tried in order after `target`. A routed card
+   * starts on the first of these nodes with a free slot and stays on it once
+   * it has a worktree. Needs `maxConcurrent`.
+   */
+  alternateTargets?: Omit<WorkboardExecutionTarget, "worktree">[];
+  /**
+   * How many of the route's node tickets may run at once on each of its
+   * nodes, within the plugin's node-ticket pool. A ticket counts toward it
+   * while its labels match the route and it runs on that node.
    */
   maxConcurrent?: number;
 };

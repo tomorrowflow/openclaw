@@ -50,7 +50,8 @@ import {
   MAX_WORKER_CONTEXT_PARENTS,
   MAX_WORKER_CONTEXT_RECENT_CARDS,
   type WorkboardClaimSlot,
-  workboardSlotFull,
+  withWorkboardRouteTarget,
+  workboardSlotPlacement,
 } from "./store-constants.js";
 
 type SyncStore<T> = {
@@ -137,7 +138,9 @@ class WorkboardSqliteCardStore implements SyncStore<WorkboardCardStore> {
       }
       // Keep lease and slot decisions with the shared policy, after SQLite
       // excludes archived and inactive cards. Only a capped route reads child
-      // records, and only for node tickets on its board and node.
+      // records, and only for node tickets on its board and nodes. The node a
+      // pooled ticket runs on is chosen here, in the same transaction as the
+      // count, so two claims cannot both take a node's last slot.
       const candidates = query
         .selectFrom("workboard_cards")
         .select([
@@ -171,7 +174,9 @@ class WorkboardSqliteCardStore implements SyncStore<WorkboardCardStore> {
             status: requiredString(row, "status") as WorkboardCard["status"],
             agentId: stringValue(row, "agent_id"),
             labels:
-              route && route.boardId === boardId && automation?.target?.nodeId === route.nodeId
+              route &&
+              route.boardId === boardId &&
+              route.targets.some((target) => target.nodeId === automation?.target?.nodeId)
                 ? readLabels(db, requiredString(row, "id"))
                 : undefined,
             metadata: {
@@ -188,15 +193,20 @@ class WorkboardSqliteCardStore implements SyncStore<WorkboardCardStore> {
           };
         }
       }
-      const full = workboardSlotFull(occupants(), slot, now);
-      if (full) {
-        return full;
+      const placement = workboardSlotPlacement(occupants(), slot, now);
+      if (placement.full) {
+        return placement.full;
       }
       // Validate the target's stored tree before replacing it, without decoding
       // unrelated cards as an incidental prerequisite for claiming this one.
       readCard(this.db, current);
-      insertCard(this.db, value.card);
-      return "updated";
+      const placed =
+        placement.target &&
+        placement.target.nodeId !== value.card.metadata?.automation?.target?.nodeId
+          ? placement.target
+          : undefined;
+      insertCard(this.db, placed ? withWorkboardRouteTarget(value.card, placed) : value.card);
+      return placed ? { placed } : "updated";
     });
   }
 

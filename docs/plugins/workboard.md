@@ -524,16 +524,43 @@ a non-scratch workspace, or a linked session skips them. Saving refuses a route
 with no labels and a label that appears in more than one route. Pass
 `targetRoutes: null` or `[]` to remove the routes. Routing happens only when a
 card is created: changing a card's labels later, or the board's routes, does
-not move existing cards to another node.
+not move existing cards to another node. The one exception is a route's node
+pool, below.
 
 A route's optional `maxConcurrent` (1 to 16) caps how many of its tickets run at
-once, inside the plugin-wide pool. Use it when a node can run only one ticket
-at a time, such as a Mac with one simulator. A ticket counts toward the route
-while it is `running` on the route's node and the route is the first one that
-shares its labels. The cap and the labels are read when a ticket starts, so it
-also holds cards created before you set it, and relabeling a running ticket
-moves it in or out of the count. A start beyond it reports that the route's slots are in use;
-scheduled passes skip it, and a reopened ticket waits, until one frees.
+once on each of its nodes, inside the plugin-wide pool. Use it when a node can
+run only one ticket at a time, such as a Mac with one simulator. A ticket counts
+toward the route while it is `running` on one of the route's nodes and the
+route is the first one that shares its labels. The cap and the labels are read
+when a ticket starts, so it also holds cards created before you set it, and
+relabeling a running ticket moves it in or out of the count. A start beyond it
+reports that the route's slots are in use; scheduled passes skip it, and a
+reopened ticket waits, until one frees.
+
+To spread a route's work over several nodes, list the others in order as
+`alternateTargets`; the route then needs `maxConcurrent`, and each node may
+appear only once. A new card still copies `target`, but when it first starts,
+its claim moves it to the first of `target` and `alternateTargets` whose
+`maxConcurrent` slots are not all in use, in the same transaction that counts
+them, so two starts never take one node's last slot. Once the ticket has a
+worktree on a node it stays there through questions, review, rework, retries,
+and a restart after a stop. A card on a node outside the route is not moved,
+and a card moved to another node takes that node's entry as its whole target.
+The choice does not check whether a node is connected (claims run in the store,
+which has no Gateway access): a start on an offline node fails and blocks the
+card as with a single target, and its next start may pick the same node again.
+A start that fails after creating the worktree but before recording it can
+leave that worktree behind when the next start picks another node.
+
+```json5
+{
+  labels: ["class:server-fix", "class:server-feature", "class:server-refactor"],
+  target: { kind: "node-claude", nodeId: "linux-big" /* paths as above */ },
+  alternateTargets: [{ kind: "node-claude", nodeId: "linux-small" /* paths as above */ }],
+  // One server ticket per node: two run at once, the big node first.
+  maxConcurrent: 1,
+}
+```
 
 Saving a board that sets the target, the routes, or the assignee checks each
 target `model` against that agent's `modelPolicy.allow` (the default agent when

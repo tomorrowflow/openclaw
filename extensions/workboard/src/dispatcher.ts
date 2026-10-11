@@ -35,8 +35,9 @@ import {
   workboardCardConsumesNodeTicketSlot,
   workboardCardConsumesOwnerSlot,
   workboardCardSlotOwner,
+  withWorkboardRouteTarget,
   workboardSlotBusyMessage,
-  workboardSlotFull,
+  workboardSlotPlacement,
 } from "./store-constants.js";
 import { WorkboardStore, type WorkboardDispatchResult } from "./store.js";
 import {
@@ -225,8 +226,9 @@ function selectStartableCards(
   for (const card of ordered) {
     const owner = ownerOverride || workboardCardSlotOwner(card, now);
     const nodeTicketSlot = nodeTicketSlots.get(card.id);
-    const nodeTicketFull =
-      nodeTicketSlot && workboardSlotFull(nodeTicketOccupants, nodeTicketSlot, now);
+    const placement =
+      nodeTicketSlot && workboardSlotPlacement(nodeTicketOccupants, nodeTicketSlot, now);
+    const nodeTicketFull = placement?.full;
     const rejection = card.metadata?.archivedAt
       ? "Card is archived; restore it before starting."
       : cardHasActiveClaim(card, now)
@@ -257,11 +259,16 @@ function selectStartableCards(
     }
     if (nodeTicketSlot) {
       // Node tickets share the pool, not their owner's slot. Count the pick
-      // as the running, freshly claimed ticket its start makes it.
+      // as the running, freshly claimed ticket its start makes it, on the
+      // route node its claim will take.
+      const picked =
+        placement?.target && placement.target.nodeId !== card.metadata?.automation?.target?.nodeId
+          ? withWorkboardRouteTarget(card, placement.target)
+          : card;
       nodeTicketOccupants.push({
-        ...card,
+        ...picked,
         status: "running",
-        metadata: { ...card.metadata, claim: undefined },
+        metadata: { ...picked.metadata, claim: undefined },
       });
       selected.push(card);
       continue;
@@ -469,12 +476,14 @@ async function runWorkboardDispatch(
       attemptedStarts += 1;
       const context = await params.store.buildWorkerContext(card.id);
       assertOwnerCurrent?.();
+      // The claim may have placed a pooled route's ticket on another node.
+      const claimedTarget = nodeTarget && nodeTicketTarget(claimed.card);
       const nodeWorktree =
-        nodeTarget && params.nodeTickets
+        claimedTarget && params.nodeTickets
           ? await createNodeTicketWorktree({
               runtime: params.nodeTickets,
               card: claimed.card,
-              target: nodeTarget,
+              target: claimedTarget,
             })
           : undefined;
       const materialized = await materializeWorkspace({
@@ -513,11 +522,11 @@ async function runWorkboardDispatch(
       const runId = prepared.launch.provisionalRunId;
       assertOwnerCurrent?.();
       const run =
-        nodeTarget && nodeWorktree && params.nodeTickets
+        claimedTarget && nodeWorktree && params.nodeTickets
           ? await startNodeTicketSession({
               runtime: params.nodeTickets,
               card: claimed.card,
-              target: nodeTarget,
+              target: claimedTarget,
               worktree: nodeWorktree,
               sessionKey,
               message: buildNodeTicketMessage({

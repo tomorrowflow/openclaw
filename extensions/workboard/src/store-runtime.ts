@@ -10,6 +10,7 @@ import type {
   WorkboardKeyedStore,
   WorkboardWriteAuthority,
 } from "./persistence-types.js";
+import { isWorkboardSlotFull } from "./store-constants.js";
 
 export class WorkboardStoreRuntime {
   protected readonly cardLists = new Map<
@@ -126,7 +127,7 @@ export class WorkboardStoreRuntime {
       claimIfSlotAvailable: (key, value, expectedUpdatedAt, slot, now) =>
         this.trackMutation(
           () => store.claimIfSlotAvailable(key, value, expectedUpdatedAt, slot, now),
-          (result) => result === "updated",
+          (result) => result !== "conflict" && !isWorkboardSlotFull(result),
         ),
       listCardStatuses: (ids) => this.runOperation(() => store.listCardStatuses(ids)),
       listBoardAggregates: () => this.runOperation(() => store.listBoardAggregates()),

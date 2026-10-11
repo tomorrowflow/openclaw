@@ -7,7 +7,11 @@ import type {
   WorkboardSessionsBoard,
   WorkboardSessionsBoardSpec,
 } from "@openclaw/workboard-contract";
-import type { WorkboardClaimSlot, WorkboardSlotFull } from "./store-constants.js";
+import type {
+  WorkboardClaimSlot,
+  WorkboardRouteTarget,
+  WorkboardSlotFull,
+} from "./store-constants.js";
 
 /**
  * Guard the first accepted write (including CAS retries), then allow its settlement.
@@ -91,7 +95,12 @@ export type WorkboardCardStatsAggregate = {
   oldestReadyAt: number | undefined;
 };
 
-export type WorkboardSlotClaimResult = "updated" | "conflict" | WorkboardSlotFull;
+/** `placed`: the claim succeeded on another of its route's nodes, written to the card's target. */
+export type WorkboardSlotClaimResult =
+  | "updated"
+  | "conflict"
+  | WorkboardSlotFull
+  | { placed: WorkboardRouteTarget };
 
 export type WorkboardCardReadScope =
   | { kind: "board"; boardId: string }

@@ -25,7 +25,7 @@ import type {
   WorkboardWriteAuthority,
 } from "./persistence-types.js";
 import { normalizeBoardMetadata } from "./store-board-normalizers.js";
-import { findWorkboardTargetRoute } from "./store-constants.js";
+import { findWorkboardTargetRoute, workboardRouteTargets } from "./store-constants.js";
 import type {
   WorkboardBoardInput,
   WorkboardLinkedCreateInput,
@@ -288,10 +288,12 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
         ? [{ kind: "default", model: orchestration.defaultTarget?.model }]
         : []),
       ...(assigneeChanged || Object.hasOwn(requested, "targetRoutes")
-        ? (orchestration.targetRoutes ?? []).map((route) => ({
-            kind: "route",
-            model: route.target.model,
-          }))
+        ? (orchestration.targetRoutes ?? []).flatMap((route) =>
+            workboardRouteTargets(route).map((target) => ({
+              kind: "route",
+              model: target.model,
+            })),
+          )
         : []),
     ];
     const agentId = orchestration.defaultAssignee;

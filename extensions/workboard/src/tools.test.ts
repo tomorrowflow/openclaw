@@ -733,6 +733,32 @@ describe("workboard tools", () => {
         },
       }),
     ).rejects.toThrow("target route maxConcurrent must be an integer from 1 to 16.");
+    const alternate = { ...NODE_TARGET, nodeId: "linux-factory" };
+    await expect(
+      store.upsertBoard({
+        id: "app",
+        orchestration: {
+          targetRoutes: [
+            { labels: ["class:feature"], target: NODE_TARGET, alternateTargets: [alternate] },
+          ],
+        },
+      }),
+    ).rejects.toThrow("a target route with alternateTargets needs maxConcurrent.");
+    await expect(
+      store.upsertBoard({
+        id: "app",
+        orchestration: {
+          targetRoutes: [
+            {
+              labels: ["class:feature"],
+              target: NODE_TARGET,
+              alternateTargets: [alternate, { ...alternate, repoPath: "/srv/app" }],
+              maxConcurrent: 1,
+            },
+          ],
+        },
+      }),
+    ).rejects.toThrow("target route node linux-factory appears more than once.");
   });
 
   it("refuses a board node target whose model the assignee's modelPolicy does not allow", async () => {

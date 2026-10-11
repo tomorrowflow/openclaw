@@ -164,13 +164,52 @@ function normalizeTargetRoutes(value: unknown): WorkboardTargetRoute[] {
     if (!target) {
       throw new Error("each target route needs labels and a target.");
     }
+    const alternateTargets = normalizeAlternateTargets(route.alternateTargets, target.nodeId);
     if (route.maxConcurrent === undefined || route.maxConcurrent === null) {
+      // Without a per-node cap every card would take the first node.
+      if (alternateTargets.length) {
+        throw new Error("a target route with alternateTargets needs maxConcurrent.");
+      }
       return { labels, target };
     }
     const maxConcurrent = resolveOptionalIntegerOption(route.maxConcurrent, { min: 1, max: 16 });
     if (maxConcurrent === undefined || maxConcurrent !== route.maxConcurrent) {
       throw new Error("target route maxConcurrent must be an integer from 1 to 16.");
     }
-    return { labels, target, maxConcurrent };
+    return {
+      labels,
+      target,
+      ...(alternateTargets.length ? { alternateTargets } : {}),
+      maxConcurrent,
+    };
+  });
+}
+
+const MAX_ALTERNATE_TARGETS = 7;
+
+function normalizeAlternateTargets(
+  value: unknown,
+  primaryNodeId: string,
+): NonNullable<WorkboardTargetRoute["alternateTargets"]> {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value) || value.length > MAX_ALTERNATE_TARGETS) {
+    throw new Error(
+      `target route alternateTargets must be an array of at most ${MAX_ALTERNATE_TARGETS} targets.`,
+    );
+  }
+  const nodeIds = new Set([primaryNodeId]);
+  return value.map((entry) => {
+    const target = normalizeExecutionTarget(entry);
+    if (!target) {
+      throw new Error("each target route alternate target needs a node-claude target.");
+    }
+    // Slots are counted per node, so a node can appear in a route only once.
+    if (nodeIds.has(target.nodeId)) {
+      throw new Error(`target route node ${target.nodeId} appears more than once.`);
+    }
+    nodeIds.add(target.nodeId);
+    return target;
   });
 }
