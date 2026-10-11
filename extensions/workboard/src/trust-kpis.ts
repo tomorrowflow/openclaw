@@ -130,8 +130,9 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
 /**
  * Projects the dev loop trust KPIs (D9/D53) from node ticket cards on read.
  * Per-class counts gate trust-ladder promotions; the weekly autonomy trend
- * (accepted with zero human touches) and median lead time from create to
- * accept show whether the whole loop improves.
+ * (accepted with zero human touches), median lead time from create to
+ * accept, and median review wait from import to publish show whether the
+ * whole loop improves and how much of the lead time is the operator's.
  */
 export function projectWorkboardTrust(
   cards: readonly WorkboardCard[],
@@ -153,11 +154,21 @@ export function projectWorkboardTrust(
         : [],
     );
     const leadTime = median(accepted.map((ticket) => ticket.leadTimeMs));
+    const reviewWait = median(
+      tickets.flatMap((ticket) =>
+        ticket.reviews.flatMap(({ importedAt, publishedAt }) =>
+          importedAt !== undefined && publishedAt !== undefined && weekStart(publishedAt) === start
+            ? [publishedAt - importedAt]
+            : [],
+        ),
+      ),
+    );
     weeks.push({
       weekStart: start,
       accepted: accepted.length,
       autonomous: accepted.filter((ticket) => isClean(ticket) && ticket.blocks === 0).length,
       ...(leadTime === undefined ? {} : { medianLeadTimeMs: leadTime }),
+      ...(reviewWait === undefined ? {} : { medianReviewWaitMs: reviewWait }),
     });
   }
   return {

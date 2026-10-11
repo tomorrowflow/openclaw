@@ -313,6 +313,7 @@ export async function publishNodeTicket(params: {
     return;
   }
   const pullRequestUrl = pullRequest.url;
+  const publishedAt = params.now();
   await store.setNodeHandoff(
     card.id,
     {
@@ -321,10 +322,10 @@ export async function publishNodeTicket(params: {
         phase: "published",
         headCommit: item.headCommit,
         importedAt: item.importedAt,
-        publishedAt: params.now(),
+        publishedAt,
         pullRequestUrl,
       },
-      review: reviewVerdict(item),
+      review: { ...reviewVerdict(item), importedAt: item.importedAt, publishedAt },
     },
     scope,
   );

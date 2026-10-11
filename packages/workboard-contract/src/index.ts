@@ -333,10 +333,14 @@ export type WorkboardNodeFeedback = {
  * operator moved the round to done, or `missed` when none came first. `round`
  * is the rework round the publish closed (0 for the first publish); the
  * operator reworked it when the ticket later reached rework round `round + 1`.
+ * `importedAt` and `publishedAt` bound the round's wait for the operator;
+ * entries recorded before they existed lack them.
  */
 export type WorkboardNodeReviewVerdict = {
   round: number;
   verdict: "accept" | "rework" | "missed";
+  importedAt?: number;
+  publishedAt?: number;
 };
 
 /** A ticket worktree the dispatcher created on a paired node. */
@@ -591,6 +595,8 @@ export type WorkboardTrustWeek = {
   /** Accepted with zero human touches: no rework, outside commit, or block. */
   autonomous: number;
   medianLeadTimeMs?: number;
+  /** Median import-to-publish wait of the review rounds published this week. */
+  medianReviewWaitMs?: number;
 };
 
 /**
