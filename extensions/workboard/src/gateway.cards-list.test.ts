@@ -4,6 +4,7 @@ import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../api.js";
 import { registerWorkboardGatewayMethods } from "./gateway.js";
+import { startNodeCard } from "./node-ticket.test-support.js";
 import type { WorkboardStore } from "./store.js";
 import {
   createWorkboardSqliteTestHarness,
@@ -94,6 +95,34 @@ describe("workboard card list revisions", () => {
     expect(reconciled.cards[0].title).toBe("External");
     expect(await list("ops")).toBe(reconciled);
     expect(changes).toHaveBeenCalledTimes(3);
+  });
+
+  it("holds dev's shadow verdict back from the operator until the review is decided", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card } = await startNodeCard(store);
+    const worktree = (await store.get(card.id))!.metadata!.automation!.target!.worktree!;
+    await store.setNodeHandoff(card.id, {
+      worktreePath: worktree.path,
+      handoff: { phase: "imported", headCommit: "b".repeat(40), importedAt: Date.now() },
+    });
+    await store.update(card.id, { status: "review" });
+    await store.addComment(card.id, { body: "Proof looks thin." }, undefined, "operator");
+    await store.addComment(card.id, { body: "Verdict: rework: no test" }, undefined, "agent:dev");
+    const listCards = captureCardsList(store);
+    const comments = async () =>
+      (await listCards({})).mock.calls[0]?.[1].cards[0].metadata.comments.map(
+        (comment: { body: string }) => comment.body,
+      );
+
+    expect(await comments()).toEqual(["Proof looks thin."]);
+    expect((await store.get(card.id))?.metadata?.comments).toHaveLength(2);
+
+    await store.update(card.id, { status: "done" });
+    expect(await comments()).toEqual(["Proof looks thin.", "Verdict: rework: no test"]);
+
+    // A failed publish blocks the decided card; the verdict stays visible.
+    await store.update(card.id, { status: "blocked" });
+    expect(await comments()).toEqual(["Proof looks thin.", "Verdict: rework: no test"]);
   });
 
   it("replaces a pending card read when a mutation advances its revision", async () => {

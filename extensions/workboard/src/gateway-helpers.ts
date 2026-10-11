@@ -3,7 +3,7 @@ import { ErrorCodes, errorShape } from "openclaw/plugin-sdk/gateway-runtime";
 import { parseStrictPositiveInteger } from "openclaw/plugin-sdk/number-runtime";
 import { asRecord, isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawPluginApi } from "../api.js";
-import { redactClaimToken, redactDispatchResult } from "./card-redaction.js";
+import { redactDispatchResult, redactOperatorCard } from "./card-redaction.js";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { WorkboardCardConflictError, type WorkboardStore } from "./store.js";
 import {
@@ -42,7 +42,7 @@ export function respondError(respond: GatewayRespond, error: unknown) {
       message: error.message,
       details: {
         type: "workboard_card_conflict",
-        card: redactClaimToken(error.current),
+        card: redactOperatorCard(error.current),
       },
     });
     return;
@@ -186,7 +186,7 @@ export function createWorkboardDispatchHandler(params: {
       if (!started?.card) {
         throw new Error(result.startFailures[0]?.error ?? "Workboard card did not start.");
       }
-      return { ...started, card: redactClaimToken(started.card) };
+      return { ...started, card: redactOperatorCard(started.card) };
     }
     return redactDispatchResult(result);
   };

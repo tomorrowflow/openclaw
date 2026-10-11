@@ -2,7 +2,7 @@ import type { WorkboardCard, WorkboardSessionsBoardView } from "@openclaw/workbo
 import { readStringParam } from "openclaw/plugin-sdk/core";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawPluginApi } from "../api.js";
-import { redactClaimToken } from "./card-redaction.js";
+import { redactOperatorCard } from "./card-redaction.js";
 import {
   assertNoCursorAdvance,
   createWorkboardDispatchHandler,
@@ -98,13 +98,13 @@ function redactDiagnosticsRows(result: Awaited<ReturnType<WorkboardStore["diagno
     ...result,
     diagnostics: result.diagnostics.map((row) => ({
       ...row,
-      card: redactClaimToken(row.card),
+      card: redactOperatorCard(row.card),
     })),
   };
 }
 
 async function redactCardResult(card: Promise<WorkboardCard>) {
-  return { card: redactClaimToken(await card) };
+  return { card: redactOperatorCard(await card) };
 }
 
 export function registerWorkboardGatewayMethods(params: {
@@ -202,7 +202,7 @@ export function registerWorkboardGatewayMethods(params: {
     });
     // Another stop is already in flight; its abort and settle own the card.
     if (!requested.updated) {
-      return { card: redactClaimToken(requested.card) };
+      return { card: redactOperatorCard(requested.card) };
     }
     const sessionKey = cardSessionKey(requested.card);
     const runId = cardRunId(requested.card);
@@ -234,7 +234,7 @@ export function registerWorkboardGatewayMethods(params: {
     if (!aborted && !stopped) {
       throw new Error("The ticket session had no active run to stop; refresh the card.");
     }
-    return { card: redactClaimToken(card) };
+    return { card: redactOperatorCard(card) };
   });
   register("workboard.cards.move", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(
@@ -261,7 +261,7 @@ export function registerWorkboardGatewayMethods(params: {
   cardMutation("artifact", (id, input) => store.addArtifact(id, input));
   register("workboard.cards.claim", WRITE_SCOPE, async ({ params: input }) => {
     const claimed = await store.claim(readId(input), input);
-    return { ...claimed, card: redactClaimToken(claimed.card) };
+    return { ...claimed, card: redactOperatorCard(claimed.card) };
   });
   cardMutation("heartbeat", (id, input) => store.heartbeat(id, input));
   cardMutation("release", (id, input) => store.releaseClaim(id, input));
@@ -281,7 +281,7 @@ export function registerWorkboardGatewayMethods(params: {
         ? withWorkboardWorkspaceAccess(patch, access)
         : patch,
     });
-    return { cards: result.cards.map(redactClaimToken) };
+    return { cards: result.cards.map(redactOperatorCard) };
   });
   register("workboard.cards.diagnostics", READ_SCOPE, async () =>
     redactDiagnosticsRows(await store.diagnostics()),
@@ -354,7 +354,7 @@ export function registerWorkboardGatewayMethods(params: {
   );
   register("workboard.cards.runs", READ_SCOPE, async ({ params: input }) => {
     const result = await store.runs(readId(input));
-    return { ...result, card: redactClaimToken(result.card) };
+    return { ...result, card: redactOperatorCard(result.card) };
   });
   register("workboard.cards.specify", WRITE_SCOPE, async (request) => {
     const input = withoutWorkboardWorkspaceAccess(request.params);
@@ -378,8 +378,8 @@ export function registerWorkboardGatewayMethods(params: {
       null,
     );
     return {
-      parent: redactClaimToken(result.parent),
-      children: result.children.map(redactClaimToken),
+      parent: redactOperatorCard(result.parent),
+      children: result.children.map(redactOperatorCard),
     };
   });
   register("workboard.notifications.subscribe", WRITE_SCOPE, async ({ params: input }) => ({
@@ -400,7 +400,7 @@ export function registerWorkboardGatewayMethods(params: {
   );
   register("workboard.cards.attachments.list", READ_SCOPE, async ({ params: input }) => {
     const result = await store.listAttachments(readId(input));
-    return { ...result, card: redactClaimToken(result.card) };
+    return { ...result, card: redactOperatorCard(result.card) };
   });
   register("workboard.cards.attachments.get", READ_SCOPE, async ({ params: input }) => {
     const attachment = await store.getAttachment(readId(input));
@@ -432,6 +432,6 @@ export function registerWorkboardGatewayMethods(params: {
   );
   register("workboard.cards.export", READ_SCOPE, async () => {
     const exported = await store.exportCards();
-    return { ...exported, cards: exported.cards.map(redactClaimToken) };
+    return { ...exported, cards: exported.cards.map(redactOperatorCard) };
   });
 }
