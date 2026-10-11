@@ -17,6 +17,9 @@ import {
 } from "openclaw/plugin-sdk/run-command";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
+  type WorkboardNodeTicketRouteSlot,
+  workboardRouteName,
+  workboardRoutePinnedNode,
   MAX_BLOCK_REASON_CHARS,
   MAX_COMMENT_BODY_CHARS,
   MAX_PROOF_COMMAND_CHARS,
@@ -53,7 +56,6 @@ export type NodeTicketReopen = {
   worktreePath: string;
   round: number;
   reviewed: boolean;
-  slotWaitNoted: boolean;
 };
 
 const REVIEW_VERDICT_PATTERN = /^Verdict:\s*(accept|rework)\b/i;
@@ -110,8 +112,32 @@ export function nodeTicketReopen(card: WorkboardCard, now: number): NodeTicketRe
         ? (worktree.rework?.round ?? 0) + 1
         : (worktree.questions?.rounds ?? 0) + 1,
     reviewed: nodeTicketReviewComments(card).length > 0,
-    slotWaitNoted: handoff.slotWaitNotedAt !== undefined,
   };
+}
+
+/**
+ * What a queued node ticket's notice says it waits for. `route` names a
+ * capped route whose slots are full; without it the whole pool is.
+ */
+export function nodeTicketSlotWaitNotice(
+  card: WorkboardCard,
+  route: WorkboardNodeTicketRouteSlot | undefined,
+  now: number,
+): string {
+  const reopen = nodeTicketReopen(card, now);
+  const what = !reopen
+    ? "This ticket"
+    : reopen.kind === "rework"
+      ? `Rework round ${reopen.round}`
+      : "The answer";
+  if (!route) {
+    return `${what} waits for a node-ticket slot; it starts when a running node ticket reaches review.`;
+  }
+  const name = workboardRouteName(route);
+  const pinned = workboardRoutePinnedNode(route);
+  return pinned
+    ? `${what} waits for a slot on node ${pinned}, where its worktree is, on the ${name} route; it starts when a running ticket of that route on ${pinned} reaches review.`
+    : `${what} waits for a slot on the ${name} route; it starts when a running ticket on that route reaches review.`;
 }
 
 export function nodeInvokePayload(result: unknown): Record<string, unknown> {

@@ -152,7 +152,8 @@ export function createWorkboardDispatchHandler(params: {
       worktrees: params.api.runtime.worktrees,
       nodeTickets: params.api.runtime.gateway,
       options: {
-        ...(cardId ? { cardId, maxStarts: 1 } : {}),
+        // The operator's Start queues a node ticket whose slot is full.
+        ...(cardId ? { cardId, maxStarts: 1, queue: "request" as const } : {}),
         boardId: typeof boardId === "string" ? boardId : undefined,
         ...(maxStarts !== undefined ? { maxStarts } : {}),
         ...(provider ? { provider } : {}),
@@ -182,6 +183,9 @@ export function createWorkboardDispatchHandler(params: {
       },
     });
     if (cardId) {
+      if (result.queued) {
+        return { queued: true, card: redactOperatorCard(result.queued) };
+      }
       const started = result.started[0];
       if (!started?.card) {
         throw new Error(result.startFailures[0]?.error ?? "Workboard card did not start.");

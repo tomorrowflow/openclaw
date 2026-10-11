@@ -35,10 +35,10 @@ import {
   MAX_CARD_COMMENTS,
   MAX_CARD_WORKER_LOGS,
   MAX_COMMENT_BODY_CHARS,
-  isWorkboardSlotFull,
+  assertWorkboardSlotClaimed,
   POSITION_STEP,
   withWorkboardRouteTarget,
-  workboardSlotBusyMessage,
+  withoutStaleStartRequest,
 } from "./store-constants.js";
 import type {
   WorkboardCardPatch,
@@ -662,6 +662,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
         syncExecutionAttemptMetadata(next.metadata ?? {}, execution, now),
         options,
       );
+      next = withoutStaleStartRequest(next, now);
       next.events = appendEvent(
         next,
         options.event ?? updateEvent(existing, next),
@@ -701,9 +702,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
         options.claimSlot.slot,
         options.claimSlot.now,
       );
-      if (isWorkboardSlotFull(result)) {
-        throw new Error(workboardSlotBusyMessage(options.claimSlot.slot, result));
-      }
+      assertWorkboardSlotClaimed(options.claimSlot.slot, result);
       if (typeof result === "object") {
         next = withWorkboardRouteTarget(next, result.placed);
       }

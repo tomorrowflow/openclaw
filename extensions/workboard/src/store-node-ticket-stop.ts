@@ -1,11 +1,11 @@
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { appendComment, cardSessionKey, closeRunningAttempts } from "./store-card-helpers.js";
-import { WorkboardWorkflowStore } from "./store-workflow.js";
+import { WorkboardNodeTicketQueueStore } from "./store-node-ticket-queue.js";
 
 const NODE_TICKET_STOPPED_NOTICE =
   "Stopped by the operator. Restart continues in the same worktree with its uncommitted edits.";
 
-export class WorkboardNodeTicketStopStore extends WorkboardWorkflowStore {
+export class WorkboardNodeTicketStopStore extends WorkboardNodeTicketQueueStore {
   /**
    * An operator stop of a running node ticket. `request` records it on the
    * worktree before the caller aborts the session, so the run's end is not

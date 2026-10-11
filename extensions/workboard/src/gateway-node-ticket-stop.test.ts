@@ -2,7 +2,7 @@ import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../api.js";
 import { registerWorkboardGatewayMethods } from "./gateway.js";
-import { startNodeCard } from "./node-ticket.test-support.js";
+import { createNodeGateway, NODE_TARGET, startNodeCard } from "./node-ticket.test-support.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 
 function createGatewayMethodCapture() {
@@ -100,5 +100,71 @@ describe("workboard.cards.stop", () => {
     expect(stored?.metadata?.automation?.target?.worktree?.stopRequestedAt).toBe(
       first.card.metadata?.automation?.target?.worktree?.stopRequestedAt,
     );
+  });
+});
+
+describe("workboard.cards.start on a full node-ticket pool", () => {
+  async function setup() {
+    const { api, invoke } = createGatewayMethodCapture();
+    const store = createWorkboardSqliteTestStore();
+    store.nodeTicketConcurrency = 1;
+    await startNodeCard(store);
+    const gateway = createNodeGateway();
+    Object.assign(api.runtime, { gateway, subagent: { run: vi.fn() } });
+    registerWorkboardGatewayMethods({ api, store });
+    const card = await store.create({
+      title: "Fix the lexer",
+      status: "todo",
+      metadata: { automation: { target: NODE_TARGET } },
+    });
+    return { store, invoke, gateway, card };
+  }
+
+  it("queues the card in todo with one notice instead of refusing", async () => {
+    const { store, invoke, gateway, card } = await setup();
+
+    const first = await invoke("workboard.cards.start", { id: card.id });
+    const second = await invoke("workboard.cards.start", { id: card.id });
+
+    expect(first.mock.calls[0]?.[0]).toBe(true);
+    expect(first.mock.calls[0]?.[1]).toMatchObject({
+      queued: true,
+      card: { id: card.id, status: "todo" },
+    });
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("todo");
+    const requestedAt = stored?.metadata?.automation?.startRequest?.requestedAt;
+    expect(requestedAt).toBeTypeOf("number");
+    expect(stored?.metadata?.comments?.map((comment) => comment.body)).toEqual([
+      "This ticket waits for a node-ticket slot; it starts when a running node ticket reaches review.",
+    ]);
+    // A second Start keeps the card's place in line and adds no notice.
+    expect(second.mock.calls[0]?.[1]).toMatchObject({ queued: true });
+    const again = await store.get(card.id);
+    expect(again?.metadata?.automation?.startRequest?.requestedAt).toBe(requestedAt);
+    expect(again?.metadata?.comments).toHaveLength(1);
+    expect(gateway.respond).not.toHaveBeenCalledWith("sessions.create", expect.anything());
+  });
+
+  it("never lets an update or a create set the request", async () => {
+    const { store, invoke, card } = await setup();
+    const startRequest = { requestedAt: 1 };
+
+    const updated = await invoke("workboard.cards.update", {
+      id: card.id,
+      patch: { startRequest, metadata: { automation: { target: NODE_TARGET, startRequest } } },
+    });
+    const created = await invoke("workboard.cards.create", {
+      title: "Sneaky",
+      metadata: { automation: { target: NODE_TARGET, startRequest } },
+    });
+
+    expect(updated.mock.calls[0]?.[0]).toBe(true);
+    expect(created.mock.calls[0]?.[0]).toBe(true);
+    const cards = await store.list();
+    expect(cards.map((entry) => entry.title).toSorted()).toEqual(
+      ["Fix the lexer", "Fix the parser", "Sneaky"].toSorted(),
+    );
+    expect(cards.filter((entry) => entry.metadata?.automation?.startRequest)).toEqual([]);
   });
 });
