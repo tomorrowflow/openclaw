@@ -6,6 +6,7 @@ import type {
   WorkboardClaim,
   WorkboardMetadata,
   WorkboardNotification,
+  WorkboardOrchestrationSettings,
   WorkboardRunAttempt,
 } from "@openclaw/workboard-contract";
 import {
@@ -32,7 +33,8 @@ import {
   isWorkboardClaimReclaimable,
   isWorkboardNodeTicket,
   type WorkboardClaimSlot,
-  workboardSlotBusyMessage,
+  type WorkboardNodeTicketSlot,
+  workboardNodeTicketRoute,
   MAX_CARD_ARTIFACTS,
   MAX_CARD_COMMENTS,
   MAX_BLOCK_REASON_CHARS,
@@ -80,6 +82,33 @@ function assertClaimIdentity(claim: WorkboardClaim, input: WorkboardHeartbeatInp
 export class WorkboardWorkflowStore extends WorkboardPromoteStore {
   /** D41 pool size for node tickets with a running turn; set once from plugin config. */
   nodeTicketConcurrency = DEFAULT_NODE_TICKET_CONCURRENCY;
+
+  /** The pool slot a node ticket claims, with its board route's cap when set. */
+  async nodeTicketSlot(card: WorkboardCard): Promise<WorkboardNodeTicketSlot> {
+    return (await this.nodeTicketSlots([card])).get(card.id) ?? this.nodeTicketPoolSlot();
+  }
+
+  /** Slots for several node tickets, reading each board once. */
+  async nodeTicketSlots(
+    cards: readonly WorkboardCard[],
+  ): Promise<Map<string, WorkboardNodeTicketSlot>> {
+    const boards = new Map<string, Promise<WorkboardOrchestrationSettings | undefined>>();
+    const slots = new Map<string, WorkboardNodeTicketSlot>();
+    for (const card of cards) {
+      const boardId = cardBoardId(card);
+      const orchestration =
+        boards.get(boardId) ??
+        this.boardStore.lookup(boardId).then((entry) => entry?.board.orchestration);
+      boards.set(boardId, orchestration);
+      const route = workboardNodeTicketRoute(card, await orchestration);
+      slots.set(card.id, { ...this.nodeTicketPoolSlot(), ...(route ? { route } : {}) });
+    }
+    return slots;
+  }
+
+  private nodeTicketPoolSlot(): WorkboardNodeTicketSlot {
+    return { kind: "node-tickets", limit: this.nodeTicketConcurrency };
+  }
 
   async claim(
     id: string,
@@ -148,7 +177,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
       }
       const metadata = clearDiagnostics(guarded.metadata, ["stranded_ready"]);
       const slot: WorkboardClaimSlot = isWorkboardNodeTicket(guarded)
-        ? { kind: "node-tickets", limit: this.nodeTicketConcurrency }
+        ? await this.nodeTicketSlot(guarded)
         : { kind: "owner", ownerId };
       const card = await this.updateCard(
         await this.requireCard(id),
@@ -167,7 +196,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
         },
         {
           expectedUpdatedAt: guarded.updatedAt,
-          claimSlot: { slot, busyMessage: workboardSlotBusyMessage(slot), now },
+          claimSlot: { slot, now },
         },
       );
       return { card, token };

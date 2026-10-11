@@ -35,7 +35,9 @@ import {
   MAX_CARD_COMMENTS,
   MAX_CARD_WORKER_LOGS,
   MAX_COMMENT_BODY_CHARS,
+  isWorkboardSlotFull,
   POSITION_STEP,
+  workboardSlotBusyMessage,
 } from "./store-constants.js";
 import type {
   WorkboardCardPatch,
@@ -698,8 +700,8 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
         options.claimSlot.slot,
         options.claimSlot.now,
       );
-      if (result === "slot_busy") {
-        throw new Error(options.claimSlot.busyMessage);
+      if (isWorkboardSlotFull(result)) {
+        throw new Error(workboardSlotBusyMessage(options.claimSlot.slot, result));
       }
       updated = result === "updated";
     } else {

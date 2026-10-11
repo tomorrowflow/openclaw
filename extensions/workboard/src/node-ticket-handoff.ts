@@ -20,7 +20,7 @@ import {
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
-import { workboardCardConsumesNodeTicketSlot } from "./store-constants.js";
+import { workboardRouteName, workboardSlotFull } from "./store-constants.js";
 import type { WorkboardStore } from "./store.js";
 
 // file.fetch's hard cap; a larger bundle fails on the node with FILE_TOO_LARGE.
@@ -351,15 +351,17 @@ async function reopenNodeTicket(params: {
     return;
   }
   const at = params.now();
-  const busy =
-    (await store.list()).filter((entry) => workboardCardConsumesNodeTicketSlot(entry, at)).length >=
-    store.nodeTicketConcurrency;
-  if (busy) {
+  const slot = await store.nodeTicketSlot(current);
+  const full = workboardSlotFull(await store.list(), slot, at);
+  if (full) {
     if (!still.slotWaitNoted) {
       await store.addNodeTicketNotice(card.id, {
         worktreePath,
         kind: "slotWait",
-        body: `${what} waits for a node-ticket slot; it starts when a running node ticket reaches review.`,
+        body:
+          full === "route_busy" && slot.route
+            ? `${what} waits for a slot on the ${workboardRouteName(slot.route)} route; it starts when a running ticket on that route reaches review.`
+            : `${what} waits for a node-ticket slot; it starts when a running node ticket reaches review.`,
         applies: (latest) => nodeTicketReopen(latest, params.now())?.slotWaitNoted === false,
       });
     }
