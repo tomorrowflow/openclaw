@@ -6,7 +6,7 @@ import { parseStrictPositiveInteger } from "openclaw/plugin-sdk/number-runtime";
 import { getRuntimeConfig } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { resolveWorkboardCardByIdOrPrefix } from "./card-lookup.js";
-import { redactClaimToken, redactDispatchResult } from "./card-redaction.js";
+import { redactDispatchResult, redactOperatorCard } from "./card-redaction.js";
 import type { WorkboardStore } from "./store.js";
 
 type JsonOptions = {
@@ -55,7 +55,7 @@ function formatCardLine(card: WorkboardCard): string {
 
 function writeCards(cards: WorkboardCard[], options: JsonOptions): void {
   if (options.json) {
-    writeJson({ cards: cards.map(redactClaimToken) });
+    writeJson({ cards: cards.map(redactOperatorCard) });
     return;
   }
   for (const card of cards) {
@@ -65,7 +65,7 @@ function writeCards(cards: WorkboardCard[], options: JsonOptions): void {
 
 function writeCard(card: WorkboardCard, options: JsonOptions): void {
   if (options.json) {
-    writeJson({ card: redactClaimToken(card) });
+    writeJson({ card: redactOperatorCard(card) });
   } else {
     writeLine(formatCardLine(card));
   }

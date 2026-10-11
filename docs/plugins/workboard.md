@@ -662,6 +662,9 @@ published (a probe, a duplicate, a dropped ticket) removes it from every count.
 **Shadow verdicts:** an agent reviewing a ticket in `review` can leave a
 comment starting with `Verdict: accept` or `Verdict: rework: <finding>`
 before the operator acts. Authority does not change; the verdict is advisory.
+The verdict is blind: Gateway and CLI card reads hide it until the operator
+moves the card to `done`, so it cannot prime that decision. Agent tools still
+see it.
 Each accept (the publish) records the newest agent verdict since the import
 and up to the move to `done`, or `missed` when none came first, in the node
 worktree's `reviews` (the last 20 rounds). A round agrees when the verdict was

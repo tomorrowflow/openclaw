@@ -13,7 +13,7 @@ import type {
 } from "@openclaw/workboard-contract";
 import { WORKBOARD_STATUSES } from "@openclaw/workboard-contract";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { redactClaimToken } from "./card-redaction.js";
+import { redactOperatorCard } from "./card-redaction.js";
 import type {
   PersistedWorkboardAttachment,
   PersistedWorkboardBoard,
@@ -104,7 +104,7 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
             return this.listCards(boardId);
           }
           const result = {
-            cards: cards.map(redactClaimToken),
+            cards: cards.map(redactOperatorCard),
             boards,
             statuses: WORKBOARD_STATUSES,
             revision: { ...this.cardsRevision, ...(boardId === undefined ? {} : { boardId }) },
