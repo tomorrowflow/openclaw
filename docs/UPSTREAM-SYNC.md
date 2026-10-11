@@ -353,6 +353,14 @@ it is missing.
 
 Stop the running gateway, install from the local repo globally, and restart.
 
+> **Running node tickets block the deploy.** `scripts/sync-and-deploy.sh`
+> refuses before the sync and again before the deploy build while any
+> Workboard node ticket is `running`: the build starves the Gateway and
+> truncates the ticket's Claude CLI stream. Wait until the tickets reach
+> review, or stop them, then rerun. `--allow-running-tickets` deploys anyway.
+> If the card list cannot be read (Gateway down, no workboard plugin), the
+> script warns and continues.
+
 > **Two-user model.** The `frogger` user holds the source repo at
 > `/home/frogger/openclaw/` and runs build/test/push. The `openclaw` user
 > (UID 1001) runs the gateway service and owns its runtime config at

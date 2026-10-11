@@ -30,17 +30,26 @@ LOG_DIR="$HOME/logs"
 # release branch (validated in .sandcastle/sync.ts: must exist and not be older
 # than main). Use it when the newest cut is a fresh beta far ahead of the
 # deployed line and a smaller patch cut is the one to ship.
+#
+# --allow-running-tickets skips the running node ticket guard (see
+# check_running_node_tickets below). Use it only when the operator accepts
+# that a running ticket on a factory node may fail during the build.
 RUN_SYNC=1
-USAGE="usage: $(basename "$0") [--deploy-only | --target X.Y.Z]"
-case "${1:-}" in
-  --deploy-only) RUN_SYNC=0 ;;
-  --target)
-    [ -n "${2:-}" ] || { echo "$USAGE" >&2; exit 2; }
-    export SYNC_TARGET_RELEASE="$2"
-    ;;
-  "") ;;
-  *) echo "$USAGE" >&2; exit 2 ;;
-esac
+ALLOW_RUNNING_TICKETS=0
+USAGE="usage: $(basename "$0") [--deploy-only | --target X.Y.Z] [--allow-running-tickets]"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --deploy-only) RUN_SYNC=0 ;;
+    --target)
+      [ -n "${2:-}" ] || { echo "$USAGE" >&2; exit 2; }
+      export SYNC_TARGET_RELEASE="$2"
+      shift
+      ;;
+    --allow-running-tickets) ALLOW_RUNNING_TICKETS=1 ;;
+    *) echo "$USAGE" >&2; exit 2 ;;
+  esac
+  shift
+done
 
 # Where failure alerts go. openclaw runs as the openclaw user, so the send is
 # wrapped in `sudo -u openclaw`. Signal target is an E.164 number.
@@ -170,6 +179,42 @@ trap on_exit EXIT
 
 step() { echo ""; echo "── $1 ──────────────────────────────────────────────────────────"; }
 
+# Refuse while a Workboard node ticket is running. The build starves the
+# Gateway (the 2026-10-10 deploy delayed its liveness heartbeat by 22 s), and a
+# node ticket streams its Claude CLI session through it: UX-3 blocked with
+# "paired node truncated the Claude CLI stream" during the build, before the
+# cutover restart. Source satellites also build on the Mac that runs iOS
+# tickets. Read-only; an unreachable Gateway or a missing workboard plugin
+# only warns, because the deploy must still be able to repair a broken host.
+#
+# $1 is the rerun command to suggest once the tickets are out of the way.
+check_running_node_tickets() {
+  local rerun="$1"
+  [ "$ALLOW_RUNNING_TICKETS" -eq 0 ] || { echo "  ! running node ticket guard skipped (--allow-running-tickets)"; return 0; }
+  local cards running
+  if ! cards="$(oc_openclaw gateway call workboard.cards.list --json --params '{}' 2>/dev/null)" \
+    || ! running="$(printf '%s' "$cards" | jq -er '[.cards[]
+        | select(.status == "running" and .metadata.automation.target.kind == "node-claude")
+        | "    \(.id)  \(.title)"] | join("\n")' 2>/dev/null)"; then
+    echo "  ! could not list Workboard cards (Gateway down or workboard plugin absent) — not checking for running node tickets"
+    return 0
+  fi
+  if [ -z "$running" ]; then
+    echo "  ✓ no node ticket is running"
+    return 0
+  fi
+  echo ""
+  echo "  ✗ Node tickets are running; a deploy now can truncate their sessions:"
+  echo "$running"
+  echo ""
+  echo "    Nothing was built or installed; the gateway keeps running the previous version."
+  echo "    Wait until they reach review (or stop them on the board), then rerun:"
+  echo "      $rerun"
+  echo "    To deploy anyway, add --allow-running-tickets."
+  echo ""
+  exit 1
+}
+
 echo "=== OpenClaw upstream sync + deploy  $(date) ==="
 echo "    repo : $REPO_DIR"
 echo "    log  : $LOG_FILE"
@@ -178,6 +223,8 @@ echo "    log  : $LOG_FILE"
 # The agent handles steps 1–7: fetch → rebase → install → build → check →
 # fork-feature verification → push.  Exits 1 on non-success.
 if [ "$RUN_SYNC" -eq 1 ]; then
+  STAGE="sync: running node ticket guard (nothing changed yet)"
+  check_running_node_tickets "$0${SYNC_TARGET_RELEASE:+ --target $SYNC_TARGET_RELEASE}"
   STAGE="sync (Codex agent, steps 1–7)"
   step "1/2  Sync (Codex agent — steps 1–7)"
   npx tsx .sandcastle/sync.ts
@@ -265,6 +312,11 @@ sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
 # gateway is still serving the old version at this point.
 STAGE="deploy: fork features (gateway still up)"
 node scripts/check-fork-features.mjs
+
+# Checked again here: the sync stage can run long enough for a ticket to start.
+# The sync already pushed main by now, so the rerun is a deploy only.
+STAGE="deploy: running node ticket guard (nothing installed yet)"
+check_running_node_tickets "$0 --deploy-only"
 
 # Source satellites (macOS) build this commit themselves, in parallel with ours.
 SATELLITES_SRC_LOG="$LOG_DIR/satellites-prepare-source-$(date +%Y%m%d-%H%M%S).log"
