@@ -357,6 +357,8 @@ Unlinked cards without an active or unresolved task association can start work d
   Opening it clears any schedule and moves a `scheduled` card to `todo`.
   Other cards keep their status.
 
+**Start**, **Run Claude**, and **Run OpenAI** keep you on the board; only
+**Open Claude** and **Open OpenAI** open the new session.
 Autonomous starts use the Gateway's task-tracked agent run path (default agent
 and model unless Claude/OpenAI is chosen explicitly). Workboard then links the
 resulting run id and session key back onto the card. Each linked
@@ -533,9 +535,9 @@ run only one ticket at a time, such as a Mac with one simulator. A ticket counts
 toward the route while it is `running` on one of the route's nodes and the
 route is the first one that shares its labels. The cap and the labels are read
 when a ticket starts, so it also holds cards created before you set it, and
-relabeling a running ticket moves it in or out of the count. A start beyond it
-reports that the route's slots are in use; scheduled passes skip it, and a
-reopened ticket waits, until one frees.
+relabeling a running ticket moves it in or out of the count. A scheduled pass
+skips a ticket beyond it, and an operator's **Start** or a reopened ticket
+[queues](#queued-starts) until one frees.
 
 To spread a route's work over several nodes, list the others in order as
 `alternateTargets`; the route then needs `maxConcurrent`, and each node may
@@ -611,10 +613,10 @@ cards then block at start with the core `model not allowed` reason.
    first: a published card moved to `todo` with no comment newer than its
    publish goes back to `backlog` with a comment naming the next step, and
    Workboard's own comments never count as review feedback. When every
-   [node ticket slot](#configuration) is busy, the card stays in `todo` with
-   one comment saying it waits, and starts when a running node ticket reaches
-   review. If the start is refused for another reason, the card is blocked
-   with that reason; fix it and move the card to `todo` again. The node worktree
+   [node ticket slot](#configuration) is busy, the card joins the
+   [start queue](#queued-starts) in `todo` with one comment saying it waits.
+   If the start is refused for another reason, the card is blocked with that
+   reason; fix it and move the card to `todo` again. The node worktree
    restarts at the PR branch tip on `origin`, so commits a reviewer pushed are
    kept. The session gets the same session key, a "Review rework, round N"
    brief with the full text of the review comments (the last five), and the
@@ -683,10 +685,33 @@ Node tickets share one pool instead of their owner's single slot: up to
 `nodeTickets.maxConcurrent` (default 2) run at once across all nodes, even for
 the same agent. A ticket holds its pool slot only while it is `running`
 (including the import). In `review` it waits for a person, so an un-accepted
-draft PR never holds back the next ticket. A start beyond the pool reports
-`All 2 node ticket slots are in use`; scheduled passes skip it until a slot
-frees. A route can set its own lower cap; see `maxConcurrent` under the label
-routes above.
+draft PR never holds back the next ticket. A scheduled pass skips a ticket
+beyond the pool until a slot frees. A route can set its own lower cap; see
+`maxConcurrent` under the label routes above.
+
+<a id="queued-starts" />
+
+#### Queued starts
+
+When the operator starts a node ticket (**Start** in the Control UI, or
+`workboard.cards.start`) while the pool or the ticket's route is full, the
+card is queued instead of refused. It stays in `todo` (or `ready`) with one
+comment naming the route or node it waits for, its **Start** button reads
+**Queued** and is disabled, and `workboard.cards.start` returns
+`{ queued: true, card }`. A reviewed rework or answer reopen that finds no free
+slot joins the same queue.
+
+Whenever a card changes, such as a running ticket reaching `review`, Workboard
+starts queued tickets oldest request first. A ticket whose own route is still
+full keeps its place without holding back a later ticket on a route with a
+free slot, so a full Mac route never blocks the Linux pool. A queued start
+refused for another reason blocks the card with that reason.
+
+The request is stored as `metadata.automation.startRequest`. Only the
+operator's start and a reviewed reopen set it; card updates, agent tools, and
+creates cannot. To cancel a queued start, move the card to `backlog`. Moving it
+away from `todo` or `ready`, archiving it, or a claim drops the request, and
+moving the card back does not restore it; start it again to requeue.
 
 ### Worker selection
 
@@ -842,6 +867,9 @@ The template id is stored as card metadata.
    the menu or ArrowLeft/ArrowRight. During a drag, the source card dims and
    available drop columns gain an outline.
 4. Start an unlinked card when it has no active or unresolved task association.
+   An autonomous start keeps you on the board; opening a card manually in an
+   engine opens its session. A node ticket started while its slot is full is
+   [queued](#queued-starts).
 5. Open the linked session from the card while the agent works.
 6. Let lifecycle sync move running work into `review`/`blocked`, then manually
    move the card to `done` when accepted.
