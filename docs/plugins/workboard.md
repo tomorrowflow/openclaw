@@ -654,8 +654,9 @@ and attempts. A weekly series for the last 8 UTC weeks gives the accepted
 count, the **autonomous** count (accepted with no rework, outside commit, or
 block), the median lead time from create to accept, and the median review
 wait (`medianReviewWaitMs`): import to publish for the review rounds published
-that week, the part of the lead time spent waiting for the operator. Rounds
-published before this was recorded have no review wait. On a board with an
+that week, the part of the lead time spent waiting for the operator (API
+only; the Control UI tables do not show it yet). Rounds published before this
+was recorded have no review wait. On a board with an
 `orchestration.defaultTarget`, the Control UI shows "N of M autonomous this
 week" under the board title; select it for the weekly and per-class tables.
 Blocks come from card events, which keep the newest 50 per card. An archived
