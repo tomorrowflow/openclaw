@@ -46,6 +46,11 @@ export function canRestartWorkboardNodeTicket(card: WorkboardCard): boolean {
   );
 }
 
+/** The operator started this node ticket while its slot was full; it starts when one frees. */
+export function isWorkboardStartQueued(card: WorkboardCard): boolean {
+  return Boolean(card.metadata?.automation?.startRequest);
+}
+
 export function canStartWorkboardCard(card: WorkboardCard): boolean {
   return !workboardCardSessionKey(card) || canRestartWorkboardNodeTicket(card);
 }

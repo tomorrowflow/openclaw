@@ -86,6 +86,9 @@ export function normalizeAutomation(value: unknown): WorkboardAutomation | undef
       : {}),
     ...(typeof value.maxRetries === "number" ? { maxRetries: value.maxRetries } : {}),
     ...(typeof value.scheduledAt === "number" ? { scheduledAt: value.scheduledAt } : {}),
+    ...(isRecord(value.startRequest) && typeof value.startRequest.requestedAt === "number"
+      ? { startRequest: { requestedAt: value.startRequest.requestedAt } }
+      : {}),
     ...(typeof value.summary === "string" ? { summary: value.summary } : {}),
     ...(createdCardIds.length ? { createdCardIds } : {}),
     ...(typeof value.dispatchCount === "number" ? { dispatchCount: value.dispatchCount } : {}),

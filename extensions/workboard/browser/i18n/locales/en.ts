@@ -269,6 +269,9 @@ export default {
     start: "Start",
     restart: "Restart",
     restartNodeTicket: "Restart in the same node worktree",
+    startQueued: "Queued",
+    startQueuedHelp:
+      "Queued for a node-ticket slot; it starts when one frees. Move it to backlog to cancel.",
     dependencies: "Dependencies",
     dependenciesBlocked: "{count} blocked",
     dependencyStatusMissing: "Missing",
