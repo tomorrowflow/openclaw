@@ -509,6 +509,8 @@ This board runs server work on a Linux node and everything else on a Mac:
           worktreesRoot: "/home/factory/worktrees",
           hostRepoPath: "/home/openclaw/repos/voice-diary",
         },
+        // Optional: at most one server ticket runs at a time.
+        maxConcurrent: 1,
       },
     ],
   },
@@ -523,6 +525,15 @@ with no labels and a label that appears in more than one route. Pass
 `targetRoutes: null` or `[]` to remove the routes. Routing happens only when a
 card is created: changing a card's labels later, or the board's routes, does
 not move existing cards to another node.
+
+A route's optional `maxConcurrent` (1 to 16) caps how many of its tickets run at
+once, inside the plugin-wide pool. Use it when a node can run only one ticket
+at a time, such as a Mac with one simulator. A ticket counts toward the route
+while it is `running` on the route's node and the route is the first one that
+shares its labels. The cap and the labels are read when a ticket starts, so it
+also holds cards created before you set it, and relabeling a running ticket
+moves it in or out of the count. A start beyond it reports that the route's slots are in use;
+scheduled passes skip it, and a reopened ticket waits, until one frees.
 
 Saving a board that sets the target, the routes, or the assignee checks each
 target `model` against that agent's `modelPolicy.allow` (the default agent when
@@ -629,7 +640,8 @@ the same agent. A ticket holds its pool slot only while it is `running`
 (including the import). In `review` it waits for a person, so an un-accepted
 draft PR never holds back the next ticket. A start beyond the pool reports
 `All 2 node ticket slots are in use`; scheduled passes skip it until a slot
-frees.
+frees. A route can set its own lower cap; see `maxConcurrent` under the label
+routes above.
 
 ### Worker selection
 

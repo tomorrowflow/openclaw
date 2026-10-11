@@ -12,6 +12,7 @@ import type {
   WorkboardSqliteWorkerOperations,
 } from "./sqlite-store-contract.js";
 import { unwrapWorkboardSqliteResult } from "./sqlite-store-errors.js";
+import { isWorkboardSlotFull } from "./store-constants.js";
 
 type WorkboardSqliteStores = WorkboardPersistence & {
   ready: Promise<number>;
@@ -119,7 +120,7 @@ export function createWorkboardSqliteStores(options: {
       ),
     );
     // A rejected comparison has accepted no mutation; a retry still needs authority.
-    if (result !== false && result !== "conflict" && result !== "slot_busy") {
+    if (result !== false && result !== "conflict" && !isWorkboardSlotFull(result)) {
       authority.assertCurrent = undefined;
     }
     return result;

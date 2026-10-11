@@ -214,6 +214,56 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     expect(next.started.map((run) => run.cardId)).toEqual([cards[2]?.id]);
   });
 
+  it("holds a capped route to its own slots inside the pool, including cards made before the cap", async () => {
+    const store = createWorkboardSqliteTestStore();
+    store.nodeTicketConcurrency = 3;
+    const linux = { ...TARGET, nodeId: "linux-factory" };
+    const routes = [
+      { labels: ["class:ios-ui", "class:ios-device"], target: TARGET },
+      { labels: ["class:server-fix"], target: linux },
+    ];
+    await store.upsertBoard({
+      id: "app",
+      orchestration: { defaultTarget: TARGET, defaultAssignee: "dev", targetRoutes: routes },
+    });
+    const create = async (title: string, label: string) =>
+      await store.create({ title, boardId: "app", status: "ready", labels: [label] });
+    const firstIos = await create("Fix the header", "class:ios-ui");
+    const secondIos = await create("Fix the wake word", "class:ios-device");
+    const server = await create("Fix the upload", "class:server-fix");
+    await store.upsertBoard({
+      id: "app",
+      orchestration: { targetRoutes: [{ ...routes[0], maxConcurrent: 1 }, routes[1]] },
+    });
+    const nodeTickets = createNodeGateway();
+    const dispatch = async (cardId?: string) =>
+      await dispatchAndStartWorkboardCards({
+        store,
+        subagent: { run: vi.fn() },
+        nodeTickets,
+        options: { now: Date.now(), maxStarts: 3, ...(cardId ? { cardId } : {}) },
+      });
+
+    const first = await dispatch();
+    expect(first.startFailures).toEqual([]);
+    expect(first.started.map((run) => run.cardId).toSorted()).toEqual(
+      [firstIos.id, server.id].toSorted(),
+    );
+    const busy =
+      "The class:ios-ui, class:ios-device route's 1 node ticket slot is in use; it frees when a running ticket on that route reaches review.";
+    await expect(dispatch(secondIos.id)).resolves.toMatchObject({
+      startFailures: [expect.objectContaining({ cardId: secondIos.id, error: busy })],
+    });
+    // The claim enforces the cap itself, not only the dispatcher's selection.
+    await expect(store.claim(secondIos.id, { ownerId: "dev" })).rejects.toThrow(busy);
+    await expect(store.get(secondIos.id)).resolves.toMatchObject({ status: "ready" });
+    // A full pool is named as the pool, even when the route is full too.
+    store.nodeTicketConcurrency = 2;
+    await expect(store.claim(secondIos.id, { ownerId: "dev" })).rejects.toThrow(
+      "All 2 node ticket slots are in use",
+    );
+  });
+
   it("blocks the card with the node's error when the worktree cannot be created", async () => {
     const store = createWorkboardSqliteTestStore();
     const card = await createNodeCard(store);

@@ -725,6 +725,14 @@ describe("workboard tools", () => {
         },
       }),
     ).rejects.toThrow("target route label class:feature appears in more than one route.");
+    await expect(
+      store.upsertBoard({
+        id: "app",
+        orchestration: {
+          targetRoutes: [{ labels: ["class:feature"], target: NODE_TARGET, maxConcurrent: 0 }],
+        },
+      }),
+    ).rejects.toThrow("target route maxConcurrent must be an integer from 1 to 16.");
   });
 
   it("refuses a board node target whose model the assignee's modelPolicy does not allow", async () => {

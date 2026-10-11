@@ -31,10 +31,12 @@ import { workboardSessionKeyForCard } from "./session-link.js";
 import { cardBoardId } from "./store-card-helpers.js";
 import {
   isWorkboardNodeTicket,
+  type WorkboardClaimSlot,
   workboardCardConsumesNodeTicketSlot,
   workboardCardConsumesOwnerSlot,
   workboardCardSlotOwner,
   workboardSlotBusyMessage,
+  workboardSlotFull,
 } from "./store-constants.js";
 import { WorkboardStore, type WorkboardDispatchResult } from "./store.js";
 import {
@@ -200,16 +202,18 @@ function selectStartableCards(
   ownerOverride: string | undefined,
   now: number,
   mode: "scheduled" | "exact",
-  nodeTicketLimit: number,
+  nodeTicketSlots: ReadonlyMap<string, WorkboardClaimSlot>,
 ): { cards: WorkboardCard[]; rejection?: WorkboardStartFailure } {
   if (limit <= 0) {
     return { cards: [] };
   }
   const runningOwners = new Set<string>();
-  let nodeTicketsInUse = 0;
+  // Selected node tickets join the running ones, so one pass cannot overfill
+  // the pool or a capped route.
+  const nodeTicketOccupants: WorkboardCard[] = [];
   for (const card of cards) {
     if (workboardCardConsumesNodeTicketSlot(card, now)) {
-      nodeTicketsInUse += 1;
+      nodeTicketOccupants.push(card);
     } else if (workboardCardConsumesOwnerSlot(card, now)) {
       runningOwners.add(workboardCardSlotOwner(card));
     }
@@ -220,7 +224,9 @@ function selectStartableCards(
   const ordered = mode === "scheduled" ? candidates.toSorted(sortReadyCards) : candidates;
   for (const card of ordered) {
     const owner = ownerOverride || workboardCardSlotOwner(card, now);
-    const nodeTicket = isWorkboardNodeTicket(card);
+    const nodeTicketSlot = nodeTicketSlots.get(card.id);
+    const nodeTicketFull =
+      nodeTicketSlot && workboardSlotFull(nodeTicketOccupants, nodeTicketSlot, now);
     const rejection = card.metadata?.archivedAt
       ? "Card is archived; restore it before starting."
       : cardHasActiveClaim(card, now)
@@ -233,9 +239,9 @@ function selectStartableCards(
               card.status !== "todo" &&
               card.status !== "ready"
             ? `Card cannot start from ${card.status}; move it to backlog, todo, or ready first.`
-            : nodeTicket
-              ? nodeTicketsInUse >= nodeTicketLimit
-                ? workboardSlotBusyMessage({ kind: "node-tickets", limit: nodeTicketLimit })
+            : nodeTicketSlot
+              ? nodeTicketFull
+                ? workboardSlotBusyMessage(nodeTicketSlot, nodeTicketFull)
                 : undefined
               : runningOwners.has(owner)
                 ? `Owner ${owner} already has active Workboard work; complete or stop it before starting another card.`
@@ -249,9 +255,14 @@ function selectStartableCards(
       }
       continue;
     }
-    if (nodeTicket) {
-      // Node tickets share the pool, not their owner's slot.
-      nodeTicketsInUse += 1;
+    if (nodeTicketSlot) {
+      // Node tickets share the pool, not their owner's slot. Count the pick
+      // as the running, freshly claimed ticket its start makes it.
+      nodeTicketOccupants.push({
+        ...card,
+        status: "running",
+        metadata: { ...card.metadata, claim: undefined },
+      });
       selected.push(card);
       continue;
     }
@@ -317,6 +328,11 @@ async function runWorkboardDispatch(
   let acceptedStarts = 0;
   let attemptedStarts = 0;
 
+  const nodeTicketSlots = await params.store.nodeTicketSlots(
+    candidates.filter(
+      (card) => isWorkboardNodeTicket(card) && (directCard || card.status === "ready"),
+    ),
+  );
   const selection = selectStartableCards(
     cards,
     maxStarts,
@@ -324,7 +340,7 @@ async function runWorkboardDispatch(
     ownerOverride,
     now,
     directCardId ? "exact" : "scheduled",
-    params.store.nodeTicketConcurrency,
+    nodeTicketSlots,
   );
   if (selection.rejection) {
     startFailures.push(selection.rejection);

@@ -164,6 +164,13 @@ function normalizeTargetRoutes(value: unknown): WorkboardTargetRoute[] {
     if (!target) {
       throw new Error("each target route needs labels and a target.");
     }
-    return { labels, target };
+    if (route.maxConcurrent === undefined || route.maxConcurrent === null) {
+      return { labels, target };
+    }
+    const maxConcurrent = resolveOptionalIntegerOption(route.maxConcurrent, { min: 1, max: 16 });
+    if (maxConcurrent === undefined || maxConcurrent !== route.maxConcurrent) {
+      throw new Error("target route maxConcurrent must be an integer from 1 to 16.");
+    }
+    return { labels, target, maxConcurrent };
   });
 }

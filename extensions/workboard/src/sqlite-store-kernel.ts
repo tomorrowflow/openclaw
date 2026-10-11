@@ -36,6 +36,7 @@ import {
   parseJson,
   readAttachment,
   readCard,
+  readLabels,
   requiredNumber,
   requiredString,
   stringValue,
@@ -49,7 +50,7 @@ import {
   MAX_WORKER_CONTEXT_PARENTS,
   MAX_WORKER_CONTEXT_RECENT_CARDS,
   type WorkboardClaimSlot,
-  workboardCardOccupiesSlot,
+  workboardSlotFull,
 } from "./store-constants.js";
 
 type SyncStore<T> = {
@@ -134,11 +135,14 @@ class WorkboardSqliteCardStore implements SyncStore<WorkboardCardStore> {
       if (!current) {
         return "conflict";
       }
-      // Child records cannot occupy a slot. Keep lease and slot decisions
-      // with the shared policy, after SQLite excludes archived and inactive cards.
+      // Keep lease and slot decisions with the shared policy, after SQLite
+      // excludes archived and inactive cards. Only a capped route reads child
+      // records, and only for node tickets on its board and node.
       const candidates = query
         .selectFrom("workboard_cards")
         .select([
+          "id",
+          "board_id",
           "status",
           "agent_id",
           "claim_json",
@@ -155,30 +159,38 @@ class WorkboardSqliteCardStore implements SyncStore<WorkboardCardStore> {
             eb.and([eb("claim_json", "is not", null), eb("status", "!=", "done")]),
           ]),
         );
-      let occupied = 0;
-      const capacity = slot.kind === "node-tickets" ? slot.limit : 1;
-      for (const row of iterateSqliteQuerySync(this.db, candidates)) {
-        // SAFETY: insertCard serializes WorkboardMetadata.automation; only its target kind is read.
-        const automation = parseJson(row.automation_json) as WorkboardMetadata["automation"];
-        const card = {
-          // SAFETY: insertCard persists WorkboardCard.status; this keeps readCard's required-string boundary.
-          status: requiredString(row, "status") as WorkboardCard["status"],
-          agentId: stringValue(row, "agent_id"),
-          metadata: {
-            // SAFETY: insertCard serializes WorkboardMetadata.claim; this keeps readMetadata's optional JSON boundary.
-            claim: parseJson(row.claim_json) as WorkboardMetadata["claim"],
-            automation: automation?.target ? { target: automation.target } : undefined,
-          },
-          execution: stringValue(row, "execution_id")
-            ? {
-                // SAFETY: insertCard persists WorkboardExecution.status; this keeps readExecution's required-string boundary.
-                status: requiredString(row, "execution_status") as WorkboardExecution["status"],
-              }
-            : undefined,
-        };
-        if (workboardCardOccupiesSlot(card, slot, now) && ++occupied >= capacity) {
-          return "slot_busy";
+      const db = this.db;
+      const route = slot.kind === "node-tickets" ? slot.route : undefined;
+      function* occupants() {
+        for (const row of iterateSqliteQuerySync(db, candidates)) {
+          // SAFETY: insertCard serializes WorkboardMetadata.automation; only its target is read.
+          const automation = parseJson(row.automation_json) as WorkboardMetadata["automation"];
+          const boardId = requiredString(row, "board_id");
+          yield {
+            // SAFETY: insertCard persists WorkboardCard.status; this keeps readCard's required-string boundary.
+            status: requiredString(row, "status") as WorkboardCard["status"],
+            agentId: stringValue(row, "agent_id"),
+            labels:
+              route && route.boardId === boardId && automation?.target?.nodeId === route.nodeId
+                ? readLabels(db, requiredString(row, "id"))
+                : undefined,
+            metadata: {
+              // SAFETY: insertCard serializes WorkboardMetadata.claim; this keeps readMetadata's optional JSON boundary.
+              claim: parseJson(row.claim_json) as WorkboardMetadata["claim"],
+              automation: automation?.target ? { target: automation.target, boardId } : undefined,
+            },
+            execution: stringValue(row, "execution_id")
+              ? {
+                  // SAFETY: insertCard persists WorkboardExecution.status; this keeps readExecution's required-string boundary.
+                  status: requiredString(row, "execution_status") as WorkboardExecution["status"],
+                }
+              : undefined,
+          };
         }
+      }
+      const full = workboardSlotFull(occupants(), slot, now);
+      if (full) {
+        return full;
       }
       // Validate the target's stored tree before replacing it, without decoding
       // unrelated cards as an incidental prerequisite for claiming this one.

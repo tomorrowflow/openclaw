@@ -199,7 +199,7 @@ function workerProtocolRow(
   return db.prepare("SELECT * FROM workboard_worker_protocol WHERE card_id = ?").get(cardId);
 }
 
-function readLabels(db: DatabaseSync, cardId: string, preloaded?: CardChildRows): string[] {
+export function readLabels(db: DatabaseSync, cardId: string, preloaded?: CardChildRows): string[] {
   return childRows(db, "workboard_card_labels", cardId, preloaded).flatMap((row) => {
     const label = stringValue(row, "label");
     return label ? [label] : [];

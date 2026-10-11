@@ -25,6 +25,7 @@ import type {
   WorkboardWriteAuthority,
 } from "./persistence-types.js";
 import { normalizeBoardMetadata } from "./store-board-normalizers.js";
+import { findWorkboardTargetRoute } from "./store-constants.js";
 import type {
   WorkboardBoardInput,
   WorkboardLinkedCreateInput,
@@ -250,9 +251,9 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
       (isRecord(requestedAutomation) && Object.hasOwn(requestedAutomation, "target")) ||
       (workspace && workspace.kind !== "scratch")
         ? undefined
-        : (orchestration?.targetRoutes?.find((route) =>
-            route.labels.some((label) => labels.includes(label)),
-          )?.target ?? orchestration?.defaultTarget);
+        : (orchestration?.targetRoutes?.[
+            findWorkboardTargetRoute(orchestration.targetRoutes, labels)
+          ]?.target ?? orchestration?.defaultTarget);
     return {
       metadata: target ? { ...metadata, automation: { ...automation, target } } : metadata,
       ...(agentId ? { agentId } : {}),
