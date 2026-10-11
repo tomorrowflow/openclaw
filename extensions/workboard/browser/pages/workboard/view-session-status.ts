@@ -20,7 +20,7 @@ export function getSessionStatus(
   lifecycle: WorkboardLifecycle,
   now = Date.now(),
 ): SessionStatusPresentation {
-  const formatted = formatLifecycle(lifecycle);
+  const formatted = formatLifecycle(lifecycle, card);
   const state = getCardSessionState(lifecycle);
   const key = state === "succeeded" ? "done" : state === "timed_out" ? "timedOut" : state;
   const staleAgeMs = state === "stale" ? getCardStaleAgeMs(card, lifecycle, now) : undefined;

@@ -13,6 +13,7 @@ import {
   WORKBOARD_ALL_BOARDS_FILTER,
 } from "../../lib/workboard/board-filter.ts";
 import { workboardBoardName } from "../../lib/workboard/board-presentation.ts";
+import { canRestartWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
 import {
   addWorkboardCardComment,
   getWorkboardDependencyState,
@@ -180,7 +181,7 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
     props.onRequestUpdate?.();
   };
   const lifecycle = getWorkboardLifecycle(card, props.sessions, props.sessionResolution);
-  const formatted = formatLifecycle(lifecycle);
+  const formatted = formatLifecycle(lifecycle, card);
   const sessionStatus = getSessionStatus(card, lifecycle);
   const comments = card.metadata?.comments ?? [];
   const automation = card.metadata?.automation;
@@ -456,7 +457,8 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
                   >
                     ${renderSessionHeading("overview")}
                     ${
-                      showStartControls
+                      // A restart continues the node ticket's own session; other starts would not.
+                      showStartControls && !canRestartWorkboardNodeTicket(card)
                         ? html`
                             <details
                               class="workboard-detail__disclosure workboard-detail__engine-options"

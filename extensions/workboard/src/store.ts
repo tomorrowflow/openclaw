@@ -370,7 +370,13 @@ export class WorkboardStore extends WorkboardNotificationStore {
       const result = await this.updateLatestCard(
         id,
         (card) => {
-          if (card.metadata?.archivedAt) {
+          // A stopped node ticket waits in todo until its next launch; the aborted
+          // run's failure must neither block it nor count as a failed attempt.
+          if (
+            card.metadata?.archivedAt ||
+            (card.status === "todo" &&
+              card.metadata?.automation?.target?.worktree?.stopRequestedAt !== undefined)
+          ) {
             return undefined;
           }
           const patch: WorkboardCardPatch = {};

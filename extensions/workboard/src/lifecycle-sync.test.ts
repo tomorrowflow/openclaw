@@ -17,6 +17,7 @@ import { startNodeCard } from "./node-ticket.test-support.js";
 import { workboardSessionKeyForCard } from "./session-link.js";
 import type { WorkboardStore } from "./store.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
+import { projectWorkboardTrust } from "./trust-kpis.js";
 
 type ServiceContext = Parameters<OpenClawPluginService["start"]>[0];
 type ServiceCron = NonNullable<ReturnType<NonNullable<ServiceContext["getCron"]>>>;
@@ -970,6 +971,33 @@ describe("Workboard lifecycle service", () => {
     expect(attempt?.status).toBe("blocked");
     expect(attempt?.error?.length).toBeLessThanOrEqual(800);
     expect(attempt?.error?.startsWith(lead)).toBe(true);
+  });
+
+  it("records an operator stop of a node ticket as stopped, not failed", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    await store.nodeTicketStop(card.id, { action: "request" });
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: false, messages: [] },
+      context: { runId, sessionKey },
+    });
+    await runSessionSweep({
+      store,
+      sessions: [
+        { key: sessionKey, status: "killed", abortedLastRun: true, updatedAt: Date.now() },
+      ],
+    });
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("todo");
+    expect(stored?.sessionKey).toBe(sessionKey);
+    expect(stored?.metadata?.failureCount ?? 0).toBe(0);
+    expect(stored?.metadata?.attempts?.at(-1)?.status).toBe("stopped");
+    expect(stored?.metadata?.comments?.at(-1)?.body).toMatch(/^Stopped by the operator\./);
+    expect(stored?.events?.some((event) => event.toStatus === "blocked")).toBe(false);
+    expect(projectWorkboardTrust([stored!], "default", Date.now()).total.blocked).toBe(0);
   });
 
   it("leaves a finished node ticket running when only the sweep saw it end", async () => {

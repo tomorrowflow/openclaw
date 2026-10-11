@@ -6,6 +6,7 @@ import type { GatewaySessionRow } from "../../api/types.ts";
 import { icons } from "../../components/icons.ts";
 import { t } from "../../i18n/index.ts";
 import { formatDateTimeMs } from "../../lib/format.ts";
+import { isWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
 import {
   getWorkboardState,
   workboardMutationsReady,
@@ -266,11 +267,13 @@ export function engineBlockedByRuntime(
   });
 }
 
-export function formatLifecycle(lifecycle: WorkboardLifecycle): {
+type LifecyclePresentation = {
   label: string;
   detail: string | undefined;
   tone: "blocked" | "done" | "idle" | "live";
-} {
+};
+
+function formatSessionLifecycle(lifecycle: WorkboardLifecycle): LifecyclePresentation {
   if (lifecycle.state === "failed") {
     if (lifecycle.session?.status === "timeout") {
       return {
@@ -289,6 +292,18 @@ export function formatLifecycle(lifecycle: WorkboardLifecycle): {
   }
   const [labelKey, detailKey, tone] = lifecycleCopy[lifecycle.state];
   return { label: t(labelKey), detail: detailKey === undefined ? undefined : t(detailKey), tone };
+}
+
+export function formatLifecycle(
+  lifecycle: WorkboardLifecycle,
+  card?: WorkboardCard,
+): LifecyclePresentation {
+  const formatted = formatSessionLifecycle(lifecycle);
+  // A node ticket's session ran on the node, so opening it explains nothing;
+  // the card comments say what happened and Restart continues in its worktree.
+  return lifecycle.state === "failed" && card && isWorkboardNodeTicket(card)
+    ? { ...formatted, detail: t("workboard.lifecycleNodeTicketRestartDetail") }
+    : formatted;
 }
 
 export function cardHasUnresolvedStartedRun(card: WorkboardCard): boolean {

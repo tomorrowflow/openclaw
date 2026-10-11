@@ -350,6 +350,12 @@ export type WorkboardNodeWorktree = {
   feedback?: WorkboardNodeFeedback;
   /** One entry per publish, oldest first; kept across rework rounds. */
   reviews?: WorkboardNodeReviewVerdict[];
+  /**
+   * When an operator asked to stop the running session. Set before the abort,
+   * so the run's end records a stop (card back in todo, worktree kept), not a
+   * failure.
+   */
+  stopRequestedAt?: number;
 };
 
 /**

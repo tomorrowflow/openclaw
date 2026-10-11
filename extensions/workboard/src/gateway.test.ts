@@ -269,6 +269,7 @@ describe("workboard gateway methods", () => {
       "workboard.cards.captureSession",
       "workboard.cards.update",
       "workboard.cards.start",
+      "workboard.cards.stop",
       "workboard.cards.move",
       "workboard.cards.delete",
       "workboard.cards.comment",
@@ -334,6 +335,7 @@ describe("workboard gateway methods", () => {
         [
           "cards.diagnostics.refresh",
           "cards.create",
+          "cards.stop",
           "cards.attachments.add",
           "boards.upsert",
           "notifications.advance",

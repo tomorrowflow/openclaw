@@ -145,6 +145,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
   const questions = normalizeNodeQuestions(value.questions);
   const feedback = normalizeNodeFeedback(value.feedback);
   const reviews = normalizeNodeReviews(value.reviews);
+  const stopRequestedAt = resolveOptionalIntegerOption(value.stopRequestedAt, { min: 0 });
   return worktreePath && branch && baseCommit
     ? {
         path: worktreePath,
@@ -155,6 +156,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         ...(questions ? { questions } : {}),
         ...(feedback ? { feedback } : {}),
         ...(reviews.length > 0 ? { reviews } : {}),
+        ...(stopRequestedAt !== undefined ? { stopRequestedAt } : {}),
       }
     : undefined;
 }
