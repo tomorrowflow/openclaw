@@ -264,6 +264,77 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     );
   });
 
+  it("starts a pooled route's tickets on its first node with a free slot, and keeps a started ticket on its node", async () => {
+    const store = createWorkboardSqliteTestStore();
+    store.nodeTicketConcurrency = 4;
+    const big = { ...TARGET, nodeId: "linux-3090" };
+    const small = { ...TARGET, nodeId: "linux-790" };
+    await store.upsertBoard({
+      id: "app",
+      orchestration: {
+        defaultAssignee: "dev",
+        targetRoutes: [
+          {
+            labels: ["class:server-fix"],
+            target: big,
+            alternateTargets: [small],
+            maxConcurrent: 1,
+          },
+        ],
+      },
+    });
+    const create = async (title: string) =>
+      await store.create({ title, boardId: "app", status: "ready", labels: ["class:server-fix"] });
+    const first = await create("Fix the upload");
+    const second = await create("Fix the retry");
+    const third = await create("Fix the schema");
+    const nodeTickets = createNodeGateway();
+    const dispatch = async (cardId?: string) =>
+      await dispatchAndStartWorkboardCards({
+        store,
+        subagent: { run: vi.fn() },
+        nodeTickets,
+        options: { now: Date.now(), maxStarts: 3, ...(cardId ? { cardId } : {}) },
+      });
+    const nodeOf = async (id: string) =>
+      (await store.get(id))?.metadata?.automation?.target?.nodeId;
+
+    const started = await dispatch();
+    expect(started.startFailures).toEqual([]);
+    expect(started.started.map((run) => run.cardId)).toEqual([first.id, second.id]);
+    await expect(nodeOf(first.id)).resolves.toBe("linux-3090");
+    await expect(nodeOf(second.id)).resolves.toBe("linux-790");
+    expect(
+      nodeTickets.respond.mock.calls
+        .filter(([method]) => method === "sessions.create")
+        .map(([, params]) => params?.execNode),
+    ).toEqual(["linux-3090", "linux-790"]);
+
+    const busy =
+      "Each of the class:server-fix route's 2 nodes has its 1 node ticket slot in use; one frees when a running ticket on that route reaches review.";
+    await expect(dispatch(third.id)).resolves.toMatchObject({
+      startFailures: [expect.objectContaining({ cardId: third.id, error: busy })],
+    });
+    await expect(store.claim(third.id, { ownerId: "dev" })).rejects.toThrow(busy);
+    await expect(nodeOf(third.id)).resolves.toBe("linux-3090");
+
+    // Both nodes free up; the ticket with a worktree on the 790 stays there.
+    for (const id of [first.id, second.id]) {
+      const claim = (await store.get(id))?.metadata?.claim;
+      await store.releaseClaim(id, {
+        ownerId: claim?.ownerId,
+        token: claim?.token,
+        status: id === first.id ? "review" : "todo",
+      });
+    }
+    await store.claim(second.id, { ownerId: "dev" });
+    await expect(store.get(second.id)).resolves.toMatchObject({
+      metadata: { automation: { target: { nodeId: "linux-790", worktree: expect.any(Object) } } },
+    });
+    await store.claim(third.id, { ownerId: "dev" });
+    await expect(nodeOf(third.id)).resolves.toBe("linux-3090");
+  });
+
   it("blocks the card with the node's error when the worktree cannot be created", async () => {
     const store = createWorkboardSqliteTestStore();
     const card = await createNodeCard(store);

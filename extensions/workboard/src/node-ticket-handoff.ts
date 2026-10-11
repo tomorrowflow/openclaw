@@ -20,7 +20,7 @@ import {
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
-import { workboardRouteName, workboardSlotFull } from "./store-constants.js";
+import { workboardRouteName, workboardSlotPlacement } from "./store-constants.js";
 import type { WorkboardStore } from "./store.js";
 
 // file.fetch's hard cap; a larger bundle fails on the node with FILE_TOO_LARGE.
@@ -352,7 +352,7 @@ async function reopenNodeTicket(params: {
   }
   const at = params.now();
   const slot = await store.nodeTicketSlot(current);
-  const full = workboardSlotFull(await store.list(), slot, at);
+  const { full } = workboardSlotPlacement(await store.list(), slot, at);
   if (full) {
     if (!still.slotWaitNoted) {
       await store.addNodeTicketNotice(card.id, {

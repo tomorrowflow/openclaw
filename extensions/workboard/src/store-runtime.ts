@@ -126,7 +126,7 @@ export class WorkboardStoreRuntime {
       claimIfSlotAvailable: (key, value, expectedUpdatedAt, slot, now) =>
         this.trackMutation(
           () => store.claimIfSlotAvailable(key, value, expectedUpdatedAt, slot, now),
-          (result) => result === "updated",
+          (result) => result === "updated" || typeof result === "object",
         ),
       listCardStatuses: (ids) => this.runOperation(() => store.listCardStatuses(ids)),
       listBoardAggregates: () => this.runOperation(() => store.listBoardAggregates()),

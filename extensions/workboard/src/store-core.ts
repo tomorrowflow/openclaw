@@ -37,6 +37,7 @@ import {
   MAX_COMMENT_BODY_CHARS,
   isWorkboardSlotFull,
   POSITION_STEP,
+  withWorkboardRouteTarget,
   workboardSlotBusyMessage,
 } from "./store-constants.js";
 import type {
@@ -703,7 +704,10 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       if (isWorkboardSlotFull(result)) {
         throw new Error(workboardSlotBusyMessage(options.claimSlot.slot, result));
       }
-      updated = result === "updated";
+      if (typeof result === "object") {
+        next = withWorkboardRouteTarget(next, result.placed);
+      }
+      updated = result !== "conflict";
     } else {
       updated = await this.store.registerIfUpdatedAt(next.id, nextEntry, expectedUpdatedAt);
     }

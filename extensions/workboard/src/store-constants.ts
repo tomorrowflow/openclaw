@@ -1,8 +1,10 @@
+import { isDeepStrictEqual } from "node:util";
 import type {
   WorkboardAutomation,
   WorkboardCard,
   WorkboardClaim,
   WorkboardExecution,
+  WorkboardExecutionTarget,
   WorkboardMetadata,
   WorkboardOrchestrationSettings,
   WorkboardTargetRoute,
@@ -59,13 +61,20 @@ type WorkboardOwnerSlotCard = Pick<WorkboardCard, "status" | "agentId"> & {
   };
 };
 
+export type WorkboardRouteTarget = Omit<WorkboardExecutionTarget, "worktree">;
+
 /**
- * A board route's cap on its own running node tickets. Routes are read from
- * the board when a ticket claims, so a cap also holds cards created before it.
+ * A board route's per-node cap on its own running node tickets. Routes are
+ * read from the board when a ticket claims, so a cap also holds cards created
+ * before it.
  */
 export type WorkboardNodeTicketRouteSlot = {
   boardId: string;
-  nodeId: string;
+  /**
+   * The nodes this ticket may claim on, in preference order: the route's
+   * whole pool for a ticket that has no worktree yet, else only its own node.
+   */
+  targets: readonly WorkboardRouteTarget[];
   limit: number;
   /** The board's routes, so a running ticket counts only toward its own first match. */
   routes: readonly Pick<WorkboardTargetRoute, "labels">[];
@@ -130,10 +139,26 @@ export function workboardCardConsumesNodeTicketSlot(
   );
 }
 
+/** The card on another node of its route; only a card without a worktree is placed. */
+export function withWorkboardRouteTarget(
+  card: WorkboardCard,
+  target: WorkboardRouteTarget,
+): WorkboardCard {
+  return {
+    ...card,
+    metadata: { ...card.metadata, automation: { ...card.metadata?.automation, target } },
+  };
+}
+
+/** A route's nodes in preference order: its target, then its alternates. */
+export function workboardRouteTargets(route: WorkboardTargetRoute): WorkboardRouteTarget[] {
+  return [route.target, ...(route.alternateTargets ?? [])];
+}
+
 /**
  * The capped route a node ticket counts toward: the first route sharing one of
  * its labels, the same rule that picked its target, when the ticket runs on
- * that route's node.
+ * one of that route's nodes.
  */
 export function workboardNodeTicketRoute(
   card: WorkboardOwnerSlotCard,
@@ -143,65 +168,77 @@ export function workboardNodeTicketRoute(
   const routes = orchestration?.targetRoutes ?? [];
   const index = findWorkboardTargetRoute(routes, card.labels ?? []);
   const route = routes[index];
-  return target && route?.maxConcurrent && route.target.nodeId === target.nodeId
-    ? {
-        boardId: card.metadata?.automation?.boardId ?? "default",
-        nodeId: route.target.nodeId,
-        limit: route.maxConcurrent,
-        routes,
-        index,
-      }
-    : undefined;
-}
-
-function workboardCardInNodeTicketRoute(
-  card: WorkboardOwnerSlotCard,
-  route: WorkboardNodeTicketRouteSlot,
-): boolean {
-  return (
-    (card.metadata?.automation?.boardId ?? "default") === route.boardId &&
-    card.metadata?.automation?.target?.nodeId === route.nodeId &&
-    findWorkboardTargetRoute(route.routes, card.labels ?? []) === route.index
-  );
+  const pool = route ? workboardRouteTargets(route) : [];
+  const own = target && pool.find((candidate) => candidate.nodeId === target.nodeId);
+  if (!target || !own || !route?.maxConcurrent) {
+    return undefined;
+  }
+  // A ticket without a worktree still carries the target creation copied from
+  // the route, so it may start on any of the route's nodes. Once it has a
+  // worktree, or an operator gave it a different target, it stays put.
+  const { worktree, ...placement } = target;
+  return {
+    boardId: card.metadata?.automation?.boardId ?? "default",
+    targets: !worktree && isDeepStrictEqual(placement, own) ? pool : [own],
+    limit: route.maxConcurrent,
+    routes,
+    index,
+  };
 }
 
 /**
- * Which part of this slot the running cards fill, if any: the owner's slot,
- * the node-ticket pool, or the claiming ticket's route cap.
+ * Whether the slot has room and, for a capped route, the first of its nodes
+ * below the per-node cap. `full` names the pool or the route; `target` is
+ * the node the claiming ticket runs on.
  */
-export function workboardSlotFull(
+export function workboardSlotPlacement(
   occupants: Iterable<WorkboardOwnerSlotCard>,
   slot: WorkboardClaimSlot,
   now: number,
-): WorkboardSlotFull | undefined {
+):
+  | { full: WorkboardSlotFull; target?: undefined }
+  | { full?: undefined; target?: WorkboardRouteTarget } {
   if (slot.kind === "owner") {
     for (const card of occupants) {
       if (
         workboardCardConsumesOwnerSlot(card, now) &&
         workboardCardSlotOwner(card) === slot.ownerId
       ) {
-        return "slot_busy";
+        return { full: "slot_busy" };
       }
     }
-    return undefined;
+    return {};
   }
   // Count every running ticket so a full pool is reported as such, whichever
   // limit the iteration order would reach first.
+  const route = slot.route;
   let pool = 0;
-  let route = 0;
+  const perNode = new Map<string, number>();
   for (const card of occupants) {
-    if (workboardCardConsumesNodeTicketSlot(card, now)) {
-      pool += 1;
-      if (slot.route && workboardCardInNodeTicketRoute(card, slot.route)) {
-        route += 1;
-      }
+    if (!workboardCardConsumesNodeTicketSlot(card, now)) {
+      continue;
+    }
+    pool += 1;
+    const nodeId = card.metadata?.automation?.target?.nodeId;
+    if (
+      route &&
+      nodeId &&
+      (card.metadata?.automation?.boardId ?? "default") === route.boardId &&
+      findWorkboardTargetRoute(route.routes, card.labels ?? []) === route.index
+    ) {
+      perNode.set(nodeId, (perNode.get(nodeId) ?? 0) + 1);
     }
   }
-  return pool >= slot.limit
-    ? "slot_busy"
-    : slot.route && route >= slot.route.limit
-      ? "route_busy"
-      : undefined;
+  if (pool >= slot.limit) {
+    return { full: "slot_busy" };
+  }
+  if (!route) {
+    return {};
+  }
+  const target = route.targets.find(
+    (candidate) => (perNode.get(candidate.nodeId) ?? 0) < route.limit,
+  );
+  return target ? { target } : { full: "route_busy" };
 }
 
 /** `route_busy` only for a node-ticket slot whose route cap is full. */
@@ -222,9 +259,14 @@ export function workboardSlotBusyMessage(
   if (slot.kind === "owner") {
     return `Owner ${slot.ownerId} already has active Workboard work.`;
   }
-  return full === "route_busy" && slot.route
-    ? `The ${workboardRouteName(slot.route)} route's ${slot.route.limit} node ticket ${slot.route.limit === 1 ? "slot is" : "slots are"} in use; it frees when a running ticket on that route reaches review.`
-    : `All ${slot.limit} node ticket slots are in use; a slot frees when a running node ticket reaches review.`;
+  if (full !== "route_busy" || !slot.route) {
+    return `All ${slot.limit} node ticket slots are in use; a slot frees when a running node ticket reaches review.`;
+  }
+  const route = slot.route;
+  const slots = `${route.limit} node ticket ${route.limit === 1 ? "slot" : "slots"}`;
+  return route.targets.length > 1
+    ? `Each of the ${workboardRouteName(route)} route's ${route.targets.length} nodes has its ${slots} in use; one frees when a running ticket on that route reaches review.`
+    : `The ${workboardRouteName(route)} route's ${slots} ${route.limit === 1 ? "is" : "are"} in use; it frees when a running ticket on that route reaches review.`;
 }
 
 export function workboardCardSlotOwner(card: WorkboardOwnerSlotCard, now?: number): string {
