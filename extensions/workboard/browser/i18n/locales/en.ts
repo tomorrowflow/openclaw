@@ -267,6 +267,8 @@ export default {
     openEngine: "Open {engine}",
     runDefaultAgent: "Run default agent",
     start: "Start",
+    restart: "Restart",
+    restartNodeTicket: "Restart in the same node worktree",
     dependencies: "Dependencies",
     dependenciesBlocked: "{count} blocked",
     dependencyStatusMissing: "Missing",
@@ -380,6 +382,8 @@ export default {
     lifecycleStopped: "Stopped",
     lifecycleTimedOut: "Timed out",
     lifecycleStoppedDetail: "The run was stopped",
+    lifecycleNodeTicketRestartDetail:
+      "The card comments say why. Restart from todo continues in the same node worktree",
     eventsLabel: "Card events",
     eventCreated: "Created",
     eventEdited: "Edited",

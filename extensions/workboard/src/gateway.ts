@@ -16,6 +16,7 @@ import {
 } from "./gateway-helpers.js";
 import type { WorkboardSessionsBoardService } from "./sessions-board.js";
 import { resolveWorkboardSqliteWorkerModuleUrl } from "./sqlite-store-paths.js";
+import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
 import { registerWorkboardStoreLifecycle } from "./store-lifecycle.js";
 import { WorkboardStore } from "./store.js";
 import {
@@ -192,6 +193,49 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.start", WRITE_SCOPE, (request) =>
     dispatchCards(request, { supportsMaxStarts: false, directCard: true }),
   );
+  // The stop is recorded before the abort so the run's end reads as a stop, not a failure.
+  register("workboard.cards.stop", WRITE_SCOPE, async ({ params: input }) => {
+    const id = readId(input);
+    const requested = await store.nodeTicketStop(id, {
+      action: "request",
+      expectedUpdatedAt: readExpectedUpdatedAt(input),
+    });
+    // Another stop is already in flight; its abort and settle own the card.
+    if (!requested.updated) {
+      return { card: redactClaimToken(requested.card) };
+    }
+    const sessionKey = cardSessionKey(requested.card);
+    const runId = cardRunId(requested.card);
+    // chat.abort needs operator.write, the scope this method already requires.
+    const abort = async (abortParams: Record<string, unknown>) => {
+      const result = await api.runtime.gateway.request("chat.abort", abortParams, {
+        scopes: ["operator.write"],
+      });
+      return (
+        isRecord(result) &&
+        (result.aborted === true || (Array.isArray(result.runIds) && result.runIds.length > 0))
+      );
+    };
+    let aborted: boolean;
+    try {
+      // A stale card run id aborts nothing; retry session-wide before giving up.
+      aborted =
+        (await abort({ sessionKey, ...(runId ? { runId } : {}) })) ||
+        (runId !== undefined && (await abort({ sessionKey })));
+    } catch (error) {
+      await store.nodeTicketStop(id, { action: "settle", aborted: false });
+      throw error;
+    }
+    const { card } = await store.nodeTicketStop(id, { action: "settle", aborted });
+    // The run's end may have settled the stop before the abort found nothing to abort.
+    const stopped =
+      card.status === "todo" &&
+      card.metadata?.automation?.target?.worktree?.stopRequestedAt !== undefined;
+    if (!aborted && !stopped) {
+      throw new Error("The ticket session had no active run to stop; refresh the card.");
+    }
+    return { card: redactClaimToken(card) };
+  });
   register("workboard.cards.move", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(
       store.move(readId(input), input.status, input.position, undefined, {

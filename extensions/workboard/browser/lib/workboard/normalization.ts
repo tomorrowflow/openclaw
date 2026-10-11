@@ -1,4 +1,5 @@
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeNodeClaudeTarget } from "./metadata-contract-normalization.ts";
 import {
   normalizeEvents,
   normalizeExecution,
@@ -17,23 +18,6 @@ import {
 
 function normalizeCount(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : 0;
-}
-
-type NodeClaudeTarget = NonNullable<
-  NonNullable<WorkboardBoardSummary["orchestration"]>["defaultTarget"]
->;
-
-function normalizeNodeClaudeTarget(target: unknown): NodeClaudeTarget | undefined {
-  if (!isRecord(target) || target.kind !== "node-claude") {
-    return undefined;
-  }
-  const { nodeId, repoPath, worktreesRoot, hostRepoPath } = target;
-  return typeof nodeId === "string" &&
-    typeof repoPath === "string" &&
-    typeof worktreesRoot === "string" &&
-    typeof hostRepoPath === "string"
-    ? { kind: "node-claude", nodeId, repoPath, worktreesRoot, hostRepoPath }
-    : undefined;
 }
 
 /**

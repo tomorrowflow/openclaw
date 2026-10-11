@@ -590,6 +590,17 @@ cards then block at start with the core `model not allowed` reason.
    acceptance (`rework.acceptedAt`) on its node worktree. A card imported but not yet published can't be reworked; accept it
    first. A branch that is gone from `origin` (merged or closed PR) needs a new
    card.
+6. **Stop and restart:** **Stop** on a running node ticket calls
+   `workboard.cards.stop {id, expectedUpdatedAt}`, which records the stop on
+   the node worktree before it aborts the session. The card goes back to
+   `todo` with a comment, its claim released, and its session link and node
+   worktree kept. The attempt closes as `stopped`: no failure is counted, the
+   card is never `blocked`, and the trust KPIs count no block. If the session
+   had no active run, the call fails and the card is unchanged; a second stop
+   while one is in flight returns the card as is. **Restart** on a node ticket
+   in `todo` or `ready` that keeps its session link starts it again in the
+   same worktree, keeping uncommitted edits. Move a `blocked` node ticket to
+   `todo` first; a published or questions card then resumes on its own.
 
 Nodes and ticket sessions never hold the GitHub token; only the Gateway's
 publish step reads it.
@@ -766,7 +777,8 @@ Starting a card uses normal Gateway sessions. Workboard only stores card
 metadata and links. Conversation transcript, model selection, and run
 lifecycle stay owned by the regular session system. Use **Stop** on a live
 linked card to abort the active run - Workboard marks that card `blocked` so
-it stays visible for follow-up.
+it stays visible for follow-up. A stopped node ticket goes back to `todo`
+instead (see [node tickets](#node-tickets), step 6).
 
 New cards can start from Workboard templates (`bugfix`, `docs`, `release`,
 `pr_review`, `plugin`). Templates prefill title, notes, labels, and priority.

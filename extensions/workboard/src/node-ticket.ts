@@ -560,12 +560,17 @@ export async function applyNodeTicketReport(params: {
   const block = async (reason: string) =>
     await store.block(card.id, { reason: capText(reason, MAX_BLOCK_REASON_CHARS) }, scope);
   const parsed = parseNodeTicketReport(params.messages);
+  const worktree = nodeTicketTarget(card)?.worktree;
   if (!parsed.ok) {
+    // The operator's stop aborted the turn; a report that arrived before it applies below.
+    if (worktree?.stopRequestedAt !== undefined) {
+      await store.nodeTicketStop(card.id, { action: "settle", aborted: true });
+      return;
+    }
     await block(params.success ? parsed.reason : `The ticket session failed. ${parsed.reason}`);
     return;
   }
   const { report } = parsed;
-  const worktree = nodeTicketTarget(card)?.worktree;
   if (report.outcome === "needs_input" && worktree) {
     await store.addComment(
       card.id,

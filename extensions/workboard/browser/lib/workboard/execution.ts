@@ -28,8 +28,26 @@ const WORKBOARD_ENGINE_MODELS = {
 } as const;
 const WORKBOARD_SESSION_LABEL_MAX_CHARS = 512;
 
+export function isWorkboardNodeTicket(card: WorkboardCard): boolean {
+  return card.metadata?.automation?.target?.kind === "node-claude";
+}
+
+/**
+ * A stopped node ticket waits in todo with its session link and node
+ * worktree; starting it again continues in that worktree. A blocked one is
+ * moved to todo first, where published and questions cards resume on their own.
+ */
+export function canRestartWorkboardNodeTicket(card: WorkboardCard): boolean {
+  return (
+    isWorkboardNodeTicket(card) &&
+    Boolean(workboardCardSessionKey(card)) &&
+    !card.metadata?.archivedAt &&
+    (card.status === "todo" || card.status === "ready")
+  );
+}
+
 export function canStartWorkboardCard(card: WorkboardCard): boolean {
-  return !workboardCardSessionKey(card);
+  return !workboardCardSessionKey(card) || canRestartWorkboardNodeTicket(card);
 }
 
 function assertCurrentCard(state: WorkboardUiState, card: WorkboardCard): void {
@@ -192,6 +210,17 @@ export async function stopWorkboardCard(params: {
   const assertCurrent = () => assertCurrentCard(state, params.card);
   try {
     assertCurrent();
+    // Workboard records a running node ticket's stop before aborting it, so
+    // the run's end puts the card back in todo instead of reading as a failure.
+    if (isWorkboardNodeTicket(params.card) && params.card.status === "running") {
+      const payload = await params.client.request("workboard.cards.stop", {
+        id: params.card.id,
+        expectedUpdatedAt: params.card.updatedAt,
+      });
+      assertCurrent();
+      replaceCard(state, normalizeCardPayload(payload));
+      return;
+    }
     let sessionAborted = false;
     if (session) {
       const runId = workboardCardRunId(params.card);

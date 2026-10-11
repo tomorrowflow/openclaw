@@ -2,6 +2,7 @@ import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type {
   WorkboardAutomation,
   WorkboardDiagnosticAction,
+  WorkboardExecutionTarget,
   WorkboardWorkspace,
   WorkboardWorkspaceAccess,
 } from "./types.ts";
@@ -29,10 +30,25 @@ function normalizeWorkspaceAccess(value: unknown): WorkboardWorkspaceAccess | un
   };
 }
 
+/** The UI only needs to know where a node ticket runs, never its recorded worktree. */
+export function normalizeNodeClaudeTarget(target: unknown): WorkboardExecutionTarget | undefined {
+  if (!isRecord(target) || target.kind !== "node-claude") {
+    return undefined;
+  }
+  const { nodeId, repoPath, worktreesRoot, hostRepoPath } = target;
+  return typeof nodeId === "string" &&
+    typeof repoPath === "string" &&
+    typeof worktreesRoot === "string" &&
+    typeof hostRepoPath === "string"
+    ? { kind: "node-claude", nodeId, repoPath, worktreesRoot, hostRepoPath }
+    : undefined;
+}
+
 export function normalizeAutomation(value: unknown): WorkboardAutomation | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
+  const target = normalizeNodeClaudeTarget(value.target);
   const workspace = isRecord(value.workspace)
     ? {
         kind:
@@ -64,6 +80,7 @@ export function normalizeAutomation(value: unknown): WorkboardAutomation | undef
     ...(skills.length ? { skills } : {}),
     ...(workspace?.kind ? { workspace: workspace as WorkboardWorkspace } : {}),
     ...(workspaceAccess ? { workspaceAccess } : {}),
+    ...(target ? { target } : {}),
     ...(typeof value.maxRuntimeSeconds === "number"
       ? { maxRuntimeSeconds: value.maxRuntimeSeconds }
       : {}),

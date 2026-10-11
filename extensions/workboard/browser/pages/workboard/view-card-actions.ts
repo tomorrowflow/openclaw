@@ -7,7 +7,10 @@ import {
   nextWorkboardCardPosition,
   workboardCardSessionKey,
 } from "../../lib/workboard/card-state.ts";
-import { canStartWorkboardCard } from "../../lib/workboard/execution.ts";
+import {
+  canRestartWorkboardNodeTicket,
+  canStartWorkboardCard,
+} from "../../lib/workboard/execution.ts";
 import {
   archiveWorkboardCard,
   deleteWorkboardCard,
@@ -299,13 +302,16 @@ export function renderStartExecutionButton(
   const engineName = engine === "codex" ? t("workboard.engineOpenAI") : t("workboard.engineClaude");
   const disabled =
     busy || !props.connected || Boolean(runtimeBlock) || Boolean(card.metadata?.archivedAt);
+  const restart = !engine && mode === "autonomous" && canRestartWorkboardNodeTicket(card);
   const title = runtimeBlock
     ? runtimeBlock
     : engine
       ? mode === "autonomous"
         ? t("workboard.runEngine", { engine: engineName })
         : t("workboard.openEngine", { engine: engineName })
-      : t("workboard.runDefaultAgent");
+      : restart
+        ? t("workboard.restartNodeTicket")
+        : t("workboard.runDefaultAgent");
   return html`
     <button
       class="btn btn--xs workboard-card__start workboard-card__start--${mode}  ${engine ? "" : "workboard-card__start--default"}"
@@ -330,7 +336,7 @@ export function renderStartExecutionButton(
         engine
           ? html`<span>${engineName}</span>`
           : html`${mode === "autonomous" ? icons.play : icons.penLine}<span
-                >${t("workboard.start")}</span
+                >${restart ? t("workboard.restart") : t("workboard.start")}</span
               >`
       }
     </button>
