@@ -8,204 +8,99 @@ deploys (step 8) — stop before both.
 
 - `pnpm` is **not** on PATH. Use `corepack pnpm` for every pnpm command.
 - `pnpm install` was already run before you started (via `onSandboxReady`).
-- Untracked files (`??` in `git status`) are local-only additions — ignore them
-  when assessing working-tree cleanliness. Only unstaged changes to **tracked**
-  files matter (`git diff HEAD`).
+- Untracked files (`??` in `git status`) that were there before you started are
+  local-only additions; ignore them. **Every file you create must be committed:**
+  the host refuses to publish a `main` with files created during the sync left
+  untracked, because `origin/main` would not build without them.
 
 ## Procedure
 
 Follow `docs/UPSTREAM-SYNC.md` exactly. Key reminders per step:
 
-### Step 2–4: Fetch + rebase onto the newest release branch
+### Step 2–4: Finish the merge the host started
 
-This fork tracks the newest upstream **release** branch (e.g. `release/2026.6.5`),
-**not** `main` — unless the host pinned a specific release (see `TARGET` below);
-a pinned target is deliberate, so never substitute a newer branch for it. `main` never carries version bumps — its `package.json` stays at a
-baseline (e.g. `2026.6.2`) even as code lands — so the deployed version only
-advances when we rebase onto release branches.
+This fork tracks the newest upstream **release** branch (or the one the host
+pinned), not `main`, and syncs by **merging** it into `main`. The host already:
 
-```bash
-git fetch upstream --tags --prune
+- fetched upstream and picked the target: `upstream/release/{{TARGET_RELEASE}}`,
+  which brings in {{UPSTREAM_COMMITS}} commit(s);
+- ran `git merge --no-ff --no-commit upstream/release/{{TARGET_RELEASE}}` on
+  `main` ({{CONFLICTED}} file(s) conflicted);
+- resolved the mechanical classes with `scripts/sync-merge-release.mjs`: upstream
+  CI the fork does not keep, `package.json` version hunks, release-owned
+  changelogs and generated files, `pnpm-lock.yaml`, files only an earlier release
+  cut changed, and the root `version` pin plus the fork's `deploy:globally`
+  script.
 
-# The host may pin the target (SYNC_TARGET_RELEASE, already validated: X.Y.Z,
-# fetched, not older than main). Empty means the newest release branch by
-# version. Only `release/X.Y.Z` names qualify: `release-ci/*` (hash-named CI
-# snapshots) and any suffixed names are excluded, and `sort -V` orders the
-# dotted versions correctly.
-TARGET="{{TARGET_RELEASE}}"
-if [ -z "$TARGET" ]; then
-  TARGET=$(git for-each-ref --format='%(refname:short)' 'refs/remotes/upstream/release/*' \
-    | sed 's#^upstream/release/##' \
-    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
-    | sort -V | tail -1)
-fi
-git rev-parse --verify --quiet "upstream/release/$TARGET" >/dev/null \
-  || { echo "STOP: upstream/release/$TARGET does not exist"; exit 1; }
-echo "Target release branch: upstream/release/$TARGET"
+These files are still conflicted and are yours:
 
-# Fork-only commits = everything in `main` not contained in ANY upstream ref.
-# They form one contiguous chain at the tip of `main` (re-stacked every sync),
-# so the base to replant from is the parent of the OLDEST fork commit — i.e. the
-# upstream commit the stack currently sits on (last sync's release branch, or the
-# old `upstream/main` tip on the first switch). Deriving the base this way needs
-# no stored state and stays correct across both the first main→release switch and
-# every later release→release bump.
-#
-# Do NOT use `git merge-base main upstream/main` here: once we track a release
-# branch, that merge-base walks back to where the release line diverged from main
-# and would drag the release branch's own commits into the rebase set.
-FORK_COMMITS=$(git rev-list main --not --remotes=upstream)
-if [ -n "$FORK_COMMITS" ]; then
-  BASE=$(git rev-parse "$(echo "$FORK_COMMITS" | tail -1)^")
-else
-  BASE=$(git rev-parse main)   # no fork commits (unexpected) — nothing to replant
-fi
+{{REMAINING_CONFLICTS}}
 
-# Count what the target release brings in over the current base (for the report).
-NEW_COMMITS=$(git rev-list "$BASE..upstream/release/$TARGET" | wc -l | tr -d ' ')
-echo "release/$TARGET adds $NEW_COMMITS commit(s) over current base $BASE"
+`TARGET={{TARGET_RELEASE}}` in the commands below. Never re-run the merge, never
+`git merge --abort`, and never rebase: the host owns starting and abandoning the
+merge. Do not take either side of a source file wholesale; each conflict below
+needs both sides read.
 
-git rebase --onto "upstream/release/$TARGET" "$BASE" main
-```
-
-**Already on the newest release is normal — and it's a fast exit.** If
-`NEW_COMMITS` is `0` (the newest release branch is the one `main` already sits
-on), the rebase is a no-op: the working tree is byte-identical to the last
-successful sync that already built, checked, and pushed it. **Do not run
-install/build/check** — there is nothing new to verify, and the full
-optional-bundled build does not finish inside one agent turn, so polling it here
-is what makes the run die with `codex exited with code 1` before it can emit this
-result. Instead, confirm the tree is clean and already pushed, then report
-success **immediately**:
-
-```bash
-# Guard: only short-circuit when the rebase truly changed nothing.
-test -z "$(git status --porcelain --untracked-files=no)" \
-  && git rev-list --count "origin/main..main" | grep -qx 0 \
-  && echo "NO-OP: main == upstream/release/$TARGET and == origin/main — skipping build"
-```
-
-For a confirmed no-op, return `upstreamCommits: 0`, `conflicts: 0`,
-`build: "skipped"`, `tests: "skipped"`, `forkFeatures: "skipped"`,
-`pushed: true`, `status: "success"` (origin/main already matches local main; no
-push needed). Only fall through to the full install/build/check/push path below
-when `NEW_COMMITS` is greater than `0`.
-
-Report `upstreamCommits: $NEW_COMMITS` and set `trackedRelease` to `$TARGET` (e.g.
-`"2026.6.5"`) in the result.
+In a merge, `--ours` is fork `main` and `--theirs` is the release. Inspect a file
+with the common base shown: `git checkout --conflict=diff3 -- <file>`.
 
 ### Conflict resolution rules
 
-Apply these **in order**. The redundant-commit check comes first because it
-resolves the large majority of stops on a release→release bump.
+Apply these per file, in order:
 
-- **Redundant upstream commit — check this FIRST, before any merge.** The replay
-  range `$BASE..main` is not only our fork patches; it includes every upstream
-  commit that landed between syncs. The newer release branch already contains
-  most of them, but git cannot auto-drop a redundant commit once an earlier
-  replayed commit shifts its context, so it surfaces as a conflict (often a
-  scary-looking semantic one). At every stop, test whether the commit being
-  replayed is already in the release and skip it if so — do **not** hand-merge:
-  ```bash
-  git merge-base --is-ancestor "$(git rev-parse REBASE_HEAD)" \
-    "upstream/release/$TARGET" && git rebase --skip
-  ```
-  A skipped redundant commit leaves the release's version in place, which already
-  has its change. Only commits that are **not** ancestors of
-  `upstream/release/$TARGET` are genuine fork patches worth merging by hand.
-  (In the 2026.7.1 sync, 776 of 981 replayed commits were redundant. The stop-gate
-  that failed the run — an iOS snapshot-test refactor — was one of them, already
-  shipped in the release; it should have been skipped, not treated as semantic.)
-- **Previous release cut's commit — skip it.** Upstream cuts every
-  `release/X.Y.Z` branch independently from `main`, and re-cuts a release branch
-  in place (2026.9.7 was re-cut twice). The commits a previous cut carried are
-  then no longer ancestors of the target, so the check above misses them. At a
-  stop, if the commit is **not** authored by the fork (`git config user.name`) and
-  its subject already appears in the target's history, skip it:
-  ```bash
-  [ "$(git log -1 --format=%an REBASE_HEAD)" != "$(git config user.name)" ] \
-    && git log --format=%s "upstream/release/$TARGET" \
-      | grep -Fqx -- "$(git log -1 --format=%s REBASE_HEAD)" \
-    && git rebase --skip
-  ```
-  The newer cut carries that change, evolved. Replaying it duplicates it, and a
-  double-applied fix once spliced one test into the middle of another.
-- **Fork backport of an upstream fix — drop it once the target ships the
-  original.** The fork sometimes cherry-picks an upstream fix onto the release it
-  deploys, with `(cherry picked from commit <sha>)` in the message. When that
-  original is in the target, the backport is superseded and usually conflicts,
-  because it was adapted to the older cut's shape. It is not a semantic stop:
-  ```bash
-  ORIG=$(git log -1 --format=%B REBASE_HEAD | sed -n 's/^(cherry picked from commit \([0-9a-f]*\))$/\1/p')
-  [ -n "$ORIG" ] && git merge-base --is-ancestor "$ORIG" "upstream/release/$TARGET" \
-    && git rebase --skip
-  ```
-  Put its subject in `droppedForkCommits`. Precedent: the 2026.9.7 re-cut sync
-  stopped on "fix(doctor): backport plan-and-execute plugin migrations from one
-  inventory", whose original `47a84c8f1f3` (#157479) the re-cut already shipped.
-- **pnpm-lock.yaml**: always accept upstream's version:
-  `git checkout --theirs pnpm-lock.yaml && git add pnpm-lock.yaml && git rebase --continue`
-- **Generated baselines** (`docs/.generated/*.sha256`): accept the release version:
-  `git checkout "upstream/release/$TARGET" -- <file> && git add <file>`
-- **Release-owned changelogs** (`CHANGELOG.md`, `apps/ios/CHANGELOG.md`): release
-  generation owns these — accept the release version:
-  `git checkout "upstream/release/$TARGET" -- <file> && git add <file>`
-- **iOS release metadata the release no longer tracks**
-  (`apps/ios/Config/Version.xcconfig`, `apps/ios/fastlane/metadata/*/release_notes.txt`):
-  these are generated/gitignored upstream and show up as modify/delete — resolve
-  by deleting: `git rm <file> && git rebase --continue`
-- **GitHub Actions files** (`.github/workflows/`, `.github/actions/`, `.github/codeql/`,
-  `.github/dependabot.yml`, `.github/actionlint.yaml`): this fork removes upstream CI — always delete:
-  `git rm <file> && git rebase --continue`
-  After rebase also delete any new workflow files added by upstream (no conflict, just new):
-  `git ls-files .github/workflows | grep -v '^\.github/workflows/fork-' | xargs -r git rm -q`
-  `git rm -r .github/actions/ .github/codeql/ .github/dependabot.yml .github/actionlint.yaml 2>/dev/null || true`
-  Exception: `.github/workflows/fork-*.yml` is the fork's own CI. Keep it; never delete it.
-- **Source code — trivial** (adjacent additions, import ordering, whitespace): resolve and continue.
-- **Fork patch whose upstream premise was deleted — drop it.** A fork commit can
-  patch a code path that upstream has since removed outright. There is nothing to
-  merge: the patch edits lines that no longer exist, and re-applying it would
-  resurrect a contract the release deleted. Drop the commit (`git rebase --skip`)
-  only when **all four** hold — otherwise it is a stop gate:
+- **Generated files** — a plugin manifest's `controlUi` hashes
+  (`extensions/*/openclaw.plugin.json`), `docs/.generated/*`: take the release's
+  hunk. The build regenerates them.
+- **Ratchet baselines** (`config/*-baseline.txt`): take the release's hunk, then
+  run the matching check (`corepack pnpm check:assertion-safety` and friends) in
+  Step 5c and correct only counts it reports wrong. A merge carries both sides'
+  entries, so a ratchet compared against one parent alone reports the other
+  side's entries as growth; that is not a regression.
+- **Fork patch on code upstream refactored** (the common case): keep upstream's
+  new structure and re-apply only the fork's change on top, using upstream's
+  current names. Read the fork's intent first: `git log --format='%h %s'
+$(git merge-base HEAD MERGE_HEAD)..HEAD -- <file>` lists the fork commits.
+  Union import lists, then let Step 5c's lint drop what upstream made unused.
+- **Fork patch whose upstream premise was deleted** (a modify/delete conflict, or
+  a symbol gone from the release): accept upstream's version only when **all
+  four** hold, and otherwise stop:
   1. The symbol or contract the patch depends on is gone from the release:
      `git grep -q '<symbol>' "upstream/release/$TARGET" -- src/` returns nothing.
-  2. No entry in `docs/fork-features.txt` covers the behaviour (a tracked fork
-     feature is never dropped — see "Fork patches on upstream code" below).
+  2. No entry in `docs/fork-features.txt` covers the behaviour.
   3. Upstream still covers the user-visible behaviour by another route, or the
      behaviour is meaningless without the deleted contract. Name the upstream
-     file and line that carries it now.
+     file that carries it now.
   4. Upstream has regression coverage for that behaviour, or the fork's own test
-     for it is unreproducible because its trigger type no longer exists.
+     for it is unreproducible because its trigger no longer exists.
+     Record each such drop in `notes` with the four findings. Precedent: the 10.5
+     sync accepted the deletion of `src/skills/workshop/maintenance-prompt.ts`
+     because upstream retired the collection review it fed (#161057).
+- **Upstream changed a contract the fork calls** (a new required parameter, a
+  changed outcome source): adapt the fork's callers and tests to the new
+  contract, and keep the fork's ordering guarantees explicit. Precedent: the
+  10.5 sync made Workboard's `agent_end` read the session owner's outcome before
+  mapping a node ticket's report, so a failed attempt during model fallback does
+  not block the card.
 
-  Report every dropped commit in `notes` with the four findings, and list the
-  subject of every dropped **fork-authored** commit in `droppedForkCommits`, so the
-  drop is a recorded decision rather than a silent loss. The host compares
-  fork-authored subjects before and after the rebase and reports any missing one
-  that is neither upstream nor declared there as lost. Precedent: `35b9ccfac7d`
-  ("hand off restart lease loss") was dropped for the 2026.8.1 sync after
-  upstream `ce53f7e82e2` removed the session write lease; the silent-handoff
-  behaviour it added now lives in `resolveReplyOperationAbortAction`, gated on
-  `turn.isRestartRecoveryArmed?.()`, in `agent-runner-error-handler.ts`.
+After the last file, `git add` the resolutions and commit the merge with the
+host's message: `git commit --no-edit`. Everything after that is an ordinary
+fixup commit on top (Step 6).
 
-- **Genuine fork-only source — semantic** (commit is NOT an ancestor of the
-  release AND both sides changed the same logic differently): **stop gate** — set
-  `status: "failed"` and report details. This applies only after the redundant
-  check and the deleted-premise check above both rule the commit out; a
-  "semantic" conflict on an already-released commit is not a stop gate, it is a
-  skip, and one on a patch whose premise upstream deleted is a drop.
+**Auto-merged code needs a typecheck, not trust.** A conflict-free merge of
+fork code can still call a name upstream moved or removed (the 10.5 sync found
+`normalizeLabels` and `toDisplayPath` this way). Run `corepack pnpm tsgo:core`,
+`tsgo:extensions`, `tsgo:core:test`, and `tsgo:extensions:test` before you trust
+any test result, and migrate fork callers to upstream's replacement rather than
+restoring the old name. The `tsgo:core:test` error importing a `.github` fixture
+(`test-prerequisites.json`) is the known gap from the fork deleting upstream CI.
 
-  Evaluate this gate on the files still conflicted **after** applying every
-  mechanical rule above, not on the commit as a whole. Resolve the always-delete
-  and always-accept classes first (workflows, changelogs, generated baselines,
-  lockfile, iOS release metadata), then re-inspect `git diff --name-only
---diff-filter=U`. A large upstream commit that touches deleted CI workflows
-  alongside docs, scripts, and tests is not a stop gate: strip the workflow files
-  per the rule above and resolve the remainder normally. Escalate only if real
-  source files are still conflicted once the mechanical classes are gone.
+Report `upstreamCommits: {{UPSTREAM_COMMITS}}`, `trackedRelease:
+"{{TARGET_RELEASE}}"`, and `conflicts: {{CONFLICTED}}`.
 
 ### Step 5a: Install
 
-Already done by `onSandboxReady`. If pnpm-lock.yaml changed during rebase, re-run:
+Already done by `onSandboxReady`, on the release's `pnpm-lock.yaml` the host took. If you
+change a `package.json` or the lockfile while resolving, re-run:
 
 ```bash
 CI=true corepack pnpm install --no-frozen-lockfile
@@ -287,7 +182,7 @@ OPENCLAW_VITEST_MAX_WORKERS=4 corepack pnpm vitest run \
 A directory-shaped filter can select files into the wrong Vitest lane, where that
 lane's setup and mocks do not apply and tests fall through to real network calls.
 The result is a large, noisy, run-to-run-varying failure count that has nothing to
-do with the rebase. If a suite fails, rerun the exact failing files by full path
+do with the merge. If a suite fails, rerun the exact failing files by full path
 before believing the failure — if they pass that way, it was lane misrouting.
 Failures whose reported paths begin with `../../` are the tell.
 
@@ -328,8 +223,8 @@ Only case 1 that you could not repair is a stop gate. Cases 2 and 3 are checklis
 maintenance: fix the file, commit it in Step 6, and continue the sync.
 
 Some entries point at an **upstream test** whose expectation the fork supersedes.
-A rebase takes upstream's copy of that file wholesale, so the fork's expectation
-reverts and the suite goes red against fork behaviour that is working as intended.
+A resolution that takes upstream's copy of that file wholesale reverts the fork's
+expectation, and the suite goes red against fork behaviour that is working as intended.
 Those are case 1: re-apply the fork's expectation, keep the comment that explains
 the divergence, and do not "fix" the production code to satisfy upstream's copy.
 
@@ -337,7 +232,7 @@ the divergence, and do not "fix" the production code to satisfy upstream's copy.
 
 A fork fix committed between syncs is only protected once
 `docs/fork-features.txt` asserts it. Fixes without an entry are exactly the ones
-earlier rebases dropped silently, and nobody noticed until a user did. The
+earlier rebase-based syncs dropped silently, and nobody noticed until a user did. The
 Control UI's container-path previews of `/workspace/shared/...` (OneDrive and
 Syncthing) links broke that way after a sync and had to be re-landed. Before
 Step 6, list the fork-authored commits since the last sync and check that each
@@ -352,7 +247,7 @@ git log --format='%h %an %s' origin/main --not --remotes=upstream \
 
 For each one with no entry, add one that asserts the **call or condition** that
 carries the behavior, not an import or a type field, since those survive a
-rebase that drops the behavior. Commit it with the Step 6 fixups.
+resolution that drops the behavior. Commit it with the Step 6 fixups.
 
 If you leave a stale entry unfixed, it fails again on _every_ future sync and
 trains the next run to "restore" code upstream already has. Treat a checklist that
@@ -365,7 +260,7 @@ the build.
 
 #### Never fix a build break with a compatibility shim
 
-When the build fails on a missing export or module after a rebase, the cause is
+When the build fails on a missing export or module after the merge, the cause is
 almost always that a conflict was resolved by keeping the fork's whole copy of a
 file, which reverted an upstream rename or module split. Upstream callers then
 reference names the fork's copy no longer has.
@@ -389,15 +284,15 @@ A test file that is upstream-owned and carries no fork-feature assertions is
 taken from upstream wholesale; one that carries fork coverage is rebuilt from
 upstream's version with the fork's assertions re-added.
 
-If a fork-touched file's guard, branch, or helper vanished during the rebase,
+If a fork-touched file's guard, branch, or helper vanished during the merge,
 restore it — a dropped upstream guard is a silent regression, not a cleanup.
 
 #### Fork patches on upstream code (re-apply if Step 5f flags them)
 
-Most fork features are fork-only _additions_ that simply replant during rebase.
+Most fork features are fork-only _additions_ that a merge carries unchanged.
 The two below instead _modify upstream-owned files_, so an upstream change can
 silently revert them or cause a semantic conflict. If Step 5f reports either as
-MISSING — or the rebase conflicts in these files — re-apply the patch (do **not**
+MISSING — or the merge conflicts in these files — re-apply the patch (do **not**
 just delete the conflicting hunk), keep the fork-features.txt entry, then continue.
 Both are deployed-behaviour bug fixes; dropping them re-breaks live agents.
 
@@ -435,42 +330,28 @@ Both are deployed-behaviour bug fixes; dropping them re-breaks live agents.
 
 ### Step 5g: Root package.json fork customizations
 
-The rebase takes upstream's root `package.json` for the metadata/scripts blocks,
-which silently drops fork-only entries and adopts the release branch's in-dev
-version. Restore both after the rebase (idempotent):
+The host already pinned the root `version` to `{{TARGET_RELEASE}}` (the clean
+release train, not the branch's `-beta`, so `OPENCLAW_SERVICE_VERSION` never reads
+as a downgrade) and kept the fork's `deploy:globally` script, which the deploy
+lane calls after `npm i -g`. If your conflict resolutions touched the root
+`package.json`, confirm both survived:
 
-> **Dependency versions are upstream's, not the fork's.** Only the fork's _own_
-> entries are restored here — `version`, `deploy:globally`, and the plugin-sdk
-> export. For any third-party dependency the rebase touches, **take upstream's
-> version**; never re-pin the value the fork happened to carry in. Upstream bumps
-> deps because its own code needs the new API, so a "restored" older pin breaks
-> the build in a way that looks unrelated: `@openclaw/fs-safe` 0.4.4 was correct
-> for the pre-2026.7.2 base, and force-carrying it onto 2026.7.2 removed
-> `configureFsSafeNative` and broke every import of `src/utils.ts`.
+```bash
+node -e "const p=require('./package.json');console.log(p.version,p.scripts['deploy:globally'])"
+```
+
+> **Dependency versions are upstream's, not the fork's.** For any third-party
+> dependency a conflict touches, **take upstream's version**; never re-pin the
+> value the fork happened to carry. Upstream bumps deps because its own code needs
+> the new API, so a "kept" older pin breaks the build in a way that looks
+> unrelated: `@openclaw/fs-safe` 0.4.4 was correct for the pre-2026.7.2 base, and
+> force-carrying it onto 2026.7.2 removed `configureFsSafeNative` and broke every
+> import of `src/utils.ts`.
 >
 > Cross-check before accepting a pin: if an `extensions/*/package.json` asks for a
 > newer version than root, root is the stale outlier, not the plugin.
 > `grep -rn '<dep>' package.json extensions/*/package.json pnpm-workspace.yaml`
 > should agree.
-
-```bash
-# 1. Pin the deployed version to the clean release train, not the branch's
-#    -beta. release/$TARGET carries e.g. 2026.7.1-beta.6 mid-development; the fork
-#    deploys as $TARGET (2026.7.1). Otherwise OPENCLAW_SERVICE_VERSION reads as a
-#    downgrade from the running install.
-node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));if(p.version!==process.argv[1]){p.version=process.argv[1];fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');console.log('pinned version ->',process.argv[1]);}else{console.log('version already',p.version);}" "$TARGET"
-
-# 2. Re-add the fork's deploy:globally script if upstream's package.json dropped
-#    it (Step 5f flags it via docs/fork-features.txt). The script file
-#    scripts/deploy-globally.mjs survives the rebase; only the invocation entry
-#    is lost. The deploy lane calls `pnpm deploy:globally`, so a missing entry
-#    breaks the deploy after npm i -g.
-node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));if(!p.scripts['deploy:globally']){p.scripts['deploy:globally']='node scripts/deploy-globally.mjs';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');console.log('restored deploy:globally script');}else{console.log('deploy:globally present');}"
-```
-
-Rebuild after pinning the version so `dist/build-info` carries `$TARGET`
-(`OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 corepack pnpm build`), then commit both in
-Step 6.
 
 > The deploy lane (`scripts/sync-and-deploy.sh`, host step 8) separately handles
 > the `@openai/codex` `workspace:*` install break (via
@@ -481,7 +362,8 @@ Step 6.
 
 ### Step 6: Commit fixups
 
-If install, build, check, or fork-feature repair required file changes, commit them:
+The merge commit holds the conflict resolutions (Step 2–4). If install, build,
+check, or fork-feature repair required more changes, commit them on top:
 
 ```bash
 scripts/committer "chore/fix: <description>" <files...>
@@ -491,18 +373,22 @@ Remove `.tmp/` before committing. Never commit `.tmp/` or any scratch directory.
 
 ### Step 7: Publish — the host does this, not you
 
-Do **not** run `git push`. This sandbox has no GitHub credentials, so the push
-fails with `could not read Username`, and that is not a sync failure. The host
-publishes after checking your result: it re-runs the fork-feature check, reports
-fork commits the rebase lost, and pushes with an explicit lease. Leave `main`
-committed and clean, report `pushed: false`, and set `status` from steps 1–6
-alone.
+Do **not** run `git push`. This sandbox has no GitHub credentials. The host
+publishes after checking your result: the merge must be committed, the tree
+clean, `main` must contain both `upstream/release/{{TARGET_RELEASE}}` and
+everything `origin/main` had, and the push is a plain fast-forward. Leave `main`
+committed and clean, report `pushed: false`, and set `status` from steps 2–6
+alone. On `status: "failed"` the host parks your work on
+`sync/attempt-{{TARGET_RELEASE}}` and resets `main`, so leave the tree as it is
+rather than undoing anything.
 
 ## Stop gates (set status: "failed" and stop)
 
-1. Semantic rebase conflicts where both sides changed the same logic differently.
-2. `git rebase --abort` was needed — rebase could not be completed.
-3. Build or typecheck failures after conflict resolution (may indicate bad merge).
+1. A conflict where the fork's behaviour cannot be carried onto upstream's new
+   code without guessing what one side meant.
+2. A fork patch whose upstream premise was deleted but that fails one of the
+   four checks in the conflict rules.
+3. Build or typecheck failures you could not trace to a resolution and fix.
 4. A fork feature that is **genuinely lost** (Step 5f case 1) and could not be
    re-applied. A MISSING line alone is not a stop gate — triage it first.
 
@@ -510,9 +396,8 @@ Not a stop gate: a MISSING fork feature that turned out to be moved, renamed, or
 upstreamed (Step 5f cases 2 and 3). Fix `docs/fork-features.txt`, commit it, and
 continue. Report the repointed entries in `notes`.
 
-Not a stop gate: untracked files (`??` in `git status`) — these are local-only
-additions. Set `rebased: true` as long as `git diff HEAD` shows no unstaged
-changes to tracked files and the rebase completed.
+Not a stop gate: untracked files that were there before you started — these are
+local-only additions.
 
 Not a stop gate: `npm shrinkwrap guard` failing alone due to dual-major-version
 packages — accept, note it, and continue.
@@ -527,18 +412,13 @@ Emit a `<sync-result>` JSON object with these fields:
   - `"success"`: steps 1–6 completed; `main` is ready for the host to publish
   - `"partial"`: ready to publish, but one or more non-blocking check lanes failed
   - `"failed"`: hit a stop gate — `main` must not be published
-- `upstreamCommits`: number of release-branch commits brought in (the `NEW_COMMITS`
-  count from step 2–4; integer)
-- `trackedRelease`: the release branch version this sync rebased onto, e.g.
-  `"2026.6.5"` (string)
-- `conflicts`: number of files that had merge conflicts (integer)
+- `upstreamCommits`: `{{UPSTREAM_COMMITS}}` (from the host)
+- `trackedRelease`: `"{{TARGET_RELEASE}}"`
+- `conflicts`: `{{CONFLICTED}}` (files that conflicted when the host started the merge)
 - `build`: `"passed"` | `"failed"` | `"skipped"`
 - `tests`: `"passed"` | `"failed"` | `"skipped"`
 - `forkFeatures`: `"verified"` | `"failed"` | `"skipped"`
-- `pushed`: `true` only for a confirmed no-op where origin/main already matches local
-  main; otherwise `false` (you never push — see Step 7)
-- `droppedForkCommits`: (optional) subjects of fork-authored commits you dropped because
-  upstream superseded them
+- `pushed`: always `false` (you never push — see Step 7)
 - `deployNeeded`: always `true` (step 8 requires sudo/systemd — cannot run here)
 - `newUpstreamCommits`: (optional) new upstream commits that arrived during this run
 - `failedCheckLanes`: (optional) array of lane names that failed in `pnpm check`
@@ -554,10 +434,4 @@ Example (shrinkwrap partial):
 
 <sync-result>
 {"status":"partial","upstreamCommits":41,"trackedRelease":"2026.6.5","conflicts":3,"build":"passed","tests":"skipped","forkFeatures":"verified","pushed":false,"deployNeeded":true,"failedCheckLanes":["npm shrinkwrap guard"],"notes":"@smithy packages have two major versions in pnpm-lock — shrinkwrap will self-resolve on next sync."}
-</sync-result>
-
-Example (no-op — `main` already on the newest release; build/check skipped, see Step 2–4):
-
-<sync-result>
-{"status":"success","upstreamCommits":0,"trackedRelease":"2026.6.11","conflicts":0,"build":"skipped","tests":"skipped","forkFeatures":"skipped","pushed":true,"deployNeeded":true,"notes":"Already on newest upstream release and in sync with origin/main — no build/check needed."}
 </sync-result>

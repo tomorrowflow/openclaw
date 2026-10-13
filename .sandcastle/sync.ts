@@ -1,14 +1,17 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { run, codex, Output } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { z } from "zod";
 
-// Runs upstream sync steps 1–7 (fetch → rebase → install → build → check →
-// fork-feature verification → push).  Step 8 (deploy) requires sudo/systemd —
-// that runs on the host via scripts/sync-and-deploy.sh after this completes.
+// Runs upstream sync steps 1–7: the host fetches, picks the target release, and
+// starts the merge with its mechanical resolutions (scripts/sync-merge-release.mjs);
+// the agent resolves what needs judgment, then installs, builds, checks, and
+// verifies fork features; the host publishes the merge as a fast-forward of
+// main. Step 8 (deploy) requires sudo/systemd — that runs on the host via
+// scripts/sync-and-deploy.sh after this completes.
 //
 // Usage (standalone):    npx tsx .sandcastle/sync.ts
 // Usage (full pipeline): bash scripts/sync-and-deploy.sh
@@ -16,7 +19,7 @@ import { z } from "zod";
 const syncResultSchema = z.object({
   status: z.enum(["success", "partial", "failed"]),
   upstreamCommits: z.number(),
-  // Release branch version this sync rebased onto (e.g. "2026.6.5"). The fork
+  // Release branch version this sync merged (e.g. "2026.6.5"). The fork
   // tracks the newest upstream release branch, not main, so the deployed version
   // advances. Absent only on an early stop-gate failure before a target was picked.
   trackedRelease: z.string().optional(),
@@ -24,10 +27,6 @@ const syncResultSchema = z.object({
   build: z.enum(["passed", "failed", "skipped"]),
   tests: z.enum(["passed", "failed", "skipped"]),
   forkFeatures: z.enum(["verified", "failed", "skipped"]),
-  // Subjects of fork-authored commits the agent deliberately dropped because
-  // upstream superseded them. Any other fork commit missing after the rebase is
-  // reported by the host as lost.
-  droppedForkCommits: z.array(z.string()).optional(),
   pushed: z.boolean(),
   deployNeeded: z.boolean(),
   newUpstreamCommits: z.number().optional(),
@@ -46,9 +45,6 @@ function printResult(result: SyncResult) {
   console.log(`  Build                   : ${result.build}`);
   console.log(`  Tests                   : ${result.tests}`);
   console.log(`  Fork features           : ${result.forkFeatures}`);
-  for (const subject of result.droppedForkCommits ?? []) {
-    console.log(`  Dropped fork commit     : ${subject}`);
-  }
   console.log(`  Pushed to origin/main   : ${result.pushed}`);
   if (result.failedCheckLanes?.length) {
     console.log(`  Failed check lanes      : ${result.failedCheckLanes.join(", ")}`);
@@ -96,19 +92,12 @@ function git(...args: string[]): string {
 
 // ── Preflight: reconcile this checkout with origin/main ─────────────────────
 //
-// Step 7 ends in `git push origin main --force-with-lease`, so whatever is not
-// in the local `main` at that moment is erased from the fork. The lease is no
-// protection here: it only compares against the remote-tracking ref, which any
-// `git fetch` refreshes — so a checkout that merely sits *behind* origin passes
-// the lease and silently drops the missing commits.
-//
-// That is the normal state of this fork between syncs: fixes land on
-// origin/main as merged GitHub PRs and never touch this checkout. Four such PRs
-// were already pending on origin when the 2026-09-14 run failed.
-//
-// Fast-forward when local `main` is strictly behind. Refuse when the two have
-// diverged — picking which side survives is a maintainer's call, not this
-// script's.
+// The sync merges into the local `main` and publishes it as a fast-forward of
+// origin/main, so it must start from origin/main exactly. Fixes land on
+// origin/main as merged GitHub PRs and never touch this checkout, so a checkout
+// that sits behind is the normal state between syncs: fast-forward it. Refuse
+// when the two have diverged — picking which side survives is a maintainer's
+// call, not this script's.
 function reconcileWithOrigin(): string {
   const branch = git("rev-parse", "--abbrev-ref", "HEAD");
   if (branch !== "main") {
@@ -119,19 +108,26 @@ function reconcileWithOrigin(): string {
       .find((block) => block.includes("\nbranch refs/heads/main"))
       ?.match(/^worktree (.+)$/m)?.[1];
     throw new Error(
-      `sync preflight: HEAD is on "${branch}", not main. The sync rebases and ` +
+      `sync preflight: HEAD is on "${branch}", not main. The sync merges into and ` +
         (mainWorktree
           ? `publishes main; run it from ${mainWorktree}/scripts/sync-and-deploy.sh.`
           : `publishes main; check it out first.`),
     );
   }
+  const gitDir = git("rev-parse", "--git-dir");
+  if (existsSync(join(repoDir, gitDir, "MERGE_HEAD"))) {
+    throw new Error(
+      "sync preflight: a merge is already in progress in this checkout. " +
+        "`git merge --abort` it before syncing.",
+    );
+  }
   if (
-    existsSync(join(repoDir, ".git/rebase-merge")) ||
-    existsSync(join(repoDir, ".git/rebase-apply"))
+    existsSync(join(repoDir, gitDir, "rebase-merge")) ||
+    existsSync(join(repoDir, gitDir, "rebase-apply"))
   ) {
     throw new Error(
       "sync preflight: a rebase is already in progress in this checkout. " +
-        "Finish or `git rebase --abort` it before syncing.",
+        "`git rebase --abort` it before syncing.",
     );
   }
   // Only tracked-file changes matter; untracked files are local-only additions.
@@ -139,7 +135,7 @@ function reconcileWithOrigin(): string {
   if (dirty) {
     throw new Error(
       `sync preflight: tracked files have uncommitted changes:\n${dirty}\n` +
-        "Commit or restore them before syncing — the rebase would carry them along.",
+        "Commit or restore them before syncing — the merge would carry them along.",
     );
   }
 
@@ -147,15 +143,15 @@ function reconcileWithOrigin(): string {
   const behind = Number(git("rev-list", "--count", "main..origin/main"));
   const ahead = Number(git("rev-list", "--count", "origin/main..main"));
 
-  if (behind === 0) {
-    console.log(`[sync] checkout is level with origin/main (${ahead} unpushed commit(s))`);
+  if (behind === 0 && ahead === 0) {
+    console.log("[sync] checkout is level with origin/main");
     return git("rev-parse", "origin/main");
   }
   if (ahead > 0) {
     throw new Error(
-      `sync preflight: main has diverged from origin/main (${ahead} local, ${behind} remote ` +
-        `commit(s)). Rebasing and force-pushing from here would drop the ${behind} remote ` +
-        `commit(s). Reconcile by hand, then re-run.`,
+      `sync preflight: main has commits origin/main lacks (${ahead} local, ${behind} remote ` +
+        `commit(s)). The sync publishes main as a fast-forward of origin/main. Reconcile by ` +
+        `hand, then re-run.`,
     );
   }
   console.log(`[sync] fast-forwarding main to origin/main (${behind} commit(s) behind)`);
@@ -280,8 +276,82 @@ function resolvePinnedRelease(): string {
   return pinned;
 }
 
+// The newest upstream `release/X.Y.Z` by version, unless the host pinned one.
+// `release-ci/*` (hash-named CI snapshots) and suffixed names never qualify.
+function resolveTarget(pinned: string): string {
+  if (pinned) {
+    return pinned;
+  }
+  const versions = git(
+    "for-each-ref",
+    "--format=%(refname:short)",
+    "refs/remotes/upstream/release/",
+  )
+    .split("\n")
+    .map((ref) => ref.replace(/^upstream\/release\//, ""))
+    .filter((name) => /^\d+\.\d+\.\d+$/.test(name))
+    .toSorted(compareVersions);
+  const newest = versions.at(-1);
+  if (!newest) {
+    throw new Error("sync preflight: upstream has no release/X.Y.Z branch.");
+  }
+  return newest;
+}
+
+type MergeStart =
+  | { state: "up-to-date"; target: string; upstreamCommits: 0 }
+  | {
+      state: "merging";
+      target: string;
+      upstreamCommits: number;
+      conflicted: number;
+      mechanical: Record<string, string[]>;
+      remaining: string[];
+    };
+
 const preSyncOrigin = reconcileWithOrigin();
+git("fetch", "upstream", "--prune");
 const pinnedRelease = resolvePinnedRelease();
+const target = resolveTarget(pinnedRelease);
+// Files the sync creates must be committed; these were already here.
+const untrackedBefore = new Set(untrackedFiles());
+let mergeStart: MergeStart;
+try {
+  mergeStart = JSON.parse(
+    execFileSync("node", ["scripts/sync-merge-release.mjs", target], {
+      cwd: repoDir,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    }),
+  ) as MergeStart;
+} catch (error) {
+  console.error(`\n✗ Starting the merge of upstream/release/${target} failed: ${String(error)}`);
+  parkFailedAttempt();
+  process.exit(1);
+}
+
+if (mergeStart.state === "up-to-date") {
+  printResult({
+    status: "success",
+    upstreamCommits: 0,
+    trackedRelease: target,
+    conflicts: 0,
+    build: "skipped",
+    tests: "skipped",
+    forkFeatures: "skipped",
+    pushed: true,
+    deployNeeded: true,
+    notes: `main already contains upstream/release/${target}; nothing to merge.`,
+  });
+  process.exit(0);
+}
+for (const [rule, files] of Object.entries(mergeStart.mechanical)) {
+  console.log(`[sync] mechanical (${rule}): ${files.length} file(s)`);
+}
+console.log(
+  `[sync] merging upstream/release/${target}: ${mergeStart.upstreamCommits} commit(s), ` +
+    `${mergeStart.conflicted} conflicted file(s), ${mergeStart.remaining.length} left for the agent`,
+);
 const runStartedAt = Date.now();
 
 const { output } = await run({
@@ -307,18 +377,22 @@ const { output } = await run({
   agent: codex("gpt-5.6-terra"),
 
   promptFile: "./.sandcastle/sync-prompt.md",
-  // Empty selects the newest release branch; see resolvePinnedRelease.
-  promptArgs: { TARGET_RELEASE: pinnedRelease },
+  promptArgs: {
+    TARGET_RELEASE: target,
+    UPSTREAM_COMMITS: String(mergeStart.upstreamCommits),
+    CONFLICTED: String(mergeStart.conflicted),
+    REMAINING_CONFLICTS: mergeStart.remaining.map((file) => `- ${file}`).join("\n") || "(none)",
+  },
 
   // Must stay 1: sandcastle rejects `output` (the structured sync-result schema
   // below) on multi-iteration runs — "output requires maxIterations to be 1".
   // Raising it fails the run before the agent starts. A "Reached max iterations
-  // (1)" line in the log is normal completion, not a truncated rebase; when a
+  // (1)" line in the log is normal completion, not a truncated merge; when a
   // sync stops early the cause is a stop-gate in sync-prompt.md, not this value.
   maxIterations: 1,
 
-  // "head" = agent writes directly to the host working directory (no temp branch).
-  // Required for upstream sync: rebase modifies main, force-push goes to origin.
+  // "head" = agent writes directly to the host working directory (no temp branch):
+  // it finishes the merge the host started on main.
   branchStrategy: { type: "head" },
 
   output: Output.object({ tag: "sync-result", schema: syncResultSchema }),
@@ -326,8 +400,9 @@ const { output } = await run({
   hooks: {
     sandbox: {
       // Pre-install before the agent starts so its first build attempt doesn't
-      // trigger a redundant install.  --no-frozen-lockfile because the rebase
-      // may have changed pnpm-lock.yaml.  Retry with linear backoff so a
+      // trigger a redundant install.  --no-frozen-lockfile because the merge
+      // takes the release's pnpm-lock.yaml and the fork's own dependencies
+      // re-resolve on top.  Retry with linear backoff so a
       // transient npm registry blip (corepack binary fetch or dependency
       // downloads) does not abort the whole sync. Runs under `sh -c` in the
       // container, so this is a POSIX-sh loop, not a JS expression.
@@ -355,70 +430,117 @@ const { output } = await run({
   if (reason) {
     console.error(`\n✗ Sync agent failed: ${reason}`);
   }
+  parkFailedAttempt();
   throw error;
 });
 
-// Fork commits are the only ones a rebase must carry; upstream commits are
-// replaced by the new release cut. Every commit the fork authored before the
-// sync must still be on main by subject (SHAs are all rewritten), be present
-// upstream by subject, or be declared dropped. The 2026.9.x rebases lost fork
-// fixes silently, e.g. Control UI previews of /workspace/shared (OneDrive) links.
-function forkSubjects(ref: string): string[] {
-  const author = git("config", "user.name");
-  return git("log", "--format=%an%x09%s", ref, "--not", "--remotes=upstream")
-    .split("\n")
-    .map((line) => line.split("\t"))
-    .filter(([name, subject]) => name === author && subject)
-    .map(([, subject]) => subject!);
+// A failed sync must not strand the checkout: park the attempt for inspection
+// and put main back on origin/main, so the next run starts clean.
+function parkFailedAttempt() {
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0, 13);
+  const branch = `sync/attempt-${target}-${stamp}`;
+  const created = createdFiles();
+  try {
+    // Tracked and newly created files, conflicted ones included; never stash
+    // (the stack is shared with every worktree).
+    git("add", "-u");
+    if (created.length > 0) {
+      git("add", "--", ...created);
+    }
+    const attempt = git(
+      "commit-tree",
+      git("write-tree"),
+      "-p",
+      "HEAD",
+      "-m",
+      `sync attempt: upstream/release/${target}`,
+    );
+    git("branch", branch, attempt);
+    console.error(`  The attempt is parked on branch ${branch}.`);
+  } catch (error) {
+    console.error(`  Could not park the attempt: ${String(error)}`);
+  }
+  // Get back to main whatever the agent left behind: a rebase, another
+  // branch, a merge. Each step runs even when an earlier one failed.
+  const recover = (...args: string[]) => {
+    try {
+      git(...args);
+    } catch (error) {
+      console.error(`  git ${args.join(" ")} failed: ${String(error)}`);
+    }
+  };
+  const gitDir = git("rev-parse", "--git-dir");
+  if (
+    existsSync(join(repoDir, gitDir, "rebase-merge")) ||
+    existsSync(join(repoDir, gitDir, "rebase-apply"))
+  ) {
+    recover("rebase", "--abort");
+  }
+  recover("checkout", "-f", "main");
+  recover("reset", "--hard", preSyncOrigin);
+  for (const file of created) {
+    rmSync(join(repoDir, file), { force: true });
+  }
+  console.error("  main is back on origin/main.");
 }
 
-function reportLostForkCommits(release: string | undefined, declared: string[]) {
-  const kept = new Set(forkSubjects("main"));
-  const upstream = new Set(
-    release ? git("log", "--format=%s", `upstream/release/${release}`).split("\n") : [],
-  );
-  const lost = [...new Set(forkSubjects(preSyncOrigin))].filter(
-    (subject) => !kept.has(subject) && !upstream.has(subject) && !declared.includes(subject),
-  );
-  if (lost.length === 0) {
-    console.log("[sync] every pre-sync fork commit is on main, upstream, or declared dropped");
-    return;
-  }
-  console.error(
-    `\n✗ ${lost.length} fork commit(s) missing after the rebase and not declared dropped:\n` +
-      lost.map((subject) => `    - ${subject}`).join("\n") +
-      "\n  Restore them or confirm upstream superseded them before publishing.",
-  );
+function untrackedFiles(): string[] {
+  return execFileSync("git", ["ls-files", "-z", "--others", "--exclude-standard"], {
+    cwd: repoDir,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  })
+    .split("\0")
+    .filter(Boolean);
+}
+
+function createdFiles(): string[] {
+  return untrackedFiles().filter((file) => !untrackedBefore.has(file));
 }
 
 printResult(output);
 
-// Block deploy on a hard stop gate. "partial" means the agent pushed and only a
-// non-blocking check lane failed (e.g. the npm shrinkwrap guard's @smithy
-// dual-major case that self-resolves) — that code is on origin/main and should
-// still deploy.
+// Block deploy on a hard stop gate. "partial" means only a non-blocking check
+// lane failed (e.g. the npm shrinkwrap guard's @smithy dual-major case that
+// self-resolves) — that merge is still published and deployed.
 if (output.status === "failed") {
+  parkFailedAttempt();
   process.exit(1);
 }
 
-// `pushed` is the agent's own report, and it says false for two different
-// things: it refused to push, and it had nothing to push. A no-op sync cannot
-// confirm a push at all — the sandbox holds no GitHub credentials — so taking
-// it at face value skips the deploy on a perfectly good run. The host is the
-// authority on whether main is published, so ask git instead.
-if (!output.pushed) {
-  git("fetch", "origin", "main", "--prune");
-  const ahead = Number(git("rev-list", "--count", "origin/main..main"));
-  const behind = Number(git("rev-list", "--count", "main..origin/main"));
-  if (ahead !== 0 || behind !== 0) {
-    reportLostForkCommits(output.trackedRelease, output.droppedForkCommits ?? []);
-    console.error(
-      `\n✗ Sync did not push and main is not level with origin/main ` +
-        `(${ahead} local, ${behind} remote commit(s)) — skipping deploy.\n` +
-        `  Publish by hand: git push origin main --force-with-lease=main:${preSyncOrigin}\n` +
-        `  then: scripts/sync-and-deploy.sh --deploy-only`,
-    );
-    process.exit(1);
+// The host is the authority on what gets published: a finished merge of the
+// target on top of everything origin/main had, committed and clean.
+const problems = [
+  existsSync(join(repoDir, git("rev-parse", "--git-dir"), "MERGE_HEAD")) &&
+    "the merge is not committed",
+  git("status", "--porcelain", "--untracked-files=no") && "tracked files have uncommitted changes",
+  createdFiles().length > 0 &&
+    `files created during the sync are not committed (${createdFiles().slice(0, 5).join(", ")})`,
+  !isAncestor(`upstream/release/${target}`, "main") &&
+    `main does not contain upstream/release/${target}`,
+  !isAncestor(preSyncOrigin, "main") && "main lost commits origin/main had before the sync",
+].filter(Boolean);
+if (problems.length > 0) {
+  console.error(`\n✗ Not publishing: ${problems.join("; ")}.`);
+  parkFailedAttempt();
+  process.exit(1);
+}
+// A plain push only fast-forwards; git rejects it if origin/main moved meanwhile.
+try {
+  git("push", "origin", "main");
+} catch (error) {
+  // Usually origin/main moved during the sync; the next run merges again from it.
+  console.error(`\n✗ Publishing main failed: ${String(error)}`);
+  parkFailedAttempt();
+  process.exit(1);
+}
+console.log(`[sync] published main ${git("rev-parse", "--short", "main")} to origin`);
+
+function isAncestor(ancestor: string, descendant: string): boolean {
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], { cwd: repoDir });
+    return true;
+  } catch {
+    return false;
   }
-  console.log("[sync] agent reported no push; main is level with origin/main — deploying that.");
 }

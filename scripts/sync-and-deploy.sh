@@ -3,8 +3,10 @@
 # Runs every Monday and Thursday night from frogger's crontab.
 #
 # Stages:
-#   1. Codex agent (Docker) — fetch, rebase, conflict resolution, install,
-#      build, check, fork-feature verification, git push  (steps 1–7)
+#   1. Sync (steps 1–7, .sandcastle/sync.ts) — the host fetches upstream and
+#      merges the target release into main with its mechanical resolutions;
+#      a Codex agent (Docker) resolves the rest, installs, builds, checks, and
+#      verifies fork features; the host publishes main as a fast-forward.
 #   2. Host — deploy (step 8): npm i -g → pnpm deploy:globally → cutover restart.
 #      The gateway keeps serving the current version through install + bundle +
 #      migrations, so a failure there leaves the live service UP (old version).
@@ -23,8 +25,8 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_DIR="$HOME/logs"
 
 # --deploy-only runs stage 2 alone. The sync stage is a separate concern: when a
-# release bump is too large for the agent's single iteration it gets rebased by
-# hand, and the deploy still needs the tested path rather than hand-run steps.
+# sync stops for a maintainer it gets merged by hand, and the deploy still needs
+# the tested path rather than hand-run steps.
 #
 # --target X.Y.Z pins the sync to upstream/release/X.Y.Z instead of the newest
 # release branch (validated in .sandcastle/sync.ts: must exist and not be older
@@ -71,8 +73,8 @@ UNIT_FILE=/home/openclaw/.config/systemd/user/openclaw-gateway.service
 mkdir -p "$LOG_DIR"
 
 # ── Single-instance guard ──────────────────────────────────────────────────
-# A hung build must not let the next cron run overlap (two concurrent
-# rebases/force-pushes would corrupt the branch). Done before the log+trap
+# A hung build must not let the next cron run overlap (two concurrent merges
+# into one checkout would corrupt it). Done before the log+trap
 # setup so a skipped run leaves no empty log and triggers no alert.
 exec 9>"$LOG_DIR/.sync.lock"
 if ! flock -n 9; then
@@ -220,8 +222,9 @@ echo "    repo : $REPO_DIR"
 echo "    log  : $LOG_FILE"
 
 # ── 1. Sync via Codex agent ────────────────────────────────────────────────
-# The agent handles steps 1–7: fetch → rebase → install → build → check →
-# fork-feature verification → push.  Exits 1 on non-success.
+# Steps 1–7: fetch → merge (host, mechanical) → agent resolution, install,
+# build, check, fork-feature verification → fast-forward push (host).
+# Exits 1 on non-success, with main back on origin/main.
 if [ "$RUN_SYNC" -eq 1 ]; then
   STAGE="sync: running node ticket guard (nothing changed yet)"
   check_running_node_tickets "$0${SYNC_TARGET_RELEASE:+ --target $SYNC_TARGET_RELEASE}"
@@ -291,7 +294,7 @@ sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
 # source, not the npm registry, so rewrite those to absolute `file:` paths for
 # the install, then restore the committed `workspace:*` form immediately after.
 # Build before installing. The sync agent builds as part of steps 1-7, but it
-# skips the build whenever the rebase was a no-op, and `npm i -g .` copies dist/
+# skips the build whenever the sync was a no-op, and `npm i -g .` copies dist/
 # exactly as it finds it. Without this a run with nothing to sync ships whatever
 # dist was last built, which can predate the commit being deployed — the deploy
 # then reports the new version while serving older code. Incremental, so a dist
@@ -306,7 +309,7 @@ sudo rm -f "$(npm root -g)"/.openclaw-* 2>/dev/null || true
 # Fork features are the fork's whole reason to exist, and an upstream refactor
 # drops them silently: the file still builds, the tests still pass, and the
 # behaviour is simply gone. The sync stage checks this too, but --deploy-only
-# skips that stage entirely and a hand-resolved rebase is exactly when a feature
+# skips that stage entirely and a hand-resolved merge is exactly when a feature
 # goes missing. Gate here as well, before anything is built or installed, so a
 # missing feature costs a failed run rather than a deployed regression. The
 # gateway is still serving the old version at this point.
