@@ -28,6 +28,9 @@ import {
 import { capText } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
 
+// Node output that reaches host git as a revision argument.
+const COMMIT_ID = /^[0-9a-f]{40,64}$/;
+
 /** Gateway methods a node ticket needs; both run with the dispatcher's admin authority. */
 export type WorkboardNodeTicketRuntime = Pick<PluginRuntime["gateway"], "request">;
 
@@ -291,6 +294,9 @@ export async function createNodeTicketWorktree(params: {
           `${branch} is no longer on origin, so its draft PR was merged or closed; create a new card for further changes`,
         );
       });
+      if (!COMMIT_ID.test(start)) {
+        throw new Error(`node ${target.nodeId} reported an invalid tip for ${branch}`);
+      }
       const outside = Number(await git("rev-list", "--count", `${published.headCommit}..${start}`));
       if (!Number.isInteger(outside)) {
         throw new Error(`node ${target.nodeId} reported an invalid commit count for ${branch}`);
@@ -350,7 +356,7 @@ export async function createNodeTicketWorktree(params: {
     "rev-parse",
     "HEAD",
   ]);
-  if (!/^[0-9a-f]{40,64}$/.test(baseCommit)) {
+  if (!COMMIT_ID.test(baseCommit)) {
     throw new Error(`node ${target.nodeId} reported an invalid base commit for ${worktreePath}`);
   }
   return { path: worktreePath, branch, baseCommit, ...kept };

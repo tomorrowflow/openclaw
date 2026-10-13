@@ -42,12 +42,18 @@ function handoffCard(card: WorkboardCard): HandoffCard | undefined {
   // A rework start (D54) or an answered ticket's start claims the card, so it
   // is running, before it swaps out the published or questions worktree
   // record. Neither handoff is an import to resume; cleaning up after one
-  // would delete the worktree the start is about to reuse.
+  // would delete the worktree the start is about to reuse. A re-run of a card
+  // whose import failed claims it after the done report, so that pending
+  // record is the failed one, not this start's.
+  const claim = card.metadata?.claim;
   if (
     !target ||
     !worktree?.handoff ||
     worktree.handoff.phase === "published" ||
     worktree.handoff.phase === "questions" ||
+    (worktree.handoff.phase === "pending" &&
+      claim &&
+      claim.claimedAt > worktree.handoff.reportedAt) ||
     card.status !== "running" ||
     card.metadata?.archivedAt
   ) {
