@@ -702,7 +702,10 @@ controls are disabled, and `workboard.cards.start` returns
 `{ queued: true, card }`. A reviewed rework or answer reopen that finds no free
 slot joins the same queue. A published or questions ticket without a review
 comment or answer is not queued; it goes back with the next step as described
-in the rework step above.
+in the rework step above. Only a full slot queues a start: a card that could
+not start on a free slot either, such as one whose parents are not done, one
+scheduled for later, or one out of retries, is refused with that reason and
+not queued.
 
 Whenever a card changes, such as a running ticket reaching `review`, Workboard
 starts queued tickets oldest request first. A ticket whose own route is still

@@ -29,7 +29,7 @@ import {
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
 import { workboardSessionKeyForCard } from "./session-link.js";
-import { cardBoardId } from "./store-card-helpers.js";
+import { cardBoardId, workboardClaimRefusal } from "./store-card-helpers.js";
 import {
   isWorkboardNodeTicket,
   type WorkboardNodeTicketSlot,
@@ -256,7 +256,9 @@ function selectStartableCards(
     const placement =
       nodeTicketSlot && workboardSlotPlacement(nodeTicketOccupants, nodeTicketSlot, now);
     const nodeTicketFull = placement?.full;
-    const rejection = card.metadata?.archivedAt
+    // A card the claim would refuse gets that reason on a full slot as on a
+    // free one; only a refusal for the slot alone may queue it.
+    const cardRefusal = card.metadata?.archivedAt
       ? "Card is archived; restore it before starting."
       : cardHasActiveClaim(card, now)
         ? `Card is already claimed by ${card.metadata?.claim?.ownerId ?? "another worker"}.`
@@ -268,21 +270,26 @@ function selectStartableCards(
               card.status !== "todo" &&
               card.status !== "ready"
             ? `Card cannot start from ${card.status}; move it to backlog, todo, or ready first.`
-            : nodeTicketSlot
-              ? nodeTicketFull
-                ? workboardSlotBusyMessage(nodeTicketSlot, nodeTicketFull)
-                : undefined
-              : runningOwners.has(owner)
-                ? `Owner ${owner} already has active Workboard work; complete or stop it before starting another card.`
-                : undefined;
+            : mode === "exact"
+              ? workboardClaimRefusal(card, false)
+              : undefined;
+    const fullSlot =
+      cardRefusal === undefined && nodeTicketSlot && nodeTicketFull
+        ? { slot: nodeTicketSlot, full: nodeTicketFull }
+        : undefined;
+    const rejection =
+      cardRefusal ??
+      (fullSlot
+        ? workboardSlotBusyMessage(fullSlot.slot, fullSlot.full)
+        : !nodeTicketSlot && runningOwners.has(owner)
+          ? `Owner ${owner} already has active Workboard work; complete or stop it before starting another card.`
+          : undefined);
     if (rejection !== undefined) {
       if (mode === "exact") {
         return {
           cards: [],
           rejection: { cardId: card.id, title: card.title, error: rejection },
-          ...(nodeTicketSlot && nodeTicketFull
-            ? { fullSlot: { slot: nodeTicketSlot, full: nodeTicketFull } }
-            : {}),
+          ...(fullSlot ? { fullSlot } : {}),
         };
       }
       continue;

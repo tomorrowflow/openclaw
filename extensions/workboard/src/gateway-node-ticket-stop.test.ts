@@ -165,6 +165,41 @@ describe("workboard.cards.start on a full node-ticket pool", () => {
     expect((await store.get(card.id))?.metadata?.automation?.startRequest).toBeUndefined();
   });
 
+  it("refuses a card the claim would refuse with its own reason instead of queueing it", async () => {
+    const { store, invoke } = await setup();
+    const parent = await store.create({ title: "Design the grammar", status: "todo" });
+    const child = await store.create({
+      title: "Fix the grammar",
+      status: "todo",
+      parents: [parent.id],
+      metadata: { automation: { target: NODE_TARGET } },
+    });
+    const later = await store.create({
+      title: "Fix it tomorrow",
+      status: "todo",
+      scheduledAt: Date.now() + 60 * 60 * 1000,
+      metadata: { automation: { target: NODE_TARGET } },
+    });
+    const start = async (id: string) => {
+      const respond = await invoke("workboard.cards.start", { id });
+      const [ok, , error] = respond.mock.calls[0] ?? [];
+      expect(ok).toBe(false);
+      return (error as { message?: string } | undefined)?.message;
+    };
+
+    expect(await start(child.id)).toBe("card dependencies are not done.");
+
+    expect(await start(later.id)).toMatch(/scheduled/);
+    for (const id of [child.id, later.id]) {
+      const stored = await store.get(id);
+      expect(stored?.metadata?.automation?.startRequest).toBeUndefined();
+      expect(stored?.metadata?.comments ?? []).toEqual([]);
+    }
+    // A free slot refuses the same way.
+    store.nodeTicketConcurrency = 4;
+    expect(await start(child.id)).toBe("card dependencies are not done.");
+  });
+
   it("never lets an update or a create set the request", async () => {
     const { store, invoke, card } = await setup();
     const startRequest = { requestedAt: 1 };

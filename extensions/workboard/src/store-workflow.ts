@@ -24,7 +24,7 @@ import {
   cardRunId,
   cardSessionKey,
   closeRunningAttempts,
-  retryBudgetExhausted,
+  workboardClaimRefusal,
 } from "./store-card-helpers.js";
 import {
   addWorkboardDurationMs,
@@ -160,18 +160,9 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
           (guarded.status === "running" && !isWorkboardClaimReclaimable(existingClaim, now)))
           ? existingClaim
           : undefined;
-      if (cardParentIds(guarded).length > 0 && guarded.status !== "ready" && !activeClaim) {
-        throw new Error(
-          guarded.status === "blocked"
-            ? "card is blocked; use workboard_unblock before claiming."
-            : "card dependencies are not done.",
-        );
-      }
-      if (guarded.status === "scheduled") {
-        throw new Error("card is scheduled for later.");
-      }
-      if (retryBudgetExhausted(guarded)) {
-        throw new Error("card exhausted its retry budget.");
+      const refusal = workboardClaimRefusal(guarded, Boolean(activeClaim));
+      if (refusal) {
+        throw new Error(refusal);
       }
       if (activeClaim) {
         throw new Error(`card already claimed by ${activeClaim.ownerId}.`);
