@@ -10,7 +10,7 @@ import type {
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { MAX_NODE_REVIEW_VERDICTS } from "./store-constants.js";
-import { normalizeBoundedString } from "./store-value-normalizers.js";
+import { normalizeBoundedString, normalizeCommentSource } from "./store-value-normalizers.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
 
 function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined {
@@ -50,7 +50,14 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
     return undefined;
   }
   if (value.phase === "imported") {
-    return { phase: "imported", headCommit, importedAt };
+    const decidedBy = normalizeCommentSource(value.decidedBy);
+    return {
+      phase: "imported",
+      headCommit,
+      importedAt,
+      ...(decidedBy && decidedBy !== "operator" ? { decidedBy } : {}),
+      ...(typeof value.sampled === "boolean" ? { sampled: value.sampled } : {}),
+    };
   }
   const publishedAt = resolveOptionalIntegerOption(value.publishedAt, { min: 0 });
   const pullRequestUrl = normalizeBoundedString(
@@ -148,6 +155,8 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
           verdict,
           ...(importedAt === undefined ? {} : { importedAt }),
           ...(publishedAt === undefined ? {} : { publishedAt }),
+          ...(entry.decidedBy === "agent" ? { decidedBy: "agent" as const } : {}),
+          ...(typeof entry.sampled === "boolean" ? { sampled: entry.sampled } : {}),
         },
       ];
     })
@@ -182,6 +191,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         ...(questions ? { questions } : {}),
         ...(feedback ? { feedback } : {}),
         ...(reviews.length > 0 ? { reviews } : {}),
+        ...(value.rung === "b" ? { rung: "b" as const } : {}),
         ...(stopRequestedAt !== undefined ? { stopRequestedAt } : {}),
       }
     : undefined;

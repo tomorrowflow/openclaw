@@ -2,6 +2,7 @@ import type {
   WorkboardAutomation,
   WorkboardCard,
   WorkboardClaim,
+  WorkboardClassRung,
   WorkboardExecution,
   WorkboardExecutionTarget,
   WorkboardMetadata,
@@ -93,6 +94,28 @@ export function findWorkboardTargetRoute<Route extends Pick<WorkboardTargetRoute
   labels: readonly string[],
 ): number {
   return (routes ?? []).findIndex((route) => route.labels.some((label) => labels.includes(label)));
+}
+
+/** A card's task class: its first `class:<name>` label, without the prefix. */
+export function workboardTaskClass(labels: readonly string[]): string | undefined {
+  return (
+    labels
+      .find((label) => label.startsWith("class:"))
+      ?.slice("class:".length)
+      .trim() || undefined
+  );
+}
+
+/** The board's rung entry for a card's task class; no entry means rung a. */
+export function workboardClassRung(
+  orchestration: Pick<WorkboardOrchestrationSettings, "classRungs"> | undefined,
+  labels: readonly string[],
+): WorkboardClassRung | undefined {
+  const taskClass = workboardTaskClass(labels);
+  const classRungs = orchestration?.classRungs;
+  return taskClass && classRungs && Object.hasOwn(classRungs, taskClass)
+    ? classRungs[taskClass]
+    : undefined;
 }
 
 /**

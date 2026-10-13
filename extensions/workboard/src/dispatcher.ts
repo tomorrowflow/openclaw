@@ -582,17 +582,19 @@ async function runWorkboardDispatch(
       preparedLaunch = prepared.launch;
       const runId = prepared.launch.provisionalRunId;
       assertOwnerCurrent?.();
+      // The launch recorded the round's rung on the worktree it persisted.
+      const roundWorktree = nodeTicketTarget(launched)?.worktree ?? nodeWorktree;
       const run =
-        claimedTarget && nodeWorktree && params.nodeTickets
+        claimedTarget && roundWorktree && params.nodeTickets
           ? await startNodeTicketSession({
               runtime: params.nodeTickets,
               card: claimed.card,
               target: claimedTarget,
-              worktree: nodeWorktree,
+              worktree: roundWorktree,
               sessionKey,
               message: buildNodeTicketMessage({
                 card: claimed.card,
-                worktree: nodeWorktree,
+                worktree: roundWorktree,
                 context,
               }),
             })

@@ -28,7 +28,11 @@ import {
   shouldSkipPersistedLifecycleStatusUpdate,
   shouldSyncWorkboardLifecycleStatus,
 } from "./store-card-helpers.js";
-import { isWorkboardClaimReclaimable, secondsToDurationMs } from "./store-constants.js";
+import {
+  isWorkboardClaimReclaimable,
+  secondsToDurationMs,
+  workboardClassRung,
+} from "./store-constants.js";
 import type {
   WorkboardBulkInput,
   WorkboardCardPatch,
@@ -201,6 +205,12 @@ export class WorkboardStore extends WorkboardNotificationStore {
     },
   ): Promise<{ card: WorkboardCard; launch: WorkboardPreparedLaunch }> {
     return await this.enqueueMutation(async () => {
+      // Each round reads its rung from the live board, so a promotion or
+      // demotion applies from the next launch on and never mid-round.
+      const orchestration = input.nodeWorktree
+        ? (await this.boardStore.lookup(cardBoardId(await this.requireCard(id))))?.board
+            .orchestration
+        : undefined;
       const result = await this.updateLatestCard(
         id,
         (card) => {
@@ -232,7 +242,15 @@ export class WorkboardStore extends WorkboardNotificationStore {
                 launch,
                 ...(input.nodeWorktree && card.metadata?.automation?.target
                   ? {
-                      target: { ...card.metadata.automation.target, worktree: input.nodeWorktree },
+                      target: {
+                        ...card.metadata.automation.target,
+                        worktree: {
+                          ...input.nodeWorktree,
+                          ...(workboardClassRung(orchestration, card.labels)?.rung === "b"
+                            ? { rung: "b" as const }
+                            : {}),
+                        },
+                      },
                     }
                   : {}),
               },

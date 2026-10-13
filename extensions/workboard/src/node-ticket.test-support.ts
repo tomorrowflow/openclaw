@@ -133,11 +133,13 @@ export function createLocalNodeGateway() {
 export async function createNodeCard(
   store: WorkboardStore,
   target: WorkboardExecutionTarget = NODE_TARGET,
+  labels: string[] = [],
 ) {
   return await store.create({
     title: "Fix the parser",
     status: "ready",
     agentId: "dev",
+    labels,
     workspaceAccess: { unrestricted: true },
     metadata: { automation: { target } },
   });
@@ -148,8 +150,9 @@ export async function startNodeCard(
   store: WorkboardStore,
   nodeTickets: WorkboardNodeTicketRuntime = createNodeGateway(),
   target?: WorkboardExecutionTarget,
+  labels?: string[],
 ) {
-  const card = await createNodeCard(store, target);
+  const card = await createNodeCard(store, target, labels);
   const result = await dispatchAndStartWorkboardCards({
     store,
     subagent: { run: vi.fn() },
@@ -181,4 +184,38 @@ export function endedSession(success = true) {
       : [],
     complete: true,
   });
+}
+
+/** A GitHub API stand-in for the publish step; pushes go to the local `remote`. */
+export function createFakeGitHub(remote: string) {
+  const tokens = new Map<string, string>();
+  const openPulls: string[] = [];
+  const failComments = { value: false };
+  const requests: Array<{ method: string; url: string; auth?: string; body?: unknown }> = [];
+  const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+    const method = init?.method ?? "GET";
+    const headers = new Headers(init?.headers);
+    const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    requests.push({ method, url, auth: headers.get("authorization") ?? undefined, body });
+    if (url.endsWith("/comments") && failComments.value) {
+      return new Response(JSON.stringify({ message: "Resource not accessible" }), { status: 403 });
+    }
+    const reply = url.includes("/pulls?")
+      ? openPulls.map((html_url) => ({ html_url, number: Number(html_url.split("/").at(-1)) }))
+      : method === "POST"
+        ? { html_url: "https://github.com/acme/app/pull/7" }
+        : { default_branch: "main" };
+    return new Response(JSON.stringify(reply), { status: method === "POST" ? 201 : 200 });
+  });
+  return {
+    tokens,
+    openPulls,
+    failComments,
+    requests,
+    access: {
+      token: (repo: string) => tokens.get(repo),
+      fetch: fetchImpl as unknown as typeof fetch,
+      remoteUrl: () => remote,
+    },
+  };
 }

@@ -1,7 +1,11 @@
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { appendComment, assertCanMutateClaimedCard } from "./store-card-helpers.js";
 import { WorkboardEnrichmentStore } from "./store-enrichment.js";
-import type { WorkboardMutationScope, WorkboardPromoteInput } from "./store-inputs.js";
+import type {
+  WorkboardAgentActor,
+  WorkboardMutationScope,
+  WorkboardPromoteInput,
+} from "./store-inputs.js";
 import { clearDiagnostics } from "./store-normalizers.js";
 import { normalizeBoundedString } from "./store-value-normalizers.js";
 
@@ -11,7 +15,11 @@ export class WorkboardPromoteStore extends WorkboardEnrichmentStore {
     status: unknown,
     position: unknown,
     scope?: WorkboardMutationScope,
-    options: { expectedUpdatedAt?: number; assertOwnerCurrent?: () => void } = {},
+    options: {
+      expectedUpdatedAt?: number;
+      assertOwnerCurrent?: () => void;
+      actor?: WorkboardAgentActor;
+    } = {},
   ): Promise<WorkboardCard> {
     return await this.enqueueMutation(async () => {
       const result = await this.updateLatestCard(
@@ -26,6 +34,7 @@ export class WorkboardPromoteStore extends WorkboardEnrichmentStore {
           allowMetadataDependencyLinks: false,
           enforceStatusHolds: true,
           expectedUpdatedAt: options.expectedUpdatedAt,
+          actor: options.actor,
         },
       );
       return result.card;

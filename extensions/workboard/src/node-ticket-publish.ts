@@ -11,6 +11,7 @@ import {
   nodeTicketTarget,
   requireHostGit,
   reviewVerdictOf,
+  STANDARDS_REVIEW_LABEL,
 } from "./node-ticket.js";
 import type { WorkboardStore } from "./store.js";
 
@@ -44,6 +45,9 @@ type PublishCard = {
   headCommit: string;
   importedAt: number;
   rework?: WorkboardNodeRework;
+  /** An agent accepted the round at rung b; `sampled` is set for its accept verdict. */
+  decidedByAgent: boolean;
+  sampled?: boolean;
 };
 
 export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
@@ -67,13 +71,15 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
     headCommit: handoff.headCommit,
     importedAt: handoff.importedAt,
     ...(worktree.rework ? { rework: worktree.rework } : {}),
+    decidedByAgent: handoff.decidedBy !== undefined,
+    ...(handoff.sampled === undefined ? {} : { sampled: handoff.sampled }),
   };
 }
 
 /**
- * The shadow verdict on the round being published: the newest agent comment
- * starting with `Verdict:` since the import and no later than the operator's
- * move to done, so a verdict that arrives after the decision counts as missed.
+ * The verdict on the round being published: the newest agent comment
+ * starting with `Verdict:` since the import and no later than the move to
+ * done, so a verdict that arrives after the decision counts as missed.
  */
 function reviewVerdict(item: PublishCard): WorkboardNodeReviewVerdict {
   const { card } = item;
@@ -83,7 +89,31 @@ function reviewVerdict(item: PublishCard): WorkboardNodeReviewVerdict {
     .filter((comment) => comment.createdAt >= item.importedAt && comment.createdAt <= decidedAt)
     .flatMap((comment) => reviewVerdictOf(comment) ?? [])
     .at(-1);
-  return { round: item.rework?.round ?? 0, verdict: verdict ?? "missed" };
+  return {
+    round: item.rework?.round ?? 0,
+    verdict: verdict ?? "missed",
+    ...(item.decidedByAgent ? { decidedBy: "agent" as const } : {}),
+    ...(item.sampled === undefined ? {} : { sampled: item.sampled }),
+  };
+}
+
+/**
+ * The rung b lines of a publish: the round's standards review counts since
+ * `from`, and whether an agent-accepted PR is in the human review sample.
+ */
+function rungBLines(item: PublishCard, from: number | undefined): Array<string | undefined> {
+  const review = item.card.metadata?.proof?.findLast(
+    (entry) =>
+      entry.label === STANDARDS_REVIEW_LABEL && (from === undefined || entry.createdAt >= from),
+  );
+  return [
+    review?.note ? `Standards review: ${review.note}` : undefined,
+    item.sampled === undefined
+      ? undefined
+      : item.sampled
+        ? "Sampled for human review: a person reads this PR before it merges."
+        : "Not sampled for human review: the agent accepted it at rung b.",
+  ];
 }
 
 /** A card created from a GitHub issue names it as its source; merging the PR closes it. */
@@ -92,7 +122,8 @@ function closesIssue(card: WorkboardCard): string | undefined {
   return match ? `Closes ${match[1]}#${match[2]}` : undefined;
 }
 
-function pullRequestBody(card: WorkboardCard, headCommit: string): string {
+function pullRequestBody(item: PublishCard): string {
+  const { card, headCommit } = item;
   const proof = (card.metadata?.proof ?? [])
     .filter((entry) => entry.label === "ticket proof")
     .map(
@@ -101,6 +132,7 @@ function pullRequestBody(card: WorkboardCard, headCommit: string): string {
   return [
     card.notes?.trim(),
     proof.length > 0 ? ["Ticket proof:", ...proof].join("\n") : undefined,
+    ...rungBLines(item, undefined),
     closesIssue(card),
     `Workboard card \`${card.id}\` at ${headCommit}.`,
   ]
@@ -147,7 +179,10 @@ type DraftPullRequest = {
   reused?: { repo: string; token: string; number: number };
 };
 
-/** Pushes the imported commit and returns the open draft PR for it, creating one when needed. */
+/**
+ * Pushes the imported commit and returns the open PR for it, creating one
+ * when needed: a draft, or ready for review when an agent accepted it.
+ */
 async function pushAndOpenDraft(
   access: WorkboardGitHubAccess,
   item: PublishCard,
@@ -220,8 +255,8 @@ async function pushAndOpenDraft(
       title: card.title,
       head: branch,
       base,
-      body: pullRequestBody(card, headCommit),
-      draft: true,
+      body: pullRequestBody(item),
+      draft: item.sampled === undefined,
     }),
   );
   if (!created) {
@@ -256,6 +291,7 @@ function reworkCommentBody(item: PublishCard, rework: WorkboardNodeRework): stri
   const outside = rework.outsideCommits;
   return [
     `Rework round ${rework.round} pushed \`${item.headCommit.slice(0, 12)}\` to this PR.`,
+    ...rungBLines(item, previousPublish),
     outside > 0
       ? `${outside} commit${outside === 1 ? "" : "s"} pushed by others since the first publish.`
       : undefined,

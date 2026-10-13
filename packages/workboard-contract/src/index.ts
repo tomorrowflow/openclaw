@@ -291,7 +291,18 @@ export type WorkboardNodeHandoff =
       slotWaitNotedAt?: number;
       escalatedAt?: number;
     }
-  | { phase: "imported"; headCommit: string; importedAt: number }
+  | {
+      phase: "imported";
+      headCommit: string;
+      importedAt: number;
+      /**
+       * The agent whose move to done accepted the round at rung b; absent when
+       * an operator did. `sampled` is set when that agent's verdict was
+       * accept: whether the PR is in the human review sample.
+       */
+      decidedBy?: `agent:${string}`;
+      sampled?: boolean;
+    }
   | {
       phase: "published";
       headCommit: string;
@@ -345,9 +356,11 @@ export type WorkboardNodeFeedback = {
 };
 
 /**
- * An agent's advisory verdict on one published review round (shadow
- * acceptance): the `Verdict: accept|rework` comment it left before the
- * operator moved the round to done, or `missed` when none came first. `round`
+ * An agent's verdict on one published review round: the `Verdict:
+ * accept|rework` comment it left before the round moved to done, or `missed`
+ * when none came first. Advisory (shadow acceptance) when the operator moved
+ * it; `decidedBy: "agent"` when the agent itself accepted it at rung b, with
+ * `sampled` set for an accept verdict. `round`
  * is the rework round the publish closed (0 for the first publish); the
  * operator reworked it when the ticket later reached rework round `round + 1`.
  * `importedAt` and `publishedAt` bound the round's wait for the operator;
@@ -358,6 +371,8 @@ export type WorkboardNodeReviewVerdict = {
   verdict: "accept" | "rework" | "missed";
   importedAt?: number;
   publishedAt?: number;
+  decidedBy?: "agent";
+  sampled?: boolean;
 };
 
 /** A ticket worktree the dispatcher created on a paired node. */
@@ -371,6 +386,11 @@ export type WorkboardNodeWorktree = {
   feedback?: WorkboardNodeFeedback;
   /** One entry per publish, oldest first; kept across rework rounds. */
   reviews?: WorkboardNodeReviewVerdict[];
+  /**
+   * The round runs at rung b: its class was at b on the board when it
+   * launched, so its brief asked for the standards review. Absent = rung a.
+   */
+  rung?: "b";
   /**
    * When an operator asked to stop the running session. Set before the abort,
    * so the run's end records a stop (card back in todo, worktree kept), not a
@@ -487,6 +507,21 @@ export type WorkboardOrchestrationSettings = {
    * label belongs to at most one route. Operator-set only.
    */
   targetRoutes?: WorkboardTargetRoute[];
+  /**
+   * Trust-ladder rung per task class (`class:<name>` label, keyed without the
+   * prefix). A class not listed is at rung a. Operator-set only.
+   */
+  classRungs?: Record<string, WorkboardClassRung>;
+};
+
+/**
+ * Rung b runs a standards reviewer in the ticket session and lets an agent
+ * accept the ticket. `sampleEvery` (default 3) is the share of agent-accepted
+ * PRs a human reads: 1 in `sampleEvery`, chosen by the card.
+ */
+export type WorkboardClassRung = {
+  rung: "a" | "b";
+  sampleEvery?: number;
 };
 
 export type WorkboardTargetRoute = {
@@ -604,8 +639,8 @@ export type WorkboardTrustCounts = {
   operatorAnswers: number;
   attempts: number;
   /**
-   * Published review rounds with an agent verdict, and how many matched the
-   * operator: `accept` with no rework after the publish, or `rework` with one.
+   * Operator-decided review rounds with an agent verdict, and how many matched
+   * the operator: `accept` with no rework after the publish, or `rework` with one.
    */
   verdictRounds: number;
   verdictAgreedRounds: number;
@@ -614,6 +649,12 @@ export type WorkboardTrustCounts = {
   verdictAgreedCards: number;
   /** Rounds published before any verdict; excluded from both rates. */
   verdictMissed: number;
+  /** Rounds an agent accepted at rung b, and those a later rework round reopened. */
+  agentAccepts: number;
+  reworkedAccepts: number;
+  /** Agent-accepted rounds in the human review sample, and those not reworked later. */
+  sampledRounds: number;
+  sampledAgreed: number;
   /** Runs with a recorded turn-end context, and those whose context passed the smart zone. */
   contextMeasured: number;
   smartZoneBreaches: number;
@@ -643,7 +684,8 @@ export type WorkboardTrustResult = {
   /** A run's turn-end context above this many tokens is a smart-zone breach. */
   smartZoneTokens: number;
   total: WorkboardTrustCounts;
-  classes: Array<WorkboardTrustCounts & { taskClass: string }>;
+  /** `rung` is the board's rung for the class; only a one-board projection has it. */
+  classes: Array<WorkboardTrustCounts & { taskClass: string; rung?: "a" | "b" }>;
   /** The last 8 weeks, oldest first, including the current one. */
   weeks: WorkboardTrustWeek[];
 };

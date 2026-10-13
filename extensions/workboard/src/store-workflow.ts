@@ -41,6 +41,7 @@ import {
   secondsToDurationMs,
 } from "./store-constants.js";
 import type {
+  WorkboardAgentActor,
   WorkboardBlockInput,
   WorkboardCardPatch,
   WorkboardClaimInput,
@@ -229,6 +230,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
   async releaseClaim(
     id: string,
     input: WorkboardHeartbeatInput & { status?: unknown } = {},
+    actor?: WorkboardAgentActor,
   ): Promise<WorkboardCard> {
     return await this.enqueueMutation(async () => {
       const existing = await this.requireCard(id);
@@ -243,7 +245,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
           status,
           metadata: { ...existing.metadata, claim: undefined },
         },
-        { enforceStatusHolds: input.status !== undefined },
+        { enforceStatusHolds: input.status !== undefined, actor },
       );
     });
   }
@@ -252,14 +254,16 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
     id: string,
     input: WorkboardCompleteInput = {},
     scope: WorkboardMutationScope | null | undefined = input,
+    actor?: WorkboardAgentActor,
   ): Promise<WorkboardCard> {
-    return await this.enqueueMutation(() => this.completeDirect(id, input, scope));
+    return await this.enqueueMutation(() => this.completeDirect(id, input, scope, actor));
   }
 
   private async completeDirect(
     id: string,
     input: WorkboardCompleteInput = {},
     scope: WorkboardMutationScope | null | undefined = input,
+    actor?: WorkboardAgentActor,
   ): Promise<WorkboardCard> {
     const existing = await this.requireCard(id);
     assertCanMutateClaimedCard(existing, scope === null ? undefined : scope);
@@ -323,6 +327,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
       {
         enforceStatusHolds: true,
         preserveProofId: proofId ?? proof?.id,
+        actor,
       },
     );
   }
@@ -458,6 +463,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
     id: string,
     input: WorkboardReassignInput = {},
     scope?: WorkboardMutationScope | null,
+    actor?: WorkboardAgentActor,
   ): Promise<WorkboardCard> {
     return await this.enqueueMutation(async () => {
       const existing = await this.requireCard(id);
@@ -478,7 +484,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
       return await this.updateCard(
         await this.requireCard(id),
         { agentId, status, metadata },
-        { enforceStatusHolds: true },
+        { enforceStatusHolds: true, actor },
       );
     });
   }
@@ -487,6 +493,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
     id: string,
     input: WorkboardReclaimInput = {},
     scope?: WorkboardMutationScope | null,
+    actor?: WorkboardAgentActor,
   ): Promise<WorkboardCard> {
     return await this.enqueueMutation(async () => {
       const existing = await this.requireCard(id);
@@ -514,7 +521,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
             stale: null,
           },
         },
-        { enforceStatusHolds: true },
+        { enforceStatusHolds: true, actor },
       );
       return await this.promoteDependencyReady(reclaimed.id, now);
     });
@@ -595,6 +602,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
     id: string,
     input: WorkboardDecomposeInput = {},
     scope?: WorkboardMutationScope | null,
+    actor?: WorkboardAgentActor,
   ): Promise<{ parent: WorkboardCard; children: WorkboardCard[] }> {
     return await this.enqueueMutation(
       async () =>
@@ -648,6 +656,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
                 parent.id,
                 { summary, createdCardIds: children.map((child) => child.id) },
                 scope,
+                actor,
               )
             : await (async () => {
                 const latestParent = (await this.get(parent.id)) ?? parent;

@@ -1,15 +1,20 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
   WorkboardCard,
+  WorkboardClassRung,
   WorkboardComment,
   WorkboardExecutionTarget,
   WorkboardNodeFeedback,
+  WorkboardNodeHandoff,
   WorkboardNodeQuestions,
   WorkboardNodeRework,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
-import { isFutureDateTimestampMs } from "openclaw/plugin-sdk/number-runtime";
+import {
+  isFutureDateTimestampMs,
+  resolveOptionalIntegerOption,
+} from "openclaw/plugin-sdk/number-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import {
   runPluginCommandWithTimeout,
@@ -24,7 +29,9 @@ import {
   MAX_COMMENT_BODY_CHARS,
   MAX_PROOF_COMMAND_CHARS,
   MAX_PROOF_NOTE_CHARS,
+  workboardTaskClass,
 } from "./store-constants.js";
+import type { WorkboardAgentActor } from "./store-inputs.js";
 import { capText } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
 
@@ -61,6 +68,11 @@ export type NodeTicketReopen = {
   reviewed: boolean;
 };
 
+/** The proof entry label of a rung b round's standards review. */
+export const STANDARDS_REVIEW_LABEL = "standards review";
+// One in this many agent-accepted PRs is read by a person when the class sets no sampleEvery.
+const DEFAULT_SAMPLE_EVERY = 3;
+
 const REVIEW_VERDICT_PATTERN = /^Verdict:\s*(accept|rework)\b/i;
 
 /** An agent's shadow verdict on a review round (`Verdict: accept|rework`), if the comment is one. */
@@ -69,6 +81,56 @@ export function reviewVerdictOf(comment: WorkboardComment): "accept" | "rework" 
     ? REVIEW_VERDICT_PATTERN.exec(comment.body.trim())?.[1]?.toLowerCase()
     : undefined;
   return match === "accept" || match === "rework" ? match : undefined;
+}
+
+type ImportedHandoff = Extract<WorkboardNodeHandoff, { phase: "imported" }>;
+
+/**
+ * Who accepts an imported node ticket on its move to done. The operator does
+ * unless an agent moves it; an agent may only for a class at rung b on the
+ * board whose round also ran at rung b, after posting its verdict. An accept
+ * verdict then picks whether a person reads the PR: every reworked ticket,
+ * and 1 in `sampleEvery` others, chosen by the card id so the sample is not
+ * the reader's choice. Throws the refusal an agent gets.
+ */
+export function nodeTicketAcceptance(params: {
+  card: WorkboardCard;
+  worktree: WorkboardNodeWorktree;
+  handoff: ImportedHandoff;
+  actor?: WorkboardAgentActor;
+  classRung?: WorkboardClassRung;
+}): ImportedHandoff {
+  const { card, worktree, actor, classRung } = params;
+  const { decidedBy: _decidedBy, sampled: _sampled, ...imported } = params.handoff;
+  if (!actor) {
+    return imported;
+  }
+  const askForVerdict = "Post `Verdict: accept` or `Verdict: rework: <finding>` as a comment";
+  if (classRung?.rung !== "b") {
+    throw new Error(
+      `Rung a: the operator accepts ${workboardTaskClass(card.labels) ?? "unclassified"} tickets. ${askForVerdict} instead of moving the card to done.`,
+    );
+  }
+  if (worktree.rung !== "b") {
+    throw new Error(
+      `This round ran before its class reached rung b, so the operator accepts it. ${askForVerdict} instead of moving the card to done.`,
+    );
+  }
+  const verdict = (card.metadata?.comments ?? [])
+    .filter((comment) => comment.createdAt >= imported.importedAt)
+    .flatMap((comment) => reviewVerdictOf(comment) ?? [])
+    .at(-1);
+  if (!verdict) {
+    throw new Error(`${askForVerdict} first, then move the card to done.`);
+  }
+  if (verdict === "rework") {
+    return { ...imported, decidedBy: actor };
+  }
+  const sampleEvery = classRung.sampleEvery ?? DEFAULT_SAMPLE_EVERY;
+  const sampled =
+    (worktree.rework?.round ?? 0) > 0 ||
+    createHash("sha256").update(card.id).digest().readUInt32BE(0) % sampleEvery === 0;
+  return { ...imported, decidedBy: actor, sampled };
 }
 
 /**
@@ -445,6 +507,7 @@ export function buildNodeTicketMessage(params: {
           )
         : [];
   const feedback = rework || answering ? comments.slice(-REWORK_FEEDBACK_MAX_ENTRIES) : [];
+  const reviewed = params.worktree.rung === "b";
   return [
     `Work on this ticket: ${params.card.title}`,
     "",
@@ -479,10 +542,15 @@ export function buildNodeTicketMessage(params: {
     "- Commit your work on this branch. Never push, add remotes, or change other branches.",
     "- Do not end the turn while a background job is still running; wait for it or stop it.",
     "- If something needs a decision you cannot make from the ticket and the repository, stop and ask; propose a default.",
+    ...(reviewed
+      ? [
+          "- Before a `done` report, run a reviewer subagent over your changes against the repository's CODING_STANDARDS.md, address its findings, and report them in `review`: how many findings it raised, how many you fixed, and a note on any you left. A `done` report without `review` blocks the card.",
+        ]
+      : []),
     "- End your final message with exactly one report block:",
     "",
     "```" + REPORT_FENCE,
-    '{"outcome":"done|blocked|needs_input","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],"questions":["…"]}',
+    `{"outcome":"done|blocked|needs_input","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${reviewed ? '"review":{"findings":0,"fixed":0,"note":"…"},' : ""}"questions":["…"]}`,
     "```",
     "",
     "Use `done` only when the work is committed and its proof passed. Use `needs_input` for open questions, each with your proposed default; the answers come back as the next turn of this session. Use `blocked` for anything else that stops you.",
@@ -506,8 +574,11 @@ type NodeTicketStopReport = {
   questions: string[];
 };
 
+/** The rung b standards review the session ran before its done report. */
+type NodeTicketReview = { findings: number; fixed: number; note?: string };
+
 type NodeTicketReport =
-  | { outcome: "done"; summary: string; proof: NodeTicketProof[] }
+  | { outcome: "done"; summary: string; proof: NodeTicketProof[]; review?: NodeTicketReview }
   | NodeTicketStopReport;
 
 function lastAssistantText(messages: readonly unknown[]): string | undefined {
@@ -531,6 +602,18 @@ function lastAssistantText(messages: readonly unknown[]): string | undefined {
 // Report fields are session output; bound them to the store limits they land in.
 function optionalText(value: unknown, max: number): string | undefined {
   return typeof value === "string" ? capText(value.trim(), max) : undefined;
+}
+
+function parseReview(value: unknown): NodeTicketReview | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const findings = resolveOptionalIntegerOption(value.findings, { min: 0 });
+  const fixed = resolveOptionalIntegerOption(value.fixed, { min: 0 });
+  const note = optionalText(value.note, MAX_PROOF_NOTE_CHARS);
+  return findings === undefined || fixed === undefined
+    ? undefined
+    : { findings, fixed, ...(note ? { note } : {}) };
 }
 
 /** Reads the last report block of the final assistant message; anything else is a contract miss. */
@@ -566,7 +649,8 @@ function parseNodeTicketReport(
         return [{ status, ...(command ? { command } : {}), ...(note ? { note } : {}) }];
       },
     );
-    return { ok: true, report: { outcome: "done", summary, proof } };
+    const review = parseReview(value.review);
+    return { ok: true, report: { outcome: "done", summary, proof, ...(review ? { review } : {}) } };
   }
   if (value.outcome === "blocked" || value.outcome === "needs_input") {
     const questions = (Array.isArray(value.questions) ? value.questions : []).flatMap((entry) => {
@@ -592,7 +676,8 @@ function blockReason(report: NodeTicketStopReport): string {
  * moves the card to review. A needs_input report posts the questions and
  * waits in review for an answer; the agent_end nudge wakes the board's
  * automation so `dev` can answer. Every other ending blocks the card so `dev`
- * sees the reason. Proof that did not pass also blocks.
+ * sees the reason. Proof that did not pass also blocks, and so does a rung b
+ * round's done report without its standards review.
  */
 export async function applyNodeTicketReport(params: {
   store: WorkboardStore;
@@ -643,11 +728,33 @@ export async function applyNodeTicketReport(params: {
   for (const proof of report.proof) {
     await store.addProof(card.id, { ...proof, label: "ticket proof" }, scope);
   }
+  // The counts are recorded, not judged: fewer fixed than found is for the reviewer of the PR.
+  if (report.review) {
+    const { findings, fixed, note } = report.review;
+    await store.addProof(
+      card.id,
+      {
+        status: "passed",
+        label: STANDARDS_REVIEW_LABEL,
+        note: capText(
+          `${findings} findings, ${fixed} fixed${note ? `. ${note}` : ""}`,
+          MAX_PROOF_NOTE_CHARS,
+        ),
+      },
+      scope,
+    );
+  }
   if (
     !report.proof.some((proof) => proof.status === "passed") ||
     report.proof.some((proof) => proof.status === "failed")
   ) {
     await block(`Reported done without passing proof: ${report.summary || "no summary given"}`);
+    return;
+  }
+  if (worktree?.rung === "b" && !report.review) {
+    await block(
+      `Reported done without the standards review its rung b brief asked for: ${report.summary || "no summary given"}\nRe-run the card; the next run reuses the node worktree, and its brief asks for the reviewer against CODING_STANDARDS.md and a \`review\` in the report.`,
+    );
     return;
   }
   if (report.summary) {
