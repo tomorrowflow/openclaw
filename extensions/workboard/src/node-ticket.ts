@@ -300,6 +300,7 @@ export async function createNodeTicketWorktree(params: {
         pullRequestUrl: published.pullRequestUrl,
         acceptedAt: previous.rework?.acceptedAt ?? published.publishedAt,
         outsideCommits: (previous.rework?.outsideCommits ?? 0) + outside,
+        startCommit: start,
       };
     } else {
       const baseRef = target.baseRef ?? "origin/HEAD";

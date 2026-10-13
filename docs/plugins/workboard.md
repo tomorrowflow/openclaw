@@ -594,8 +594,13 @@ cards then block at start with the core `model not allowed` reason.
 3. **Import:** the node bundles the branch to `<worktreesRoot>/wb-<cardId>.bundle`
    and the Gateway fetches it with File Transfer, so the node's
    `allowReadPaths` must cover `<worktreesRoot>/*.bundle`. The host clone
-   fetches `origin` when it lacks the base commit, creates `factory/<cardId>`
-   (never moving an existing branch), the node worktree is removed, and the
+   fetches `origin` when it lacks the base commit and runs `git diff --check`
+   over the ticket's commits (a rework round: only the round's own commits,
+   not what a reviewer pushed). A failure adds a failed `import check` proof
+   entry and blocks the card with the output, which counts as a block in the
+   trust KPIs; a re-run fixes it with a new commit in the same node worktree
+   and imports again. Otherwise it creates `factory/<cardId>` (never moving an
+   existing branch), the node worktree is removed, and the
    card moves to `review` with its claim released. When the board has an
    automation job, reaching `review` nudges it, so the assignee agent can
    give a shadow verdict (see [Trust KPIs](#trust-kpis)).

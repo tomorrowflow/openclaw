@@ -304,12 +304,15 @@ export type WorkboardNodeHandoff =
  * draft PR branch tip. `round` counts rework rounds so far; `outsideCommits`
  * counts commits others pushed to the branch between rounds. `acceptedAt` is
  * the first publish, which stays the ticket's acceptance through rework.
+ * `startCommit` is the branch tip the round started from, so the import check
+ * covers only the round's own commits.
  */
 export type WorkboardNodeRework = {
   round: number;
   pullRequestUrl: string;
   acceptedAt: number;
   outsideCommits: number;
+  startCommit?: string;
 };
 
 /**

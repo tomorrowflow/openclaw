@@ -94,7 +94,24 @@ async function finishNodeTicket(params: {
       }),
     ...(params.onReview ? { onReview: params.onReview } : {}),
   });
-  return { store, card, repos, worktree, handoffs, warn, gateway, github };
+  /** Re-runs the blocked card as an operator does; the session reports done again. */
+  const rerunDone = async () => {
+    const ready = await store.move(card.id, "ready", undefined);
+    const { started } = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets: gateway,
+      options: { now: ready.updatedAt, maxStarts: 1 },
+    });
+    expect(started[0]).toBeDefined();
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId: started[0]?.runId, success: true, messages: doneReport },
+      context: { runId: started[0]?.runId, sessionKey: started[0]?.sessionKey },
+    });
+    await handoffs.resume(warn);
+  };
+  return { store, card, repos, worktree, handoffs, warn, gateway, github, rerunDone };
 }
 
 /** GitHub as the publish step sees it: a local remote for the push and a recorded REST API. */
@@ -226,7 +243,7 @@ describe("node ticket handoff", () => {
   });
 
   it("imports from the original base when a blocked card is re-run without new commits", async () => {
-    const { store, card, repos, worktree, handoffs, warn, gateway } = await finishNodeTicket({});
+    const { store, card, repos, worktree, handoffs, warn, rerunDone } = await finishNodeTicket({});
     const branch = `factory/${card.id}`;
     const base = git(repos.target.repoPath, "rev-parse", "main");
     const head = git(worktree, "rev-parse", "HEAD");
@@ -235,21 +252,7 @@ describe("node ticket handoff", () => {
     expect((await store.get(card.id))?.status).toBe("blocked");
 
     git(repos.hostRepo, "branch", "-D", branch);
-    const ready = await store.move(card.id, "ready", undefined);
-    const rerun = await dispatchAndStartWorkboardCards({
-      store,
-      subagent: { run: vi.fn() },
-      nodeTickets: gateway,
-      options: { now: ready.updatedAt, maxStarts: 1 },
-    });
-    const started = rerun.started[0];
-    expect(started).toBeDefined();
-    await syncWorkboardAgentEnded({
-      store,
-      event: { runId: started?.runId, success: true, messages: doneReport },
-      context: { runId: started?.runId, sessionKey: started?.sessionKey },
-    });
-    await handoffs.resume(warn);
+    await rerunDone();
 
     const stored = await store.get(card.id);
     expect(stored?.status).toBe("review");
@@ -257,6 +260,39 @@ describe("node ticket handoff", () => {
       `Imported ${branch} ${base.slice(0, 12)}..${head.slice(0, 12)} into ${repos.hostRepo}`,
     );
     expect(git(repos.hostRepo, "rev-parse", branch)).toBe(head);
+  });
+
+  it("blocks a branch that fails git diff --check before review, then imports the fixed rerun", async () => {
+    const { store, card, repos, worktree, handoffs, warn, rerunDone } = await finishNodeTicket({
+      files: { "parser.py": "ok  \n" },
+    });
+    const branch = `factory/${card.id}`;
+    const base = git(repos.target.repoPath, "rev-parse", "main");
+    const head = git(worktree, "rev-parse", "HEAD");
+
+    await handoffs.resume(warn);
+
+    const blocked = await store.get(card.id);
+    expect(blocked?.status).toBe("blocked");
+    expect(blocked?.metadata?.proof?.at(-1)).toMatchObject({
+      label: "import check",
+      status: "failed",
+      command: `git diff --check ${base.slice(0, 12)}..${head.slice(0, 12)}`,
+      note: expect.stringContaining("parser.py:1: trailing whitespace."),
+    });
+    expect(blocked?.metadata?.comments?.at(-1)?.body).toMatch(
+      /^Import check: `git diff --check [0-9a-f]{12}\.\.[0-9a-f]{12}` failed; fix it with a new commit in the same worktree:\nparser\.py:1: trailing whitespace\./,
+    );
+    expect(git(repos.hostRepo, "branch", "--list", branch)).toBe("");
+    expect(existsSync(worktree)).toBe(true);
+
+    writeFileSync(path.join(worktree, "parser.py"), "ok\n");
+    git(worktree, "commit", "-q", "-am", "strip trailing whitespace");
+    const fixed = git(worktree, "rev-parse", "HEAD");
+    await rerunDone();
+
+    expect((await store.get(card.id))?.status).toBe("review");
+    expect(git(repos.hostRepo, "rev-parse", branch)).toBe(fixed);
   });
 
   it("blocks instead of dropping commits made on a detached HEAD", async () => {
@@ -570,7 +606,8 @@ describe("node ticket draft PR", () => {
     github.openPulls.push(pullRequestUrl);
     const review = path.join(path.dirname(repos.origin), "review");
     git(repos.origin, "worktree", "add", "-q", review, branch);
-    writeFileSync(path.join(review, "parser.py"), "reviewed\n");
+    // The import check covers only the round's own commits, not the reviewer's.
+    writeFileSync(path.join(review, "parser.py"), "reviewed  \n");
     git(review, "commit", "-q", "-am", "review fixup");
     const reviewed = git(review, "rev-parse", "HEAD");
     git(repos.origin, "worktree", "remove", review);
@@ -609,6 +646,7 @@ describe("node ticket draft PR", () => {
       pullRequestUrl,
       acceptedAt: expect.any(Number),
       outsideCommits: 1,
+      startCommit: reviewed,
     });
     // The first publish stays the acceptance while the rework round runs, and
     // dev's rework verdict on it matched the operator's reopen.

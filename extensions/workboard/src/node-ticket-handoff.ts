@@ -20,6 +20,8 @@ import {
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
+import { MAX_BLOCK_REASON_CHARS, MAX_PROOF_NOTE_CHARS } from "./store-constants.js";
+import { capText } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
 
 // file.fetch's hard cap; a larger bundle fails on the node with FILE_TOO_LARGE.
@@ -92,6 +94,16 @@ async function fetchNodeBundle(
   return bundle;
 }
 
+/** The imported range fails `git diff --check`, a mechanical check review should not have to catch. */
+class ImportCheckError extends Error {
+  constructor(
+    readonly command: string,
+    readonly output: string,
+  ) {
+    super(`\`${command}\` failed`);
+  }
+}
+
 /**
  * Bundles the ticket branch on the node and imports it into the host clone.
  * The bundle must carry exactly the ticket branch, descend from the recorded
@@ -159,6 +171,26 @@ async function importNodeBundle(
     }
     const existing = await hostGit(hostRepoPath, ["rev-parse", "--verify", "--quiet", ref]);
     const existingHead = existing.code === 0 ? existing.stdout.trim() : "";
+    // A rework round answers for its own commits, not for what a reviewer pushed
+    // (an "Update branch" merge carries all of main). Records from before
+    // startCommit fall back to the head the host imported last.
+    const checkFrom = worktree.rework
+      ? (worktree.rework.startCommit ?? (existingHead || worktree.baseCommit))
+      : worktree.baseCommit;
+    const check = await hostGit(hostRepoPath, ["diff", "--check", checkFrom, headCommit]);
+    if (check.code !== 0 && check.stdout.trim()) {
+      // A superseded card must not be blocked by its stale import.
+      await assertCurrent();
+      throw new ImportCheckError(
+        `git diff --check ${checkFrom.slice(0, 12)}..${headCommit.slice(0, 12)}`,
+        check.stdout.trim(),
+      );
+    }
+    if (check.code !== 0) {
+      throw new Error(
+        `host \`git diff --check\` failed: ${check.stderr.trim() || `exit ${check.code}`}`,
+      );
+    }
     // Only a rework round (D54) may move the branch, and only forward from what it published.
     if (
       existingHead &&
@@ -233,6 +265,31 @@ async function runNodeTicketHandoff(params: {
       });
     } catch (error) {
       if (error instanceof HandoffSupersededError) {
+        return;
+      }
+      if (error instanceof ImportCheckError) {
+        await store.addProof(
+          card.id,
+          {
+            label: "import check",
+            status: "failed",
+            command: error.command,
+            note: capText(error.output, MAX_PROOF_NOTE_CHARS),
+          },
+          scope,
+        );
+        // The reason becomes a comment the re-run session sees cut to 400
+        // characters, so the command and its output come first.
+        await store.block(
+          card.id,
+          {
+            reason: capText(
+              `Import check: ${error.message}; fix it with a new commit in the same worktree:\n${error.output}\nRe-run the card to import again.`,
+              MAX_BLOCK_REASON_CHARS,
+            ),
+          },
+          scope,
+        );
         return;
       }
       await store.block(
