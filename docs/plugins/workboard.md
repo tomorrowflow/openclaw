@@ -395,6 +395,7 @@ plugin using the linked run and session lifecycle (see
 | `workboard_boards` / `workboard_stats`                                                                                                           | Inspect board namespaces and queue stats.                                                                                                                                                 |
 | `workboard_promote` / `workboard_reassign` / `workboard_reclaim`                                                                                 | Recover or hand off stuck work.                                                                                                                                                           |
 | `workboard_comment` / `workboard_proof`                                                                                                          | Add handoff notes or attach proof/artifact references.                                                                                                                                    |
+| `workboard_escalate`                                                                                                                             | Record that a node ticket's open questions went to the operator (`handoff.escalatedAt`), so automation reviews the round once                                                             |
 | `workboard_unblock`                                                                                                                              | Move blocked work back to `todo`.                                                                                                                                                         |
 | `workboard_move`                                                                                                                                 | Move a card to another status; claimed cards require the caller's agent claim scope.                                                                                                      |
 | `workboard_dispatch`                                                                                                                             | Nudge dependency promotion or stale-claim cleanup without launching workers; worker launch uses Gateway or slash-command dispatch.                                                        |
@@ -591,7 +592,10 @@ cards then block at start with the core `model not allowed` reason.
    `todo` without a newer comment, or a move to `done`, sends the card back to
    `review` with a comment naming the next step. When the board has an
    automation job, the end of the ticket's turn nudges it, so the assignee
-   agent can answer. The trust KPIs count answered question rounds. A round an
+   agent can answer. An agent that passes the questions to the operator
+   instead calls `workboard_escalate`, which records `escalatedAt` on the round
+   (no comment, no move), so later automation runs can skip it; the next
+   questions round starts without it. The trust KPIs count answered question rounds. A round an
    operator answered (a comment from the Control UI or the Gateway) is a human
    touch; a round an agent answered with `workboard_comment` is not.
 3. **Import:** the node bundles the branch to `<worktreesRoot>/wb-<cardId>.bundle`

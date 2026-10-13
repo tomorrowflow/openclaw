@@ -278,11 +278,19 @@ export type WorkboardWorkspaceAccess =
  * `questions` is set by a needs_input report: the card waits in review, and a
  * comment newer than `askedAt` plus a move to todo resumes the same session
  * with the answer. `reviewFrom` and `slotWaitNotedAt` mark Workboard's own
- * notices since, as on a published ticket.
+ * notices since, as on a published ticket. `escalatedAt` records that an
+ * agent passed this round's questions to the operator; a new round starts
+ * without it.
  */
 export type WorkboardNodeHandoff =
   | { phase: "pending"; reportedAt: number }
-  | { phase: "questions"; askedAt: number; reviewFrom?: number; slotWaitNotedAt?: number }
+  | {
+      phase: "questions";
+      askedAt: number;
+      reviewFrom?: number;
+      slotWaitNotedAt?: number;
+      escalatedAt?: number;
+    }
   | { phase: "imported"; headCommit: string; importedAt: number }
   | {
       phase: "published";

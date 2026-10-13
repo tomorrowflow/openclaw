@@ -4,8 +4,8 @@ import { resolveIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import type { AnyAgentTool, OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "typebox";
 import { redactClaimToken } from "./card-redaction.js";
-import { normalizeCommentSource } from "./store-value-normalizers.js";
 import { normalizeCappedStringList } from "./store-string-lists.js";
+import { normalizeCommentSource } from "./store-value-normalizers.js";
 import type { WorkboardStore } from "./store.js";
 import {
   cardIdField,
@@ -261,6 +261,16 @@ export function createWorkboardTools(params: {
       execute: scopedCardMutation((id, record, scope) =>
         store.addComment(id, { body: record.body }, scope, commentSource),
       ),
+    },
+    {
+      name: "workboard_escalate",
+      label: "Workboard Escalate",
+      description:
+        "Record that a node ticket's open questions were passed to the operator, so later reviews of this questions round skip the card (handoff.escalatedAt). Adds no comment and does not move the card.",
+      parameters: strictObject({
+        id: cardIdField(),
+      }),
+      execute: scopedCardMutation((id) => store.escalateNodeTicketQuestions(id)),
     },
     {
       name: "workboard_proof",
