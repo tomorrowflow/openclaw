@@ -135,6 +135,12 @@ export type WorkboardRunAttempt = {
   sessionKey?: string;
   runId?: string;
   error?: string;
+  /**
+   * Context use at the run's end (draft D16): the prompt tokens of its last
+   * model call, from the usage its agent_end messages reported. Absent when the
+   * run never replied or ended before this was recorded.
+   */
+  contextTokens?: number;
 };
 
 /**
@@ -586,6 +592,9 @@ export type WorkboardTrustCounts = {
   verdictAgreedCards: number;
   /** Rounds published before any verdict; excluded from both rates. */
   verdictMissed: number;
+  /** Runs with a recorded turn-end context, and those whose context passed the smart zone. */
+  contextMeasured: number;
+  smartZoneBreaches: number;
 };
 
 /** Accepted tickets in one UTC week (Monday 00:00), by acceptance time. */
@@ -597,6 +606,8 @@ export type WorkboardTrustWeek = {
   medianLeadTimeMs?: number;
   /** Median import-to-publish wait of the review rounds published this week. */
   medianReviewWaitMs?: number;
+  /** Median turn-end context of the measured runs that ended this week. */
+  medianContextTokens?: number;
 };
 
 /**
@@ -607,6 +618,8 @@ export type WorkboardTrustWeek = {
 export type WorkboardTrustResult = {
   boardId: string;
   generatedAt: number;
+  /** A run's turn-end context above this many tokens is a smart-zone breach. */
+  smartZoneTokens: number;
   total: WorkboardTrustCounts;
   classes: Array<WorkboardTrustCounts & { taskClass: string }>;
   /** The last 8 weeks, oldest first, including the current one. */

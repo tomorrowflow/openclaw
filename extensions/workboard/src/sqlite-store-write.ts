@@ -167,6 +167,7 @@ export function insertCard(db: DatabaseSync, card: WorkboardCard): void {
     session_key: (entry) => bindNull(entry.sessionKey),
     run_id: (entry) => bindNull(entry.runId),
     error: (entry) => bindNull(entry.error),
+    context_tokens: (entry) => bindNull(entry.contextTokens),
   });
   insertChildren(db, "workboard_card_comments", card.id, metadata?.comments, {
     id: (entry) => entry.id,

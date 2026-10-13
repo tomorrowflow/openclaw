@@ -6,6 +6,7 @@ import type {
   WorkboardTrustWeek,
 } from "@openclaw/workboard-contract";
 import { nodeTicketTarget } from "./node-ticket.js";
+import { SMART_ZONE_TOKENS } from "./store-constants.js";
 
 const TRUST_WEEKS = 8;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -24,6 +25,8 @@ type TicketFacts = {
   questionRounds: number;
   operatorAnswers: number;
   attempts: number;
+  /** Turn-end context of each run that recorded one, with when it ended. */
+  contexts: ReadonlyArray<{ contextTokens: number; endedAt: number }>;
   reviews: readonly WorkboardNodeReviewVerdict[];
 };
 
@@ -69,6 +72,9 @@ function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
     questionRounds: worktree?.questions?.rounds ?? 0,
     operatorAnswers: worktree?.questions?.operatorAnswers ?? 0,
     attempts: card.metadata?.attempts?.length ?? 0,
+    contexts: (card.metadata?.attempts ?? []).flatMap(({ contextTokens, endedAt, startedAt }) =>
+      contextTokens === undefined ? [] : [{ contextTokens, endedAt: endedAt ?? startedAt }],
+    ),
     reviews: worktree?.reviews ?? [],
   };
 }
@@ -100,6 +106,8 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
     verdictCards: 0,
     verdictAgreedCards: 0,
     verdictMissed: 0,
+    contextMeasured: 0,
+    smartZoneBreaches: 0,
   };
   for (const ticket of tickets) {
     const rounds = ticket.reviews.filter((review) => review.verdict !== "missed");
@@ -123,6 +131,10 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
     counts.questionRounds += ticket.questionRounds;
     counts.operatorAnswers += ticket.operatorAnswers;
     counts.attempts += ticket.attempts;
+    counts.contextMeasured += ticket.contexts.length;
+    counts.smartZoneBreaches += ticket.contexts.filter(
+      (context) => context.contextTokens > SMART_ZONE_TOKENS,
+    ).length;
   }
   return counts;
 }
@@ -154,6 +166,13 @@ export function projectWorkboardTrust(
         : [],
     );
     const leadTime = median(accepted.map((ticket) => ticket.leadTimeMs));
+    const turnEndContext = median(
+      tickets.flatMap((ticket) =>
+        ticket.contexts.flatMap((context) =>
+          weekStart(context.endedAt) === start ? [context.contextTokens] : [],
+        ),
+      ),
+    );
     const reviewWait = median(
       tickets.flatMap((ticket) =>
         ticket.reviews.flatMap(({ importedAt, publishedAt }) =>
@@ -169,11 +188,13 @@ export function projectWorkboardTrust(
       autonomous: accepted.filter((ticket) => isClean(ticket) && ticket.blocks === 0).length,
       ...(leadTime === undefined ? {} : { medianLeadTimeMs: leadTime }),
       ...(reviewWait === undefined ? {} : { medianReviewWaitMs: reviewWait }),
+      ...(turnEndContext === undefined ? {} : { medianContextTokens: turnEndContext }),
     });
   }
   return {
     boardId,
     generatedAt: now,
+    smartZoneTokens: SMART_ZONE_TOKENS,
     total: countTickets(tickets),
     classes: [...byClass]
       .map(([taskClass, entries]) => Object.assign({ taskClass }, countTickets(entries)))

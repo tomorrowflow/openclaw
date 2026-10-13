@@ -120,6 +120,33 @@ describe("projectWorkboardTrust", () => {
     expect(trust.weeks.at(-2)).not.toHaveProperty("medianReviewWaitMs");
   });
 
+  it("counts smart-zone breaches and the weekly median turn-end context per measured run", () => {
+    const run = (id: string, endedAt: number, contextTokens?: number) => ({
+      id,
+      status: "succeeded" as const,
+      startedAt: endedAt - HOUR,
+      endedAt,
+      ...(contextTokens === undefined ? {} : { contextTokens }),
+    });
+    const card = ticket("a", { createdAt: MONDAY, labels: ["class:server-fix"] });
+    card.metadata!.attempts = [
+      run("r1", MONDAY + HOUR, 40_000),
+      run("r2", MONDAY + 2 * HOUR, 151_000),
+      run("r3", MONDAY + 3 * HOUR, 100_000),
+      // Recorded before context was measured: neither measured nor a breach.
+      run("r4", MONDAY + 4 * HOUR),
+      run("old", MONDAY - HOUR, 20_000),
+    ];
+
+    const trust = projectWorkboardTrust([card], "app", MONDAY + 24 * HOUR);
+
+    expect(trust.smartZoneTokens).toBe(150_000);
+    expect(trust.total).toMatchObject({ attempts: 5, contextMeasured: 4, smartZoneBreaches: 1 });
+    expect(trust.classes[0]).toMatchObject({ taskClass: "server-fix", smartZoneBreaches: 1 });
+    expect(trust.weeks.at(-1)?.medianContextTokens).toBe(100_000);
+    expect(trust.weeks.at(-2)?.medianContextTokens).toBe(20_000);
+  });
+
   it("groups by class label and keeps rework out of clean acceptance", () => {
     const cards = [
       ticket("docs", { createdAt: MONDAY, labels: ["class:docs"], worktree: published(MONDAY) }),

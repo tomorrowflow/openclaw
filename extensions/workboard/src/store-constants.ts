@@ -51,6 +51,8 @@ export function isWorkboardClaimReclaimable(
 }
 
 export const DEFAULT_NODE_TICKET_CONCURRENCY = 2;
+/** The smart zone (draft D16): ~20% of a frontier context window. */
+export const SMART_ZONE_TOKENS = 150_000;
 
 type WorkboardOwnerSlotCard = Pick<WorkboardCard, "status" | "agentId"> & {
   labels?: readonly string[];

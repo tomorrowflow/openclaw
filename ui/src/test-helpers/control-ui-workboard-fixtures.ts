@@ -649,10 +649,13 @@ function buildWorkboardTrustFixture(boardId: string, baseTime: number) {
     verdictCards: 0,
     verdictAgreedCards: 0,
     verdictMissed: 0,
+    contextMeasured: 0,
+    smartZoneBreaches: 0,
   });
   return {
     boardId,
     generatedAt: baseTime,
+    smartZoneTokens: 150_000,
     total: counts(24, 20, 13),
     classes: [
       { taskClass: "dead-code", ...counts(6, 6, 5) },
