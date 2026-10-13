@@ -574,6 +574,35 @@ no assignee is set) and refuses a model the agent may not run, naming both. Othe
 skip the check, so a board whose agent policy narrowed later still saves; its
 cards then block at start with the core `model not allowed` reason.
 
+A board's `orchestration.classRungs`, also set only through
+`workboard.boards.upsert`, sets the trust-ladder rung of each task class (a
+card's first `class:<name>` label, keyed without the `class:` prefix). A class
+not listed is at rung a:
+
+```json5
+{
+  id: "voice-diary",
+  orchestration: {
+    classRungs: {
+      docs: { rung: "b" },
+      // Every PR of a rung b security class is read by a person.
+      security: { rung: "b", sampleEvery: 1 },
+    },
+  },
+}
+```
+
+`sampleEvery` (1 to 100, default 3) is kept for the review sample at rung b.
+Saving replaces the whole map; `classRungs: null` or `{}` removes it. Saving
+refuses more than 50 classes, a name with the `class:` prefix or longer than 34
+characters, a rung other than `a` or `b`, and a `sampleEvery` that is not an
+integer from 1 to 100. Each start, rework, answer, or retry reads the rung from
+the board and records a rung b round as `rung: "b"` on the node worktree, so
+promoting or demoting a class applies from the next round on, never to one
+already running. A rung b round's brief asks the session to run a reviewer
+subagent against the repository's `CODING_STANDARDS.md` before its `done`
+report, address the findings, and report them (see **Report** below).
+
 1. **Start:** the dispatcher fetches `origin` in the node clone, creates branch
    `factory/<cardId>` at `baseRef` (default `origin/HEAD`) in
    `<worktreesRoot>/wb-<cardId>`, and starts the session there.
@@ -582,7 +611,10 @@ cards then block at start with the core `model not allowed` reason.
    for an answer (see **Questions**). Anything else blocks the card,
    including a `done` report with any `failed` proof entry. The brief tells the
    session to record red-first evidence (a test that failed before the fix) in
-   the note of its passing entry.
+   the note of its passing entry. A rung b round's report also carries
+   `"review": {"findings": n, "fixed": n, "note": "…"}`, recorded as a passed
+   `standards review` proof entry whose note gives the counts; a `done` report
+   without it blocks the card. Fewer fixed than found is recorded, not blocked.
    **Questions:** a `needs_input` report posts its questions as a card
    comment and moves the card to `review`, keeping the node worktree. To
    answer, add a comment and move the card to `todo`. The same session resumes

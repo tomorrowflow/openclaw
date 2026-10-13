@@ -372,6 +372,11 @@ export type WorkboardNodeWorktree = {
   /** One entry per publish, oldest first; kept across rework rounds. */
   reviews?: WorkboardNodeReviewVerdict[];
   /**
+   * The round runs at rung b: its class was at b on the board when it
+   * launched, so its brief asked for the standards review. Absent = rung a.
+   */
+  rung?: "b";
+  /**
    * When an operator asked to stop the running session. Set before the abort,
    * so the run's end records a stop (card back in todo, worktree kept), not a
    * failure.
@@ -487,6 +492,21 @@ export type WorkboardOrchestrationSettings = {
    * label belongs to at most one route. Operator-set only.
    */
   targetRoutes?: WorkboardTargetRoute[];
+  /**
+   * Trust-ladder rung per task class (`class:<name>` label, keyed without the
+   * prefix). A class not listed is at rung a. Operator-set only.
+   */
+  classRungs?: Record<string, WorkboardClassRung>;
+};
+
+/**
+ * Rung b runs a standards reviewer in the ticket session. `sampleEvery`
+ * (default 3) is the share of a rung b class's PRs a human reads: 1 in
+ * `sampleEvery`, chosen by the card.
+ */
+export type WorkboardClassRung = {
+  rung: "a" | "b";
+  sampleEvery?: number;
 };
 
 export type WorkboardTargetRoute = {

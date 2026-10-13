@@ -1,6 +1,7 @@
 import {
   createDefaultWorkboardSessionsBoardSpec,
   type WorkboardBoardMetadata,
+  type WorkboardClassRung,
   type WorkboardOrchestrationSettings,
   type WorkboardTargetRoute,
 } from "@openclaw/workboard-contract";
@@ -121,6 +122,9 @@ function normalizeOrchestration(
   const targetRoutes = Object.hasOwn(record, "targetRoutes")
     ? normalizeTargetRoutes(record.targetRoutes)
     : fallback?.targetRoutes;
+  const classRungs = Object.hasOwn(record, "classRungs")
+    ? normalizeClassRungs(record.classRungs)
+    : fallback?.classRungs;
   const next: WorkboardOrchestrationSettings = {
     ...(autoDecompose !== undefined ? { autoDecompose } : {}),
     ...(autoDecomposePerDispatch ? { autoDecomposePerDispatch } : {}),
@@ -128,8 +132,46 @@ function normalizeOrchestration(
     ...(orchestratorProfile ? { orchestratorProfile } : {}),
     ...(defaultTarget ? { defaultTarget } : {}),
     ...(targetRoutes?.length ? { targetRoutes } : {}),
+    ...(classRungs && Object.keys(classRungs).length ? { classRungs } : {}),
   };
   return Object.keys(next).length ? next : undefined;
+}
+
+const MAX_CLASS_RUNGS = 50;
+// A card label is at most 40 characters, so a class name after `class:` is at most 34.
+const MAX_CLASS_NAME_CHARS = 34;
+
+function normalizeClassRungs(value: unknown): Record<string, WorkboardClassRung> {
+  if (value === null) {
+    return {};
+  }
+  const entries = isRecord(value) ? Object.entries(value) : undefined;
+  if (!entries || entries.length > MAX_CLASS_RUNGS) {
+    throw new Error(`class rungs must be an object of at most ${MAX_CLASS_RUNGS} classes.`);
+  }
+  return Object.fromEntries(
+    entries.map(([name, entry]): [string, WorkboardClassRung] => {
+      if (!name || name !== name.trim() || name.length > MAX_CLASS_NAME_CHARS) {
+        throw new Error(
+          `class rung names must be 1 to ${MAX_CLASS_NAME_CHARS} characters without surrounding spaces.`,
+        );
+      }
+      if (name.startsWith("class:")) {
+        throw new Error(`class rung ${name} must name the class without the class: prefix.`);
+      }
+      if (!isRecord(entry) || (entry.rung !== "a" && entry.rung !== "b")) {
+        throw new Error(`class rung ${name} needs rung a or b.`);
+      }
+      if (entry.sampleEvery === undefined || entry.sampleEvery === null) {
+        return [name, { rung: entry.rung }];
+      }
+      const sampleEvery = resolveOptionalIntegerOption(entry.sampleEvery, { min: 1, max: 100 });
+      if (sampleEvery === undefined || sampleEvery !== entry.sampleEvery) {
+        throw new Error(`class rung ${name} sampleEvery must be an integer from 1 to 100.`);
+      }
+      return [name, { rung: entry.rung, sampleEvery }];
+    }),
+  );
 }
 
 const MAX_TARGET_ROUTES = 20;

@@ -182,6 +182,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         ...(questions ? { questions } : {}),
         ...(feedback ? { feedback } : {}),
         ...(reviews.length > 0 ? { reviews } : {}),
+        ...(value.rung === "b" ? { rung: "b" as const } : {}),
         ...(stopRequestedAt !== undefined ? { stopRequestedAt } : {}),
       }
     : undefined;

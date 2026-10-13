@@ -1,7 +1,9 @@
+import { expectDefined } from "@openclaw/normalization-core";
 // Workboard tests cover how a node ticket's run ending maps onto its card.
 import { describe, expect, it } from "vitest";
 import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
 import { runSessionSweep } from "./lifecycle-sync.test-support.js";
+import { nodeTicketTarget } from "./node-ticket.js";
 import { endedSession, startNodeCard } from "./node-ticket.test-support.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 import { projectWorkboardTrust } from "./trust-kpis.js";
@@ -134,6 +136,56 @@ describe("Workboard node ticket lifecycle", () => {
     expect(attempt?.status).toBe("blocked");
     expect(attempt?.error?.length).toBeLessThanOrEqual(800);
     expect(attempt?.error?.startsWith(lead)).toBe(true);
+  });
+
+  it("needs the standards review in a rung b round's done report and records it as proof", async () => {
+    const done = (review?: unknown) =>
+      report({
+        outcome: "done",
+        summary: "Docs page updated",
+        proof: [{ command: "pnpm docs:check", status: "passed" }],
+        ...(review ? { review } : {}),
+      });
+    const end = async (messages: unknown[]) => {
+      const store = createWorkboardSqliteTestStore();
+      await store.upsertBoard({
+        id: "default",
+        orchestration: { classRungs: { docs: { rung: "b" } } },
+      });
+      const { card, sessionKey, runId } = await startNodeCard(store, undefined, undefined, [
+        "class:docs",
+      ]);
+      await syncWorkboardAgentEnded({
+        store,
+        event: { runId, success: true, messages },
+        context: { runId, sessionKey },
+        readSessions: endedSession(),
+      });
+      return await store.get(card.id);
+    };
+
+    const unreviewed = await end(done());
+    expect(unreviewed?.status).toBe("blocked");
+    expect(unreviewed?.metadata?.comments?.at(-1)?.body).toBe(
+      "Reported done without the standards review its rung b brief asked for: Docs page updated\nRe-run the card; the next run reuses the node worktree, and its brief asks for the reviewer against CODING_STANDARDS.md and a `review` in the report.",
+    );
+
+    // Fewer fixed than found is recorded for the reviewer, not blocked.
+    const reviewed = await end(done({ findings: 3, fixed: 2, note: "Kept the long table" }));
+    expect(reviewed?.status).toBe("running");
+    expect(
+      reviewed?.metadata?.proof?.map(({ label, status, note }) => ({ label, status, note })),
+    ).toEqual([
+      { label: "ticket proof", status: "passed", note: undefined },
+      {
+        label: "standards review",
+        status: "passed",
+        note: "3 findings, 2 fixed. Kept the long table",
+      },
+    ]);
+    expect(
+      nodeTicketTarget(expectDefined(reviewed, "reviewed card"))?.worktree?.handoff?.phase,
+    ).toBe("pending");
   });
 
   it("records an operator stop of a node ticket as stopped, not failed", async () => {

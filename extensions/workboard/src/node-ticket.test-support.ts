@@ -133,11 +133,13 @@ export function createLocalNodeGateway() {
 export async function createNodeCard(
   store: WorkboardStore,
   target: WorkboardExecutionTarget = NODE_TARGET,
+  labels: string[] = [],
 ) {
   return await store.create({
     title: "Fix the parser",
     status: "ready",
     agentId: "dev",
+    labels,
     workspaceAccess: { unrestricted: true },
     metadata: { automation: { target } },
   });
@@ -148,8 +150,9 @@ export async function startNodeCard(
   store: WorkboardStore,
   nodeTickets: WorkboardNodeTicketRuntime = createNodeGateway(),
   target?: WorkboardExecutionTarget,
+  labels?: string[],
 ) {
-  const card = await createNodeCard(store, target);
+  const card = await createNodeCard(store, target, labels);
   const result = await dispatchAndStartWorkboardCards({
     store,
     subagent: { run: vi.fn() },

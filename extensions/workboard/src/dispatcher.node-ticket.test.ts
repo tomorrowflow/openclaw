@@ -1,6 +1,8 @@
+import { expectDefined } from "@openclaw/normalization-core";
 // Workboard tests cover dispatching cards to paired-node Claude Code sessions.
 import { describe, expect, it, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
+import { nodeTicketTarget } from "./node-ticket.js";
 import {
   BASE_COMMIT,
   createNodeCard,
@@ -171,6 +173,46 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
       "sessions.create",
       expect.objectContaining({ agentId: "dev", execNode: "linux-factory" }),
     );
+  });
+
+  it("briefs a rung b class with the standards reviewer, reading the rung at each launch", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({
+      id: "default",
+      orchestration: { classRungs: { docs: { rung: "b" } } },
+    });
+    const card = await createNodeCard(store, TARGET, ["class:docs"]);
+    const nodeTickets = createNodeGateway();
+    const dispatch = async () =>
+      await dispatchAndStartWorkboardCards({
+        store,
+        subagent: { run: vi.fn() },
+        nodeTickets,
+        options: { now: Date.now(), maxStarts: 1 },
+      });
+    const briefs = () =>
+      nodeTickets.respond.mock.calls.flatMap(([method, params]) =>
+        method === "sessions.create" ? [String(params?.message)] : [],
+      );
+    const rung = async () =>
+      nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree?.rung;
+
+    expect((await dispatch()).startFailures).toEqual([]);
+    expect(briefs()[0]).toContain(
+      "run a reviewer subagent over your changes against the repository's CODING_STANDARDS.md",
+    );
+    expect(briefs()[0]).toContain('"review":{"findings":0,"fixed":0,"note":"…"}');
+    await expect(rung()).resolves.toBe("b");
+
+    // A demotion applies from the next launch: the re-run is briefed and recorded at rung a.
+    await store.upsertBoard({ id: "default", orchestration: { classRungs: null } });
+    const claim = expectDefined((await store.get(card.id))?.metadata?.claim, "claim");
+    await store.block(card.id, { reason: "node restarted" }, claim);
+    await store.move(card.id, "ready", undefined);
+    expect((await dispatch()).startFailures).toEqual([]);
+    expect(briefs()[1]).toBeDefined();
+    expect(briefs()[1]).not.toContain("CODING_STANDARDS.md");
+    await expect(rung()).resolves.toBeUndefined();
   });
 
   it("runs node tickets up to the pool size regardless of owner, and review frees a slot", async () => {
