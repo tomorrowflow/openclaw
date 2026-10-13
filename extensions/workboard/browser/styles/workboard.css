@@ -177,7 +177,7 @@
 }
 
 .workboard-trust-info {
-  width: min(440px, calc(100vw - 24px));
+  width: min(720px, calc(100vw - 24px));
 }
 
 .workboard-trust-table {
