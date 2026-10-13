@@ -29,8 +29,8 @@ function trustResult(accepted: number, autonomous: number): WorkboardTrustResult
     verdictCards: 0,
     verdictAgreedCards: 0,
     verdictMissed: 0,
-    contextMeasured: 0,
-    smartZoneBreaches: 0,
+    contextMeasured: 4,
+    smartZoneBreaches: 1,
   };
   return {
     boardId: "app",
@@ -38,7 +38,16 @@ function trustResult(accepted: number, autonomous: number): WorkboardTrustResult
     smartZoneTokens: 150_000,
     total: counts,
     classes: [{ taskClass: "dead-code", ...counts }],
-    weeks: [{ weekStart: Date.UTC(2026, 9, 5), accepted, autonomous, medianLeadTimeMs: 3_600_000 }],
+    weeks: [
+      {
+        weekStart: Date.UTC(2026, 9, 5),
+        accepted,
+        autonomous,
+        medianLeadTimeMs: 3_600_000,
+        medianReviewWaitMs: 7_200_000,
+        medianContextTokens: 132_000,
+      },
+    ],
   };
 }
 
@@ -102,6 +111,13 @@ describe("Workboard trust KPIs", () => {
     );
     expect(popover.textContent).toContain("dead-code");
     expect(popover.textContent).toContain("50%");
+    const cells = (row: number) =>
+      [...popover.querySelectorAll("tbody")[row]!.querySelectorAll("td")].map((cell) =>
+        cell.textContent?.trim(),
+      );
+    expect(cells(0).slice(-2)).toEqual(["2h", "132K"]);
+    expect(popover.textContent).toContain("Runs over 150K");
+    expect(cells(1).at(-1)).toBe("1 of 4");
     expect(page.request).toHaveBeenCalledWith("workboard.cards.trust", { boardId: "app" });
 
     result = trustResult(3, 3);
