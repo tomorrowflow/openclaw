@@ -210,7 +210,10 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
 
   async trust(input: WorkboardListOptions = {}, now = Date.now()): Promise<WorkboardTrustResult> {
     const boardId = normalizeBoardId(input.boardId);
-    return projectWorkboardTrust(await this.list({ boardId }), boardId ?? "all", now);
+    const board = boardId
+      ? ((await this.boardStore.lookup(boardId))?.board.orchestration ?? {})
+      : undefined;
+    return projectWorkboardTrust(await this.list({ boardId }), boardId ?? "all", now, board);
   }
 
   /**

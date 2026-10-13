@@ -3,6 +3,7 @@ import type { AnyAgentTool } from "openclaw/plugin-sdk/plugin-entry";
 import { asNonArrayRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { Type } from "typebox";
 import { redactClaimToken, redactDispatchResult } from "./card-redaction.js";
+import type { WorkboardAgentActor } from "./store-inputs.js";
 import type { WorkboardStore } from "./store.js";
 import {
   cardIdField,
@@ -27,8 +28,9 @@ const OptionalOperatorNoteField = Type.Optional(
 export function createWorkboardOrchestrationTools(params: {
   store: WorkboardStore;
   ownerId: string;
+  actor: WorkboardAgentActor;
 }): AnyAgentTool[] {
-  const { store, ownerId } = params;
+  const { store, ownerId, actor } = params;
   const { readScopedCardToolParams, scopedCardMutation, claimedCardMutation } =
     createWorkboardCardMutations(store, ownerId);
   return [
@@ -195,7 +197,7 @@ export function createWorkboardOrchestrationTools(params: {
       }),
       execute: async (_toolCallId, rawParams) => {
         const { record, id, scope } = await readScopedCardToolParams(asNonArrayRecord(rawParams));
-        const result = await store.decompose(id, record, scope);
+        const result = await store.decompose(id, record, scope, actor);
         return jsonResult({
           parent: redactClaimToken(result.parent),
           children: result.children.map(redactClaimToken),
@@ -291,7 +293,7 @@ export function createWorkboardOrchestrationTools(params: {
         resetFailures: Type.Optional(Type.Boolean({ description: "Reset failure count." })),
         reason: OptionalOperatorNoteField,
       }),
-      execute: scopedCardMutation((id, record, scope) => store.reassign(id, record, scope)),
+      execute: scopedCardMutation((id, record, scope) => store.reassign(id, record, scope, actor)),
     },
     {
       name: "workboard_reclaim",
@@ -304,7 +306,7 @@ export function createWorkboardOrchestrationTools(params: {
         status: OptionalNextStatusField,
         reason: OptionalOperatorNoteField,
       }),
-      execute: scopedCardMutation((id, record, scope) => store.reclaim(id, record, scope)),
+      execute: scopedCardMutation((id, record, scope) => store.reclaim(id, record, scope, actor)),
     },
     {
       name: "workboard_dispatch",

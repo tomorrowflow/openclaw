@@ -40,7 +40,11 @@ type WorkboardCardInput = {
 };
 
 export type WorkboardCardPatch = WorkboardCardInput;
+/** An agent tool mutation's author; mutations without one are the operator's or Workboard's own. */
+export type WorkboardAgentActor = `agent:${string}`;
+
 export type WorkboardUpdateCardOptions = {
+  actor?: WorkboardAgentActor;
   allowAutomationLaunch?: boolean;
   allowMetadataDependencyLinks?: boolean;
   enforceStatusHolds?: boolean;

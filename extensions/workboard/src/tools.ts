@@ -76,6 +76,8 @@ export function createWorkboardTools(params: {
   const commentSource = normalizeCommentSource(
     params.context?.agentId ? `agent:${params.context.agentId}` : undefined,
   );
+  // Every agent tool mutation is an agent's, including one without an agent id.
+  const actor = commentSource && commentSource !== "operator" ? commentSource : "agent:unknown";
   const { readScopedCardToolParams, scopedCardMutation, claimedCardMutation } =
     createWorkboardCardMutations(store, ownerId);
   const tools: AnyAgentTool[] = [
@@ -246,7 +248,7 @@ export function createWorkboardTools(params: {
         ),
       }),
       execute: scopedCardMutation((id, record, scope) =>
-        store.releaseClaim(id, { ...scope, status: record.status }),
+        store.releaseClaim(id, { ...scope, status: record.status }, actor),
       ),
     },
     {
@@ -346,7 +348,7 @@ export function createWorkboardTools(params: {
           Type.Array(Type.String(), { description: "Cards created during this run." }),
         ),
       }),
-      execute: claimedCardMutation((id, record, scope) => store.complete(id, record, scope)),
+      execute: claimedCardMutation((id, record, scope) => store.complete(id, record, scope, actor)),
     },
     {
       name: "workboard_attachment_add",
@@ -429,10 +431,10 @@ export function createWorkboardTools(params: {
         token: claimTokenField("Claim token for claimed cards."),
       }),
       execute: scopedCardMutation((id, record, scope) =>
-        store.move(id, record.status, undefined, scope),
+        store.move(id, record.status, undefined, scope, { actor }),
       ),
     },
-    ...createWorkboardOrchestrationTools({ store, ownerId }),
+    ...createWorkboardOrchestrationTools({ store, ownerId, actor }),
   ];
   for (const tool of tools) {
     const execute = tool.execute;

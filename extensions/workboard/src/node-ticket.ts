@@ -1,10 +1,12 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
   WorkboardCard,
+  WorkboardClassRung,
   WorkboardComment,
   WorkboardExecutionTarget,
   WorkboardNodeFeedback,
+  WorkboardNodeHandoff,
   WorkboardNodeQuestions,
   WorkboardNodeRework,
   WorkboardNodeWorktree,
@@ -27,7 +29,9 @@ import {
   MAX_COMMENT_BODY_CHARS,
   MAX_PROOF_COMMAND_CHARS,
   MAX_PROOF_NOTE_CHARS,
+  workboardTaskClass,
 } from "./store-constants.js";
+import type { WorkboardAgentActor } from "./store-inputs.js";
 import { capText } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
 
@@ -65,7 +69,9 @@ export type NodeTicketReopen = {
 };
 
 /** The proof entry label of a rung b round's standards review. */
-const STANDARDS_REVIEW_LABEL = "standards review";
+export const STANDARDS_REVIEW_LABEL = "standards review";
+// One in this many agent-accepted PRs is read by a person when the class sets no sampleEvery.
+const DEFAULT_SAMPLE_EVERY = 3;
 
 const REVIEW_VERDICT_PATTERN = /^Verdict:\s*(accept|rework)\b/i;
 
@@ -75,6 +81,56 @@ export function reviewVerdictOf(comment: WorkboardComment): "accept" | "rework" 
     ? REVIEW_VERDICT_PATTERN.exec(comment.body.trim())?.[1]?.toLowerCase()
     : undefined;
   return match === "accept" || match === "rework" ? match : undefined;
+}
+
+type ImportedHandoff = Extract<WorkboardNodeHandoff, { phase: "imported" }>;
+
+/**
+ * Who accepts an imported node ticket on its move to done. The operator does
+ * unless an agent moves it; an agent may only for a class at rung b on the
+ * board whose round also ran at rung b, after posting its verdict. An accept
+ * verdict then picks whether a person reads the PR: every reworked ticket,
+ * and 1 in `sampleEvery` others, chosen by the card id so the sample is not
+ * the reader's choice. Throws the refusal an agent gets.
+ */
+export function nodeTicketAcceptance(params: {
+  card: WorkboardCard;
+  worktree: WorkboardNodeWorktree;
+  handoff: ImportedHandoff;
+  actor?: WorkboardAgentActor;
+  classRung?: WorkboardClassRung;
+}): ImportedHandoff {
+  const { card, worktree, actor, classRung } = params;
+  const { decidedBy: _decidedBy, sampled: _sampled, ...imported } = params.handoff;
+  if (!actor) {
+    return imported;
+  }
+  const askForVerdict = "Post `Verdict: accept` or `Verdict: rework: <finding>` as a comment";
+  if (classRung?.rung !== "b") {
+    throw new Error(
+      `Rung a: the operator accepts ${workboardTaskClass(card.labels) ?? "unclassified"} tickets. ${askForVerdict} instead of moving the card to done.`,
+    );
+  }
+  if (worktree.rung !== "b") {
+    throw new Error(
+      `This round ran before its class reached rung b, so the operator accepts it. ${askForVerdict} instead of moving the card to done.`,
+    );
+  }
+  const verdict = (card.metadata?.comments ?? [])
+    .filter((comment) => comment.createdAt >= imported.importedAt)
+    .flatMap((comment) => reviewVerdictOf(comment) ?? [])
+    .at(-1);
+  if (!verdict) {
+    throw new Error(`${askForVerdict} first, then move the card to done.`);
+  }
+  if (verdict === "rework") {
+    return { ...imported, decidedBy: actor };
+  }
+  const sampleEvery = classRung.sampleEvery ?? DEFAULT_SAMPLE_EVERY;
+  const sampled =
+    (worktree.rework?.round ?? 0) > 0 ||
+    createHash("sha256").update(card.id).digest().readUInt32BE(0) % sampleEvery === 0;
+  return { ...imported, decidedBy: actor, sampled };
 }
 
 /**

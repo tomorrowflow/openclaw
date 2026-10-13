@@ -257,4 +257,58 @@ describe("projectWorkboardTrust", () => {
       verdictMissed: 1,
     });
   });
+
+  it("scores agent acceptances at rung b apart from shadow verdicts, with the sample and the board's rung", () => {
+    const at = MONDAY + HOUR;
+    const reworked = { round: 1, pullRequestUrl: "u", acceptedAt: at, outsideCommits: 0 };
+    const cards = [
+      // The sampled round 0 accept was reworked by its reader; round 1 held.
+      ticket("reopened", {
+        createdAt: MONDAY,
+        labels: ["class:docs"],
+        worktree: {
+          ...published(at),
+          rework: reworked,
+          reviews: [
+            { round: 0, verdict: "accept", decidedBy: "agent", sampled: true },
+            { round: 1, verdict: "accept", decidedBy: "agent", sampled: true },
+          ],
+        },
+      }),
+      ticket("unread", {
+        createdAt: MONDAY,
+        labels: ["class:docs"],
+        worktree: {
+          ...published(at),
+          reviews: [{ round: 0, verdict: "accept", decidedBy: "agent", sampled: false }],
+        },
+      }),
+      ticket("shadow", {
+        createdAt: MONDAY,
+        labels: ["class:server"],
+        worktree: { ...published(at), reviews: [{ round: 0, verdict: "accept" }] },
+      }),
+    ];
+
+    const trust = projectWorkboardTrust(cards, "app", MONDAY, {
+      classRungs: { docs: { rung: "b" } },
+    });
+
+    expect(trust.total).toMatchObject({
+      verdictRounds: 1,
+      verdictAgreedRounds: 1,
+      verdictCards: 1,
+      agentAccepts: 3,
+      reworkedAccepts: 1,
+      sampledRounds: 2,
+      sampledAgreed: 1,
+    });
+    expect(
+      trust.classes.map(({ taskClass, rung, agentAccepts }) => ({ taskClass, rung, agentAccepts })),
+    ).toEqual([
+      { taskClass: "docs", rung: "b", agentAccepts: 3 },
+      { taskClass: "server", rung: "a", agentAccepts: 0 },
+    ]);
+    expect(projectWorkboardTrust(cards, "all", MONDAY).classes[0]).not.toHaveProperty("rung");
+  });
 });

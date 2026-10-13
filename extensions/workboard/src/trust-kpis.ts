@@ -1,12 +1,13 @@
 import type {
   WorkboardCard,
   WorkboardNodeReviewVerdict,
+  WorkboardOrchestrationSettings,
   WorkboardTrustCounts,
   WorkboardTrustResult,
   WorkboardTrustWeek,
 } from "@openclaw/workboard-contract";
 import { nodeTicketTarget } from "./node-ticket.js";
-import { SMART_ZONE_TOKENS, workboardTaskClass } from "./store-constants.js";
+import { SMART_ZONE_TOKENS, workboardClassRung, workboardTaskClass } from "./store-constants.js";
 
 const TRUST_WEEKS = 8;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -88,6 +89,11 @@ function isClean(ticket: TicketFacts): boolean {
   return ticket.reworkRounds === 0 && ticket.outsideCommits === 0 && ticket.operatorAnswers === 0;
 }
 
+// An agent's own accept at rung b; a later rework round means a person disagreed.
+function isAgentAccept(review: WorkboardNodeReviewVerdict): boolean {
+  return review.decidedBy === "agent" && review.verdict === "accept";
+}
+
 function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
   const counts: WorkboardTrustCounts = {
     tickets: tickets.length,
@@ -105,13 +111,25 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
     verdictCards: 0,
     verdictAgreedCards: 0,
     verdictMissed: 0,
+    agentAccepts: 0,
+    reworkedAccepts: 0,
+    sampledRounds: 0,
+    sampledAgreed: 0,
     contextMeasured: 0,
     smartZoneBreaches: 0,
   };
   for (const ticket of tickets) {
-    const rounds = ticket.reviews.filter((review) => review.verdict !== "missed");
+    // Shadow agreement scores the operator's decisions only; an agent's own accept agrees with itself.
+    const shadow = ticket.reviews.filter((review) => review.decidedBy === undefined);
+    const rounds = shadow.filter((review) => review.verdict !== "missed");
     const agreed = rounds.filter((review) => verdictAgrees(ticket, review)).length;
-    const missed = ticket.reviews.length - rounds.length;
+    const missed = shadow.length - rounds.length;
+    const accepts = ticket.reviews.filter(isAgentAccept);
+    const sampled = accepts.filter((review) => review.sampled === true);
+    counts.agentAccepts += accepts.length;
+    counts.reworkedAccepts += accepts.filter((review) => !verdictAgrees(ticket, review)).length;
+    counts.sampledRounds += sampled.length;
+    counts.sampledAgreed += sampled.filter((review) => verdictAgrees(ticket, review)).length;
     counts.verdictRounds += rounds.length;
     counts.verdictAgreedRounds += agreed;
     counts.verdictMissed += missed;
@@ -149,6 +167,8 @@ export function projectWorkboardTrust(
   cards: readonly WorkboardCard[],
   boardId: string,
   now: number,
+  /** The board's class rungs; only a one-board projection passes them. */
+  board?: Pick<WorkboardOrchestrationSettings, "classRungs">,
 ): WorkboardTrustResult {
   const tickets = cards.flatMap((card) => ticketFacts(card) ?? []);
   const byClass = new Map<string, TicketFacts[]>();
@@ -196,7 +216,13 @@ export function projectWorkboardTrust(
     smartZoneTokens: SMART_ZONE_TOKENS,
     total: countTickets(tickets),
     classes: [...byClass]
-      .map(([taskClass, entries]) => Object.assign({ taskClass }, countTickets(entries)))
+      .map(([taskClass, entries]) =>
+        Object.assign(
+          { taskClass },
+          board ? { rung: workboardClassRung(board, [`class:${taskClass}`])?.rung ?? "a" } : {},
+          countTickets(entries),
+        ),
+      )
       .toSorted((a, b) => a.taskClass.localeCompare(b.taskClass)),
     weeks,
   };
