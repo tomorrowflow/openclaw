@@ -17,6 +17,13 @@ If you installed via **npm/pnpm/bun** (global install, no git metadata),
 updates go through the package-manager flow described in
 [Updating](/install/updating).
 
+Update checks, candidate rehearsal, activation Doctor, and verification inherit
+the managed Gateway's Node heap controls from its effective service command and
+`NODE_OPTIONS`. Command-line heap controls take precedence. An empty service
+`NODE_OPTIONS` preserves heap controls supplied by the invoking shell while still
+clearing inherited preload and debugger flags. This requires the fix in the
+installed updater; an older updater cannot inherit it from the candidate it stages.
+
 On Windows, update checks the Gateway Scheduled Task's principal and run level
 before staging or changing state. A per-user `LeastPrivilege` task for the current
 account can be updated from a non-elevated terminal, including a UAC-filtered
@@ -27,6 +34,9 @@ Unresolved or group principals defer to native permission checks. Task lookup ha
 own 60-second cold-start limit, and each `schtasks` command has a 15-second limit;
 a stalled operation names the check or command instead of using the update's full
 timeout.
+
+Service-definition refresh recognizes Windows account aliases that resolve to the
+same SID. A different or unresolved account remains protected from automatic repair.
 
 For a global npm installation, the manual recovery path is
 `npm i -g openclaw@<target> --allow-scripts=openclaw`, then
@@ -138,6 +148,9 @@ Repair settles only native commands belonging to its Doctor. Another Doctor's
 retained command is recorded as foreign custody with its Doctor PID, without
 making the completed Doctor unsettled. Installation replacement remains blocked
 while any live command claim exists.
+If retaining a spawned command's custody fails, Doctor keeps its process identity
+and stops the command before settling its reservation. A reservation without a
+recorded identity still blocks recovery; repeating repair cannot prove it stopped.
 A verified rollback does not automatically start triage: the previous generation
 is running again, and the report keeps the failing check as the reason.
 An interactive update offers the diagnose/report menu with **Exit** selected by
@@ -146,6 +159,15 @@ status. JSON, non-interactive, `--yes`, and managed-service handoff invocations 
 not prompt after rollback.
 
 Update completion prints the terminal outcome and a local Markdown report path before exiting, including unexpected failures. Failed runs keep rollback-facing diagnostic JSON within the released 8 KiB limit. That file links a separate artifact containing every individually bounded Doctor finding; the Markdown report also retains the complete inventory. JSON output includes `reportPath`; a report-write failure prints a warning and preserves the update outcome.
+
+When another process holds the state database writer, the update driver gives
+its worker-backed phase and progress writes up to two minutes to acquire the
+writer. This extended wait ends when the transaction starts; Gateway and other
+callers retain the normal five-second budget.
+Progress-only receipts wait at most one second, then warn and continue
+without claiming a saved receipt. Required writes report actionable contention
+if their budget expires. This fix must be present in the installed updater to
+protect the next update it runs.
 
 Exit always waits for accepted state operations, pending database opens, and live
 worker references to settle. After settlement, retained-worker native close and
@@ -160,6 +182,11 @@ update successfully and then exit with `ERR_MODULE_NOT_FOUND` during CLI cleanup
 Check `openclaw update status` with the newly installed CLI to distinguish that
 exit failure from the recorded update outcome; the installed driver needs the fix
 before it performs its next update.
+
+Newer packages retain the published 2026.10.1 updater's cleanup entrypoints,
+including its original pending-disposer queue, so that first upgrade can finish
+normally. This compatibility covers the published package, not arbitrary
+development-build filenames.
 
 Updating from inside the installation keeps captured paths anchored to the
 invoking directory while the package is replaced. The updater keeps a valid
@@ -627,6 +654,13 @@ for channel, availability, and the latest durable update report. Gateway console
 file log level (`logging.level: "debug"`/`"trace"`) are independent knobs; see
 [Gateway logging](/gateway/logging).
 
+With `--no-restart`, state verification blocked by another process is deferred,
+and the installed update is recorded with Gateway readiness unverified. That
+recorded contention also defers Gateway recovery verification. Restart the Gateway through its service
+owner, then run `openclaw update status` and `openclaw doctor`; keep recovery backups
+until verification completes. Other failures keep their recovery diagnostics;
+a genuine database incompatibility still fails.
+
 Interactive updates show phase transitions, the current step, and elapsed time.
 The phases match the Control UI: requested, staging, validating, activating,
 restarting, verifying, and finished. When output is piped or captured in a log,
@@ -657,7 +691,17 @@ inspect the checkout and recovery report before restarting it.
 For a profile without a runtime database, an older npm target initializes its
 compatible state before the updater records history. The selected release's
 Doctor runs before activation, including when npm's install hooks already created
-the database. Existing databases retain their downgrade protections.
+the database. Existing databases retain their downgrade protections. When the
+updater can read shared state, target-release preflight also checks configured,
+retired, and registered custom agent stores and names every incompatible store
+before changing the installation or stopping the Gateway. State newer than the
+updater can read retains a single install-compatible-build or restore-backup refusal.
+
+During candidate validation, Doctor leaves bookkeeping-only version, wizard, and
+migration stamps out of the copied config so older updaters do not mistake them
+for required config repairs. Webhook completion without endpoint changes is
+recorded in the rehearsal state. Real config migrations still run; normal config
+writes after activation record the candidate's version and migration metadata.
 
 If database schema preflight cannot inspect the configured paths because the
 config is invalid, its refusal lists the config file and invalid fields. Run

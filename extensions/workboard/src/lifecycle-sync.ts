@@ -1,5 +1,7 @@
+import { AsyncResource } from "node:async_hooks";
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { resolveGlobalSingleton } from "openclaw/plugin-sdk/global-singleton";
+import { isIncognitoSessionKey, parseAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawPluginApi, OpenClawPluginService } from "../api.js";
 import {
@@ -21,17 +23,19 @@ const WORKBOARD_LIFECYCLE_SWEEP_MS = 60_000;
 const WORKBOARD_STALE_SESSION_MS = 30 * 60 * 1000;
 const WORKBOARD_SESSION_SWEEP_LIMIT = 10_000;
 const WORKBOARD_WORKTREE_CLEANUP_SWEEP_LIMIT = 32;
-// Keep readiness across plugin-only reloads, while the singleton lifecycle
-// clears it before an in-process Gateway restart starts replacement services.
+// Prepared hook generations share the active service reader, never a worker's
+// caller authority. Gateway restart clears both readiness and that reader.
 const workboardLifecycleGatewayState = resolveGlobalSingleton<{
   ready: boolean;
   abortSignal?: AbortSignal;
+  readSessions?: WorkboardLifecycleSessionReader;
 }>(
   Symbol.for("openclaw.workboard.lifecycleGatewayState"),
   () => ({ ready: false }),
   (state) => {
     state.ready = false;
     state.abortSignal = undefined;
+    state.readSessions = undefined;
   },
 );
 
@@ -67,7 +71,12 @@ function sessionProvesPreparedAcceptance(session: WorkboardLifecycleSession): bo
 
 type WorkboardLifecycleSessionReadOptions = {
   includeUnknown: boolean;
+  sessionKey?: string;
 };
+
+type WorkboardLifecycleSessionReader = (
+  options: WorkboardLifecycleSessionReadOptions,
+) => Promise<WorkboardLifecycleSessionSnapshot>;
 
 type WorkboardLifecycleMatchHandler = (input: {
   cards: readonly WorkboardCard[];
@@ -80,6 +89,7 @@ type WorkboardLifecycleService = OpenClawPluginService & {
   scheduleNodeHandoffs: () => void;
   onGatewayStart: (abortSignal?: AbortSignal) => void;
   onGatewayStop: () => void;
+  readSessions: WorkboardLifecycleSessionReader;
 };
 
 function needsWorkboardLifecycleReconciliation(card: WorkboardCard): boolean {
@@ -120,26 +130,25 @@ async function syncWorkboardLifecycleEvent(params: {
     (card) => !card.metadata?.archivedAt && workboardCardMatchesLifecycleLink(card, params.source),
   );
   const updates = Promise.all(
-    cards.map(
-      async (card) =>
-        await params.store.syncLifecycle(card.id, {
-          ...LIFECYCLE_TARGETS[params.observation.state],
-          sourceUpdatedAt: params.observation.sourceUpdatedAt,
-          stale: params.observation.stale,
-          now: params.now,
-          ...(params.source.sessionKey
-            ? {
-                association: {
-                  ...(cardSessionKey(card) ? { expectedSessionKey: cardSessionKey(card) } : {}),
-                  ...(cardRunId(card) ? { expectedRunId: cardRunId(card) } : {}),
-                  sessionKey: params.source.sessionKey,
-                  ...(params.source.runId ? { runId: params.source.runId } : {}),
-                  acceptedAt: params.observation.sourceUpdatedAt ?? params.now,
-                },
-              }
-            : {}),
-        }),
-    ),
+    cards.map(async (card) => {
+      return await params.store.syncLifecycle(card.id, {
+        ...LIFECYCLE_TARGETS[params.observation.state],
+        sourceUpdatedAt: params.observation.sourceUpdatedAt,
+        stale: params.observation.stale,
+        now: params.now,
+        ...(params.source.sessionKey
+          ? {
+              association: {
+                ...(cardSessionKey(card) ? { expectedSessionKey: cardSessionKey(card) } : {}),
+                ...(cardRunId(card) ? { expectedRunId: cardRunId(card) } : {}),
+                sessionKey: params.source.sessionKey,
+                ...(params.source.runId ? { runId: params.source.runId } : {}),
+                acceptedAt: params.observation.sourceUpdatedAt ?? params.now,
+              },
+            }
+          : {}),
+      });
+    }),
   );
   await Promise.all([
     updates,
@@ -194,6 +203,9 @@ export async function syncWorkboardAgentEnded(params: {
   event: { runId?: string; success: boolean; messages?: unknown[] };
   context: { runId?: string; sessionKey?: string };
   now?: number;
+  readSessions: (
+    options: WorkboardLifecycleSessionReadOptions,
+  ) => Promise<WorkboardLifecycleSessionSnapshot>;
   onMatched?: WorkboardLifecycleMatchHandler;
 }): Promise<number> {
   const now = params.now ?? Date.now();
@@ -201,44 +213,68 @@ export async function syncWorkboardAgentEnded(params: {
     sessionKey: params.context.sessionKey,
     runId: params.event.runId ?? params.context.runId,
   };
-  // Node tickets report through their final message, not Workboard tools.
-  // Map the report first: a block holds, and a done report leaves the card
-  // running with a pending handoff that only the bundle import moves to review.
+  // An attempt can finish before fallback settles, even with success=true.
+  // Only the session owner can establish the run's terminal outcome.
+  const snapshot = await params.readSessions({
+    includeUnknown: params.context.sessionKey === "unknown",
+    ...(params.context.sessionKey && parseAgentSessionKey(params.context.sessionKey)
+      ? { sessionKey: params.context.sessionKey }
+      : {}),
+  });
+  const session = snapshot.sessions.find((entry) => entry.key === params.context.sessionKey);
+  const observation = session ? lifecycleFromSession(session, now) : undefined;
+  const terminal = observation?.state === "succeeded" || observation?.state === "failed";
+  const linked = (await params.store.list()).filter(
+    (card) => !card.metadata?.archivedAt && workboardCardMatchesLifecycleLink(card, source),
+  );
+  // Node tickets report through their final message, not Workboard tools: a
+  // block holds, and a done report leaves the card running with a pending
+  // handoff that only the bundle import moves to review. The report exists
+  // only in this message, so a successful attempt maps it even before the
+  // session settles; a failed one waits while fallback may still continue.
   let nodeTicket = false;
-  for (const card of await params.store.list()) {
-    if (
-      card.status === "running" &&
-      !card.metadata?.archivedAt &&
-      nodeTicketTarget(card) &&
-      workboardCardMatchesLifecycleLink(card, source)
-    ) {
+  for (const card of linked) {
+    if (card.status === "running" && nodeTicketTarget(card)) {
       nodeTicket = true;
-      await applyNodeTicketReport({
-        store: params.store,
-        card,
-        messages: params.event.messages ?? [],
-        success: params.event.success,
-      });
+      if (terminal || params.event.success) {
+        await applyNodeTicketReport({
+          store: params.store,
+          card,
+          messages: params.event.messages ?? [],
+          success: params.event.success,
+        });
+      }
     }
   }
-  const synced = await syncWorkboardLifecycleEvent({
-    store: params.store,
-    source,
-    observation: {
-      state: !params.event.success ? "failed" : nodeTicket ? "idle" : "succeeded",
-      sourceUpdatedAt: now,
-    },
-    now,
-    ...(params.onMatched ? { onMatched: params.onMatched } : {}),
-  });
-  // After the lifecycle write, which gives a session-linked attempt its run id.
+  let count = 0;
+  let cards: readonly WorkboardCard[] = linked;
+  if (observation && terminal) {
+    const synced = await syncWorkboardLifecycleEvent({
+      store: params.store,
+      source,
+      // A node ticket's report already settled its card. Dating the observation
+      // at this hook, before the report's writes, keeps it from overriding them.
+      observation: nodeTicket
+        ? {
+            ...observation,
+            state: observation.state === "succeeded" ? "idle" : observation.state,
+            sourceUpdatedAt: now,
+          }
+        : observation,
+      now,
+      ...(params.onMatched ? { onMatched: params.onMatched } : {}),
+    });
+    count = synced.count;
+    cards = synced.cards;
+  }
+  // After any lifecycle write, which gives a session-linked attempt its run id.
   const contextTokens = turnEndContextTokens(params.event.messages ?? []);
   if (source.runId && contextTokens !== undefined) {
-    for (const card of synced.cards) {
+    for (const card of cards) {
       await params.store.recordAttemptContext(card.id, source.runId, contextTokens);
     }
   }
-  return synced.count;
+  return count;
 }
 
 /**
@@ -316,6 +352,7 @@ async function syncWorkboardLifecycleSessions(params: {
   sessions: readonly WorkboardLifecycleSession[];
   complete?: boolean;
   now?: number;
+  onMatched?: WorkboardLifecycleMatchHandler;
 }): Promise<number> {
   const now = params.now ?? Date.now();
   const sessionsByKey = new Map<string, WorkboardLifecycleSession>();
@@ -405,6 +442,9 @@ async function syncWorkboardLifecycleSessions(params: {
       })
     ) {
       count += 1;
+      if (observation.state === "succeeded" || observation.state === "failed") {
+        await params.onMatched?.({ cards: [card], sessionKey: session.key });
+      }
     }
   }
   return count;
@@ -439,6 +479,19 @@ export async function readWorkboardLifecycleSessions(
 ): Promise<WorkboardLifecycleSessionSnapshot> {
   if (!(await gateway.isAvailable())) {
     return { sessions: [], complete: false };
+  }
+  if (options.sessionKey) {
+    const payload = await gateway.request(
+      "sessions.describe",
+      { key: options.sessionKey, includeDerivedTitles: false, includeLastMessage: false },
+      { scopes: ["operator.read"] },
+    );
+    if (!isRecord(payload) || (payload.session !== null && !isRecord(payload.session))) {
+      throw new Error("sessions.describe returned an invalid lifecycle snapshot");
+    }
+    const session = normalizeSession(payload.session);
+    // An exact read establishes no facts about the rest of the catalog.
+    return { sessions: session ? [session] : [], complete: false };
   }
   let includeUnknown = false;
   if (options.includeUnknown) {
@@ -482,6 +535,7 @@ export function createWorkboardLifecycleService(params: {
     options: WorkboardLifecycleSessionReadOptions,
   ) => Promise<WorkboardLifecycleSessionSnapshot>;
   now?: () => number;
+  onMatched?: WorkboardLifecycleMatchHandler;
 }): WorkboardLifecycleService {
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -489,6 +543,7 @@ export function createWorkboardLifecycleService(params: {
   let removeDrainListener: (() => void) | undefined;
   let cleanupCursor = 0;
   let scheduleNodeHandoffs: (() => void) | undefined;
+  let serviceReader: WorkboardLifecycleSessionReader | undefined;
   const cleanupWorktrees = async (
     cards: readonly WorkboardCard[],
     warn: (message: string) => void,
@@ -518,6 +573,10 @@ export function createWorkboardLifecycleService(params: {
     scheduleNodeHandoffs = undefined;
     removeChangeListener?.();
     removeChangeListener = undefined;
+    if (workboardLifecycleGatewayState.readSessions === serviceReader) {
+      workboardLifecycleGatewayState.readSessions = undefined;
+    }
+    serviceReader = undefined;
     removeDrainListener?.();
     removeDrainListener = undefined;
     generation += 1;
@@ -548,8 +607,20 @@ export function createWorkboardLifecycleService(params: {
   };
   return {
     id: "workboard-lifecycle-sync",
+    async readSessions(options) {
+      const reader = workboardLifecycleGatewayState.readSessions;
+      if (!reader) {
+        return { sessions: [], complete: false };
+      }
+      const snapshot = await reader(options);
+      return workboardLifecycleGatewayState.readSessions === reader
+        ? snapshot
+        : { sessions: [], complete: false };
+    },
     start(ctx) {
       const owner = ++generation;
+      serviceReader = AsyncResource.bind(params.readSessions);
+      workboardLifecycleGatewayState.readSessions = serviceReader;
       let begun = false;
       const { nodeHandoffs } = params;
       const scheduler = ctx.scheduler;
@@ -574,6 +645,11 @@ export function createWorkboardLifecycleService(params: {
       removeChangeListener = scheduleNodeHandoffs
         ? params.store.subscribeChanges(() => scheduleNodeHandoffs?.())
         : undefined;
+      const onMatched: WorkboardLifecycleMatchHandler = async (input) => {
+        if (generation === owner) {
+          await params.onMatched?.(input);
+        }
+      };
       const reconcile = async () => {
         try {
           await params.store.runOperation(async () => {
@@ -591,11 +667,32 @@ export function createWorkboardLifecycleService(params: {
                 if (generation !== owner) {
                   return;
                 }
+                // Incognito sessions are absent from discovery. Read only identities
+                // already linked to cards, without requesting private preview content.
+                let describedIncognitoKeys: Set<string> | undefined;
+                for (const card of cards) {
+                  const sessionKey = cardSessionKey(card);
+                  if (
+                    card.metadata?.archivedAt ||
+                    !sessionKey ||
+                    !isIncognitoSessionKey(sessionKey) ||
+                    describedIncognitoKeys?.has(sessionKey)
+                  ) {
+                    continue;
+                  }
+                  (describedIncognitoKeys ??= new Set()).add(sessionKey);
+                  const exact = await params.readSessions({ includeUnknown: false, sessionKey });
+                  if (generation !== owner) {
+                    return;
+                  }
+                  snapshot.sessions.push(...exact.sessions);
+                }
                 await syncWorkboardLifecycleSessions({
                   store: params.store,
                   cards,
                   ...snapshot,
                   now: params.now?.() ?? Date.now(),
+                  onMatched,
                 });
                 if (generation !== owner) {
                   return;

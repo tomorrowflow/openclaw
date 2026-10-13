@@ -174,7 +174,7 @@ The snapshot and lookup table keep repeated startup decisions on the fast path:
 - plugin config schema and channel config schema validation
 - startup auto-enable decisions
 
-Startup and hot replacement share one prepared registry publisher and the same inventory across all configured agent workspaces. Reload preserves workspace provenance so an unchanged linked plugin is not replaced when another plugin changes. Replacement retains unchanged plugin instances and validates candidate metadata before draining affected services and channels. Reordering object keys in equivalent metadata or settings does not replace a registration; changed values, ordered lists, and explicit reload requests still do. It stops and disposes the previous registration before registering its replacement, then publishes runtime methods and metadata together. Connected clients refresh their plugin capabilities after publication. If replacement fails before publication and cleanup succeeds, recovery registers captured previous code and configuration with fresh resource ownership. A failure after publication reports the committed generation. Plugin runtime imports remain lazy; retaining metadata does not activate every discovered plugin.
+Startup and hot replacement share one prepared registry publisher and the same inventory across all configured agent workspaces. Reload preserves workspace provenance so an unchanged linked plugin is not replaced when another plugin changes. Replacement retains unchanged plugin instances and validates candidate metadata before draining affected services and channels. A retained instance keeps its original registration and `api` object; it is not registered again. Plugin-wide runtime capabilities such as `api.runtime.llm.complete` select the committed plugin inventory when each call starts, so a retained context engine can still start new completions after another plugin is replaced, including from work that restores an earlier turn's context. Reordering object keys in equivalent metadata or settings does not replace a registration; changed values, ordered lists, and explicit reload requests still do. It stops and disposes the previous registration before registering its replacement, then publishes runtime methods and metadata together. Connected clients refresh their plugin capabilities after publication. If replacement fails before publication and cleanup succeeds, recovery registers captured previous code and configuration with fresh resource ownership. A failure after publication reports the committed generation. Plugin runtime imports remain lazy; retaining metadata does not activate every discovered plugin.
 
 Durable final channel replies can use the admitting Gateway's current registry after an unrelated reload only when their exact channel registration is retained. The handoff also requires unchanged channel settings, shared channel defaults, and owning-plugin settings. Channels may add sender preparation for credentials that can change outside config: Telegram checks its resolved bot credential and pins it for the final send, so changed token-file contents, environment tokens, and SecretRef values cannot select another bot. Channels without sender preparation deliver with the unchanged successor config. New or replaced channel registrations, changed settings, and closing Gateways remain blocked. This never falls back to another Gateway or retries a send that may already have reached the provider.
 
@@ -231,6 +231,15 @@ without copying the surrounding workspace. Bundled runtime and setup modules,
 including TypeScript source entries, share the host's code identity; each inventory
 still owns its registered callbacks and cleanup. Loading edited bundled code requires
 a Gateway restart; rebuild first when the installation loads compiled output.
+
+Doctor retains an unexecuted source snapshot across its maintenance phases.
+Each phase admits fresh callback instances with private module files and settles
+their cleanup before releasing its lifecycle lease. Reuse verifies the original
+source fingerprint and dependency lookups; edited files, replaced roots, and
+changed optional dependencies receive a new snapshot. Retained source custody
+ends when Doctor finishes, including before a diagnostic process exit. This does
+not change the running Gateway's inventory or require an installation migration.
+
 Conditional package aliases retain their package metadata, and native
 Node conditions, including `module-sync`, select the target from that captured metadata.
 Source inspection uses the same synchronous-module condition without evaluating plugin code.
@@ -279,7 +288,8 @@ directory preserves every captured companion and the selected host SDK. Otherwis
 that plugin reports a load error asking for file symlink support; the update
 continues with the existing plugin-failure warning behavior.
 Within a capture, admission checks each immutable namespace and companion-directory
-mapping once. Preparing more modules reuses those facts and checks newly admitted
+mapping once, resolving each member once even when parent and child native directories
+overlap at the same placement. Preparing more modules reuses those facts and checks newly admitted
 placements. Replacement captures, host selection, and recovery copies validate again,
 so Doctor and Gateway preparation avoid repeated walks without reusing another
 capture's verdict.
@@ -477,15 +487,33 @@ the same plugin package. Standalone discovery keeps its own setup lifetime.
 Each worker retains the current plugin registration context for each loader
 workspace, shared by agents with matching configuration, environment, and plugin
 inventory. Alternating unchanged workspaces reuse their captured source; replacing
-one workspace does not evict another. Node retains native ESM module graphs until
-worker retirement even after their capture files are removed, so actual source or
-configuration revisions can still retain module memory during that lifetime. Agent
+one workspace does not evict another. Within that worker, an unchanged installed
+native ESM entry keeps one module evaluation and capture URL per workspace across
+configuration revisions. Its capture and compiled TypeScript helpers remain
+available for lazy imports after the originating generation is released. Each
+generation still owns its registrations and resolution hooks; released generations
+cannot use a replacement generation's API to register providers.
+Different workspaces keep separate modules. Node retains each native module until
+worker retirement, so new installed paths or workspaces still add resident modules.
+Installed source replacements are picked up when the worker restarts; explicit
+recovery keeps its separate source custody. CommonJS capture and disposal are
+unchanged. Agent
 credentials and configured model facts travel with each request; catalog jobs do
 not rebuild the agent workspace. Discovery reuses the registrations already
 acquired by that context. The first catalog request prepares registrations for the
 agent's known configured and credential providers together; only the requested
 providers run catalog hooks. Newly observed owners extend that context without
 discarding earlier owners. Replacement releases them after admitted work settles.
+Native admission runs outside the 180-second catalog refresh deadline, so a slow
+filesystem does not repeatedly discard and recapture the same package. Each verified
+native namespace member advances a counter, forwarded through the existing worker
+task channel at most once per second unless the active plugin changes. The parent allows admission
+to continue while that counter advances. After 180 seconds without progress, it
+records a failure naming the plugin and native reference verification stage and
+closes the worker without automatically recapturing that inventory. Reload the
+plugin or restart the Gateway to retry. Parent probes and queued requests remain
+bounded; provider discovery starts its own 180-second deadline after admission.
+Inventory retirement and shutdown still close the worker.
 After successful physical cleanup, retired plugin instances release their registry
 references while preserving revocation. Native module exports no longer retain the
 disposed registry through instance ownership, and stale calls remain rejected. Pending or failed
@@ -501,9 +529,9 @@ merge their results with the latest accepted counterpart before publication.
 Catalog workers use a 512 MiB V8 old-generation limit rather than inheriting the
 Gateway's default heap budget. Explicit process-wide heap flags override this
 limit; native and external allocations are outside it. When a Gateway catalog
-worker fails, the Gateway logs a warning with the reason, republishes the affected
-agent catalogs on a new worker, and counts the failure in `status` as
-`workerPools.modelCatalog.workerFailures`.
+worker fails, the Gateway logs a warning with the reason and counts the failure in
+`status` as `workerPools.modelCatalog.workerFailures`. Other than stalled native
+admission, failures republish the affected agent catalogs on a new worker.
 
 Catalog and authentication refresh tasks carry the host's prepared Claw consent
 provenance. Worker config reconstruction and provider imports consume these facts
@@ -908,6 +936,8 @@ For bundled workspace package names, keep the plugin id anchored in the npm name
 
 <Note>
 **Trust note:** `plugins.allow` permits **plugin ids** to load; it does not verify source provenance or choose which same-id copy loads. An auto-discovered workspace plugin does not shadow a bundled plugin merely because that id is enabled or allowlisted.
+
+An unverified-source warning logs once per plugin while its source and recorded provenance stay unchanged, including across registry rebuilds and config reloads. A changed source or provenance, or a Gateway restart, allows another warning. Each registry still retains the diagnostic for inspection with `openclaw plugins inspect <id>`.
 
 For intentional local overrides, use `plugins.load.paths` to select the plugin path. Tracked global installs can also override ordinary bundled copies. On source installs, plugins built with the host retain priority over tracked globals, including when `OPENCLAW_DEV_SOURCE_ROOT` is unset. Matching package versions alone do not prove that a registry plugin matches a source build's SDK. See [Discovery precedence](/plugins/manifest/package-json#discovery-precedence-duplicate-plugin-ids) for the full order.
 

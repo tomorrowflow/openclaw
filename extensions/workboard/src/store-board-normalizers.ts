@@ -7,7 +7,8 @@ import {
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { WorkboardBoardInput } from "./store-inputs.js";
-import { normalizeBoardId, normalizeLabels, normalizeWorkspace } from "./store-normalizers.js";
+import { normalizeBoardId, normalizeWorkspace } from "./store-normalizers.js";
+import { normalizeCappedStringList } from "./store-string-lists.js";
 import { normalizeExecutionTarget } from "./store-target-normalizers.js";
 import { normalizeBoundedString } from "./store-value-normalizers.js";
 
@@ -150,7 +151,7 @@ function normalizeTargetRoutes(value: unknown): WorkboardTargetRoute[] {
     if (route.labels.length > 12) {
       throw new Error("a target route can name at most 12 labels.");
     }
-    const labels = normalizeLabels(route.labels);
+    const labels = normalizeCappedStringList(route.labels, "labels");
     if (!labels.length) {
       throw new Error("target route labels must name at least one label.");
     }

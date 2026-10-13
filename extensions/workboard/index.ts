@@ -82,6 +82,7 @@ export default definePluginEntry({
       nodeHandoffs,
       readSessions: async (options) =>
         await readWorkboardLifecycleSessions(api.runtime.gateway, options),
+      onMatched: automationNudge.nudge,
     });
     resourceServices.push(lifecycleSync);
     api.session.controls.registerControlUiDescriptor({
@@ -135,6 +136,7 @@ export default definePluginEntry({
           store,
           event,
           context,
+          readSessions: lifecycleSync.readSessions,
           onMatched: automationNudge.nudge,
         });
         // Bundling and fetching outlast the agent_end hook budget; the sweep

@@ -110,7 +110,7 @@ export function createControlUiPrecompressedAssetVariants(
       // is canonical. Resolved through createRequire, like json5 below, because a
       // named import does not resolve in this config.
       // Smaller deflate blocks reduce startup JavaScript size and encoder memory.
-      source: Buffer.from(pako.gzip(body, { level: 9, legacyHash: true, memLevel: 7 })),
+      source: Buffer.from(pako.gzip(body, { level: 9, legacyHash: true, memLevel: 6 })),
     },
   ];
 }

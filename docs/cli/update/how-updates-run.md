@@ -39,6 +39,11 @@ executor binding does not match its parent`. The update owner must remain live,
 and changed or revoked leases still refuse mutation. This check runs in the
 candidate, so it also accepts valid handoffs from older installed updaters.
 
+If a service refresh refuses before writing its definition, the candidate keeps
+the original refusal in its output. The updater can then revalidate and restart
+the preserved service definition. Actual loss of native service authority still
+leaves recovery pending until ownership and restoration can be verified.
+
 Channel health collection timeouts are warnings during post-update verification.
 The Gateway must still answer, report the expected version and build, pass HTTP
 readiness, and remain in the same running generation. An explicit negative channel
@@ -88,6 +93,10 @@ custom policy values with an advisory while refreshing recognized old defaults.
 For example, `TimeoutStartSec=45` stays unchanged while the old installer value
 `TimeoutStopSec=30` becomes `330`. Existing identity and command checks still apply.
 Maintenance stops also read the resident Gateway's recorded shutdown budget.
+If rollback finds the service already stopped, the Gateway cannot be reached,
+and its local port is free, it proceeds directly through the guarded native stop
+to restoration instead of waiting for the drain deadline. Running Gateways and
+unverified service or port states keep the normal drain checks.
 Published 2026.9.5 residents keep their startup budget even after `daemon-reload`;
 their first stop therefore uses the short/unknown-budget path. The Gateway's
 lifecycle owner fences admission and reports drain progress until idle or the
@@ -135,6 +144,14 @@ Linux service checks treat an implicit systemd unit name and its explicit
 installed name as the same selection, including names with or without the
 `.service` suffix. The updater still rechecks service ownership before stopping
 the Gateway.
+
+Linux user-service stops use the same sequence during updates and standalone
+`openclaw gateway stop`: inspect the manager route, check current custody, then
+stop the selected unit. Manager inspection has its own 60-second allowance and
+retries one transient timeout with a recorded warning. A second timeout names
+the stalled check and leaves the original Gateway running; ownership refusals
+are never retried. The installed updater owns this sequence, so a candidate
+cannot change an older updater's stop behavior during its first update.
 
 Unavailable service inspection produces a recorded `managed-service` warning,
 including the manual restart action. A stale, uninspectable service record cannot
@@ -191,6 +208,18 @@ deleting obsolete backups; rollback still hashes a backup before restoring it
 and verifies the restored bytes. These improvements belong to the installed
 updater and do not change an older updater already running.
 
+Retaining the updater's runtime skips package recovery anchors, control journals,
+and settled evidence beside installed packages. Even hard-linking unchanged
+recovery files would change their metadata and could invalidate an older sealed
+helper's fingerprint. Explicit runtime links into those recovery artifacts are
+rejected; the evidence remains untouched for its recovery owner.
+
+Unchanged retained runtime files use hard links when the filesystem supports
+them. Retention verifies each source before linking and checks the resulting
+inode and metadata, without rehashing bytes for the change time caused by its
+own link. Files requiring independent plugin-safety checks or relocation still
+use verified copies.
+
 Candidate verification uses the same best-effort contract when its scan reaches
 the resource limits: activation and publication continue with directory identity,
 package version, and launcher verification, recording that full package contents
@@ -202,8 +231,11 @@ identity, metadata, directory listings, links, and a final metadata sweep. A
 file's content digest from the earlier baseline or staged-package scan is reused
 only when its complete metadata, including inode, link count, size, modification
 time, and change time, is unchanged and its change time predates that earlier
-read by at least five seconds. Recovery helpers and later commands re-read file
-contents. Like the metadata sweep, these checks observe the package rather than
+read by at least five seconds. Files that were too recent during preparation
+become eligible after a later successful verification observes them settled;
+subsequent publication checks reuse that observation while still comparing
+against the original package fingerprint. Recovery helpers and later commands
+re-read file contents. Like the metadata sweep, these checks observe the package rather than
 lock it: writes through an already-modified shared memory mapping may not update
 file times. Keep other package managers and tools that modify the installation
 stopped during an update.
@@ -821,7 +853,9 @@ for update status and Gateway health, then exits; this acknowledges the handoff,
 not a completed update. The acknowledging CLI exits with code `75` (`EX_TEMPFAIL`)
 so scripts cannot mistake accepted background work for a completed update. The
 detached helper remains the settlement authority; use the printed status and
-health commands to retrieve its terminal result. The helper launches staging and validation outside the
+health commands to retrieve its terminal result. A handoff accepted during candidate
+admission keeps this pending result after local staging cleanup; it does not create
+an update failure report. The helper launches staging and validation outside the
 Gateway's service boundary while the old Gateway keeps serving. It parks the Gateway
 only when the orchestrator reaches `activating`, then completes the existing
 commit-or-cancel handoff. Keep stdout connected to the agent: stopping the service

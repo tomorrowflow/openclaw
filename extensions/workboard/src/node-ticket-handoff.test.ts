@@ -12,6 +12,7 @@ import {
   createNodeRepos,
   git,
   startNodeCard,
+  endedSession,
 } from "./node-ticket.test-support.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
@@ -76,6 +77,7 @@ async function finishNodeTicket(params: {
     store,
     event: { runId, success: true, messages: params.messages ?? doneReport },
     context: { runId, sessionKey },
+    readSessions: endedSession(),
   });
   const warn = vi.fn();
   const github = createFakeGitHub(repos.origin);
@@ -119,6 +121,7 @@ async function finishNodeTicket(params: {
       store,
       event: { runId: started[0]?.runId, success: true, messages: doneReport },
       context: { runId: started[0]?.runId, sessionKey: started[0]?.sessionKey },
+      readSessions: endedSession(),
     });
     await handoffs.resume(warn);
   };
@@ -430,6 +433,7 @@ describe("node ticket questions", () => {
       store,
       event: { runId: cardRunId(resumed!), success: true, messages: doneReport },
       context: { runId: cardRunId(resumed!), sessionKey: cardSessionKey(resumed!) },
+      readSessions: endedSession(),
     });
     await handoffs.resume(warn);
 
@@ -687,6 +691,7 @@ describe("node ticket draft PR", () => {
       store,
       event: { runId: started?.runId, success: true, messages: doneReport },
       context: { runId: started?.runId, sessionKey: started?.sessionKey },
+      readSessions: endedSession(),
     });
     await handoffs.resume(warn);
     expect((await store.get(card.id))?.status).toBe("review");
@@ -768,6 +773,7 @@ describe("node ticket draft PR", () => {
       store,
       event: { runId: started?.runId, success: true, messages: doneReport },
       context: { runId: started?.runId, sessionKey: started?.sessionKey },
+      readSessions: endedSession(),
     });
     await handoffs.resume(warn);
     await store.move(card.id, "done", undefined);

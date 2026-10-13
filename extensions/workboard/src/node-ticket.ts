@@ -118,6 +118,19 @@ export function nodeTicketReopen(card: WorkboardCard, now: number): NodeTicketRe
   };
 }
 
+/** Queues a start on a full slot; the card when the request was recorded. */
+export async function queueNodeTicketStart(
+  store: WorkboardStore,
+  cardId: string,
+  route: WorkboardNodeTicketRouteSlot | undefined,
+  now: number,
+): Promise<WorkboardCard | undefined> {
+  const request = await store.requestNodeTicketStart(cardId, {
+    notice: (card) => nodeTicketSlotWaitNotice(card, route, now),
+  });
+  return request.queued ? request.card : undefined;
+}
+
 /**
  * What a queued node ticket's notice says it waits for. `route` names a
  * capped route whose slots are full; without it the whole pool is.

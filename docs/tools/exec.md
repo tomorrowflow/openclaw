@@ -31,11 +31,11 @@ Key/value environment overrides merged on top of the inherited environment.
 </ParamField>
 
 <ParamField path="yieldMs" type="number" default="10000">
-Auto-background the command after this delay (ms).
+Return a running process handle after this delay (ms). On the Gateway and in its sandbox, an ordinary yielded command remains owned by its request: the browser's Stop button and typed `/stop` cancel it. Normal model completion leaves it running.
 </ParamField>
 
 <ParamField path="background" type="boolean" default="false">
-Background the command immediately instead of waiting for `yieldMs`. The process timeout still applies after the tool returns.
+Start a deliberately independent service immediately. Request Stop leaves it running; stop it separately with its process handle. Use `yieldMs` for ordinary work. The process timeout still applies after the tool returns.
 </ParamField>
 
 <ParamField path="timeoutSeconds" type="number" default="tools.exec.timeoutSeconds">
@@ -55,6 +55,8 @@ Run in a pseudo-terminal when available. Use for TTY-only CLIs, coding agents, a
 
 <ParamField path="host" type="'auto' | 'sandbox' | 'gateway' | 'node'" default="auto">
 Where to execute. Omit `host` or use `auto` to inherit the configured exec host, including agent and session overrides. When that configured host is also `auto`, it resolves to `sandbox` when a sandbox runtime is active and `gateway` otherwise. A session that requires a sandbox stays sandboxed regardless of the configured host.
+
+The model-facing schema and code-mode signature list only hosts permitted by the session's host policy, and omit `sandbox` when no sandbox runtime is active. These choices are captured when the tool is created. Node connectivity is checked at execution time.
 </ParamField>
 
 <ParamField path="ask" type="'off' | 'on-miss' | 'always'">
@@ -111,7 +113,7 @@ Notes:
 | `tools.exec.reviewer.model`          | configured agent primary | Optional provider/model override for `mode=auto` review.                                                                                                           |
 | `tools.exec.reviewer.timeoutMs`      | `30000`                  | Per-stage timeout for reviewer model preparation and completion before human fallback.                                                                             |
 | `tools.exec.node`                    | unset                    | Selects which paired node runs `host=node` commands, by id, name, or IP. Only needed when more than one eligible node is connected; see [Parameters](#parameters). |
-| `tools.exec.notifyOnExit`            | `true`                   | When true, backgrounded exec sessions enqueue a system event and request a heartbeat on exit.                                                                      |
+| `tools.exec.notifyOnExit`            | `true`                   | When true, backgrounded host exec sessions continue through an ordinary turn in their originating session on exit.                                                 |
 | `tools.exec.approvalRunningNoticeMs` | `10000`                  | Emit a single "running" notice when an approval-gated exec runs longer than this (`0` disables).                                                                   |
 | `tools.exec.strictInlineEval`        | `false`                  | See [Inline eval](#inline-eval-strictinlineeval).                                                                                                                  |
 | `tools.exec.commandHighlighting`     | `false`                  | When true, approval prompts can highlight parser-derived command spans in the command text. Set globally or per agent; does not change approval policy.            |
@@ -197,7 +199,7 @@ that was already prepared. A fresh `openclaw` invocation follows the updated lin
   - To prevent user shell configuration (like `~/.zshenv` or `/etc/zshenv`) from overriding priority paths during startup, `tools.exec.pathPrepend` entries are securely prepended to the final `PATH` inside the shell command right before execution.
 - `host=sandbox`: runs `sh -lc` (login shell) inside the container, so `/etc/profile` may reset `PATH`. OpenClaw prepends `env.PATH` after profile sourcing via an internal env var (no shell interpolation). `tools.exec.pathPrepend` applies here too.
 - Native Codex on an owned local stdio process receives a nonempty configured prefix and Gateway CLI shim ahead of an explicitly configured native shell `PATH`, or the Gateway process `PATH` when no native value is set. Request-level native PATH overrides take precedence over native config files; an explicit empty PATH keeps only the prefix. Per-agent `tools.exec.pathPrepend` overrides the global list, including an empty list. OpenClaw applies this environment to new and resumed native threads without changing native login-shell policy. Codex reapplies the environment after loading a shell snapshot, but shell startup files can still replace `PATH` when snapshots are unavailable or bypassed, or when the command shell starts. Codex's existing `allow_login_shell = false` setting opts out of login-profile startup; it does not suppress every shell startup file. Host PATH entries are not forwarded to sandbox, remote-workspace, or socket-backed Codex execution.
-- `host=node`: only non-blocked env overrides you pass are sent to the node. `env.PATH` overrides are rejected for host execution and ignored by node hosts. If you need additional PATH entries on a node, configure the node host service environment (systemd/launchd) or install tools in standard locations.
+- `host=node`: only non-blocked env overrides you pass are sent to the node. `env.PATH` overrides are rejected for host execution and ignored by node hosts. If you need additional PATH entries on a node, configure the node host service environment (systemd/launchd) or install tools in standard locations. For Linux login-shell commands, the node re-applies its service PATH after profile startup, ahead of profile-provided entries.
 
 Per-agent node binding (use the keyed agent ID in config):
 
@@ -278,10 +280,10 @@ Foreground:
 { "tool": "exec", "command": "ls -la" }
 ```
 
-Background + poll:
+Ordinary work that yields a handle, then poll:
 
 ```json
-{"tool":"exec","command":"npm run build","background":true}
+{"tool":"exec","command":"npm run build","yieldMs":1000}
 {"tool":"process","action":"poll","sessionId":"<id>","timeout":30000}
 ```
 

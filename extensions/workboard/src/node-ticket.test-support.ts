@@ -162,3 +162,23 @@ export async function startNodeCard(
   }
   return { card, sessionKey: started.sessionKey, runId: started.runId };
 }
+
+/**
+ * The session owner's view of a run that ended, which agent_end reads before it
+ * settles the card: `done` on success, `failed` otherwise.
+ */
+export function endedSession(success = true) {
+  return async (options: { sessionKey?: string }) => ({
+    sessions: options.sessionKey
+      ? [
+          {
+            key: options.sessionKey,
+            status: success ? ("done" as const) : ("failed" as const),
+            hasActiveRun: false,
+            updatedAt: Date.now(),
+          },
+        ]
+      : [],
+    complete: true,
+  });
+}

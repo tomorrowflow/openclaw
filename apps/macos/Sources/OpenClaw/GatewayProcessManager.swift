@@ -970,13 +970,15 @@ extension GatewayProcessManager {
         context: GatewayReadinessContext,
         readinessWindow: TimeInterval = 6,
         // Fresh installs keep probing through the same first-run migration budget as the CLI.
-        firstInstallReadinessBudget: TimeInterval = GatewayLaunchAgentManager.startupMigrationTolerance) async
+        firstInstallReadinessBudget: TimeInterval = GatewayLaunchAgentManager.startupMigrationTolerance,
+        reusedLaunchdReadinessBudget: TimeInterval = GatewayLaunchAgentManager.reusedLaunchdColdStartTolerance) async
     {
+        let freshInstall = self.launchAgentFreshInstallGeneration == context.generation
         let terminal = await self.observeGatewayReadiness(
             context: context,
             deadlinePolicy: .migration(
                 window: readinessWindow,
-                tolerance: firstInstallReadinessBudget),
+                tolerance: freshInstall ? firstInstallReadinessBudget : reusedLaunchdReadinessBudget),
             clock: self.readinessClock)
         _ = await self.publishGatewayReadinessTerminal(terminal, context: context)
     }
@@ -1014,7 +1016,8 @@ extension GatewayProcessManager {
                 guard self.isCurrentGatewayReadiness(context) else { return .superseded }
                 guard extensionAuthorization.allowed else { break readinessLoop }
                 readinessPID = extensionAuthorization.readinessPID
-                freshInstallGraceAuthorized = true
+                // A reused PID is proven again at every deadline, so a replacement cannot inherit it.
+                freshInstallGraceAuthorized = extensionAuthorization.standingGrace
                 deadline = extensionDecision.deadline
                 guard clock.now < finalProbeDeadline else { break readinessLoop }
             }
@@ -1114,26 +1117,30 @@ extension GatewayProcessManager {
     private func authorizeReadinessExtension(
         context: GatewayReadinessContext,
         requiresLaunchdProof: Bool,
-        readinessPID: Int32?) async -> (allowed: Bool, readinessPID: Int32?)
+        readinessPID: Int32?) async -> (allowed: Bool, readinessPID: Int32?, standingGrace: Bool)
     {
         if case .child = context.purpose {
             return (
                 self.isCurrentGatewayReadiness(context) &&
                     self.childSupervisor.processIdentifier == readinessPID,
-                readinessPID)
+                readinessPID, true)
         }
         if !requiresLaunchdProof {
-            return (self.isCurrentGatewayReadiness(context), readinessPID)
+            return (self.isCurrentGatewayReadiness(context), readinessPID, true)
         }
-        guard self.launchAgentFreshInstallGeneration == context.generation,
-              self.isCurrentGatewayReadiness(context)
-        else { return (false, nil) }
+        // A launchd PID this app did not install (started at login after a reboot, or by a repair)
+        // has no install evidence, but while that same PID still owns the port it is the same cold
+        // start. It keeps probing through its own bounded budget; otherwise its first window arms a
+        // forced repair that SIGTERMs every slow start.
+        guard self.isCurrentGatewayReadiness(context),
+              self.launchAgentFreshInstallGeneration == context.generation || readinessPID != nil
+        else { return (false, nil, false) }
         guard let reusablePID = await self.reusableLaunchdPIDOwningPort(port: context.port) else {
-            return (false, nil)
+            return (false, nil, false)
         }
-        let allowed = self.launchAgentFreshInstallGeneration == context.generation &&
-            self.isCurrentGatewayReadiness(context)
-        return (allowed, allowed ? reusablePID : nil)
+        let freshInstall = self.launchAgentFreshInstallGeneration == context.generation
+        let allowed = self.isCurrentGatewayReadiness(context) && (freshInstall || reusablePID == readinessPID)
+        return (allowed, allowed ? reusablePID : nil, allowed && freshInstall)
     }
 
     private func probeFailureDisposition(_ error: Error) -> GatewayProbeFailureDisposition {
@@ -1388,6 +1395,8 @@ extension GatewayProcessManager {
         where C.Duration == Duration
     {
         let connection = await self.connection
+        // Startup readiness owns retry cadence and deadline; boot-time refusals must not delay a ready Gateway.
+        await connection.clearConnectFailureBackoff()
         // Startup owns recovery and its monotonic deadline. A normal request can recursively
         // start the Gateway and spend several 30-second connect retries before its RPC timer begins.
         // Disable the inner RPC timer so it cannot race the owner's typed probe timeout.
@@ -1590,25 +1599,29 @@ extension GatewayProcessManager {
         port: Int,
         pid: Int32,
         readinessWindow: TimeInterval,
-        firstInstallReadinessBudget: TimeInterval)
+        firstInstallReadinessBudget: TimeInterval,
+        reusedLaunchdReadinessBudget: TimeInterval? = nil,
+        hasFreshInstallEvidence: Bool = true)
     {
         self.desiredActive = true
         self.status = .starting
         self.gatewayStartGeneration &+= 1
         let generation = self.gatewayStartGeneration
-        self.launchAgentInstallGeneration = generation
-        self.launchAgentFreshInstallGeneration = generation
+        // Without install evidence this models a PID launchd started on its own, e.g. at login.
+        self.launchAgentInstallGeneration = hasFreshInstallEvidence ? generation : nil
+        self.launchAgentFreshInstallGeneration = hasFreshInstallEvidence ? generation : nil
         let context = self.gatewayReadinessContext(
             purpose: .launchd,
             port: port,
             generation: generation,
             readinessPID: pid,
-            launchAgentInstalled: true)
+            launchAgentInstalled: hasFreshInstallEvidence)
         self.beginGatewayStartTask(generation: generation) { [weak self] in
             await self?.observeLaunchdGatewayReadiness(
                 context: context,
                 readinessWindow: readinessWindow,
-                firstInstallReadinessBudget: firstInstallReadinessBudget)
+                firstInstallReadinessBudget: firstInstallReadinessBudget,
+                reusedLaunchdReadinessBudget: reusedLaunchdReadinessBudget ?? firstInstallReadinessBudget)
         }
     }
 }

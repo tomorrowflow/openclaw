@@ -28,7 +28,7 @@ const gateway = {
 // Admitted turns run under the session-work lease, which replaces the request
 // context with the live resolver; exercise that shape, not a bare request scope.
 const invokeNodeClaudeCliRun = (params: Parameters<typeof invokeDirect>[0]) =>
-  withPluginRuntimeGatewayRequestScope({ context: gateway }, () =>
+  withPluginRuntimeGatewayRequestScope({ context: gateway, isWebchatConnect: () => false }, () =>
     withPluginRuntimeGatewayContextResolver(
       () => gateway,
       () => invokeDirect(params),

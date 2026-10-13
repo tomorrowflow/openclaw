@@ -127,6 +127,17 @@ fallback even with explicit `agentRuntime.id: "codex"`; see
     }
     ```
 
+    ChatGPT Responses SSE turns may exceed 16 MiB in total. The parser bounds
+    each buffered event to 16 MiB of bytes before decoding or parsing it, and
+    cancels oversized events, including events without a closing delimiter.
+
+    For cached ChatGPT Responses WebSocket requests, an explicit "Rustponses
+    cannot replay" rejection before any response event triggers one retry on a
+    fresh connection with full input instead of the cached response reference.
+    The retry preserves reasoning, compaction, and completed tool results; it
+    does not rerun tools. Rejections of full input and failures after response
+    events remain terminal.
+
     Related OpenAI docs:
     - [Responses API WebSocket mode](https://developers.openai.com/api/docs/guides/websocket-mode)
     - [Streaming API responses (SSE)](https://platform.openai.com/docs/guides/streaming-responses)
@@ -277,6 +288,13 @@ fallback even with explicit `agentRuntime.id: "codex"`; see
     route, session, and auth identity, preserves it across worker transcript
     commits, and filters it from user-visible history and diagnostics. Never
     display or log the encrypted content.
+
+    The next foreground turn waits for any pending local transcript projection
+    rebuild before reading the checkpoint. Request token counts need not fall
+    below the compaction threshold: instructions and tools are sent again, and
+    tool results or reasoning produced after the checkpoint remain in context.
+    To check replay, inspect item types rather than token totals: the newest
+    `compaction` item replaces the covered prefix, followed only by later items.
 
     <Tabs>
       <Tab title="Enable explicitly">

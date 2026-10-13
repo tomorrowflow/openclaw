@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type {
   WorkboardAttachment,
   WorkboardBoardMetadata,
@@ -12,6 +11,7 @@ import type {
   WorkboardStaleState,
   WorkboardStatus,
 } from "@openclaw/workboard-contract";
+import { asNonArrayRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { createWorkboardSqliteStores } from "./sqlite-store.js";
 import {
   buildWorkerContext,
@@ -20,7 +20,6 @@ import {
   cardParentIds,
   cardRunId,
   cardSessionKey,
-  closeRunningAttempts,
   computeCardDiagnostics,
   isDependencyPromotableStatus,
   latestRunningAttempt,
@@ -29,11 +28,7 @@ import {
   shouldSkipPersistedLifecycleStatusUpdate,
   shouldSyncWorkboardLifecycleStatus,
 } from "./store-card-helpers.js";
-import {
-  isWorkboardClaimReclaimable,
-  MAX_CARD_NOTIFICATIONS,
-  secondsToDurationMs,
-} from "./store-constants.js";
+import { isWorkboardClaimReclaimable, secondsToDurationMs } from "./store-constants.js";
 import type {
   WorkboardBulkInput,
   WorkboardCardPatch,
@@ -535,28 +530,15 @@ export class WorkboardStore extends WorkboardNotificationStore {
             const reason = timedOut
               ? "Run exceeded the card max runtime."
               : "Claim expired without a recent heartbeat.";
-            const execution =
-              latest.execution?.status === "running"
-                ? { ...latest.execution, status: "blocked" as const, updatedAt: now }
-                : latest.execution;
+            const finished = this.finishRun(latest, "blocked", now, reason);
             latest = await this.updateCard(await this.requireCard(latest.id), {
-              status: "blocked",
-              ...(execution ? { execution } : {}),
+              ...finished,
               metadata: {
-                ...latest.metadata,
-                claim: undefined,
-                attempts: closeRunningAttempts(latest.metadata?.attempts, now, "blocked", reason),
-                failureCount: (latest.metadata?.failureCount ?? 0) + 1,
-                notifications: [
-                  ...(latest.metadata?.notifications ?? []),
-                  {
-                    id: randomUUID(),
-                    kind: "failed" as const,
-                    createdAt: now,
-                    sequence: this.nextNotificationSequence(now),
-                    message: reason,
-                  },
-                ].slice(-MAX_CARD_NOTIFICATIONS),
+                ...finished.metadata,
+                notifications: this.appendNotification(latest.metadata, now, {
+                  kind: "failed",
+                  message: reason,
+                }),
               },
             });
             blocked.push(latest);
@@ -575,16 +557,10 @@ export class WorkboardStore extends WorkboardNotificationStore {
               status: "blocked",
               metadata: {
                 ...latest.metadata,
-                notifications: [
-                  ...(latest.metadata?.notifications ?? []),
-                  {
-                    id: randomUUID(),
-                    kind: "failed" as const,
-                    createdAt: now,
-                    sequence: this.nextNotificationSequence(now),
-                    message: "Card exhausted its retry budget.",
-                  },
-                ].slice(-MAX_CARD_NOTIFICATIONS),
+                notifications: this.appendNotification(latest.metadata, now, {
+                  kind: "failed",
+                  message: "Card exhausted its retry budget.",
+                }),
               },
             });
             blocked.push(latest);
@@ -622,10 +598,7 @@ export class WorkboardStore extends WorkboardNotificationStore {
     if (ids.length === 0) {
       throw new Error("ids are required.");
     }
-    const patch =
-      input.patch && typeof input.patch === "object" && !Array.isArray(input.patch)
-        ? (input.patch as WorkboardCardPatch)
-        : {};
+    const patch = asNonArrayRecord(input.patch);
     const cards: WorkboardCard[] = [];
     for (const id of ids) {
       const updated =
