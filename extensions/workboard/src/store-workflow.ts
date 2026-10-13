@@ -558,6 +558,27 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
     });
   }
 
+  /** Records a run's peak context on the attempt with its run id; a card without one is left alone. */
+  async recordAttemptContext(
+    id: string,
+    runId: string,
+    peakContextTokens: number,
+  ): Promise<WorkboardCard | undefined> {
+    return await this.enqueueMutation(async () => {
+      const result = await this.updateLatestCard(id, (card) => {
+        const attempts = [...(card.metadata?.attempts ?? [])];
+        const index = attempts.findIndex((attempt) => attempt.runId === runId);
+        const attempt = attempts[index];
+        if (!attempt) {
+          return undefined;
+        }
+        attempts[index] = { ...attempt, peakContextTokens };
+        return { metadata: { ...card.metadata, attempts } };
+      });
+      return result.updated ? result.card : undefined;
+    });
+  }
+
   async runs(id: string): Promise<{ card: WorkboardCard; attempts: WorkboardRunAttempt[] }> {
     const card = await this.requireCard(id);
     return { card, attempts: card.metadata?.attempts ?? [] };

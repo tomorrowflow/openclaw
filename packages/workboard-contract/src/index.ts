@@ -135,6 +135,12 @@ export type WorkboardRunAttempt = {
   sessionKey?: string;
   runId?: string;
   error?: string;
+  /**
+   * The largest prompt among the run's model calls (input, cache read, and
+   * cache write tokens), from the usage its agent_end messages reported.
+   * Absent when the run reported no usage or ended before this was recorded.
+   */
+  peakContextTokens?: number;
 };
 
 /**
@@ -586,6 +592,9 @@ export type WorkboardTrustCounts = {
   verdictAgreedCards: number;
   /** Rounds published before any verdict; excluded from both rates. */
   verdictMissed: number;
+  /** Runs with a recorded peak context, and those whose peak passed the smart zone. */
+  contextMeasured: number;
+  smartZoneBreaches: number;
 };
 
 /** Accepted tickets in one UTC week (Monday 00:00), by acceptance time. */
@@ -597,6 +606,8 @@ export type WorkboardTrustWeek = {
   medianLeadTimeMs?: number;
   /** Median import-to-publish wait of the review rounds published this week. */
   medianReviewWaitMs?: number;
+  /** Median peak context of the measured runs that ended this week. */
+  medianPeakContextTokens?: number;
 };
 
 /**
@@ -607,6 +618,8 @@ export type WorkboardTrustWeek = {
 export type WorkboardTrustResult = {
   boardId: string;
   generatedAt: number;
+  /** A run's peak context above this many tokens is a smart-zone breach. */
+  smartZoneTokens: number;
   total: WorkboardTrustCounts;
   classes: Array<WorkboardTrustCounts & { taskClass: string }>;
   /** The last 8 weeks, oldest first, including the current one. */

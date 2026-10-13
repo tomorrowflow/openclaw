@@ -94,6 +94,9 @@ export function syncExecutionAttemptMetadata(
     ...(attemptStatus !== "succeeded" && existingAttempt?.error
       ? { error: existingAttempt.error }
       : {}),
+    ...(existingAttempt?.peakContextTokens === undefined
+      ? {}
+      : { peakContextTokens: existingAttempt.peakContextTokens }),
   };
   if (existingIndex >= 0) {
     attempts[existingIndex] = nextAttempt;

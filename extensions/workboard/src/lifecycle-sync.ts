@@ -205,7 +205,16 @@ export async function syncWorkboardAgentEnded(params: {
   // Map the report first: a block holds, and a done report leaves the card
   // running with a pending handoff that only the bundle import moves to review.
   let nodeTicket = false;
+  const peakContextTokens = peakContextTokensOf(params.event.messages ?? []);
+  const stamp =
+    source.runId && peakContextTokens !== undefined
+      ? { runId: source.runId, peakContextTokens }
+      : undefined;
+  const measuredCardIds: string[] = [];
   for (const card of await params.store.list()) {
+    if (stamp && card.metadata?.attempts?.some((attempt) => attempt.runId === stamp.runId)) {
+      measuredCardIds.push(card.id);
+    }
     if (
       card.status === "running" &&
       !card.metadata?.archivedAt &&
@@ -221,18 +230,45 @@ export async function syncWorkboardAgentEnded(params: {
       });
     }
   }
-  return (
-    await syncWorkboardLifecycleEvent({
-      store: params.store,
-      source,
-      observation: {
-        state: !params.event.success ? "failed" : nodeTicket ? "idle" : "succeeded",
-        sourceUpdatedAt: now,
-      },
-      now,
-      ...(params.onMatched ? { onMatched: params.onMatched } : {}),
-    })
-  ).count;
+  const synced = await syncWorkboardLifecycleEvent({
+    store: params.store,
+    source,
+    observation: {
+      state: !params.event.success ? "failed" : nodeTicket ? "idle" : "succeeded",
+      sourceUpdatedAt: now,
+    },
+    now,
+    ...(params.onMatched ? { onMatched: params.onMatched } : {}),
+  });
+  // After the report and lifecycle writes, which may close the attempt this stamps.
+  if (stamp) {
+    for (const id of measuredCardIds) {
+      await params.store.recordAttemptContext(id, stamp.runId, stamp.peakContextTokens);
+    }
+  }
+  return synced.count;
+}
+
+/**
+ * The largest prompt among the run's model calls. Each assistant message's
+ * usage is its own call (the CLI runner keeps a run-wide total out of it), so
+ * input plus cache read plus cache write is the context that call carried.
+ */
+function peakContextTokensOf(messages: readonly unknown[]): number | undefined {
+  let peak = 0;
+  for (const message of messages) {
+    const usage = isRecord(message) && message.role === "assistant" ? message.usage : undefined;
+    if (isRecord(usage)) {
+      const tokens =
+        tokenCount(usage.input) + tokenCount(usage.cacheRead) + tokenCount(usage.cacheWrite);
+      peak = Math.max(peak, Math.round(tokens));
+    }
+  }
+  return peak > 0 ? peak : undefined;
+}
+
+function tokenCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function lifecycleFromSession(

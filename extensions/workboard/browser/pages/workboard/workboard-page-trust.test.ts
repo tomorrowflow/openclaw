@@ -29,10 +29,13 @@ function trustResult(accepted: number, autonomous: number): WorkboardTrustResult
     verdictCards: 0,
     verdictAgreedCards: 0,
     verdictMissed: 0,
+    contextMeasured: 0,
+    smartZoneBreaches: 0,
   };
   return {
     boardId: "app",
     generatedAt: 1,
+    smartZoneTokens: 150_000,
     total: counts,
     classes: [{ taskClass: "dead-code", ...counts }],
     weeks: [{ weekStart: Date.UTC(2026, 9, 5), accepted, autonomous, medianLeadTimeMs: 3_600_000 }],
