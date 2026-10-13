@@ -62,15 +62,16 @@ export default definePluginEntry({
           getPreparedPluginSecretInput("workboard", `github.repos[${JSON.stringify(repo)}].token`)
             .value,
       },
-      // Rework rounds (D56) take the same exact start as workboard.cards.start;
-      // node tickets need no Gateway workspace, so no caller authority applies.
-      start: async (cardId) =>
+      // Rework rounds (D56) and queued starts take the same exact start as
+      // workboard.cards.start; node tickets need no Gateway workspace, so no
+      // caller authority applies.
+      start: async (cardId, queue) =>
         await dispatchAndStartWorkboardCards({
           store,
           subagent: api.runtime.subagent,
           worktrees: api.runtime.worktrees,
           nodeTickets: api.runtime.gateway,
-          options: { cardId, maxStarts: 1 },
+          options: { cardId, maxStarts: 1, queue },
         }),
       // The done report's agent_end nudge fires before the import reaches review.
       onReview: async (card) => await automationNudge.nudge({ cards: [card] }),

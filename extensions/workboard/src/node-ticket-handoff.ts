@@ -20,12 +20,6 @@ import {
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
-import {
-  type WorkboardNodeTicketRouteSlot,
-  workboardRouteName,
-  workboardRoutePinnedNode,
-  workboardSlotPlacement,
-} from "./store-constants.js";
 import type { WorkboardStore } from "./store.js";
 
 // file.fetch's hard cap; a larger bundle fails on the node with FILE_TOO_LARGE.
@@ -308,29 +302,25 @@ async function runNodeTicketHandoff(params: {
   }
 }
 
-/** Starts one card through the dispatcher's exact start path. */
+/**
+ * Starts one card through the dispatcher's exact start path. `request`
+ * queues it while its slot is full; `drain` starts it only while it is queued.
+ */
 export type WorkboardNodeTicketStart = (
   cardId: string,
-) => Promise<{ startFailures: ReadonlyArray<{ error: string }> }>;
+  queue: "request" | "drain",
+) => Promise<{
+  startFailures: ReadonlyArray<{ error: string; changed?: true }>;
+  queued?: WorkboardCard;
+}>;
 
 /**
  * D56: a published ticket moved back to todo starts its rework round once it
- * carries a review comment, waits while the node-ticket pool is full, and
+ * carries a review comment, queues while the node-ticket pool is full, and
  * goes back to backlog with the next step when no review comment says what
  * should change. A ticket waiting with questions resumes the same way once a
  * comment answers them, and goes back to review without one.
  */
-function slotWaitNotice(what: string, route: WorkboardNodeTicketRouteSlot | undefined): string {
-  if (!route) {
-    return `${what} waits for a node-ticket slot; it starts when a running node ticket reaches review.`;
-  }
-  const name = workboardRouteName(route);
-  const pinned = workboardRoutePinnedNode(route);
-  return pinned
-    ? `${what} waits for a slot on node ${pinned}, where its worktree is, on the ${name} route; it starts when a running ticket of that route on ${pinned} reaches review.`
-    : `${what} waits for a slot on the ${name} route; it starts when a running ticket on that route reaches review.`;
-}
-
 async function reopenNodeTicket(params: {
   store: WorkboardStore;
   start: WorkboardNodeTicketStart;
@@ -344,11 +334,9 @@ async function reopenNodeTicket(params: {
   }
   const { worktreePath, round } = reopen;
   const rework = reopen.kind === "rework";
-  const what = rework ? `Rework round ${round}` : "The answer";
   if (!reopen.reviewed) {
     await store.addNodeTicketNotice(card.id, {
       worktreePath,
-      kind: "reviewFrom",
       status: rework ? "backlog" : "review",
       body: rework
         ? `Reopened without a review comment; add what should change and move it to todo again to start rework round ${round}.`
@@ -357,33 +345,48 @@ async function reopenNodeTicket(params: {
     });
     return;
   }
-  const { startFailures } = await params.start(card.id);
+  const { startFailures, queued } = await params.start(card.id, "request");
   const failure = startFailures[0];
   // A start that claimed the card already blocked it on failure; only a
   // refusal before the claim leaves the reopened card in todo.
-  const current = failure ? await store.get(card.id) : undefined;
-  const still = current ? nodeTicketReopen(current, params.now()) : undefined;
-  if (!failure || !current || !still?.reviewed) {
+  const current = failure && !queued ? await store.get(card.id) : undefined;
+  if (!failure || !current || !nodeTicketReopen(current, params.now())?.reviewed) {
     return;
   }
-  const at = params.now();
-  const slot = await store.nodeTicketSlot(current);
-  const { full } = workboardSlotPlacement(await store.list(), slot, at);
-  if (full) {
-    if (!still.slotWaitNoted) {
-      await store.addNodeTicketNotice(card.id, {
-        worktreePath,
-        kind: "slotWait",
-        body: slotWaitNotice(what, full === "route_busy" ? slot.route : undefined),
-        applies: (latest) => nodeTicketReopen(latest, params.now())?.slotWaitNoted === false,
-      });
-    }
-    return;
-  }
+  const what = rework ? `Rework round ${round}` : "The answer";
   await store.block(
     card.id,
     {
       reason: `${what} could not start: ${failure.error}\nFix the cause, then move the card to todo again.`,
+    },
+    null,
+  );
+}
+
+/**
+ * Starts one queued node ticket. A card whose slot is still full, or that
+ * changed while the start read it, stays queued for the next card change; any
+ * other refusal blocks it with the reason.
+ */
+async function drainStartQueue(params: {
+  store: WorkboardStore;
+  start: WorkboardNodeTicketStart;
+  card: WorkboardCard;
+}): Promise<void> {
+  const { startFailures, queued } = await params.start(params.card.id, "drain");
+  const failure = startFailures[0];
+  if (!failure || queued || failure.changed) {
+    return;
+  }
+  // A start that claimed the card already blocked it on failure.
+  const current = await params.store.get(params.card.id);
+  if (!current?.metadata?.automation?.startRequest) {
+    return;
+  }
+  await params.store.block(
+    params.card.id,
+    {
+      reason: `The queued start failed: ${failure.error}\nFix the cause, then start the card again.`,
     },
     null,
   );
@@ -422,7 +425,11 @@ export function createNodeTicketHandoffs(params: {
       for (const card of await params.store.list()) {
         const item = handoffCard(card);
         const publish = item ? undefined : publishCandidate(card);
-        const reopen = item || publish ? undefined : nodeTicketReopen(card, now());
+        // The queue drain below owns a queued reopen's start.
+        const reopen =
+          item || publish || card.metadata?.automation?.startRequest
+            ? undefined
+            : nodeTicketReopen(card, now());
         const unanswered = unansweredDone(card);
         if ((!item && !publish && !reopen && !unanswered) || inFlight.has(card.id)) {
           continue;
@@ -447,7 +454,6 @@ export function createNodeTicketHandoffs(params: {
           } else if (unanswered) {
             await params.store.addNodeTicketNotice(card.id, {
               worktreePath: unanswered,
-              kind: "reviewFrom",
               status: "review",
               body: "This ticket stopped with open questions and has no commits to publish. Answer them in a comment and move it to todo, or archive the card; its node worktree stays until removed by hand.",
               applies: (current) => unansweredDone(current) === unanswered,
@@ -455,6 +461,28 @@ export function createNodeTicketHandoffs(params: {
           }
         } catch (error) {
           warn(`workboard node handoff failed for card ${card.id}: ${formatErrorMessage(error)}`);
+        } finally {
+          inFlight.delete(card.id);
+        }
+      }
+      // Oldest request first; a card whose route is still full does not hold
+      // back a later one on a route with a free slot.
+      const queue = (await params.store.list())
+        .filter((card) => card.metadata?.automation?.startRequest)
+        .toSorted(
+          (left, right) =>
+            (left.metadata?.automation?.startRequest?.requestedAt ?? 0) -
+            (right.metadata?.automation?.startRequest?.requestedAt ?? 0),
+        );
+      for (const card of queue) {
+        if (inFlight.has(card.id)) {
+          continue;
+        }
+        inFlight.add(card.id);
+        try {
+          await drainStartQueue({ store: params.store, start: params.start, card });
+        } catch (error) {
+          warn(`workboard queued start failed for card ${card.id}: ${formatErrorMessage(error)}`);
         } finally {
           inFlight.delete(card.id);
         }

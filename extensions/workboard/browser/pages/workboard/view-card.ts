@@ -30,6 +30,7 @@ import {
   renderCardUpdatedTime,
   renderCardPriority,
   renderCardMeta,
+  renderCardQueued,
   renderCardCounts,
   renderCardSession,
 } from "./view-card-content.ts";
@@ -212,6 +213,7 @@ function renderCard(props: WorkboardProps, card: WorkboardCard, surface: Workboa
                     </div>`
                   : nothing
               }
+              ${renderCardQueued(card)}
               ${
                 archived
                   ? html`<span class="workboard-card__archived">${t("workboard.archived")}</span>`

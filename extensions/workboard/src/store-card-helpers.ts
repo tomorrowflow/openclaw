@@ -371,6 +371,23 @@ export function retryBudgetExhausted(card: WorkboardCard): boolean {
   return Boolean(maxRetries && (card.metadata?.failureCount ?? 0) > maxRetries);
 }
 
+/**
+ * Why a claim refuses this card whichever slot is free; `claimed` is an active
+ * claim the card already holds. An exact start checks it before the slot, so a
+ * card the claim would refuse is never queued for a slot.
+ */
+export function workboardClaimRefusal(card: WorkboardCard, claimed: boolean): string | undefined {
+  if (cardParentIds(card).length > 0 && card.status !== "ready" && !claimed) {
+    return card.status === "blocked"
+      ? "card is blocked; use workboard_unblock before claiming."
+      : "card dependencies are not done.";
+  }
+  if (card.status === "scheduled") {
+    return "card is scheduled for later.";
+  }
+  return retryBudgetExhausted(card) ? "card exhausted its retry budget." : undefined;
+}
+
 export function mergeDiagnostics(
   previous: readonly WorkboardDiagnostic[] | undefined,
   next: WorkboardDiagnostic[],

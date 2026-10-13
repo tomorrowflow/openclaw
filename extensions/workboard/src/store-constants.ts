@@ -112,6 +112,36 @@ export function isWorkboardNodeTicket(card: WorkboardOwnerSlotCard): boolean {
   return card.metadata?.automation?.target?.kind === "node-claude";
 }
 
+/**
+ * Whether a node ticket may hold a queued start request: it waits unclaimed in
+ * todo, or in ready once its parents are done, and is not archived.
+ */
+export function workboardNodeTicketStartQueueable(
+  card: WorkboardOwnerSlotCard,
+  now: number,
+): boolean {
+  const claim = card.metadata?.claim;
+  return (
+    isWorkboardNodeTicket(card) &&
+    (card.status === "todo" || card.status === "ready") &&
+    !card.metadata?.archivedAt &&
+    !(claim && isFutureDateTimestampMs(claim.expiresAt, { nowMs: now }))
+  );
+}
+
+/**
+ * The card without its queued start once it can no longer hold one; a move
+ * away cancels the request, so moving the card back never starts it.
+ */
+export function withoutStaleStartRequest(card: WorkboardCard, now: number): WorkboardCard {
+  const automation = card.metadata?.automation;
+  if (!automation?.startRequest || workboardNodeTicketStartQueueable(card, now)) {
+    return card;
+  }
+  const { startRequest: _cancelled, ...rest } = automation;
+  return { ...card, metadata: { ...card.metadata, automation: rest } };
+}
+
 export function workboardCardConsumesOwnerSlot(card: WorkboardOwnerSlotCard, now: number): boolean {
   const claim = card.metadata?.claim;
   const activeClaim = claim && isFutureDateTimestampMs(claim.expiresAt, { nowMs: now });
@@ -279,6 +309,35 @@ export function workboardSlotBusyMessage(
   return route.targets.length > 1
     ? `Each of the ${name} route's ${route.targets.length} nodes has its ${slots} in use; one frees when a running ticket on that route reaches review.`
     : `The ${name} route's ${slots} ${route.limit === 1 ? "is" : "are"} in use; it frees when a running ticket on that route reaches review.`;
+}
+
+/** The card's status, board, agent, workspace, or target changed after the start read it. */
+export class WorkboardClaimAuthorityChangedError extends Error {
+  constructor() {
+    super("card workspace authority changed before claim.");
+    this.name = "WorkboardClaimAuthorityChangedError";
+  }
+}
+
+/** A claim refused only because its slot is full; the card is unchanged. */
+export class WorkboardSlotFullError extends Error {
+  constructor(
+    readonly slot: WorkboardClaimSlot,
+    readonly full: WorkboardSlotFull,
+  ) {
+    super(workboardSlotBusyMessage(slot, full));
+    this.name = "WorkboardSlotFullError";
+  }
+}
+
+/** Throws a claim's slot-full refusal as {@link WorkboardSlotFullError}. */
+export function assertWorkboardSlotClaimed<Result>(
+  slot: WorkboardClaimSlot,
+  result: Result,
+): asserts result is Exclude<Result, WorkboardSlotFull> {
+  if (isWorkboardSlotFull(result)) {
+    throw new WorkboardSlotFullError(slot, result);
+  }
 }
 
 export function workboardCardSlotOwner(card: WorkboardOwnerSlotCard, now?: number): string {

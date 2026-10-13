@@ -358,7 +358,6 @@ export async function publishNodeTicket(params: {
       card.id,
       {
         worktreePath: item.worktreePath,
-        kind: "reviewFrom",
         body: `Rework round ${item.rework.round} was pushed to ${pullRequestUrl}, but its PR comment failed: ${formatErrorMessage(error)}`,
         applies: () => true,
       },

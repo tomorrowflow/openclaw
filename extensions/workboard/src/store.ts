@@ -49,6 +49,7 @@ import { type WorkboardNodeHandoffInput, withNodeHandoff } from "./store-target-
 
 export type { WorkboardDispatchResult } from "./store-inputs.js";
 export { WorkboardCardConflictError } from "./store-core.js";
+export { WorkboardClaimAuthorityChangedError, WorkboardSlotFullError } from "./store-constants.js";
 
 type WorkboardExecutionAssociationInput = {
   expectedSessionKey?: string;

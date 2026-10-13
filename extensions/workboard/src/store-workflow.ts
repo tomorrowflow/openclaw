@@ -24,7 +24,7 @@ import {
   cardRunId,
   cardSessionKey,
   closeRunningAttempts,
-  retryBudgetExhausted,
+  workboardClaimRefusal,
 } from "./store-card-helpers.js";
 import {
   addWorkboardDurationMs,
@@ -34,6 +34,7 @@ import {
   isWorkboardNodeTicket,
   type WorkboardClaimSlot,
   type WorkboardNodeTicketSlot,
+  WorkboardClaimAuthorityChangedError,
   workboardNodeTicketRoute,
   MAX_CARD_ARTIFACTS,
   MAX_CARD_COMMENTS,
@@ -148,7 +149,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
           ) ||
           !isDeepStrictEqual(guarded.metadata?.automation?.target, expectedAuthority.target))
       ) {
-        throw new Error("card workspace authority changed before claim.");
+        throw new WorkboardClaimAuthorityChangedError();
       }
       const existingClaim = guarded.metadata?.claim;
       const activeClaim =
@@ -159,18 +160,9 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
           (guarded.status === "running" && !isWorkboardClaimReclaimable(existingClaim, now)))
           ? existingClaim
           : undefined;
-      if (cardParentIds(guarded).length > 0 && guarded.status !== "ready" && !activeClaim) {
-        throw new Error(
-          guarded.status === "blocked"
-            ? "card is blocked; use workboard_unblock before claiming."
-            : "card dependencies are not done.",
-        );
-      }
-      if (guarded.status === "scheduled") {
-        throw new Error("card is scheduled for later.");
-      }
-      if (retryBudgetExhausted(guarded)) {
-        throw new Error("card exhausted its retry budget.");
+      const refusal = workboardClaimRefusal(guarded, Boolean(activeClaim));
+      if (refusal) {
+        throw new Error(refusal);
       }
       if (activeClaim) {
         throw new Error(`card already claimed by ${activeClaim.ownerId}.`);
@@ -414,17 +406,15 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
 
   /**
    * Adds a Workboard notice to a published node ticket (D56), or one waiting
-   * with questions, in the same write that records it on the handoff, so the
-   * notice is never mistaken for the review comment or answer that starts the
-   * next round. A `reviewFrom` notice moves that cutoff past itself; a slot
-   * wait is noted once per round.
+   * with questions, in the same write that moves the handoff's review cutoff
+   * past it, so the notice is never mistaken for the review comment or answer
+   * that starts the next round.
    */
   async addNodeTicketNotice(
     id: string,
     input: {
       worktreePath: string;
       body: string;
-      kind: "reviewFrom" | "slotWait";
       applies: (card: WorkboardCard) => boolean;
       status?: "backlog" | "review";
     },
@@ -460,12 +450,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
                   ...target,
                   worktree: {
                     ...target.worktree,
-                    handoff: {
-                      ...handoff,
-                      ...(input.kind === "reviewFrom"
-                        ? { reviewFrom: now }
-                        : { slotWaitNotedAt: now }),
-                    },
+                    handoff: { ...handoff, reviewFrom: now },
                   },
                 },
               },

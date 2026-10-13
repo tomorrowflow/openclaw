@@ -163,4 +163,87 @@ describe("Workboard card execution actions", () => {
       expect(state.busyCardIds.size).toBe(0);
     },
   );
+
+  it("stays on the board after an autonomous start and opens the session of an interactive one", async () => {
+    const card = createWorkboardCard();
+    const client = createWorkboardTestClient((method) => {
+      if (method === "workboard.cards.start") {
+        return { card: { ...card, status: "running", sessionKey: "agent:main:run", updatedAt: 2 } };
+      }
+      if (method === "sessions.create") {
+        return { key: "agent:main:manual" };
+      }
+      if (method === "workboard.cards.update") {
+        return { card: { ...card, sessionKey: "agent:main:manual", updatedAt: 2 } };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+
+    const autonomous = renderDetails(card, { client });
+    expectDefined(
+      autonomous.container.querySelector<HTMLButtonElement>(
+        ".workboard-card__start--autonomous.workboard-card__start--default",
+      ),
+      "autonomous start",
+    ).click();
+    await waitForFast(() => expect(autonomous.state.cards[0]?.status).toBe("running"));
+    expect(autonomous.props.onOpenSession).not.toHaveBeenCalled();
+
+    const manual = renderDetails(card, { client });
+    expectDefined(
+      manual.container.querySelector<HTMLButtonElement>(".workboard-card__start--manual"),
+      "interactive start",
+    ).click();
+    await waitForFast(() =>
+      expect(manual.props.onOpenSession).toHaveBeenCalledWith({ sessionKey: "agent:main:manual" }),
+    );
+  });
+
+  it("shows a queued node ticket's Start as queued and disabled", async () => {
+    const card = createWorkboardCard({
+      metadata: { automation: { target: NODE_TICKET_TARGET } },
+    });
+    const queued = {
+      ...card,
+      updatedAt: 2,
+      metadata: { automation: { target: NODE_TICKET_TARGET, startRequest: { requestedAt: 2 } } },
+    };
+    const client = createWorkboardTestClient({
+      "workboard.cards.start": { queued: true, card: queued },
+    });
+    const { container, state, props } = renderDetails(card, { client });
+    const start = () =>
+      expectDefined(
+        container.querySelector<HTMLButtonElement>(
+          ".workboard-card__start--autonomous.workboard-card__start--default",
+        ),
+        "start action",
+      );
+
+    start().click();
+    await waitForFast(() => expect(state.cards[0]?.updatedAt).toBe(2));
+    render(renderCardDetailsPanel(props), container);
+
+    expect(state.error).toBeNull();
+    expect(props.onOpenSession).not.toHaveBeenCalled();
+    expect(state.cards[0]?.metadata?.automation?.startRequest).toEqual({ requestedAt: 2 });
+    expect(start().textContent?.trim()).toBe("Queued");
+    // Run and Open in an engine would race the queued start too.
+    const controls = [...container.querySelectorAll<HTMLButtonElement>(".workboard-card__start")];
+    expect(controls.map((button) => button.className)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("workboard-card__start--manual"),
+        expect.stringMatching(/workboard-card__start--autonomous(?!.*--default)/),
+      ]),
+    );
+    expect(controls.filter((button) => !button.disabled)).toEqual([]);
+  });
 });
+
+const NODE_TICKET_TARGET = {
+  kind: "node-claude",
+  nodeId: "mac-factory",
+  repoPath: "/Users/factory/repos/app",
+  worktreesRoot: "/Users/factory/worktrees",
+  hostRepoPath: "/home/openclaw/repos/app",
+} as const;

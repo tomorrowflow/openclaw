@@ -10,6 +10,7 @@ import {
 import {
   canRestartWorkboardNodeTicket,
   canStartWorkboardCard,
+  isWorkboardStartQueued,
 } from "../../lib/workboard/execution.ts";
 import {
   archiveWorkboardCard,
@@ -300,18 +301,26 @@ export function renderStartExecutionButton(
   const busy = state.busyCardIds.has(card.id) || state.dispatching;
   const runtimeBlock = engineBlockedByRuntime(props, card, engine);
   const engineName = engine === "codex" ? t("workboard.engineOpenAI") : t("workboard.engineClaude");
+  // A queued card's later autonomous start would collide with any other start or session.
+  const queued = isWorkboardStartQueued(card);
   const disabled =
-    busy || !props.connected || Boolean(runtimeBlock) || Boolean(card.metadata?.archivedAt);
+    busy ||
+    queued ||
+    !props.connected ||
+    Boolean(runtimeBlock) ||
+    Boolean(card.metadata?.archivedAt);
   const restart = !engine && mode === "autonomous" && canRestartWorkboardNodeTicket(card);
   const title = runtimeBlock
     ? runtimeBlock
-    : engine
-      ? mode === "autonomous"
-        ? t("workboard.runEngine", { engine: engineName })
-        : t("workboard.openEngine", { engine: engineName })
-      : restart
-        ? t("workboard.restartNodeTicket")
-        : t("workboard.runDefaultAgent");
+    : queued
+      ? t("workboard.startQueuedHelp")
+      : engine
+        ? mode === "autonomous"
+          ? t("workboard.runEngine", { engine: engineName })
+          : t("workboard.openEngine", { engine: engineName })
+        : restart
+          ? t("workboard.restartNodeTicket")
+          : t("workboard.runDefaultAgent");
   return html`
     <button
       class="btn btn--xs workboard-card__start workboard-card__start--${mode}  ${engine ? "" : "workboard-card__start--default"}"
@@ -327,7 +336,8 @@ export function renderStartExecutionButton(
           mode,
           requestUpdate: props.onRequestUpdate,
         });
-        if (key) {
+        // An autonomous run works on its own, so the operator stays on the board.
+        if (key && mode !== "autonomous") {
           props.onOpenSession({ sessionKey: key });
         }
       }}
@@ -335,9 +345,11 @@ export function renderStartExecutionButton(
       ${
         engine
           ? html`<span>${engineName}</span>`
-          : html`${mode === "autonomous" ? icons.play : icons.penLine}<span
-                >${restart ? t("workboard.restart") : t("workboard.start")}</span
-              >`
+          : queued && mode === "autonomous"
+            ? html`${icons.hourglass}<span>${t("workboard.startQueued")}</span>`
+            : html`${mode === "autonomous" ? icons.play : icons.penLine}<span
+                  >${restart ? t("workboard.restart") : t("workboard.start")}</span
+                >`
       }
     </button>
   `;

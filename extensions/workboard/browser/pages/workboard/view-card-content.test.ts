@@ -76,3 +76,22 @@ it("leaves settled labels untouched until their available width changes", () => 
     root.setConnected(false);
   }
 });
+
+it("shows a queued card's chip in the tile meta, which is visible without hover", () => {
+  const target = {
+    kind: "node-claude",
+    nodeId: "mac-factory",
+    repoPath: "/Users/factory/repos/app",
+    worktreesRoot: "/Users/factory/worktrees",
+    hostRepoPath: "/home/openclaw/repos/app",
+  } as const;
+  const container = document.createElement("div");
+  const meta = (startRequest?: { requestedAt: number }) => {
+    const automation = { target, ...(startRequest ? { startRequest } : {}) };
+    render(renderCardMeta(createWorkboardCard({ metadata: { automation } }), false), container);
+    return container.querySelector(".workboard-card__meta .workboard-card__queued");
+  };
+
+  expect(meta()).toBeNull();
+  expect(meta({ requestedAt: 1 })?.textContent?.trim()).toBe("Queued");
+});

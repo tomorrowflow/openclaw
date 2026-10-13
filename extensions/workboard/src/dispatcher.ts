@@ -23,15 +23,17 @@ import {
   buildNodeTicketMessage,
   createNodeTicketWorktree,
   nodeTicketReopen,
+  nodeTicketSlotWaitNotice,
   nodeTicketTarget,
   startNodeTicketSession,
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
 import { workboardSessionKeyForCard } from "./session-link.js";
-import { cardBoardId } from "./store-card-helpers.js";
+import { cardBoardId, workboardClaimRefusal } from "./store-card-helpers.js";
 import {
   isWorkboardNodeTicket,
-  type WorkboardClaimSlot,
+  type WorkboardNodeTicketSlot,
+  type WorkboardSlotFull,
   workboardCardConsumesNodeTicketSlot,
   workboardCardConsumesOwnerSlot,
   workboardCardSlotOwner,
@@ -39,7 +41,13 @@ import {
   workboardSlotBusyMessage,
   workboardSlotPlacement,
 } from "./store-constants.js";
-import { WorkboardStore, type WorkboardDispatchResult } from "./store.js";
+import {
+  WorkboardCardConflictError,
+  WorkboardClaimAuthorityChangedError,
+  WorkboardSlotFullError,
+  WorkboardStore,
+  type WorkboardDispatchResult,
+} from "./store.js";
 import {
   assertCanonicalWorkboardRootAccess,
   assertWorkboardWorkspaceSourceAccess,
@@ -67,6 +75,12 @@ type WorkboardDispatchStartOptions = {
   resolveAgentWorkspaceRuntime?: ResolveAgentWorkspaceRuntime;
   workspaceAccess?: WorkboardWorkspaceAccess;
   assertOwnerCurrent?: () => void;
+  /**
+   * For an exact node-ticket start: `request` queues the card while its slot
+   * is full instead of refusing; `drain` starts only a card that is queued and
+   * keeps it queued while its slot is still full.
+   */
+  queue?: "request" | "drain";
 };
 
 type WorkboardStartedRun = {
@@ -81,11 +95,20 @@ type WorkboardStartFailure = {
   cardId: string;
   title: string;
   error: string;
+  /** The card changed between the start's read and its claim; a later start may succeed. */
+  changed?: true;
 };
 
 type WorkboardDispatchAndStartResult = WorkboardDispatchResult & {
   started: WorkboardStartedRun[];
   startFailures: WorkboardStartFailure[];
+  /** The exact start's card, queued because its node-ticket slot is full. */
+  queued?: WorkboardCard;
+};
+
+type WorkboardFullSlot = {
+  slot: WorkboardNodeTicketSlot;
+  full: WorkboardSlotFull;
 };
 
 type WorkboardPreparedLaunch = Extract<WorkboardLaunchState, { phase: "prepared" }>;
@@ -203,8 +226,12 @@ function selectStartableCards(
   ownerOverride: string | undefined,
   now: number,
   mode: "scheduled" | "exact",
-  nodeTicketSlots: ReadonlyMap<string, WorkboardClaimSlot>,
-): { cards: WorkboardCard[]; rejection?: WorkboardStartFailure } {
+  nodeTicketSlots: ReadonlyMap<string, WorkboardNodeTicketSlot>,
+): {
+  cards: WorkboardCard[];
+  rejection?: WorkboardStartFailure;
+  fullSlot?: WorkboardFullSlot;
+} {
   if (limit <= 0) {
     return { cards: [] };
   }
@@ -229,7 +256,9 @@ function selectStartableCards(
     const placement =
       nodeTicketSlot && workboardSlotPlacement(nodeTicketOccupants, nodeTicketSlot, now);
     const nodeTicketFull = placement?.full;
-    const rejection = card.metadata?.archivedAt
+    // A card the claim would refuse gets that reason on a full slot as on a
+    // free one; only a refusal for the slot alone may queue it.
+    const cardRefusal = card.metadata?.archivedAt
       ? "Card is archived; restore it before starting."
       : cardHasActiveClaim(card, now)
         ? `Card is already claimed by ${card.metadata?.claim?.ownerId ?? "another worker"}.`
@@ -241,18 +270,26 @@ function selectStartableCards(
               card.status !== "todo" &&
               card.status !== "ready"
             ? `Card cannot start from ${card.status}; move it to backlog, todo, or ready first.`
-            : nodeTicketSlot
-              ? nodeTicketFull
-                ? workboardSlotBusyMessage(nodeTicketSlot, nodeTicketFull)
-                : undefined
-              : runningOwners.has(owner)
-                ? `Owner ${owner} already has active Workboard work; complete or stop it before starting another card.`
-                : undefined;
+            : mode === "exact"
+              ? workboardClaimRefusal(card, false)
+              : undefined;
+    const fullSlot =
+      cardRefusal === undefined && nodeTicketSlot && nodeTicketFull
+        ? { slot: nodeTicketSlot, full: nodeTicketFull }
+        : undefined;
+    const rejection =
+      cardRefusal ??
+      (fullSlot
+        ? workboardSlotBusyMessage(fullSlot.slot, fullSlot.full)
+        : !nodeTicketSlot && runningOwners.has(owner)
+          ? `Owner ${owner} already has active Workboard work; complete or stop it before starting another card.`
+          : undefined);
     if (rejection !== undefined) {
       if (mode === "exact") {
         return {
           cards: [],
           rejection: { cardId: card.id, title: card.title, error: rejection },
+          ...(fullSlot ? { fullSlot } : {}),
         };
       }
       continue;
@@ -317,6 +354,19 @@ async function runWorkboardDispatch(
   const directCard = directCardId
     ? await params.store.prepareStart(directCardId, now, assertOwnerCurrent)
     : undefined;
+  const queue = directCard ? params.options?.queue : undefined;
+  if (queue === "drain" && !directCard?.metadata?.automation?.startRequest) {
+    // The operator moved the card away, or another start took it, meanwhile.
+    return {
+      promoted: [],
+      reclaimed: [],
+      blocked: [],
+      orchestrated: [],
+      count: 0,
+      started: [],
+      startFailures: [],
+    };
+  }
   const dispatch = directCard
     ? { promoted: [], reclaimed: [], blocked: [], orchestrated: [], count: 0 }
     : await params.store.dispatch({ now, boardId, assertOwnerCurrent });
@@ -349,6 +399,7 @@ async function runWorkboardDispatch(
     directCardId ? "exact" : "scheduled",
     nodeTicketSlots,
   );
+  let fullSlot = selection.fullSlot;
   if (selection.rejection) {
     startFailures.push(selection.rejection);
   }
@@ -625,7 +676,18 @@ async function runWorkboardDispatch(
         .catch(() => undefined);
     } catch (error) {
       const message = formatErrorMessage(error);
-      startFailures.push({ cardId: card.id, title: card.title, error: message });
+      startFailures.push({
+        cardId: card.id,
+        title: card.title,
+        error: message,
+        ...(error instanceof WorkboardCardConflictError ||
+        error instanceof WorkboardClaimAuthorityChangedError
+          ? { changed: true }
+          : {}),
+      });
+      if (error instanceof WorkboardSlotFullError && error.slot.kind === "node-tickets") {
+        fullSlot = { slot: error.slot, full: error.full };
+      }
       if (!claimValue || runStarted) {
         continue;
       }
@@ -661,10 +723,28 @@ async function runWorkboardDispatch(
     }
   }
 
+  const queued =
+    directCard && queue && fullSlot && started.length === 0
+      ? await queueNodeTicketStart(params.store, directCard.id, fullSlot, now)
+      : undefined;
   return {
     ...dispatch,
     started,
     startFailures,
+    ...(queued ? { queued } : {}),
     count: dispatch.count + started.length + startFailures.length,
   };
+}
+
+async function queueNodeTicketStart(
+  store: WorkboardStore,
+  cardId: string,
+  { slot, full }: WorkboardFullSlot,
+  now: number,
+): Promise<WorkboardCard | undefined> {
+  const route = full === "route_busy" ? slot.route : undefined;
+  const request = await store.requestNodeTicketStart(cardId, {
+    notice: (card) => nodeTicketSlotWaitNotice(card, route, now),
+  });
+  return request.queued ? request.card : undefined;
 }

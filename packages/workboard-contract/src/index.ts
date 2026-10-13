@@ -405,6 +405,16 @@ export type WorkboardLaunchState =
       reason: string;
     });
 
+/**
+ * The operator's Start of a node ticket whose slot was full. Only that start
+ * and a reviewed rework or answer reopen record it, and the card loses it once
+ * it leaves todo or ready, is claimed, or is archived; queued tickets start
+ * oldest first as slots free.
+ */
+export type WorkboardStartRequest = {
+  requestedAt: number;
+};
+
 export type WorkboardAutomation = {
   tenant?: string;
   boardId?: string;
@@ -417,6 +427,7 @@ export type WorkboardAutomation = {
   maxRuntimeSeconds?: number;
   maxRetries?: number;
   scheduledAt?: number;
+  startRequest?: WorkboardStartRequest;
   summary?: string;
   createdCardIds?: string[];
   dispatchCount?: number;
