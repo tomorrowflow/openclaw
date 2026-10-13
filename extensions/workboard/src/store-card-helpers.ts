@@ -81,6 +81,11 @@ export function syncExecutionAttemptMetadata(
       (!execution.runId && attempt.id === key),
   );
   const existingAttempt = existingIndex >= 0 ? attempts[existingIndex] : undefined;
+  // A later observation that only saw the session go idle must not relabel a
+  // run whose own outcome already closed its attempt: a block would read as a stop.
+  if (existingAttempt && existingAttempt.status !== "running" && attemptStatus === "stopped") {
+    return metadata;
+  }
   const nextAttempt: WorkboardRunAttempt = {
     id: existingAttempt?.id ?? key,
     status: attemptStatus,
@@ -101,16 +106,14 @@ export function syncExecutionAttemptMetadata(
   } else {
     attempts.push(nextAttempt);
   }
-  const previousFailed =
-    existingAttempt?.status === "blocked" || existingAttempt?.status === "failed";
-  const attemptFailed = attemptStatus === "blocked";
-  const failureCount = attemptFailed
-    ? previousFailed
-      ? metadata.failureCount
-      : (metadata.failureCount ?? 0) + 1
-    : attemptStatus === "succeeded"
-      ? 0
-      : metadata.failureCount;
+  const failureCount =
+    attemptStatus === "blocked"
+      ? existingAttempt?.status === "blocked" || existingAttempt?.status === "failed"
+        ? metadata.failureCount
+        : (metadata.failureCount ?? 0) + 1
+      : attemptStatus === "succeeded"
+        ? 0
+        : metadata.failureCount;
   return removeUndefinedMetadataFields({
     ...metadata,
     attempts: attempts.slice(-MAX_CARD_ATTEMPTS),
