@@ -326,6 +326,13 @@ SATELLITES_SRC_LOG="$LOG_DIR/satellites-prepare-source-$(date +%Y%m%d-%H%M%S).lo
 "$REPO_DIR/scripts/deploy-satellites.sh" prepare-source >"$SATELLITES_SRC_LOG" 2>&1 &
 SATELLITES_SRC_PID=$!
 
+# Dependencies before the build. A sync with nothing to merge never starts the
+# agent's install, yet its preflight may have fast-forwarded to merged PRs that
+# changed them, and --deploy-only installs nothing either. Frozen: the committed
+# lockfile is the authority, and a mismatch stops here, before anything is built.
+STAGE="deploy: install dependencies (gateway still up)"
+CI=true corepack pnpm install --frozen-lockfile
+
 STAGE="deploy: build (gateway still up)"
 OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 CI=true corepack pnpm build
 
