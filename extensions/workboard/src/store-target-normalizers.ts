@@ -86,12 +86,24 @@ function normalizeNodeRework(value: unknown): WorkboardNodeRework | undefined {
     500,
     "node rework pull request url",
   );
+  const startCommit = normalizeBoundedString(
+    value.startCommit,
+    undefined,
+    64,
+    "node rework start commit",
+  );
   return round === undefined ||
     outsideCommits === undefined ||
     acceptedAt === undefined ||
     !pullRequestUrl
     ? undefined
-    : { round, pullRequestUrl, acceptedAt, outsideCommits };
+    : {
+        round,
+        pullRequestUrl,
+        acceptedAt,
+        outsideCommits,
+        ...(startCommit ? { startCommit } : {}),
+      };
 }
 
 function normalizeNodeQuestions(value: unknown): WorkboardNodeQuestions | undefined {
