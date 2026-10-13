@@ -146,6 +146,25 @@ describe("workboard.cards.start on a full node-ticket pool", () => {
     expect(gateway.respond).not.toHaveBeenCalledWith("sessions.create", expect.anything());
   });
 
+  it("moves a backlog card to todo when it queues its start", async () => {
+    const { store, invoke } = await setup();
+    const card = await store.create({
+      title: "Fix the tokenizer",
+      status: "backlog",
+      metadata: { automation: { target: NODE_TARGET } },
+    });
+
+    const respond = await invoke("workboard.cards.start", { id: card.id });
+
+    expect(respond.mock.calls[0]?.[1]).toMatchObject({ queued: true, card: { status: "todo" } });
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("todo");
+    expect(stored?.metadata?.automation?.startRequest).toBeDefined();
+    // Moving it back to backlog cancels the queued start.
+    await store.move(card.id, "backlog", undefined);
+    expect((await store.get(card.id))?.metadata?.automation?.startRequest).toBeUndefined();
+  });
+
   it("never lets an update or a create set the request", async () => {
     const { store, invoke, card } = await setup();
     const startRequest = { requestedAt: 1 };

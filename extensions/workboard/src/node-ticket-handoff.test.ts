@@ -789,6 +789,28 @@ describe("node ticket draft PR", () => {
     ).toMatchObject({ round: 1 });
   });
 
+  it("refuses to queue a reopen without a review comment on a full pool", async () => {
+    const { store, card, handoffs, warn, github, gateway } = await acceptImportedTicket();
+    github.tokens.set("acme/app", "token-app");
+    await handoffs.resume(warn);
+    store.nodeTicketConcurrency = 1;
+    await startNodeCard(store);
+    await store.move(card.id, "todo", undefined);
+
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets: gateway,
+      options: { cardId: card.id, queue: "request" },
+    });
+
+    expect(result.queued).toBeUndefined();
+    expect(result.startFailures[0]?.error).toContain("node ticket slots are in use");
+    expect((await store.get(card.id))?.metadata?.automation?.startRequest).toBeUndefined();
+    await handoffs.resume(warn);
+    expect((await store.get(card.id))?.status).toBe("backlog");
+  });
+
   it("sends a reopen without a review comment back to backlog with the next step", async () => {
     const { store, card, handoffs, warn, github, gateway } = await acceptImportedTicket();
     github.tokens.set("acme/app", "token-app");
@@ -1056,5 +1078,27 @@ describe("node ticket start queue", () => {
     expect(blocked?.metadata?.comments?.at(-1)?.body).toContain(
       "The queued start failed: node-claude targets use a node worktree",
     );
+  });
+
+  it("keeps a queued card queued when it changes while the drain starts it", async () => {
+    const { store, start, handoffs, create, runningIos, toReview } = await fullRoutes();
+    const card = await create("Fix the wake word", "class:ios-ui");
+    expect((await start(card.id, "request")).queued).toBeDefined();
+    const slots = store.nodeTicketSlots.bind(store);
+    vi.spyOn(store, "nodeTicketSlots").mockImplementationOnce(async (cards) => {
+      // An edit lands between the drain's read and its claim.
+      await store.update(card.id, { agentId: "reviewer" });
+      return await slots(cards);
+    });
+
+    await toReview(runningIos.id);
+    await handoffs.resume(vi.fn());
+
+    const waiting = await store.get(card.id);
+    expect(waiting?.status).toBe("todo");
+    expect(waiting?.metadata?.automation?.startRequest).toBeDefined();
+
+    await handoffs.resume(vi.fn());
+    expect((await store.get(card.id))?.status).toBe("running");
   });
 });

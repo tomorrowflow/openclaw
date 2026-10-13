@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { WorkboardCard } from "@openclaw/workboard-contract";
+import { nodeTicketReopen } from "./node-ticket.js";
 import { MAX_CARD_COMMENTS, workboardNodeTicketStartQueueable } from "./store-constants.js";
 import { WorkboardWorkflowStore } from "./store-workflow.js";
 
@@ -9,10 +10,13 @@ export class WorkboardNodeTicketQueueStore extends WorkboardWorkflowStore {
    * says what it waits for, in one write. A queued card keeps its first
    * request so its place in line holds. A reopened ticket's notice is noted on
    * its handoff, once per round, so it never counts as review feedback.
+   * Queueing a backlog card moves it to todo in the same write, so moving it
+   * back to backlog stays the way to cancel. A reopen without review feedback
+   * is not queued; the D56 handoff sends it back with the next step.
    */
   async requestNodeTicketStart(
     id: string,
-    input: { body: string },
+    input: { notice: (card: WorkboardCard) => string },
   ): Promise<{ card: WorkboardCard; queued: boolean }> {
     return await this.enqueueMutation(async () => {
       const now = Date.now();
@@ -20,10 +24,13 @@ export class WorkboardNodeTicketQueueStore extends WorkboardWorkflowStore {
         id,
         (card) => {
           const automation = card.metadata?.automation;
+          const queued: WorkboardCard =
+            card.status === "backlog" ? { ...card, status: "todo" } : card;
           if (
             !automation ||
             automation.startRequest ||
-            !workboardNodeTicketStartQueueable(card, now)
+            !workboardNodeTicketStartQueueable(queued, now) ||
+            nodeTicketReopen(queued, now)?.reviewed === false
           ) {
             return undefined;
           }
@@ -32,13 +39,14 @@ export class WorkboardNodeTicketQueueStore extends WorkboardWorkflowStore {
           const reopened = handoff?.phase === "published" || handoff?.phase === "questions";
           const notice = !reopened || handoff.slotWaitNotedAt === undefined;
           return {
+            ...(queued.status !== card.status ? { status: queued.status } : {}),
             metadata: {
               ...card.metadata,
               ...(notice
                 ? {
                     comments: [
                       ...(card.metadata?.comments ?? []),
-                      { id: randomUUID(), body: input.body, createdAt: now },
+                      { id: randomUUID(), body: input.notice(queued), createdAt: now },
                     ].slice(-MAX_CARD_COMMENTS),
                   }
                 : {}),

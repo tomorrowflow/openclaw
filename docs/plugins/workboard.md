@@ -695,17 +695,22 @@ beyond the pool until a slot frees. A route can set its own lower cap; see
 
 When the operator starts a node ticket (**Start** in the Control UI, or
 `workboard.cards.start`) while the pool or the ticket's route is full, the
-card is queued instead of refused. It stays in `todo` (or `ready`) with one
-comment naming the route or node it waits for, its **Start** button reads
-**Queued** and is disabled, and `workboard.cards.start` returns
+card is queued instead of refused. It waits in `todo` (or `ready`); a card
+started from `backlog` moves to `todo` as it queues. One comment names the
+route or node it waits for, the card shows a **Queued** chip, its start
+controls are disabled, and `workboard.cards.start` returns
 `{ queued: true, card }`. A reviewed rework or answer reopen that finds no free
-slot joins the same queue.
+slot joins the same queue. A published or questions ticket without a review
+comment or answer is not queued; it goes back with the next step as described
+in the rework step above.
 
 Whenever a card changes, such as a running ticket reaching `review`, Workboard
 starts queued tickets oldest request first. A ticket whose own route is still
 full keeps its place without holding back a later ticket on a route with a
-free slot, so a full Mac route never blocks the Linux pool. A queued start
-refused for another reason blocks the card with that reason.
+free slot, so a full Mac route never blocks the Linux pool. A card edited
+while its queued start reads it stays queued and is tried again on the next
+change. A queued start refused for another reason blocks the card with that
+reason.
 
 The request is stored as `metadata.automation.startRequest`. Only the
 operator's start and a reviewed reopen set it; card updates, agent tools, and

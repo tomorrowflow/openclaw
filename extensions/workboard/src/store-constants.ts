@@ -309,6 +309,14 @@ export function workboardSlotBusyMessage(
     : `The ${name} route's ${slots} ${route.limit === 1 ? "is" : "are"} in use; it frees when a running ticket on that route reaches review.`;
 }
 
+/** The card's status, board, agent, workspace, or target changed after the start read it. */
+export class WorkboardClaimAuthorityChangedError extends Error {
+  constructor() {
+    super("card workspace authority changed before claim.");
+    this.name = "WorkboardClaimAuthorityChangedError";
+  }
+}
+
 /** A claim refused only because its slot is full; the card is unchanged. */
 export class WorkboardSlotFullError extends Error {
   constructor(

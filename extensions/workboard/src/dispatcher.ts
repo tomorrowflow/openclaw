@@ -41,7 +41,13 @@ import {
   workboardSlotBusyMessage,
   workboardSlotPlacement,
 } from "./store-constants.js";
-import { WorkboardSlotFullError, WorkboardStore, type WorkboardDispatchResult } from "./store.js";
+import {
+  WorkboardCardConflictError,
+  WorkboardClaimAuthorityChangedError,
+  WorkboardSlotFullError,
+  WorkboardStore,
+  type WorkboardDispatchResult,
+} from "./store.js";
 import {
   assertCanonicalWorkboardRootAccess,
   assertWorkboardWorkspaceSourceAccess,
@@ -89,6 +95,8 @@ type WorkboardStartFailure = {
   cardId: string;
   title: string;
   error: string;
+  /** The card changed between the start's read and its claim; a later start may succeed. */
+  changed?: true;
 };
 
 type WorkboardDispatchAndStartResult = WorkboardDispatchResult & {
@@ -661,7 +669,15 @@ async function runWorkboardDispatch(
         .catch(() => undefined);
     } catch (error) {
       const message = formatErrorMessage(error);
-      startFailures.push({ cardId: card.id, title: card.title, error: message });
+      startFailures.push({
+        cardId: card.id,
+        title: card.title,
+        error: message,
+        ...(error instanceof WorkboardCardConflictError ||
+        error instanceof WorkboardClaimAuthorityChangedError
+          ? { changed: true }
+          : {}),
+      });
       if (error instanceof WorkboardSlotFullError && error.slot.kind === "node-tickets") {
         fullSlot = { slot: error.slot, full: error.full };
       }
@@ -719,13 +735,9 @@ async function queueNodeTicketStart(
   { slot, full }: WorkboardFullSlot,
   now: number,
 ): Promise<WorkboardCard | undefined> {
-  const card = await store.get(cardId);
-  if (!card) {
-    return undefined;
-  }
   const route = full === "route_busy" ? slot.route : undefined;
   const request = await store.requestNodeTicketStart(cardId, {
-    body: nodeTicketSlotWaitNotice(card, route, now),
+    notice: (card) => nodeTicketSlotWaitNotice(card, route, now),
   });
   return request.queued ? request.card : undefined;
 }

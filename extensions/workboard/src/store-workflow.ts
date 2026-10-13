@@ -34,6 +34,7 @@ import {
   isWorkboardNodeTicket,
   type WorkboardClaimSlot,
   type WorkboardNodeTicketSlot,
+  WorkboardClaimAuthorityChangedError,
   workboardNodeTicketRoute,
   MAX_CARD_ARTIFACTS,
   MAX_CARD_COMMENTS,
@@ -148,7 +149,7 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
           ) ||
           !isDeepStrictEqual(guarded.metadata?.automation?.target, expectedAuthority.target))
       ) {
-        throw new Error("card workspace authority changed before claim.");
+        throw new WorkboardClaimAuthorityChangedError();
       }
       const existingClaim = guarded.metadata?.claim;
       const activeClaim =

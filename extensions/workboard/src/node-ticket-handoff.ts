@@ -309,7 +309,10 @@ async function runNodeTicketHandoff(params: {
 export type WorkboardNodeTicketStart = (
   cardId: string,
   queue: "request" | "drain",
-) => Promise<{ startFailures: ReadonlyArray<{ error: string }>; queued?: WorkboardCard }>;
+) => Promise<{
+  startFailures: ReadonlyArray<{ error: string; changed?: true }>;
+  queued?: WorkboardCard;
+}>;
 
 /**
  * D56: a published ticket moved back to todo starts its rework round once it
@@ -361,8 +364,9 @@ async function reopenNodeTicket(params: {
 }
 
 /**
- * Starts one queued node ticket. A card whose slot is still full stays
- * queued; any other refusal blocks it with the reason.
+ * Starts one queued node ticket. A card whose slot is still full, or that
+ * changed while the start read it, stays queued for the next card change; any
+ * other refusal blocks it with the reason.
  */
 async function drainStartQueue(params: {
   store: WorkboardStore;
@@ -371,7 +375,7 @@ async function drainStartQueue(params: {
 }): Promise<void> {
   const { startFailures, queued } = await params.start(params.card.id, "drain");
   const failure = startFailures[0];
-  if (!failure || queued) {
+  if (!failure || queued || failure.changed) {
     return;
   }
   // A start that claimed the card already blocked it on failure.
