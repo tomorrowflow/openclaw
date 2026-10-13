@@ -937,36 +937,74 @@ describe("Workboard lifecycle service", () => {
     expect(stored?.metadata?.comments?.at(-1)?.body).toBe(comment);
   });
 
-  it("records the run's peak context on its attempt for the smart-zone KPIs", async () => {
+  const usage = (cacheRead: number, extra: Record<string, unknown> = {}) => ({
+    input: 2,
+    output: 40,
+    cacheRead,
+    cacheWrite: 300,
+    ...extra,
+  });
+  // The session's earlier run, which agent_end messages still carry.
+  const history = [
+    { role: "user", content: "Earlier round" },
+    { role: "assistant", content: "Earlier answer", usage: usage(170_000) },
+  ];
+  it.each([
+    {
+      name: "the last reply after the run's prompt",
+      messages: [
+        ...history,
+        { role: "user", content: "Fix the parser" },
+        { role: "assistant", content: "Reading", usage: usage(60_000) },
+        { role: "toolResult", content: "file" },
+        { role: "assistant", content: "All done!", usage: usage(152_000) },
+      ],
+      contextTokens: 152_302,
+      breaches: 1,
+    },
+    {
+      name: "nothing for a run that failed before replying",
+      messages: [...history, { role: "user", content: "Fix the parser" }],
+      contextTokens: undefined,
+      breaches: 0,
+    },
+    {
+      name: "the last call's prompt when usage sums the turn's calls",
+      messages: [
+        { role: "user", content: "Fix the parser" },
+        {
+          role: "assistant",
+          content: "All done!",
+          usage: usage(1_200_000, {
+            contextUsage: { state: "available", promptTokens: 61_000, totalTokens: 62_000 },
+          }),
+        },
+      ],
+      contextTokens: 61_000,
+      breaches: 0,
+    },
+  ])("records turn-end context on the run's attempt: $name", async (testCase) => {
     const store = createWorkboardSqliteTestStore();
     const { card, sessionKey, runId } = await startNodeCard(store);
-    const usage = (cacheRead: number) => ({ input: 2, output: 40, cacheRead, cacheWrite: 300 });
 
     await syncWorkboardAgentEnded({
       store,
-      event: {
-        runId,
-        success: true,
-        messages: [
-          { role: "user", content: "Fix the parser" },
-          { role: "assistant", content: "Working", usage: usage(160_000) },
-          { role: "assistant", content: "All done!", usage: usage(90_000) },
-        ],
-      },
+      event: { runId, success: true, messages: testCase.messages },
       context: { runId, sessionKey },
     });
 
     const attempt = (await store.get(card.id))?.metadata?.attempts?.find(
       (entry) => entry.runId === runId,
     );
-    expect(attempt).toMatchObject({ status: "blocked", peakContextTokens: 160_302 });
+    expect(attempt?.status).toBe("blocked");
+    expect(attempt?.contextTokens).toBe(testCase.contextTokens);
     expect((await store.trust({})).total).toMatchObject({
-      contextMeasured: 1,
-      smartZoneBreaches: 1,
+      contextMeasured: testCase.contextTokens === undefined ? 0 : 1,
+      smartZoneBreaches: testCase.breaches,
     });
   });
 
-  it("adds the peak context column to a prior-schema database and keeps its attempts", async () => {
+  it("adds the context column to a prior-schema database and keeps its attempts", async () => {
     const { store, dbPath } = createWorkboardSqliteTestHarness({
       createStores: createKernelStores,
     });
@@ -974,7 +1012,7 @@ describe("Workboard lifecycle service", () => {
     await store.close();
     {
       using prior = new DatabaseSync(dbPath);
-      prior.exec("ALTER TABLE workboard_card_attempts DROP COLUMN peak_context_tokens");
+      prior.exec("ALTER TABLE workboard_card_attempts DROP COLUMN context_tokens");
     }
 
     const reopenedStores = createKernelStores(dbPath);
@@ -990,7 +1028,7 @@ describe("Workboard lifecycle service", () => {
     });
 
     expect((await reopened.get(card.id))?.metadata?.attempts).toEqual([
-      expect.objectContaining({ runId, status: "blocked", peakContextTokens: 9005 }),
+      expect.objectContaining({ runId, status: "blocked", contextTokens: 9005 }),
     ]);
     await reopened.close();
   });

@@ -134,7 +134,7 @@ const WORKBOARD_SCHEMA_SQL = `
       session_key TEXT,
       run_id TEXT,
       error TEXT,
-      peak_context_tokens INTEGER
+      context_tokens INTEGER
     ) STRICT;
     CREATE INDEX IF NOT EXISTS workboard_card_attempts_card_idx
       ON workboard_card_attempts(card_id, ordinal);
@@ -280,7 +280,7 @@ function ensureWorkboardSchema(db: DatabaseSync): void {
   ensureColumn(db, "workboard_boards", "kind", "kind TEXT");
   ensureColumn(db, "workboard_boards", "sessions_spec", "sessions_spec TEXT");
   ensureColumn(db, "workboard_card_comments", "source", "source TEXT");
-  ensureColumn(db, "workboard_card_attempts", "peak_context_tokens", "peak_context_tokens INTEGER");
+  ensureColumn(db, "workboard_card_attempts", "context_tokens", "context_tokens INTEGER");
   const migrationId = `schema-${SCHEMA_VERSION}`;
   const current = db
     .prepare("SELECT 1 AS found FROM workboard_schema_migrations WHERE id = ?")

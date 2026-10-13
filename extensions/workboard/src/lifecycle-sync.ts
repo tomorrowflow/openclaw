@@ -205,16 +205,7 @@ export async function syncWorkboardAgentEnded(params: {
   // Map the report first: a block holds, and a done report leaves the card
   // running with a pending handoff that only the bundle import moves to review.
   let nodeTicket = false;
-  const peakContextTokens = peakContextTokensOf(params.event.messages ?? []);
-  const stamp =
-    source.runId && peakContextTokens !== undefined
-      ? { runId: source.runId, peakContextTokens }
-      : undefined;
-  const measuredCardIds: string[] = [];
   for (const card of await params.store.list()) {
-    if (stamp && card.metadata?.attempts?.some((attempt) => attempt.runId === stamp.runId)) {
-      measuredCardIds.push(card.id);
-    }
     if (
       card.status === "running" &&
       !card.metadata?.archivedAt &&
@@ -240,31 +231,41 @@ export async function syncWorkboardAgentEnded(params: {
     now,
     ...(params.onMatched ? { onMatched: params.onMatched } : {}),
   });
-  // After the report and lifecycle writes, which may close the attempt this stamps.
-  if (stamp) {
-    for (const id of measuredCardIds) {
-      await params.store.recordAttemptContext(id, stamp.runId, stamp.peakContextTokens);
+  // After the lifecycle write, which gives a session-linked attempt its run id.
+  const contextTokens = turnEndContextTokens(params.event.messages ?? []);
+  if (source.runId && contextTokens !== undefined) {
+    for (const card of synced.cards) {
+      await params.store.recordAttemptContext(card.id, source.runId, contextTokens);
     }
   }
   return synced.count;
 }
 
 /**
- * The largest prompt among the run's model calls. Each assistant message's
- * usage is its own call (the CLI runner keeps a run-wide total out of it), so
- * input plus cache read plus cache write is the context that call carried.
+ * The context the run's last model call carried (draft D16: context use at
+ * turn end). agent_end messages include the session's earlier runs, so only
+ * the last assistant message after the final user prompt counts; a run that
+ * failed before replying has none. A harness that sums usage over the turn's
+ * calls (Codex) reports the last call as `contextUsage.promptTokens`;
+ * otherwise input plus cache read plus cache write is that call's prompt.
  */
-function peakContextTokensOf(messages: readonly unknown[]): number | undefined {
-  let peak = 0;
-  for (const message of messages) {
-    const usage = isRecord(message) && message.role === "assistant" ? message.usage : undefined;
-    if (isRecord(usage)) {
-      const tokens =
-        tokenCount(usage.input) + tokenCount(usage.cacheRead) + tokenCount(usage.cacheWrite);
-      peak = Math.max(peak, Math.round(tokens));
-    }
+function turnEndContextTokens(messages: readonly unknown[]): number | undefined {
+  const lastPrompt = messages.findLastIndex(
+    (message) => isRecord(message) && message.role === "user",
+  );
+  const reply = messages
+    .slice(lastPrompt + 1)
+    .findLast((message) => isRecord(message) && message.role === "assistant");
+  const usage = isRecord(reply) ? reply.usage : undefined;
+  if (!isRecord(usage)) {
+    return undefined;
   }
-  return peak > 0 ? peak : undefined;
+  const context = usage.contextUsage;
+  const tokens =
+    isRecord(context) && context.state === "available"
+      ? tokenCount(context.promptTokens)
+      : tokenCount(usage.input) + tokenCount(usage.cacheRead) + tokenCount(usage.cacheWrite);
+  return tokens > 0 ? Math.round(tokens) : undefined;
 }
 
 function tokenCount(value: unknown): number {

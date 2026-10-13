@@ -281,7 +281,7 @@ function readMetadata(
       sessionKey: stringValue(child, "session_key"),
       runId: stringValue(child, "run_id"),
       error: stringValue(child, "error"),
-      peakContextTokens: numberValue(child, "peak_context_tokens"),
+      contextTokens: numberValue(child, "context_tokens"),
     });
   });
   const comments = childRows(db, "workboard_card_comments", cardId, preloaded).map((child) => {

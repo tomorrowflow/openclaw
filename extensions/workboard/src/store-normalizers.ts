@@ -499,7 +499,7 @@ function normalizeAttempt(record: Record<string, unknown>): WorkboardRunAttempt 
   const engine = normalizeBoundedString(record.engine, undefined, 160, "attempt engine");
   const model = normalizeBoundedString(record.model, undefined, 160, "attempt model");
   const mode = normalizeEnumValue(record.mode, WORKBOARD_EXECUTION_MODES, undefined);
-  const peakContextTokens = resolveOptionalIntegerOption(record.peakContextTokens, { min: 1 });
+  const contextTokens = resolveOptionalIntegerOption(record.contextTokens, { min: 1 });
   return {
     id,
     status: normalizeEnumValue(record.status, WORKBOARD_ATTEMPT_STATUSES, "running"),
@@ -511,7 +511,7 @@ function normalizeAttempt(record: Record<string, unknown>): WorkboardRunAttempt 
     ...(sessionKey ? { sessionKey } : {}),
     ...(runId ? { runId } : {}),
     ...(error ? { error } : {}),
-    ...(peakContextTokens === undefined ? {} : { peakContextTokens }),
+    ...(contextTokens === undefined ? {} : { contextTokens }),
   };
 }
 

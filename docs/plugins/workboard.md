@@ -663,13 +663,15 @@ Blocks come from card events, which keep the newest 50 per card. An archived
 ticket counts only when it was accepted before; archiving one that never
 published (a probe, a duplicate, a dropped ticket) removes it from every count.
 
-**Smart zone:** when a run ends, Workboard records its peak context on the
-attempt (`peakContextTokens`): the largest input plus cache read plus cache
-write of the run's model calls, from the usage on its assistant messages. A run
-that reported no usage stays unmeasured. The counts report `contextMeasured`
-and `smartZoneBreaches` (runs whose peak passed `smartZoneTokens`, 150,000), and
-each week reports `medianPeakContextTokens` for the runs that ended in it
-(API only for now). A class whose tickets breach the zone needs smaller tickets.
+**Smart zone:** when a run ends, Workboard records its context use at turn end
+on the attempt (`contextTokens`): the prompt tokens of the run's last model
+call, from the usage on its last assistant message. Earlier runs in the same
+session don't count, and a run that never replied stays unmeasured. A Claude
+Code run that compacted mid-run reports its context after the compaction. The
+counts report `contextMeasured` and `smartZoneBreaches` (runs whose context
+passed `smartZoneTokens`, 150,000), and each week reports `medianContextTokens`
+for the runs that ended in it. A class whose runs breach the zone needs
+smaller tickets.
 
 **Shadow verdicts:** an agent reviewing a ticket in `review` can leave a
 comment starting with `Verdict: accept` or `Verdict: rework: <finding>`

@@ -136,11 +136,11 @@ export type WorkboardRunAttempt = {
   runId?: string;
   error?: string;
   /**
-   * The largest prompt among the run's model calls (input, cache read, and
-   * cache write tokens), from the usage its agent_end messages reported.
-   * Absent when the run reported no usage or ended before this was recorded.
+   * Context use at the run's end (draft D16): the prompt tokens of its last
+   * model call, from the usage its agent_end messages reported. Absent when the
+   * run never replied or ended before this was recorded.
    */
-  peakContextTokens?: number;
+  contextTokens?: number;
 };
 
 /**
@@ -592,7 +592,7 @@ export type WorkboardTrustCounts = {
   verdictAgreedCards: number;
   /** Rounds published before any verdict; excluded from both rates. */
   verdictMissed: number;
-  /** Runs with a recorded peak context, and those whose peak passed the smart zone. */
+  /** Runs with a recorded turn-end context, and those whose context passed the smart zone. */
   contextMeasured: number;
   smartZoneBreaches: number;
 };
@@ -606,8 +606,8 @@ export type WorkboardTrustWeek = {
   medianLeadTimeMs?: number;
   /** Median import-to-publish wait of the review rounds published this week. */
   medianReviewWaitMs?: number;
-  /** Median peak context of the measured runs that ended this week. */
-  medianPeakContextTokens?: number;
+  /** Median turn-end context of the measured runs that ended this week. */
+  medianContextTokens?: number;
 };
 
 /**
@@ -618,7 +618,7 @@ export type WorkboardTrustWeek = {
 export type WorkboardTrustResult = {
   boardId: string;
   generatedAt: number;
-  /** A run's peak context above this many tokens is a smart-zone breach. */
+  /** A run's turn-end context above this many tokens is a smart-zone breach. */
   smartZoneTokens: number;
   total: WorkboardTrustCounts;
   classes: Array<WorkboardTrustCounts & { taskClass: string }>;
