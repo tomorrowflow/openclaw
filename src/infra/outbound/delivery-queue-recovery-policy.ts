@@ -1,6 +1,21 @@
-import type { QueuedDelivery } from "./delivery-queue-types.js";
+import type { DeliveryRecoveryDrainDecision } from "../delivery-recovery.shared.js";
+import { hasActiveDeliveryOwner, type QueuedDelivery } from "./delivery-queue-types.js";
 
 const DEFAULT_MAX_RETRIES = 5;
+
+export function shouldInspectQueuedDelivery(
+  entry: QueuedDelivery,
+  now: number,
+  selectEntry?: (entry: QueuedDelivery, now: number) => DeliveryRecoveryDrainDecision,
+): boolean {
+  // The live producer may still be awaiting its committed enqueue reply. Taking
+  // an inspection claim would preempt it before we reload and skip its lease.
+  return (
+    Boolean(entry.settlement) ||
+    (!hasActiveDeliveryOwner(entry, now) &&
+      (selectEntry === undefined || selectEntry(entry, now).match))
+  );
+}
 
 const PERMANENT_ERROR_PATTERNS: readonly RegExp[] = [
   /no conversation reference found/i,
@@ -15,18 +30,11 @@ const PERMANENT_ERROR_PATTERNS: readonly RegExp[] = [
   /User .* not in room/i,
 ];
 
-function integerAtLeast(value: unknown, minimum: number, fallback: number): number {
-  return typeof value === "number" && Number.isInteger(value) && value >= minimum
-    ? value
-    : fallback;
-}
-
 export function resolveMaxRetries(entry: QueuedDelivery): number {
-  return integerAtLeast(entry.maxRetries, 1, DEFAULT_MAX_RETRIES);
-}
-
-export function resolveAttemptCount(entry: QueuedDelivery): number {
-  return Math.max(integerAtLeast(entry.attemptCount, 0, 0), entry.retryCount);
+  const configured = entry.maxRetries;
+  return typeof configured === "number" && Number.isInteger(configured) && configured > 0
+    ? configured
+    : DEFAULT_MAX_RETRIES;
 }
 
 export function isPermanentDeliveryError(error: string): boolean {

@@ -118,13 +118,15 @@ export function captureDevicePairingPublication(admission: OpenClawStateDatabase
         captured.blocked = false;
         return true;
       }
+      // Rows are per-device facts: receipts and each device's own lookup refresh them, so a
+      // revision this cache missed leaves unrelated nodes known; only a full list replaces all.
       if (captured.revision !== revision) {
         captured.epoch++;
         captured.nodes = undefined;
-      }
-      if (complete || captured.revision !== revision) {
-        captured.rows.clear();
         captured.complete = false;
+      }
+      if (complete) {
+        captured.rows.clear();
       }
       captured.revision = revision;
       install(rows);
@@ -156,9 +158,8 @@ export function captureDevicePairingPublication(admission: OpenClawStateDatabase
       }
       return captured.nodes;
     },
-    beginMutation(invalidatesAuthority: boolean) {
+    beginMutation() {
       captured.epoch++;
-      captured.blocked ||= invalidatesAuthority;
       const mutation = {};
       captured.mutation = mutation;
       return {
@@ -166,10 +167,7 @@ export function captureDevicePairingPublication(admission: OpenClawStateDatabase
           if (publications.get(path) !== captured || captured.mutation !== mutation) {
             return;
           }
-          if (receipt.beforeRevision !== captured.revision) {
-            captured.complete = false;
-            captured.rows.clear();
-          }
+          captured.complete &&= receipt.beforeRevision === captured.revision;
           if (receipt.revision !== captured.revision) {
             captured.nodes = undefined;
           }
@@ -184,6 +182,8 @@ export function captureDevicePairingPublication(admission: OpenClawStateDatabase
           if (settled && captured.mutation === mutation) {
             captured.mutation = undefined;
             captured.epoch++;
+          } else if (!settled && captured.mutation === mutation) {
+            captured.blocked = true;
           }
         },
       };
@@ -195,7 +195,12 @@ export function captureDevicePairingPublication(admission: OpenClawStateDatabase
   };
 }
 
-/** Unknown facts suppress use without declaring an otherwise live node revoked. */
+/**
+ * Unknown facts suppress use without declaring an otherwise live node revoked.
+ * In-flight writes are not unknown: rows stay authoritative until COMMIT, and the pending
+ * services below install a committed receipt before this read. Gateway revocations also
+ * retire live clients directly.
+ */
 export function getPublishedPairedDeviceBinding(
   deviceId: string,
   baseDir?: string,

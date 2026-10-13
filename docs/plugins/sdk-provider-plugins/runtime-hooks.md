@@ -60,6 +60,13 @@ caller signal with an operation timeout. Start it before credential preparation
 when authentication shares the request budget, and call its `cleanup` in
 `finally` to release the timer.
 
+## OAuth refresh configuration
+
+`refreshOAuth(credential, config)` receives the caller's effective OpenClaw config
+as an optional second argument. Use that captured config for checks such as
+regional endpoint compatibility instead of reloading global runtime config.
+Existing one-argument hooks remain compatible, and direct callers can omit config.
+
 ## Hook examples
 
 <Tabs>
@@ -305,6 +312,13 @@ of each remaining level. The default preference is `medium`, `high`, `low`,
 then `off`. Missing, null, or empty metadata returns `undefined`; a nonempty
 list without supported values returns an off-only profile. Keep model-specific
 overrides and API fallbacks in the provider policy.
+
+Provider stream adapters can call `resolveOpenAIRequestReasoning(model, level)`
+from `openclaw/plugin-sdk/llm` to resolve declared efforts, native-label maps,
+logical Off, and scalar-effort disablement through the shared transport owner.
+Translate its `effort` and `thinkingEnabled` results into the provider's wire
+dialect instead of defining another effort ladder. Read the level from each
+stream call's options before falling back to the wrapper context.
 
 Bundled and trusted official plugins can also export
 `resolveToolSearchMode(ctx)` from their lightweight `provider-policy-api`

@@ -1,10 +1,15 @@
 import { expect, it, vi } from "vitest";
 import { createDeferred, withinTest } from "../../test/helpers/promise.js";
-import { createAgentRunDirectAbortError } from "../agents/run-termination.js";
+import {
+  createAgentRunDirectAbortError,
+  createAgentRunRestartAbortError,
+} from "../agents/run-termination.js";
 import {
   beginSessionWorkAdmission,
   collectActiveSessionWorkAdmissions,
+  consumeSessionWorkAdmissionHandoff,
   getActiveSessionWorkAdmissionCount,
+  getCompetingSessionWorkAdmissionRelease,
   getSessionWorkAdmissionRelease,
   interruptSessionWorkAdmissions,
   isCompetingSessionWorkAdmissionActive,
@@ -13,6 +18,63 @@ import {
   runExclusiveSessionLifecycleMutation,
   startSessionWorkAdmissionInterruption,
 } from "./session-lifecycle-admission.js";
+
+it.each(["completed", "cancelled", "cancelled-then-restart", "restart", "timeout"] as const)(
+  "uses the adopted run's %s outcome when capturing restart work",
+  async (outcome) => {
+    const scope = "settling-restart.sqlite";
+    const sessionKey = "agent:main:settling";
+    const sessionId = "settling-session";
+    const resolveGatewayContext = () => undefined;
+    const admission = await beginSessionWorkAdmission({
+      scope,
+      identities: [sessionKey, sessionId],
+      resolveGatewayContext,
+      isSettling: () => false,
+      assertAllowed: () => {},
+    });
+    let settled = false;
+    const reason =
+      outcome === "restart"
+        ? createAgentRunRestartAbortError()
+        : outcome.startsWith("cancelled")
+          ? createAgentRunDirectAbortError()
+          : outcome === "timeout"
+            ? Object.assign(new Error("timed out"), { name: "TimeoutError" })
+            : undefined;
+    const target = { scope, sessionKey, sessionId };
+    const captured = captureGatewaySessionWorkAdmissions(resolveGatewayContext);
+    try {
+      expect(captured.isActive(target)).toBe(true);
+      expect(
+        consumeSessionWorkAdmissionHandoff({
+          handoffId: admission.createHandoff(),
+          scope,
+          identities: [sessionKey, sessionId],
+          isSettling: () => settled,
+          getAbortReason: () => reason,
+        }),
+      ).toBe(admission);
+      settled = true;
+      if (outcome === "cancelled-then-restart") {
+        startSessionWorkAdmissionInterruption({
+          scope,
+          identities: [sessionKey, sessionId],
+          reason: createAgentRunRestartAbortError(),
+        });
+      }
+      const recoverable = !outcome.startsWith("cancelled");
+      expect(captured.isActive(target)).toBe(recoverable);
+      expect(captureGatewaySessionWorkAdmissions(resolveGatewayContext).isActive(target)).toBe(
+        recoverable,
+      );
+      // Cleanup keeps its exclusion lease without authorizing a stopped turn to resume.
+      expect(isSessionWorkAdmissionActive(scope, [sessionKey, sessionId])).toBe(true);
+    } finally {
+      admission.release();
+    }
+  },
+);
 
 it("serializes pending owners in FIFO order without blocking other owners", async ({ signal }) => {
   const scope = "serialized-owners.sqlite";
@@ -267,6 +329,8 @@ it("interrupts a preexisting non-chat pending attempt without classifying it as 
     ).toBe(false);
     expect(isCompetingSessionWorkAdmissionActive(scope, identities)).toBe(false);
     expect(getSessionWorkAdmissionRelease({ scope, identities })).toBeUndefined();
+    const competingRelease = getCompetingSessionWorkAdmissionRelease({ scope, identities });
+    expect(competingRelease).toBeDefined();
     expect(collectActiveSessionWorkAdmissions().get(scope)).toBeUndefined();
     expect(getActiveSessionWorkAdmissionCount()).toBe(0);
     const reason = createAgentRunDirectAbortError();
@@ -274,6 +338,7 @@ it("interrupts a preexisting non-chat pending attempt without classifying it as 
       await interruptSessionWorkAdmissions({ scope, identities, reason, timeoutMs: 1000 }),
     ).toBe(true);
     expect(await pending).toBe(reason);
+    await expect(competingRelease).resolves.toBeUndefined();
     expect(interrupted).toHaveBeenCalledOnce();
     expect(interrupted).toHaveBeenCalledWith(reason);
     expect(validated).toBe(false);

@@ -1,4 +1,3 @@
-// Coordinates process-wide root work admission with reversible host suspension.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { setMaxListeners } from "node:events";
 import type { GatewaySuspension } from "../../packages/gateway-protocol/src/schema/gateway-suspend.js";
@@ -33,6 +32,7 @@ type GatewayRootWorkAdmission = {
   references: number;
   released: boolean;
   retiredByReset?: true;
+  releaseObservers?: Set<(reason: "settled" | "reset") => void>;
 };
 
 type GatewayWorkAdmissionState = {
@@ -155,6 +155,37 @@ function createGatewayRootWorkRelease(admission: GatewayRootWorkAdmission): () =
     }
     admission.released = true;
     GATEWAY_WORK_ADMISSION_STATE.activeRootWork.delete(admission);
+    notifyGatewayRootWorkRelease(admission, "settled");
+  };
+}
+
+function notifyGatewayRootWorkRelease(
+  admission: GatewayRootWorkAdmission,
+  reason: "settled" | "reset",
+): void {
+  const observers = admission.releaseObservers;
+  delete admission.releaseObservers;
+  if (observers) {
+    notifyListeners([...observers], reason, (error) => {
+      admissionLog.warn(`root work release observer failed: ${String(error)}`);
+    });
+  }
+}
+
+/** Observes the exact root's final release without extending its lifetime. */
+export function captureGatewayRootWorkReleaseObserver():
+  | ((listener: (reason: "settled" | "reset") => void) => () => void)
+  | null {
+  const current = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
+  if (!current || current.released || !GATEWAY_WORK_ADMISSION_STATE.activeRootWork.has(current)) {
+    return null;
+  }
+  return (listener) => {
+    if (current.released) {
+      listener(current.retiredByReset ? "reset" : "settled");
+      return () => {};
+    }
+    return registerListener((current.releaseObservers ??= new Set()), listener);
   };
 }
 
@@ -435,11 +466,12 @@ export function tryBeginGatewayPreparedRestartRootWorkAdmission(): GatewayRootWo
 /** Independent roots count separately even when launched by an admitted parent. */
 export function tryBeginGatewayIndependentRootWorkAdmission(
   origin = "independent",
+  options: { detachedWork?: boolean } = {},
 ): GatewayRootWorkAdmissionLease | null {
   if (isGatewayWorkAdmissionClosed()) {
     return null;
   }
-  return createGatewayRootWorkAdmission(origin);
+  return createGatewayRootWorkAdmission(origin, options.detachedWork === true);
 }
 
 async function waitForGatewayWorkAdmissionChange(signal?: AbortSignal): Promise<void> {
@@ -722,6 +754,7 @@ export function resetGatewayWorkAdmission(): void {
     admission.references = 0;
     admission.retiredByReset = true;
     admission.released = true;
+    notifyGatewayRootWorkRelease(admission, "reset");
   }
   GATEWAY_WORK_ADMISSION_STATE.activeRootWork.clear();
   GATEWAY_WORK_ADMISSION_STATE.restartDrainReason = undefined;

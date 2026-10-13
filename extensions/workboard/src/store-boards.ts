@@ -32,15 +32,16 @@ import type {
   WorkboardListOptions,
   WorkboardStatsResult,
 } from "./store-inputs.js";
-import {
-  normalizeBoardId,
-  normalizeBoardIdRequired,
-  normalizeLabels,
-} from "./store-normalizers.js";
+import { normalizeBoardId, normalizeBoardIdRequired } from "./store-normalizers.js";
 import { freezeCardList, readCards } from "./store-read.js";
 import { WorkboardStoreRuntime } from "./store-runtime.js";
+import { normalizeCappedStringList } from "./store-string-lists.js";
 import type { WorkboardTargetModelCheck } from "./target-model-policy.js";
 import { projectWorkboardTrust } from "./trust-kpis.js";
+
+function emptyBoardSummary(id: string): WorkboardBoardSummary {
+  return { id, total: 0, active: 0, archived: 0, byStatus: {} };
+}
 
 export class WorkboardBoardStore extends WorkboardStoreRuntime {
   protected readonly store: WorkboardCardStore;
@@ -154,26 +155,12 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
       });
     }
     if (!boards.has("default")) {
-      boards.set("default", {
-        id: "default",
-        total: 0,
-        active: 0,
-        archived: 0,
-        byStatus: {},
-      });
+      boards.set("default", emptyBoardSummary("default"));
     }
     const cardAggregates = await this.store.listBoardAggregates();
     for (const aggregate of cardAggregates) {
       const boardId = aggregate.boardId;
-      const summary =
-        boards.get(boardId) ??
-        ({
-          id: boardId,
-          total: 0,
-          active: 0,
-          archived: 0,
-          byStatus: {},
-        } satisfies WorkboardBoardSummary);
+      const summary = boards.get(boardId) ?? emptyBoardSummary(boardId);
       summary.total += aggregate.total;
       summary.archived += aggregate.archived;
       summary.active += aggregate.total - aggregate.archived;
@@ -246,7 +233,7 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
     const agentId = requestedAgentId ?? orchestration?.defaultAssignee;
     const requestedAutomation = isRecord(input.metadata) ? input.metadata.automation : undefined;
     const workspace = automation?.workspace;
-    const labels = normalizeLabels(input.labels);
+    const labels = normalizeCappedStringList(input.labels, "labels");
     const target =
       (isRecord(requestedAutomation) && Object.hasOwn(requestedAutomation, "target")) ||
       (workspace && workspace.kind !== "scratch")

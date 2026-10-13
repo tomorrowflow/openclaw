@@ -355,7 +355,7 @@ async function collectInstalledPackageDistErrors(params: {
   installedVersion: string | null;
   expectedVersion?: string | null;
 }): Promise<string[]> {
-  const criticalPaths = await collectCriticalInstalledPackageDistPaths(params.packageRoot);
+  let criticalPaths = await collectCriticalInstalledPackageDistPaths(params.packageRoot);
   let inventoryFiles: string[] | null = null;
   let inventoryError: string | null = null;
   try {
@@ -364,9 +364,11 @@ async function collectInstalledPackageDistErrors(params: {
     inventoryError = `invalid package dist inventory ${PACKAGE_DIST_INVENTORY_RELATIVE_PATH}`;
   }
 
+  let actualFiles: string[] | null = null;
+  let inventoryErrors: string[] = [];
   if (inventoryFiles !== null) {
-    const actualFiles = await collectPackageDistInventory(params.packageRoot);
-    const inventoryErrors = await collectInstalledPathErrors({
+    actualFiles = await collectPackageDistInventory(params.packageRoot);
+    inventoryErrors = await collectInstalledPathErrors({
       packageRoot: params.packageRoot,
       expectedFiles: inventoryFiles,
       actualFiles,
@@ -374,39 +376,28 @@ async function collectInstalledPackageDistErrors(params: {
       unexpectedMessage: (relativePath) => `unexpected packaged dist file ${relativePath}`,
     });
     const inventorySet = new Set(inventoryFiles);
-    const supplementalCriticalPaths = criticalPaths.filter(
-      (relativePath) => !inventorySet.has(relativePath),
-    );
-    return [
-      ...inventoryErrors,
-      ...(await collectInstalledPathErrors({
-        packageRoot: params.packageRoot,
-        expectedFiles: supplementalCriticalPaths,
-        actualFiles,
-        missingMessage: (relativePath) => `missing bundled runtime sidecar ${relativePath}`,
-      })),
-    ];
+    criticalPaths = criticalPaths.filter((relativePath) => !inventorySet.has(relativePath));
   }
 
   const criticalErrors = await collectInstalledPathErrors({
     packageRoot: params.packageRoot,
     expectedFiles: criticalPaths,
-    actualFiles: null,
+    actualFiles,
     missingMessage: (relativePath) => `missing bundled runtime sidecar ${relativePath}`,
   });
-  if (inventoryError) {
-    return [inventoryError, ...criticalErrors];
+  if (inventoryFiles === null) {
+    if (inventoryError) {
+      inventoryErrors.push(inventoryError);
+    } else if (
+      shouldRequirePackagedDistInventory(params.installedVersion) ||
+      shouldRequirePackagedDistInventory(params.expectedVersion)
+    ) {
+      inventoryErrors.push(
+        `missing package dist inventory ${PACKAGE_DIST_INVENTORY_RELATIVE_PATH}`,
+      );
+    }
   }
-  if (
-    shouldRequirePackagedDistInventory(params.installedVersion) ||
-    shouldRequirePackagedDistInventory(params.expectedVersion)
-  ) {
-    return [
-      `missing package dist inventory ${PACKAGE_DIST_INVENTORY_RELATIVE_PATH}`,
-      ...criticalErrors,
-    ];
-  }
-  return criticalErrors;
+  return [...inventoryErrors, ...criticalErrors];
 }
 
 async function collectCriticalInstalledPackageDistPaths(packageRoot: string): Promise<string[]> {
@@ -730,12 +721,24 @@ function resolvePnpmIsolatedLayoutVersion(globalRoot?: string | null): number | 
   return match ? Number.parseInt(match[1] ?? "", 10) : null;
 }
 
-function inferPnpmIsolatedGlobalRootFromPackageRoot(pkgRoot?: string | null): string | null {
+function inferPnpmProjectRoot(pkgRoot?: string | null): string | null {
   const nodeModulesRoot = inferGlobalRootFromPackageRoot(pkgRoot);
   if (!nodeModulesRoot) {
     return null;
   }
-  const globalRoot = path.dirname(path.dirname(nodeModulesRoot));
+  const parts = nodeModulesRoot.split(path.sep);
+  // Nested virtual-store packages still belong to the enclosing isolated project.
+  const storeIndex = parts.length - 3;
+  return path.dirname(
+    parts[storeIndex] === ".pnpm" && parts[storeIndex - 1] === "node_modules"
+      ? parts.slice(0, storeIndex).join(path.sep)
+      : nodeModulesRoot,
+  );
+}
+
+function inferPnpmIsolatedGlobalRootFromPackageRoot(pkgRoot?: string | null): string | null {
+  const projectRoot = inferPnpmProjectRoot(pkgRoot);
+  const globalRoot = projectRoot ? path.dirname(projectRoot) : null;
   return resolvePnpmIsolatedLayoutVersion(globalRoot) === null ? null : globalRoot;
 }
 
@@ -746,11 +749,10 @@ async function hasPnpmIsolatedProjectMetadata(
   if (!inferPnpmIsolatedGlobalRootFromPackageRoot(pkgRoot)) {
     return false;
   }
-  const nodeModulesRoot = inferGlobalRootFromPackageRoot(pkgRoot);
-  if (!nodeModulesRoot) {
+  const installDir = inferPnpmProjectRoot(pkgRoot);
+  if (!installDir) {
     return false;
   }
-  const installDir = path.dirname(nodeModulesRoot);
   const manifest = await fs
     .readFile(path.join(installDir, "package.json"), "utf8")
     .then((raw) => JSON.parse(raw) as { dependencies?: Record<string, unknown> })
@@ -766,11 +768,8 @@ async function hasPnpmIsolatedProjectMetadata(
 export async function resolvePnpmIsolatedInstallOwner(
   pkgRoot?: string | null,
 ): Promise<string | null> {
-  const nodeModulesRoot = inferGlobalRootFromPackageRoot(pkgRoot);
-  if (!nodeModulesRoot) {
-    return null;
-  }
-  return path.resolve(await tryRealpath(path.dirname(nodeModulesRoot)));
+  const projectRoot = inferPnpmProjectRoot(pkgRoot);
+  return projectRoot ? await tryRealpath(projectRoot) : null;
 }
 
 async function listPnpmIsolatedGlobalPackages(params: {
@@ -792,10 +791,7 @@ async function listPnpmIsolatedGlobalPackages(params: {
     if (!entry.isSymbolicLink()) {
       continue;
     }
-    const installDir = await fs.realpath(path.join(globalRoot, entry.name)).catch(() => null);
-    if (!installDir) {
-      continue;
-    }
+    const installDir = path.resolve(globalRoot, entry.name);
     const manifest = await fs
       .readFile(path.join(installDir, "package.json"), "utf8")
       .then((raw) => JSON.parse(raw) as { dependencies?: Record<string, unknown> })
@@ -836,18 +832,7 @@ async function resolvePnpmIsolatedGlobalPackage(params: {
 }): Promise<PnpmIsolatedGlobalPackage | null> {
   const packages = await listPnpmIsolatedGlobalPackages(params);
   const requestedPackageRoot = params.pkgRoot ? path.resolve(params.pkgRoot) : null;
-  const requestedOwnerRoot = inferPnpmIsolatedGlobalRootFromPackageRoot(params.pkgRoot);
-  const globalRoot = params.globalRoot?.trim();
-  const canonicalRequestedOwnerRoot = requestedOwnerRoot
-    ? path.resolve(await tryRealpath(requestedOwnerRoot))
-    : null;
-  const canonicalGlobalRoot = globalRoot ? path.resolve(await tryRealpath(globalRoot)) : null;
-  const canonicalOwnerMatches =
-    canonicalRequestedOwnerRoot !== null && canonicalRequestedOwnerRoot === canonicalGlobalRoot;
-  const requestedInstallOwner =
-    requestedPackageRoot && canonicalOwnerMatches
-      ? await resolvePnpmIsolatedInstallOwner(requestedPackageRoot)
-      : null;
+  const requestedInstallOwner = await resolvePnpmIsolatedInstallOwner(requestedPackageRoot);
 
   for (const entry of packages) {
     const packageRoot = entry.packageRoot;
@@ -864,19 +849,13 @@ async function resolvePnpmIsolatedGlobalPackage(params: {
   return null;
 }
 
-async function isPnpmIsolatedGlobalPackageRoot(pkgRoot?: string | null): Promise<boolean> {
-  const globalRoot = inferPnpmIsolatedGlobalRootFromPackageRoot(pkgRoot);
-  if (!globalRoot) {
-    return false;
-  }
-  return Boolean(await resolvePnpmIsolatedGlobalPackage({ globalRoot, pkgRoot }));
-}
-
 async function isPnpmGlobalPackageRoot(pkgRoot?: string | null): Promise<boolean> {
-  if (await isPnpmIsolatedGlobalPackageRoot(pkgRoot)) {
-    return true;
-  }
-  if (await hasPnpmIsolatedProjectMetadata(pkgRoot)) {
+  const isolatedRoot = inferPnpmIsolatedGlobalRootFromPackageRoot(pkgRoot);
+  if (
+    (isolatedRoot &&
+      (await resolvePnpmIsolatedGlobalPackage({ globalRoot: isolatedRoot, pkgRoot }))) ||
+    (await hasPnpmIsolatedProjectMetadata(pkgRoot))
+  ) {
     return true;
   }
   const globalRoot = inferPnpmGlobalRootFromPackageRoot(pkgRoot);
@@ -966,8 +945,7 @@ async function resolveGlobalRoot(
   if (resolved.manager === "bun") {
     return inferBunGlobalRootFromPackageRoot(pkgRoot) ?? resolveBunGlobalRoot();
   }
-  const argv = [resolved.command, "root", "-g"];
-  const res = await runCommand(argv, { timeoutMs }).catch(() => null);
+  const res = await runCommand([resolved.command, "root", "-g"], { timeoutMs }).catch(() => null);
   if (!res || res.code !== 0) {
     return null;
   }
@@ -1157,18 +1135,13 @@ export async function detectGlobalInstallManagerForRoot(
     return (await isPnpmGlobalPackageRoot(pkgRoot)) ? "pnpm" : "bun";
   }
 
-  const candidates: Array<{
-    manager: "npm" | "pnpm";
-    argv: string[];
-  }> = [
-    { manager: "npm", argv: ["npm", "root", "-g"] },
-    { manager: "pnpm", argv: ["pnpm", "root", "-g"] },
-  ];
-
-  for (const { manager, argv } of candidates) {
-    const res = await runCommand(argv, { timeoutMs }).catch(() => null);
-    const globalRoot = res?.code === 0 ? readPackageManagerProbeValue(res.stdout) : "";
-    diagnostics.push(`${argv.join(" ")}: ${globalRoot || "unavailable"}`);
+  for (const manager of ["npm", "pnpm"] as const) {
+    const globalRoot = await resolveGlobalRoot(
+      { manager, command: manager },
+      runCommand,
+      timeoutMs,
+    );
+    diagnostics.push(`${manager} root -g: ${globalRoot || "unavailable"}`);
     if (!globalRoot) {
       continue;
     }
@@ -1231,16 +1204,13 @@ export function globalInstallArgs(
   npmLifecyclePolicy: NpmLifecyclePolicy = "allow-scripts",
 ): string[] {
   const resolved = normalizeGlobalInstallCommand(managerOrCommand, pkgRoot);
-  if (resolved.manager === "pnpm") {
-    return [resolved.command, "add", "-g", PNPM_OPENCLAW_BUILD_ALLOWLIST_FLAG, spec];
-  }
-  if (resolved.manager === "bun") {
+  if (resolved.manager !== "npm") {
     return [
       resolved.command,
       "add",
       "-g",
-      BUN_OPENCLAW_TRUST_FLAG,
-      resolveBunGlobalInstallSpec(spec),
+      resolved.manager === "pnpm" ? PNPM_OPENCLAW_BUILD_ALLOWLIST_FLAG : BUN_OPENCLAW_TRUST_FLAG,
+      resolved.manager === "pnpm" ? spec : resolveBunGlobalInstallSpec(spec),
     ];
   }
   return [

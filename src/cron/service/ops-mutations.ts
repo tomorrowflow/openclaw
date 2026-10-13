@@ -230,6 +230,9 @@ export async function add(
     if (opts?.createdActor) {
       job.createdActor = structuredClone(opts.createdActor);
     }
+    if (opts?.sourceConversation) {
+      job.sourceConversation = structuredClone(opts.sourceConversation);
+    }
     if (opts?.skillLibrarySelections) {
       job.skillLibrarySelections = structuredClone(opts.skillLibrarySelections);
     }

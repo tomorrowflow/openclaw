@@ -32,7 +32,7 @@ import {
 } from "./lib/arg-utils.mts";
 import { readBoundedResponseText } from "./lib/bounded-response.mjs";
 import { parsePluginReleaseSelection } from "./lib/plugin-npm-release.ts";
-import { loadChangelogCollection, loadReleaseChangelog } from "./lib/release-changelog.mjs";
+import { loadChangelogCollection } from "./lib/release-changelog.mjs";
 import { releaseBranchForTag } from "./lib/release-context.mjs";
 import { ensureReleasePublishToolingTag } from "./lib/release-publish-preflight-evidence.mts";
 import { formatReleasePublishPreflight } from "./lib/release-publish-preflight-interface.mts";
@@ -118,13 +118,15 @@ const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/u;
 const RELEASE_CANDIDATE_STATE_VERSION = 2;
 const RELEASE_CANDIDATE_STATE_FILE = "release-candidate-state.json";
 const TRUSTED_TOOLING_SHA_ENV = "OPENCLAW_RELEASE_CANDIDATE_TRUSTED_TOOLING_SHA";
+// Release tooling (toolingSha and its publishWorkflowRef tag) is not candidate
+// identity: each run re-verifies the current tooling against trusted main, and
+// saved FRV/npm evidence is authenticated against its own producer run. Tooling
+// repaired mid-release can therefore resume the same state.
 const RELEASE_CANDIDATE_STATE_KEYS = [
   "repo",
   "tag",
   "targetSha",
-  "toolingSha",
   "workflowRef",
-  "publishWorkflowRef",
   "provider",
   "mode",
   "releaseProfile",
@@ -875,11 +877,15 @@ export function assertReleaseCandidateTag(tag: string, targetSha: string, cwd: s
   }
 }
 
-function savedPublishWorkflowRef(statePath: string) {
+function savedPublishWorkflowRef(statePath: string, toolingSha: string) {
   const saved = existsSync(statePath)
     ? readJson(statePath, "release candidate state").publishWorkflowRef
     : undefined;
-  return typeof saved === "string" && PUBLISH_TOOLING_TAG_PATTERN.test(saved) ? saved : "";
+  return typeof saved === "string" &&
+    PUBLISH_TOOLING_TAG_PATTERN.test(saved) &&
+    saved.startsWith(`release-publish/${toolingSha.slice(0, 12)}-`)
+    ? saved
+    : "";
 }
 
 function gitIsAncestor(ancestor: string, target: string, cwd = process.cwd()) {
@@ -1054,7 +1060,7 @@ export function loadCandidateShippedBaseline(ref: string, rootDir = process.cwd(
   gitRevParse(`${tagRef}^{commit}`, rootDir);
   const changelog = loadChangelogCollection({ rootDir, ref: tagRef, recordsOnly: true });
   const version = requireString(releaseNotesVersionForTag(ref), "release notes version");
-  const source = loadReleaseChangelog({ rootDir, ref: tagRef, version });
+  const source = loadReleaseNotesForTag({ rootDir, ref: tagRef, tag: ref, version });
   candidateContributionRecordPullRequests(
     source.record ?? source.section,
     `shipped baseline ${ref}`,
@@ -1069,6 +1075,10 @@ export function validateCandidateReleaseNotes({
   tag,
   contributionRecordPath,
 }: StringFields<"changelog" | "repository" | "tag"> & { contributionRecordPath?: string }) {
+  if (/-beta\.[1-9][0-9]*$/u.test(tag)) {
+    // New candidates cannot silently reuse cumulative or earlier-beta prose.
+    extractChangelogSection(changelog, tag.slice(1));
+  }
   const rendered = renderGithubReleaseNotes({
     changelog,
     version: releaseNotesVersionForTag(tag),
@@ -1099,7 +1109,7 @@ export function validateCandidateChangelogProvenance({
   isAncestor?: (ancestor: string, target: string) => boolean;
   loadShippedBaseline?: (ref: string) => { pullRequests: Set<number> };
 }) {
-  // Correction tags may carry their own changelog heading.
+  // Beta and correction tags may carry their own changelog heading.
   let section: string | undefined;
   let sectionVersion = version;
   const dedicatedVersion = dedicatedSectionVersionForTag(tag);
@@ -2009,10 +2019,10 @@ async function main() {
         `--workflow-sha ${options.workflowSha} does not match tooling checkout ${toolingSha}`,
       );
     }
-    // A resumed candidate keeps the exact tag it recorded; a newer tag at the
-    // same SHA must not fail state reconciliation. The identity check below
-    // still proves that saved tag resolves to this tooling SHA.
-    const savedTag = savedPublishWorkflowRef(statePath);
+    // A resumed candidate reuses the tag it recorded for this tooling SHA; a
+    // repaired tooling SHA gets its own tag. The identity check below proves
+    // the selected tag resolves to this tooling SHA.
+    const savedTag = savedPublishWorkflowRef(statePath, toolingSha);
     const ensured = savedTag
       ? { tag: savedTag, created: false }
       : ensureReleasePublishToolingTag({

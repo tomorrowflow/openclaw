@@ -24,6 +24,7 @@ import {
   isToolWrappedWithBeforeToolCallHook,
   wrapToolWithBeforeToolCallHook,
 } from "./agent-tools.before-tool-call.js";
+import { hasAnyAuthProfileStoreSourceAsync } from "./auth-profiles/source-check.js";
 import { resolveOpenClawPluginToolsForOptions } from "./openclaw-plugin-tools.js";
 import { filterToolsByClientCaps } from "./openclaw-tools.client-caps.js";
 import { createHostedGatewayTools } from "./openclaw-tools.gateway.js";
@@ -83,6 +84,7 @@ import { createOpenClawDelegateToolsForRunAsync } from "./tools/openclaw-delegat
 import { createPdfTool } from "./tools/pdf-tool.js";
 import { createAvailablePortalTools } from "./tools/portal-tool.js";
 import { createProgressCardTool } from "./tools/progress-card-tool.js";
+import { createChannelQuestionPromptDelivery } from "./tools/question-prompt-send.js";
 import { createScreenTool } from "./tools/screen-tool.js";
 import { createSecretsTool } from "./tools/secrets-tool.js";
 import { createSessionStatusTool } from "./tools/session-status-tool.js";
@@ -140,15 +142,20 @@ export async function createOpenClawToolsWithPreparation(
   const webSearchConfigured =
     captured.webSearchEnabled === false || captured.config?.tools?.web?.search?.enabled === false
       ? undefined
-      : await prepareWebSearchConfiguration({
-          config: captured.config,
-          agentDir: captured.agentDir ?? resolveAgentDir(captured.config ?? {}, sessionAgentId),
-          authStore: captured.authProfileStore,
-          ...(captured.authProfileStoreSource !== undefined
-            ? { resolveAuthProfileStoreSource: () => captured.authProfileStoreSource === true }
-            : {}),
-          runtimeWebSearch: getActiveRuntimeWebToolsMetadataFromState()?.search,
-        });
+      : await prepareWebSearchConfiguration(
+          {
+            config: captured.config,
+            agentDir: captured.agentDir ?? resolveAgentDir(captured.config ?? {}, sessionAgentId),
+            authStore: captured.authProfileStore,
+            ...(captured.authProfileStoreSource !== undefined
+              ? { resolveAuthProfileStoreSource: () => captured.authProfileStoreSource === true }
+              : {}),
+            runtimeWebSearch: getActiveRuntimeWebToolsMetadataFromState()?.search,
+          },
+          shared.reader
+            ? (agentDir) => hasAnyAuthProfileStoreSourceAsync(agentDir, shared.reader)
+            : undefined,
+        );
   shared.assertCurrent();
   captured.assertInvocationCurrent?.();
   return createOpenClawTools(captured, delegated, webSearchConfigured);
@@ -496,12 +503,10 @@ export function createOpenClawTools(
     }) || !resolvedConfig
       ? null
       : createConfiguredSkillWorkshopTool({
-          ...options,
-          workspaceDir,
           config: resolvedConfig,
           agentId: sessionAgentId,
           sessionKey: options?.runSessionKey ?? options?.agentSessionKey,
-          messageId: options?.currentMessageId,
+          runId: options?.runId,
           run: options?.skillWorkshop,
         }),
     progressCardTool,
@@ -518,6 +523,12 @@ export function createOpenClawTools(
       })
         ? createTool({
             ...options,
+            questionPrompt:
+              options?.questionPrompt ??
+              createChannelQuestionPromptDelivery({
+                cfg: resolvedConfig ?? getRuntimeConfig(),
+                ...deliveryContext,
+              }),
             agentId: sessionAgentId,
             sessionKey: options?.runSessionKey ?? options?.agentSessionKey,
           })

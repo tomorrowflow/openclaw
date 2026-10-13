@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
-import { startNodeCard } from "./node-ticket.test-support.js";
+import { startNodeCard, endedSession } from "./node-ticket.test-support.js";
 import { WorkboardStore } from "./store.js";
 import { createKernelStores } from "./test/sqlite-kernel.js";
 import {
@@ -64,6 +64,7 @@ describe("Workboard run context (smart zone)", () => {
       store,
       event: { runId, success: true, messages: testCase.messages },
       context: { runId, sessionKey },
+      readSessions: endedSession(),
     });
 
     const attempt = (await store.get(card.id))?.metadata?.attempts?.find(
@@ -98,6 +99,7 @@ describe("Workboard run context (smart zone)", () => {
         messages: [{ role: "assistant", content: "Done", usage: { input: 5, cacheRead: 9000 } }],
       },
       context: { runId, sessionKey },
+      readSessions: endedSession(),
     });
 
     expect((await reopened.get(card.id))?.metadata?.attempts).toEqual([

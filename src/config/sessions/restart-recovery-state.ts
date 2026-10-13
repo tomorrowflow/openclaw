@@ -580,7 +580,7 @@ export function buildRestartRecoveryClaimCleanupPatch(params: {
   terminalDeliveryEvidence?: RestartRecoveryTerminalDeliveryEvidenceResult;
   terminalRunId?: string;
   terminalSourceRunId?: string;
-}): Partial<SessionEntry> {
+}): Partial<InternalSessionEntry> {
   const sourceRunId =
     normalizeRunId(params.terminalSourceRunId) ??
     normalizeRunId(params.entry.restartRecoveryDeliverySourceRunId);
@@ -623,6 +623,7 @@ export function buildRestartRecoveryClaimCleanupPatch(params: {
     restartRecoveryDeliveryRequestFingerprint: undefined,
     restartRecoveryDeliveryRunId: undefined,
     restartRecoveryDeliverySourceRunId: undefined,
+    restartRecoveryOperatorSource: undefined,
     restartRecoveryHarnessCompletion: undefined,
     restartRecoveryRequesterAccountId: undefined,
     restartRecoveryRequesterSenderId: undefined,

@@ -31,6 +31,16 @@ or database migrations. Once state has migrated beyond the older release's
 supported format, the supported recovery is to restore a verified pre-update
 backup with its matching OpenClaw release.
 
+<Warning>
+Fresh shared-state databases created after tenant-container management was retired
+omit `fleet_cells`. Older revisions that require this table can reject them even
+when the numeric schema version matches. Existing databases retain the old table
+and rows, but that alone does not establish downgrade compatibility. Do not
+reconstruct the retired table or alter schema markers to bypass validation.
+Continue with the current release, or restore a complete verified backup with its
+matching older release using the recovery procedure below.
+</Warning>
+
 Prefer `openclaw update` for upgrades and recovery. It validates the target,
 runs required Doctor migrations, and verifies the activated Gateway. A raw
 `npm i -g` replacement does not retain the previous package or run this recovery
@@ -250,8 +260,12 @@ Detailed recovery reasons remain in the update result, status diagnostics, and f
 
 Use `openclaw update status` for the recorded reason and `openclaw triage` to
 diagnose a failed check. Recovery guidance reports whether the Gateway is running
-or stopped from the latest service observation, even when the new version is running but did
-not pass verification. A restored Gateway must pass its own verification checks
+or stopped from the latest service observation. When the Gateway answers with the
+update's target version, that observation supersedes a saved runtime-verification
+restart warning; the original failed run and any migration rollback restrictions
+remain recorded. An unsafe Doctor process settlement keeps its recovery guidance
+until the recovery owner verifies settlement; a responding Gateway alone cannot
+clear that refusal. A restored Gateway must pass its own verification checks
 before the run can finish as `rolled-back`.
 
 In the Control UI, open **Settings → Updates** and choose **Diagnose update** to
@@ -307,8 +321,8 @@ through Doctor and rollback.
 The temporary snapshots used to check migrations are removed after
 validation and do not replace your backup.
 If the schema comparison cannot be completed, automatic rollback is refused
-(`rollback-state-unverified`). The newly installed version owns final
-verification and reporting after migration,
+(`rollback-state-unverified`). The updater captures authored config and include files without opening migrated
+state; the newly installed version owns state verification and final reporting after migration,
 preserving the same run ID and recorded activation steps.
 
 For pnpm and Bun, changes to sibling global packages after staging refuse automatic rollback (`rollback-project-changed`) without restoring the shared project; keep a reachable version installed, otherwise keep the Gateway stopped and follow the report’s repair command.

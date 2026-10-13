@@ -17,11 +17,21 @@ import {
 } from "./heartbeat-reply-normalization.js";
 import { truncateHeartbeatPreview } from "./heartbeat-runner-prompt.js";
 
-function normalizeHeartbeatToolNotification(
-  response: HeartbeatToolResponse,
+function normalizeHeartbeatDelivery(
+  source:
+    | { response: HeartbeatToolResponse }
+    | { payload: ReplyPayload; ackMaxChars: number; mode: "heartbeat" | "message" },
   responsePrefix: string | undefined,
 ): NormalizedHeartbeatDelivery {
-  let finalText = getHeartbeatToolNotificationText(response);
+  if (!("response" in source)) {
+    return normalizeHeartbeatReply(
+      source.payload,
+      responsePrefix,
+      source.ackMaxChars,
+      source.mode,
+    );
+  }
+  let finalText = getHeartbeatToolNotificationText(source.response);
   if (responsePrefix && finalText && !finalText.startsWith(responsePrefix)) {
     finalText = `${responsePrefix} ${finalText}`;
   }
@@ -30,7 +40,7 @@ function normalizeHeartbeatToolNotification(
     text: finalText,
     hasMedia: false,
     isInternalPlaceholderOnly: false,
-    ...(response.notify ? {} : { silent: true }),
+    ...(source.response.notify ? {} : { silent: true }),
   };
 }
 
@@ -80,15 +90,16 @@ export function classifyHeartbeatAgentOutcome(params: {
     return { kind: "ack", eventStatus: "ok-empty" } as const;
   }
   const mode = params.hasRelayableExecCompletion ? "message" : "heartbeat";
-  const normalized =
+  const normalized = normalizeHeartbeatDelivery(
     heartbeatToolResponse && !shouldSuppressSourceReply && !(hasExplicitFailure && replyPayload)
-      ? normalizeHeartbeatToolNotification(heartbeatToolResponse, params.responsePrefix)
-      : normalizeHeartbeatReply(
-          shouldSuppressSourceReply ? {} : (replyPayload ?? {}),
-          params.responsePrefix,
-          params.ackMaxChars,
+      ? { response: heartbeatToolResponse }
+      : {
+          payload: shouldSuppressSourceReply ? {} : (replyPayload ?? {}),
+          ackMaxChars: params.ackMaxChars,
           mode,
-        );
+        },
+    params.responsePrefix,
+  );
   if (agentRunFailed && params.useHeartbeatFailureCopy) {
     const replacement = replaceGenericExternalRunFailureText(normalized.text);
     if (replacement.replaced) {
@@ -109,9 +120,7 @@ export function classifyHeartbeatAgentOutcome(params: {
   const shouldSkipMain =
     // A completed quiet turn also suppresses tool warnings and media; a later crash does not.
     (!agentRunFailed && heartbeatToolResponse?.notify === false) ||
-    (normalized.shouldSkip &&
-      !normalized.hasMedia &&
-      (!hasStructuredReplyContent || normalized.isInternalPlaceholderOnly));
+    (normalized.shouldSkip && (!hasStructuredReplyContent || normalized.isInternalPlaceholderOnly));
   if (hasExplicitFailure) {
     return {
       kind: "failure",

@@ -11,15 +11,16 @@ import {
   assertStateDatabaseAccessAllowed,
   type StateDatabaseSchemaLease,
 } from "./gateway-state-owner.js";
+import { installSqliteNativeRuntimeAdmission } from "./node-sqlite.js";
 import { retainSqliteWriteAdmissionService } from "./sqlite-transaction.js";
 import { prepareSqliteWorkerActorContext } from "./sqlite-worker-broker-admission.js";
 import type { Actor, Job, Slot } from "./sqlite-worker-broker.types.js";
 import {
   SQLITE_WORKER_MAX_MESSAGE_BYTES,
   retainSqliteWorkerErrorCode,
+  SqliteWorkerAdmissionTimeoutError,
   SqliteWorkerError,
   type SqliteWorkerReply,
-  type SqliteWorkerCloseReceipt,
   type SqliteWorkerRequest,
 } from "./sqlite-worker-contract.js";
 import { createSqliteWorkerOperationAdmission } from "./sqlite-worker-operation-admission.js";
@@ -257,6 +258,9 @@ function decodeSqliteWorkerReplyValue(
 function decodeSqliteWorkerReplyError(
   error: Extract<SqliteWorkerReply, { ok: false }>["error"],
 ): Error {
+  if (error.name === "SqliteWorkerAdmissionTimeoutError" && error.code === "admission-timeout") {
+    return new SqliteWorkerAdmissionTimeoutError();
+  }
   const failure = Object.assign(new Error(error.message), {
     name: error.name,
     ...(error.code === undefined ? {} : { code: error.code }),
@@ -288,13 +292,15 @@ export type SqliteWorkerReplyOwner = {
     error?: unknown,
     value?: unknown,
     settlement?: SqliteWorkerOperationSettlement,
-    closeReceipt?: SqliteWorkerCloseReceipt,
   ): void;
   dispatch(): void;
 };
 
 export function receiveSqliteWorkerReply(
-  slot: Pick<Slot, "current" | "failed"> & { worker: Pick<Slot["worker"], "postMessage"> },
+  slot: Pick<Slot, "current" | "failed"> & {
+    actors: ReadonlySet<Pick<Actor, "id" | "closeReceipt">>;
+    worker: Pick<Slot["worker"], "postMessage">;
+  },
   reply: SqliteWorkerReply,
   owner: SqliteWorkerReplyOwner,
 ): void {
@@ -370,9 +376,19 @@ export function receiveSqliteWorkerReply(
     );
     return;
   }
+  if (reply.nativeRuntimeAdmission !== undefined) {
+    // Completion can create a sibling immediately; publish only after the full reply settles.
+    installSqliteNativeRuntimeAdmission(reply.nativeRuntimeAdmission);
+  }
   slot.current = undefined;
   if (job.request.type === "close") {
-    owner.finish(job, undefined, value, undefined, reply.closeReceipt);
+    if (reply.closeReceipt) {
+      const actor = [...slot.actors].find((candidate) => candidate.id === job.request.actor);
+      if (actor) {
+        actor.closeReceipt = reply.closeReceipt;
+      }
+    }
+    owner.finish(job, undefined, value);
   } else {
     // Domains own handled refusal results; physical and request authority still fence delivery.
     const admission = job.operationAdmission?.admission;

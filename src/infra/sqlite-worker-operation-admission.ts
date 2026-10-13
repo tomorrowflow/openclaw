@@ -1,20 +1,25 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
 import { serialize } from "node:v8";
 import {
   MessageChannel,
+  MessagePort,
   receiveMessageOnPort,
-  type MessagePort,
   type Transferable,
 } from "node:worker_threads";
 import { toErrorObject } from "@openclaw/normalization-core/error-coercion";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { resolveIdentityPathViaExistingAncestorSync } from "./boundary-path.js";
-import { deferSqlitePostCommitPublication } from "./sqlite-post-commit.js";
+import { stageSqliteTransactionState } from "./sqlite-post-commit.js";
 import { currentSqliteOperationTiming } from "./sqlite-reader-lifecycle.js";
-import { SQLITE_WORKER_MAX_MESSAGE_BYTES, SqliteWorkerError } from "./sqlite-worker-contract.js";
+import {
+  SQLITE_WORKER_MAX_MESSAGE_BYTES,
+  SqliteWorkerAdmissionTimeoutError,
+  SqliteWorkerError,
+} from "./sqlite-worker-contract.js";
 import type {
   RetainedWorkerTransactionAdmission,
   SqliteWorkerNativeSettlement,
@@ -24,6 +29,7 @@ import type {
 const REQUESTED = 0;
 const GRANTED = 1;
 const REFUSED = 2;
+const TIMED_OUT = 3;
 
 /** Only the factory's admission before agent open may certify this refusal. */
 export const SqliteWorkerOpenRefusedError = resolveGlobalSingleton(
@@ -40,6 +46,8 @@ export const SqliteWorkerOpenRefusedError = resolveGlobalSingleton(
 export type SqliteWorkerAdmissionRequest = {
   stage: "open" | "prepare" | "transaction" | "commit";
   facts: unknown;
+  /** Opt-in wait budget in milliseconds; omission retains the live-owner wait. */
+  deadlineMs?: number;
 };
 
 type AdmissionFailureSource = "authority" | "domain" | "protocol";
@@ -66,6 +74,34 @@ export type SqliteWorkerAdmissionFactory = (operation: RetainedWorkerTransaction
 };
 
 type CommitObserver = (committed: { facts: unknown }) => void;
+type NativeCommitReceipt = {
+  version: 1;
+  operationId: string;
+  sequence: number;
+  facts: unknown;
+};
+
+function readNativeCommitReceipt(value: unknown): NativeCommitReceipt | undefined {
+  if (
+    !isRecord(value) ||
+    value.version !== 1 ||
+    typeof value.operationId !== "string" ||
+    value.operationId.length === 0 ||
+    typeof value.sequence !== "number" ||
+    !Number.isSafeInteger(value.sequence) ||
+    value.sequence < 1 ||
+    !Object.hasOwn(value, "facts")
+  ) {
+    return undefined;
+  }
+  return {
+    version: 1,
+    operationId: value.operationId,
+    sequence: value.sequence,
+    facts: value.facts,
+  };
+}
+
 const commitObserverBindings = new WeakMap<
   SqliteWorkerOperationAdmission,
   (observer: CommitObserver) => void
@@ -112,6 +148,7 @@ export function createSqliteWorkerOperationAdmission(
   let observingCommit = false;
   let failure: { error: unknown; source: AdmissionFailureSource } | undefined;
   let committed: SqliteWorkerNativeSettlementOwner["committed"];
+  let nativeReceipt: NativeCommitReceipt | undefined;
   let settlement: SqliteWorkerNativeSettlement | undefined;
   let databaseAuthority:
     | {
@@ -137,14 +174,35 @@ export function createSqliteWorkerOperationAdmission(
       cleanupFailures.push(error);
     }
   };
-  const installCommitted = (receipt: { facts: unknown }) => {
-    if (committed && isDeepStrictEqual(committed, receipt)) {
-      return;
+  const invalidProtocol = (
+    kind: "commit receipt" | "native settlement" | "admission request",
+    code: "outcome-unknown" | "unavailable" = "outcome-unknown",
+  ) => {
+    recordFailure(new SqliteWorkerError(`SQLite worker ${kind} is invalid`, code), "protocol");
+  };
+  const installCommitted = (receipt: NativeCommitReceipt): boolean => {
+    if (nativeReceipt) {
+      if (
+        receipt.operationId !== nativeReceipt.operationId ||
+        (receipt.sequence === nativeReceipt.sequence && !isDeepStrictEqual(nativeReceipt, receipt))
+      ) {
+        invalidProtocol("commit receipt");
+        return false;
+      }
+      if (receipt.sequence <= nativeReceipt.sequence) {
+        return true;
+      }
     }
-    committed = receipt;
+    if (settlement) {
+      invalidProtocol("commit receipt");
+      return false;
+    }
+    nativeReceipt = receipt;
+    const publication = { facts: receipt.facts };
+    committed = publication;
     observingCommit = true;
     try {
-      inOwnerContext(() => observeCommit?.(receipt));
+      inOwnerContext(() => observeCommit?.(publication));
     } catch (error) {
       recordFailure(
         Object.assign(
@@ -156,42 +214,38 @@ export function createSqliteWorkerOperationAdmission(
     } finally {
       observingCommit = false;
     }
+    return true;
   };
   const receive = (message: unknown) => {
     started = true;
     if (isRecord(message) && message.kind === "native-commit") {
-      if (
-        !isRecord(message.committed) ||
-        (settlement && !isDeepStrictEqual(committed, { facts: message.committed.facts }))
-      ) {
-        recordFailure(
-          new SqliteWorkerError("SQLite worker commit receipt is invalid", "outcome-unknown"),
-          "protocol",
-        );
+      const receipt = readNativeCommitReceipt(message.committed);
+      if (!receipt) {
+        invalidProtocol("commit receipt");
         return;
       }
-      installCommitted({ facts: message.committed.facts });
+      installCommitted(receipt);
       return;
     }
     if (isRecord(message) && message.kind === "native-settlement") {
       const value = message.settlement;
+      const receipt = isRecord(value) ? readNativeCommitReceipt(value.committed) : undefined;
       if (
         !isRecord(value) ||
         (value.kind !== "completed" && value.kind !== "unknown") ||
-        (value.committed !== undefined && !isRecord(value.committed)) ||
-        settlement ||
-        (committed &&
-          isRecord(value.committed) &&
-          !isDeepStrictEqual(committed, { facts: value.committed.facts }))
+        (value.committed !== undefined && !receipt) ||
+        (nativeReceipt &&
+          (!receipt ||
+            receipt.operationId !== nativeReceipt.operationId ||
+            receipt.sequence < nativeReceipt.sequence)) ||
+        (settlement &&
+          (settlement.kind !== value.kind || !isDeepStrictEqual(nativeReceipt, receipt)))
       ) {
-        recordFailure(
-          new SqliteWorkerError("SQLite worker native settlement is invalid", "outcome-unknown"),
-          "protocol",
-        );
+        invalidProtocol("native settlement");
         return;
       }
-      if (isRecord(value.committed)) {
-        installCommitted({ facts: value.committed.facts });
+      if (receipt && !installCommitted(receipt)) {
+        return;
       }
       settlement = {
         kind: value.kind,
@@ -208,13 +262,32 @@ export function createSqliteWorkerOperationAdmission(
         message.stage !== "transaction" &&
         message.stage !== "commit")
     ) {
-      recordFailure(
-        new SqliteWorkerError("SQLite worker admission request is invalid", "unavailable"),
-        "protocol",
-      );
+      invalidProtocol("admission request", "unavailable");
       return;
     }
     const decision = new Int32Array(message.decision);
+    const expired = () => {
+      if (typeof message.deadlineNs === "bigint" && process.hrtime.bigint() >= message.deadlineNs) {
+        if (Atomics.compareExchange(decision, 0, REQUESTED, TIMED_OUT) === REQUESTED) {
+          Atomics.notify(decision, 0);
+        }
+      }
+      if (Atomics.load(decision, 0) !== TIMED_OUT) {
+        return false;
+      }
+      if (Array.isArray(message.ports)) {
+        for (const port of message.ports) {
+          if (port instanceof MessagePort) {
+            port.close();
+          }
+        }
+      }
+      return true;
+    };
+    if (expired()) {
+      // The worker has abandoned this request; even policy preparation must not run late.
+      return;
+    }
     decisions.add(decision);
     const request: SqliteWorkerAdmissionRequest = { stage: message.stage, facts: message.facts };
     try {
@@ -233,7 +306,7 @@ export function createSqliteWorkerOperationAdmission(
       return;
     }
     const grant = (beforeRelease?: () => void) => {
-      if (closed || Atomics.load(decision, 0) !== REQUESTED) {
+      if (closed || expired() || Atomics.load(decision, 0) !== REQUESTED) {
         return false;
       }
       // Domain admission can reenter owner lifecycle before handing the native writer its grant.
@@ -243,10 +316,13 @@ export function createSqliteWorkerOperationAdmission(
         refuse(decision, error, "authority");
         return false;
       }
-      if (closed || Atomics.load(decision, 0) !== REQUESTED) {
+      if (closed || expired() || Atomics.load(decision, 0) !== REQUESTED) {
         return false;
       }
       beforeRelease?.();
+      if (expired()) {
+        return false;
+      }
       const granted = Atomics.compareExchange(decision, 0, REQUESTED, GRANTED) === REQUESTED;
       if (granted) {
         Atomics.notify(decision, 0);
@@ -411,10 +487,18 @@ export function createSqliteWorkerOperationAdmission(
 export type SqliteWorkerOperationContext = {
   port: MessagePort;
   attachment?: { value: unknown };
-  refusal?: SqliteWorkerError;
+  refusal?: SqliteWorkerError | InstanceType<typeof SqliteWorkerAdmissionTimeoutError>;
   committed?: { facts: unknown };
   settled?: true;
+  sourceReservations?: true;
+  pendingReceipts?: Map<DatabaseSync, number>;
 };
+
+// Private wire identity follows the native operation across transformed module copies.
+const nativeCommitReceipts = resolveGlobalSingleton(
+  Symbol.for("openclaw.sqliteWorkerNativeCommitReceipts"),
+  () => new WeakMap<SqliteWorkerOperationContext, NativeCommitReceipt>(),
+);
 
 type WorkerAdmissionScope = {
   // Published SDK request helpers share these port/active carrier fields.
@@ -443,7 +527,11 @@ export function withSqliteWorkerOperationAdmission<T>(
 }
 
 /** Record facts only after the real transaction commits, before native settlement is announced. */
-export function deferSqliteWorkerCommitReceipt(database: DatabaseSync, facts: unknown): void {
+export function deferSqliteWorkerCommitReceipt(
+  database: DatabaseSync,
+  facts: unknown,
+  delivery: "commit" | "settlement" = "commit",
+): void {
   const scope = currentAdmission.getStore();
   if (!scope?.active) {
     throw new SqliteWorkerError("SQLite receipt requires its retained admission", "unavailable");
@@ -455,13 +543,54 @@ export function deferSqliteWorkerCommitReceipt(database: DatabaseSync, facts: un
     );
   }
   const captured = structuredClone(facts);
+  const operationId = nativeCommitReceipts.get(scope.owner)?.operationId ?? randomUUID();
+  const counts = scope.owner.sourceReservations
+    ? (scope.owner.pendingReceipts ??= new Map())
+    : undefined;
+  const pending = (delta: number) => {
+    if (!counts) {
+      return;
+    }
+    const count = (counts.get(database) ?? 0) + delta;
+    if (count === 0) {
+      counts.delete(database);
+    } else {
+      counts.set(database, count);
+    }
+  };
   if (
-    !deferSqlitePostCommitPublication(database, () => {
-      scope.owner.committed = { facts: captured };
-      scope.owner.port.postMessage({ kind: "native-commit", committed: scope.owner.committed }, []);
+    !stageSqliteTransactionState(database, {
+      stage: () => pending(1),
+      rollback: () => pending(-1),
+      commit() {
+        pending(-1);
+        const previous = nativeCommitReceipts.get(scope.owner);
+        const receipt: NativeCommitReceipt = {
+          version: 1,
+          operationId: previous?.operationId ?? operationId,
+          sequence: (previous?.sequence ?? 0) + 1,
+          facts: captured,
+        };
+        nativeCommitReceipts.set(scope.owner, receipt);
+        scope.owner.committed = { facts: captured };
+        if (delivery === "commit") {
+          scope.owner.port.postMessage({ kind: "native-commit", committed: receipt }, []);
+        }
+      },
     })
   ) {
     throw new Error("SQLite worker receipt requires a transaction publication owner");
+  }
+}
+
+/** A typed fenced write cannot commit without its destination owner's settlement evidence. */
+export function assertSqliteWorkerCommitReceiptPending(database: DatabaseSync): void {
+  const scope = currentAdmission.getStore();
+  if (!scope?.active || !scope.owner.pendingReceipts?.get(database)) {
+    throw new SqliteWorkerError(
+      "SQLite source fence requires a destination commit receipt",
+      "closed",
+    );
   }
 }
 
@@ -474,10 +603,11 @@ export function settleSqliteWorkerOperationContext(
     return;
   }
   owner.settled = true;
+  const committed = nativeCommitReceipts.get(owner);
   owner.port.postMessage(
     {
       kind: "native-settlement",
-      settlement: { kind, ...(owner.committed ? { committed: owner.committed } : {}) },
+      settlement: { kind, ...(committed ? { committed } : {}) },
     },
     [],
   );
@@ -492,23 +622,64 @@ export function requestSqliteWorkerOperationAdmission(
   if (!scope?.active) {
     throw new SqliteWorkerError("SQLite operation requires its retained admission", "unavailable");
   }
+  if (scope.owner.sourceReservations) {
+    throw new SqliteWorkerError("SQLite source reservations prohibit host admission", "closed");
+  }
   const decision = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
   const startedAt = Date.now();
-  scope.port.postMessage({ ...request, decision: decision.buffer }, transferList);
-  // Host scheduling delay does not revoke the retained owner's authority. The
-  // broker keeps this port through settlement and joins worker exit on failure;
-  // only the live host owner can grant or refuse the pending request.
+  const deadlineNs =
+    request.deadlineMs === undefined
+      ? undefined
+      : process.hrtime.bigint() + BigInt(request.deadlineMs) * 1_000_000n;
+  scope.port.postMessage(
+    {
+      ...request,
+      decision: decision.buffer,
+      deadlineNs,
+      ports: transferList.filter((value) => value instanceof MessagePort),
+    },
+    transferList,
+  );
+  // Without an explicit deadline, host scheduling delay does not revoke the
+  // retained owner's authority. A timeout revokes this request, never grants
+  // authority; settlement still joins native rollback before custody release.
   while (Atomics.load(decision, 0) === REQUESTED) {
-    Atomics.wait(decision, 0, REQUESTED);
+    const remainingMs =
+      deadlineNs === undefined ? undefined : Number(deadlineNs - process.hrtime.bigint()) / 1e6;
+    if (remainingMs !== undefined && remainingMs <= 0) {
+      Atomics.compareExchange(decision, 0, REQUESTED, TIMED_OUT);
+    } else {
+      Atomics.wait(decision, 0, REQUESTED, remainingMs);
+    }
   }
   const timing = currentSqliteOperationTiming();
   if (timing) {
     timing.hostAdmissionWaitMs += Date.now() - startedAt;
   }
   if (Atomics.load(decision, 0) !== GRANTED) {
-    const refusal = new SqliteWorkerError("SQLite transaction admission was refused", "closed");
+    const refusal =
+      Atomics.load(decision, 0) === TIMED_OUT
+        ? new SqliteWorkerAdmissionTimeoutError()
+        : new SqliteWorkerError("SQLite transaction admission was refused", "closed");
     scope.owner.refusal = refusal;
     throw refusal;
+  }
+}
+
+/** A native waiter may block MAIN; this interval must complete without host messages. */
+export function withSqliteWorkerSourceReservations<T>(operation: () => T): T {
+  const scope = currentAdmission.getStore();
+  if (!scope?.active || scope.owner.sourceReservations) {
+    throw new SqliteWorkerError(
+      "SQLite source fence requires exclusive operation custody",
+      "closed",
+    );
+  }
+  scope.owner.sourceReservations = true;
+  try {
+    return operation();
+  } finally {
+    delete scope.owner.sourceReservations;
   }
 }
 
