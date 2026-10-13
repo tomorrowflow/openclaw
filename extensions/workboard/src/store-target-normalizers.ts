@@ -25,6 +25,7 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
     const askedAt = resolveOptionalIntegerOption(value.askedAt, { min: 0 });
     const reviewFrom = resolveOptionalIntegerOption(value.reviewFrom, { min: 0 });
     const slotWaitNotedAt = resolveOptionalIntegerOption(value.slotWaitNotedAt, { min: 0 });
+    const escalatedAt = resolveOptionalIntegerOption(value.escalatedAt, { min: 0 });
     return askedAt === undefined
       ? undefined
       : {
@@ -32,6 +33,7 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
           askedAt,
           ...(reviewFrom !== undefined ? { reviewFrom } : {}),
           ...(slotWaitNotedAt !== undefined ? { slotWaitNotedAt } : {}),
+          ...(escalatedAt !== undefined ? { escalatedAt } : {}),
         };
   }
   if (value.phase !== "imported" && value.phase !== "published") {

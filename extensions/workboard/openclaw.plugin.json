@@ -112,6 +112,7 @@
       "workboard_dispatch",
       "workboard_release",
       "workboard_comment",
+      "workboard_escalate",
       "workboard_proof",
       "workboard_worker_log",
       "workboard_protocol_violation",
@@ -213,6 +214,9 @@
       "optional": true
     },
     "workboard_comment": {
+      "optional": true
+    },
+    "workboard_escalate": {
       "optional": true
     },
     "workboard_proof": {
