@@ -199,6 +199,33 @@ describe("Workboard node ticket lifecycle", () => {
     expect(settled?.metadata?.automation?.target?.worktree?.handoff?.phase).toBe("pending");
   });
 
+  it("keeps a blocked node ticket's attempt blocked when the sweep later sees its session end", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: true, messages: [{ role: "assistant", content: "All done!" }] },
+      context: { runId, sessionKey },
+      readSessions: endedSession(),
+    });
+    expect((await store.get(card.id))?.metadata?.attempts?.at(-1)?.status).toBe("blocked");
+
+    await runSessionSweep({
+      store,
+      sessions: [
+        { key: sessionKey, status: "done", hasActiveRun: false, updatedAt: Date.now() + 20_000 },
+      ],
+    });
+
+    const swept = await store.get(card.id);
+    expect(swept?.status).toBe("blocked");
+    expect(swept?.metadata?.attempts?.at(-1)).toMatchObject({
+      runId,
+      status: "blocked",
+      error: expect.stringMatching(/workboard-report/),
+    });
+  });
+
   it("leaves a finished node ticket running when only the sweep saw it end", async () => {
     const store = createWorkboardSqliteTestStore();
     const { card, sessionKey } = await startNodeCard(store);
