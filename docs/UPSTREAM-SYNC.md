@@ -444,7 +444,7 @@ sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$(id -u openclaw) \
 - **"extension entry escapes package directory"** — the build was run without
   `OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1`. Rebuild and redeploy.
 - **"plugin not found: \<name\>"** — if the name is a bundled extension
-  (signal, excalidraw, etc.), the build or install is broken. If the name is
+  (signal, memory-lancedb, etc.), the build or install is broken. If the name is
   an external MCP service (dav, planka, lightrag), these are no longer plugins —
   they live in `mcp.servers` now. Remove stale references from `plugins.allow`,
   `plugins.entries`, and `plugins.slots`, then verify the service is configured
