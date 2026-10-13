@@ -213,26 +213,6 @@ export async function syncWorkboardAgentEnded(params: {
     sessionKey: params.context.sessionKey,
     runId: params.event.runId ?? params.context.runId,
   };
-  // Node tickets report through their final message, not Workboard tools.
-  // Map the report first: a block holds, and a done report leaves the card
-  // running with a pending handoff that only the bundle import moves to review.
-  let nodeTicket = false;
-  for (const card of await params.store.list()) {
-    if (
-      card.status === "running" &&
-      !card.metadata?.archivedAt &&
-      nodeTicketTarget(card) &&
-      workboardCardMatchesLifecycleLink(card, source)
-    ) {
-      nodeTicket = true;
-      await applyNodeTicketReport({
-        store: params.store,
-        card,
-        messages: params.event.messages ?? [],
-        success: params.event.success,
-      });
-    }
-  }
   // An attempt can finish before fallback settles, even with success=true.
   // Only the session owner can establish the run's terminal outcome.
   const snapshot = await params.readSessions({
@@ -242,36 +222,59 @@ export async function syncWorkboardAgentEnded(params: {
       : {}),
   });
   const session = snapshot.sessions.find((entry) => entry.key === params.context.sessionKey);
-  if (!session) {
-    return 0;
+  const observation = session ? lifecycleFromSession(session, now) : undefined;
+  const terminal = observation?.state === "succeeded" || observation?.state === "failed";
+  const linked = (await params.store.list()).filter(
+    (card) => !card.metadata?.archivedAt && workboardCardMatchesLifecycleLink(card, source),
+  );
+  // Node tickets report through their final message, not Workboard tools: a
+  // block holds, and a done report leaves the card running with a pending
+  // handoff that only the bundle import moves to review. The report exists
+  // only in this message, so a successful attempt maps it even before the
+  // session settles; a failed one waits while fallback may still continue.
+  let nodeTicket = false;
+  for (const card of linked) {
+    if (card.status === "running" && nodeTicketTarget(card)) {
+      nodeTicket = true;
+      if (terminal || params.event.success) {
+        await applyNodeTicketReport({
+          store: params.store,
+          card,
+          messages: params.event.messages ?? [],
+          success: params.event.success,
+        });
+      }
+    }
   }
-  const observation = lifecycleFromSession(session, now);
-  if (observation.state !== "succeeded" && observation.state !== "failed") {
-    return 0;
+  let count = 0;
+  let cards: readonly WorkboardCard[] = linked;
+  if (observation && terminal) {
+    const synced = await syncWorkboardLifecycleEvent({
+      store: params.store,
+      source,
+      // A node ticket's report already settled its card. Dating the observation
+      // at this hook, before the report's writes, keeps it from overriding them.
+      observation: nodeTicket
+        ? {
+            ...observation,
+            state: observation.state === "succeeded" ? "idle" : observation.state,
+            sourceUpdatedAt: now,
+          }
+        : observation,
+      now,
+      ...(params.onMatched ? { onMatched: params.onMatched } : {}),
+    });
+    count = synced.count;
+    cards = synced.cards;
   }
-  const synced = await syncWorkboardLifecycleEvent({
-    store: params.store,
-    source,
-    // A node ticket's report already settled its card. Dating the observation
-    // at this hook, before the report's writes, keeps it from overriding them.
-    observation: nodeTicket
-      ? {
-          ...observation,
-          state: observation.state === "succeeded" ? "idle" : observation.state,
-          sourceUpdatedAt: now,
-        }
-      : observation,
-    now,
-    ...(params.onMatched ? { onMatched: params.onMatched } : {}),
-  });
-  // After the lifecycle write, which gives a session-linked attempt its run id.
+  // After any lifecycle write, which gives a session-linked attempt its run id.
   const contextTokens = turnEndContextTokens(params.event.messages ?? []);
   if (source.runId && contextTokens !== undefined) {
-    for (const card of synced.cards) {
+    for (const card of cards) {
       await params.store.recordAttemptContext(card.id, source.runId, contextTokens);
     }
   }
-  return synced.count;
+  return count;
 }
 
 /**

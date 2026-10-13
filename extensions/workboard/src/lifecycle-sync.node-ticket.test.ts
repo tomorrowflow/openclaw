@@ -164,6 +164,41 @@ describe("Workboard node ticket lifecycle", () => {
     expect(projectWorkboardTrust([stored!], "default", Date.now()).total.blocked).toBe(0);
   });
 
+  it("waits through a failed attempt while fallback continues, then maps the final report", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    const stillRunning = async () => ({
+      sessions: [{ key: sessionKey, status: "running" as const, hasActiveRun: true }],
+      complete: true,
+    });
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: false, messages: [] },
+      context: { runId, sessionKey },
+      readSessions: stillRunning,
+    });
+    expect((await store.get(card.id))?.status).toBe("running");
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: {
+        runId,
+        success: true,
+        messages: report({
+          outcome: "done",
+          summary: "Fixed",
+          proof: [{ command: "pytest", status: "passed" }],
+        }),
+      },
+      context: { runId, sessionKey },
+      readSessions: stillRunning,
+    });
+    const settled = await store.get(card.id);
+    expect(settled?.status).toBe("running");
+    expect(settled?.metadata?.automation?.target?.worktree?.handoff?.phase).toBe("pending");
+  });
+
   it("leaves a finished node ticket running when only the sweep saw it end", async () => {
     const store = createWorkboardSqliteTestStore();
     const { card, sessionKey } = await startNodeCard(store);
