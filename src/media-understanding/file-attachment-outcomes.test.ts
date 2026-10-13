@@ -127,11 +127,14 @@ describe("renderFileAttachmentOutcome", () => {
 
   it("accepts normalized staged paths but rejects workspace traversal", () => {
     const outcome = { kind: "unsupported-format" as const, mime: "application/msword" };
-    expect(
-      renderFileAttachmentOutcome(outcome, {
-        selfServeLocalPath: "media/inbound/report.doc",
-      }),
-    ).toContain("media/inbound/report.doc");
+    const staged = renderFileAttachmentOutcome(outcome, {
+      selfServeLocalPath: "media/inbound/report.doc",
+    });
+    expect(staged).toContain("media/inbound/report.doc");
+    // Sandboxed host file tools and container exec share only the relative form.
+    expect(staged).toContain(
+      "The approved workspace-relative file path follows as external attachment metadata; pass it to your tools unchanged, without prefixing a host or container directory.",
+    );
     expect(
       renderFileAttachmentOutcome(outcome, {
         selfServeLocalPath: "media/inbound/../secrets.txt",

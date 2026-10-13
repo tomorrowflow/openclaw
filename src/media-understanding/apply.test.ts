@@ -1350,7 +1350,7 @@ describe("applyMediaUnderstanding", () => {
     const stagedPath = "media/inbound/sandboxed.doc";
     result.enableLocalPathSelfServe?.([ctx], new Map([[0, stagedPath]]));
 
-    expect(ctx.Body).toContain("approved local file path");
+    expect(ctx.Body).toContain("approved workspace-relative file path");
     expect(ctx.Body).toContain(stagedPath);
     expect(ctx.Body).not.toContain(filePath);
     expect(ctx.Body).not.toContain("PDF and plain-text attachments can be read");

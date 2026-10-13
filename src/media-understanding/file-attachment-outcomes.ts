@@ -92,11 +92,15 @@ const POSIX_ABSOLUTE_PATH = /^\//;
 const WINDOWS_ABSOLUTE_PATH = /^[A-Za-z]:\\/;
 const MARKER_PATH_SAFE = /^[\p{L}\p{M}\p{N} /\\:._-]+$/u;
 
+function isAbsoluteMarkerPath(value: string): boolean {
+  return POSIX_ABSOLUTE_PATH.test(value) || WINDOWS_ABSOLUTE_PATH.test(value);
+}
+
 function markerSafeLocalPath(value?: string, allowWorkspaceRelative = false): string | undefined {
   if (!value || value.length > MARKER_LOCAL_PATH_MAX_CHARS) {
     return undefined;
   }
-  const isAbsolute = POSIX_ABSOLUTE_PATH.test(value) || WINDOWS_ABSOLUTE_PATH.test(value);
+  const isAbsolute = isAbsoluteMarkerPath(value);
   if (
     !isAbsolute &&
     (!allowWorkspaceRelative ||
@@ -155,11 +159,18 @@ export function renderFileAttachmentOutcome(
       const formatHint = outcome.mime?.startsWith("application/vnd.openxmlformats-officedocument")
         ? " (this Office file is a zip archive containing XML)"
         : "";
+      // Sandboxed runs get a workspace-relative staged path: host file tools and
+      // container exec resolve different roots, and only the relative form is
+      // valid in both. Unlabeled, models prefix a host or container directory.
+      const pathClause =
+        localPath && !isAbsoluteMarkerPath(localPath)
+          ? "The approved workspace-relative file path follows as external attachment metadata; pass it to your tools unchanged, without prefixing a host or container directory."
+          : "The approved local file path follows as external attachment metadata.";
       // Wording is deliberate: without the explicit "read it yourself, don't
       // ask the user" directive, models punt back to the sender.
       return localPath
         ? [
-            `[${formatClause} The approved local file path follows as external attachment metadata. Its text is not extracted automatically. Read the file yourself with your tools before answering${formatHint}; do not ask the user to paste the contents.]`,
+            `[${formatClause} ${pathClause} Its text is not extracted automatically. Read the file yourself with your tools before answering${formatHint}; do not ask the user to paste the contents.]`,
             wrapUntrustedAttachmentContent(localPath),
           ].join("")
         : `[${formatClause} PDF and plain-text attachments can be read.]`;
