@@ -266,6 +266,9 @@ function containerEntryToRow(entry: SandboxRegistryEntry, existing?: SandboxRegi
     configHash: entry.configHash ?? existing?.configHash,
     runtimeState: entry.runtimeState ?? existing?.runtimeState,
     workspaceDir: existing?.workspaceDir ?? entry.workspaceDir,
+    // Only container creation knows the mount table; later updates (each reuse
+    // restamps the entry) must keep it, while a recreate records its own.
+    mounts: entry.mounts ?? existing?.mounts,
   };
   return registryEntryToRow({ kind: "container", next });
 }
