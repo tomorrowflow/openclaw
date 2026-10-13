@@ -592,8 +592,8 @@ not listed is at rung a:
 }
 ```
 
-`sampleEvery` (1 to 100, default 3) is kept for the review sample at rung b.
-Saving replaces the whole map; `classRungs: null` or `{}` removes it. Saving
+`sampleEvery` (1 to 100, default 3) sizes the human review sample of PRs an
+agent accepts at rung b (see **Accept** below). Saving replaces the whole map; `classRungs: null` or `{}` removes it. Saving
 refuses more than 50 classes, a name with the `class:` prefix or longer than 34
 characters, a rung other than `a` or `b`, and a `sampleEvery` that is not an
 integer from 1 to 100. Each start, rework, answer, or retry reads the rung from
@@ -651,6 +651,24 @@ report, address the findings, and report them (see **Report** below).
    failure, such as a missing [token](#configuration), blocks the card with
    the reason; move it to `done` again to retry. Archive a card instead of
    moving it to `done` to close it without a PR.
+   **Agent acceptance at rung b:** an agent's Workboard tools (every one that
+   can set `done`, such as `workboard_move`, `workboard_release` with a
+   status, and `workboard_complete`) can move an imported ticket to `done` only when the
+   card's class is at rung b on the board at that moment, the round itself
+   ran at rung b, and an agent posted `Verdict: accept` or
+   `Verdict: rework: <finding>` since the import. Otherwise the move fails and
+   names the next step: at rung a, post the verdict and let the operator
+   decide. The move records `decidedBy` on the imported handoff; any later
+   move to done by the operator, such as a retry after a failed publish,
+   clears it. An agent's accept verdict also picks the review sample: every
+   ticket that went through a rework round, and 1 in `sampleEvery` of the
+   others, chosen from the card id, so the same card always gets the same
+   answer. Its PR opens ready for review instead of as a draft, and the body
+   says `Sampled for human review` or `Not sampled for human review`. The PR
+   body and a rework round's PR comment also carry the round's
+   `Standards review: <counts>` line. An agent move with a rework verdict
+   publishes a draft, the step before reopening the ticket for rework. A
+   reused PR is not marked ready; its rework comment carries the sample line.
 5. **Rework:** to address review feedback, add a comment with the feedback,
    then move the published card back to `todo`. The move starts the rework
    round on its own; `workboard.cards.start` is not needed. Add the comment
@@ -733,7 +751,16 @@ worktree's `reviews` (the last 20 rounds). A round agrees when the verdict was
 `verdictAgreedRounds` per round, `verdictCards` and `verdictAgreedCards` for
 tickets whose every round had a verdict and every verdict agreed, and
 `verdictMissed` rounds, which count in neither rate. A round accepted and then
-reopened later counts as reworked once its rework round starts.
+reopened later counts as reworked once its rework round starts. These counts
+cover only rounds the operator moved to `done`.
+
+**Agent acceptance:** rounds an agent accepted at rung b record
+`decidedBy: "agent"` and `sampled` in `reviews`. The counts report
+`agentAccepts`, `reworkedAccepts` (accepted, then reopened for rework: a
+person disagreed), `sampledRounds`, and `sampledAgreed` (sampled and never
+reworked). Whether a person merged an unsampled PR without reading it needs
+GitHub state that the projection does not have. On a one-board projection
+(`boardId` set), each class row carries the board's `rung` for that class.
 
 Node tickets share one pool instead of their owner's single slot: up to
 `nodeTickets.maxConcurrent` (default 2) run at once across all nodes, even for

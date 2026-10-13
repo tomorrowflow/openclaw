@@ -29,6 +29,10 @@ function trustResult(accepted: number, autonomous: number): WorkboardTrustResult
     verdictCards: 0,
     verdictAgreedCards: 0,
     verdictMissed: 0,
+    agentAccepts: 0,
+    reworkedAccepts: 0,
+    sampledRounds: 0,
+    sampledAgreed: 0,
     contextMeasured: 4,
     smartZoneBreaches: 1,
   };
