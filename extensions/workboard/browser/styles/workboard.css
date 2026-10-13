@@ -2698,7 +2698,8 @@
 
 .workboard-card__priority,
 .workboard-agent-chip,
-.workboard-card__archived {
+.workboard-card__archived,
+.workboard-card__queued {
   display: inline-flex;
   align-items: center;
   min-height: 20px;
@@ -2713,6 +2714,16 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.workboard-card__queued {
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.workboard-card__queued svg {
+  width: 12px;
+  height: 12px;
 }
 
 .workboard-card__priority {

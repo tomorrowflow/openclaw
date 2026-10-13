@@ -6,6 +6,7 @@ import { t } from "../../i18n/index.ts";
 import { formatUiExternalText } from "../../lib/format-error.ts";
 import { formatDurationCompact } from "../../lib/format.ts";
 import { selectCardAlert, type CardAlert } from "../../lib/workboard/card-alerts.ts";
+import { isWorkboardStartQueued } from "../../lib/workboard/execution.ts";
 import type { WorkboardCard, WorkboardLifecycle } from "../../lib/workboard/index.ts";
 import { cardAgentLabel } from "./agent-filter.ts";
 import { cardRelativeTime } from "./view-card-time.ts";
@@ -179,8 +180,17 @@ function labelOverflowRef(labels: readonly string[]) {
   };
 }
 
+/** Queued starts show on the tile itself; the start button only appears on hover. */
+export function renderCardQueued(card: WorkboardCard) {
+  return isWorkboardStartQueued(card)
+    ? html`<span class="workboard-card__queued" title=${t("workboard.startQueuedHelp")}
+        >${icons.hourglass}${t("workboard.startQueued")}</span
+      >`
+    : nothing;
+}
+
 export function renderCardMeta(card: WorkboardCard, archived: boolean) {
-  if (!card.labels.length && !archived) {
+  if (!card.labels.length && !archived && !isWorkboardStartQueued(card)) {
     return nothing;
   }
   return html`<div class="workboard-card__meta">
@@ -199,6 +209,7 @@ export function renderCardMeta(card: WorkboardCard, archived: boolean) {
           </div>`
         : nothing
     }
+    ${renderCardQueued(card)}
     ${
       archived
         ? html`<span class="workboard-card__archived">${t("workboard.archived")}</span>`

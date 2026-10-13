@@ -228,7 +228,15 @@ describe("Workboard card execution actions", () => {
     expect(props.onOpenSession).not.toHaveBeenCalled();
     expect(state.cards[0]?.metadata?.automation?.startRequest).toEqual({ requestedAt: 2 });
     expect(start().textContent?.trim()).toBe("Queued");
-    expect(start().disabled).toBe(true);
+    // Run and Open in an engine would race the queued start too.
+    const controls = [...container.querySelectorAll<HTMLButtonElement>(".workboard-card__start")];
+    expect(controls.map((button) => button.className)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("workboard-card__start--manual"),
+        expect.stringMatching(/workboard-card__start--autonomous(?!.*--default)/),
+      ]),
+    );
+    expect(controls.filter((button) => !button.disabled)).toEqual([]);
   });
 });
 

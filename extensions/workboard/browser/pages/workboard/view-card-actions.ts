@@ -301,7 +301,8 @@ export function renderStartExecutionButton(
   const busy = state.busyCardIds.has(card.id) || state.dispatching;
   const runtimeBlock = engineBlockedByRuntime(props, card, engine);
   const engineName = engine === "codex" ? t("workboard.engineOpenAI") : t("workboard.engineClaude");
-  const queued = !engine && mode === "autonomous" && isWorkboardStartQueued(card);
+  // A queued card's later autonomous start would collide with any other start or session.
+  const queued = isWorkboardStartQueued(card);
   const disabled =
     busy ||
     queued ||
@@ -344,7 +345,7 @@ export function renderStartExecutionButton(
       ${
         engine
           ? html`<span>${engineName}</span>`
-          : queued
+          : queued && mode === "autonomous"
             ? html`${icons.hourglass}<span>${t("workboard.startQueued")}</span>`
             : html`${mode === "autonomous" ? icons.play : icons.penLine}<span
                   >${restart ? t("workboard.restart") : t("workboard.start")}</span
