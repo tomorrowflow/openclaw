@@ -41,6 +41,12 @@ function percent(part: number, whole: number): string {
   return whole > 0 ? `${Math.round((part / whole) * 100)}%` : "–";
 }
 
+const compactTokens = new Intl.NumberFormat(undefined, { notation: "compact" });
+
+function tokens(count: number | undefined): string {
+  return count === undefined ? "–" : compactTokens.format(count);
+}
+
 function weekLabel(weekStart: number): string {
   return new Date(weekStart).toLocaleDateString(undefined, {
     month: "short",
@@ -63,6 +69,8 @@ function renderTrustDetails(result: WorkboardTrustResult) {
           <th scope="col">${t("workboard.trustWeek")}</th>
           <th scope="col">${t("workboard.trustAutonomous")}</th>
           <th scope="col">${t("workboard.trustLeadTime")}</th>
+          <th scope="col">${t("workboard.trustReviewWait")}</th>
+          <th scope="col">${t("workboard.trustRunContext")}</th>
         </tr>
       </thead>
       <tbody>
@@ -90,6 +98,8 @@ function renderTrustDetails(result: WorkboardTrustResult) {
                 >
               </td>
               <td>${formatDurationCompact(week.medianLeadTimeMs) ?? "–"}</td>
+              <td>${formatDurationCompact(week.medianReviewWaitMs) ?? "–"}</td>
+              <td>${tokens(week.medianContextTokens)}</td>
             </tr>
           `,
         )}
@@ -106,6 +116,9 @@ function renderTrustDetails(result: WorkboardTrustResult) {
           <th scope="col">${t("workboard.trustCleanAccept")}</th>
           <th scope="col">${t("workboard.trustFirstPass")}</th>
           <th scope="col">${t("workboard.trustRework")}</th>
+          <th scope="col">
+            ${t("workboard.trustOverZone", { tokens: tokens(result.smartZoneTokens) })}
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -117,6 +130,16 @@ function renderTrustDetails(result: WorkboardTrustResult) {
               <td>${percent(entry.cleanAccepted, entry.accepted)}</td>
               <td>${percent(entry.firstPass, entry.tickets)}</td>
               <td>${entry.reworkRounds}</td>
+              <td>
+                ${
+                  entry.contextMeasured > 0
+                    ? t("workboard.trustOfRuns", {
+                        breaches: String(entry.smartZoneBreaches),
+                        runs: String(entry.contextMeasured),
+                      })
+                    : "–"
+                }
+              </td>
             </tr>
           `,
         )}
