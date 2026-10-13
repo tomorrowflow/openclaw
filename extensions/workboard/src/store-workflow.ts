@@ -408,7 +408,8 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
    * Adds a Workboard notice to a published node ticket (D56), or one waiting
    * with questions, in the same write that moves the handoff's review cutoff
    * past it, so the notice is never mistaken for the review comment or answer
-   * that starts the next round.
+   * that starts the next round. A notice already posted this round only
+   * applies its status again, so repeated moves do not stack copies.
    */
   async addNodeTicketNotice(
     id: string,
@@ -434,6 +435,15 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
             !input.applies(card)
           ) {
             return undefined;
+          }
+          const roundStart = handoff.phase === "questions" ? handoff.askedAt : handoff.publishedAt;
+          const posted = card.metadata?.comments?.some(
+            (comment) => comment.createdAt > roundStart && comment.body === input.body,
+          );
+          if (posted) {
+            return input.status && card.status !== input.status
+              ? { status: input.status }
+              : undefined;
           }
           const now = Date.now();
           return {

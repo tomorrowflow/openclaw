@@ -486,21 +486,24 @@ describe("node ticket questions", () => {
     const { store, card, handoffs, warn } = await finishNodeTicket({ messages: questionsReport });
     await handoffs.resume(warn);
 
-    await store.move(card.id, "done", undefined);
-    await handoffs.resume(warn);
-    const refused = await store.get(card.id);
-    expect(refused?.status).toBe("review");
-    expect(refused?.metadata?.comments?.at(-1)?.body).toMatch(
-      /^This ticket stopped with open questions/,
-    );
+    const bodies = async () =>
+      ((await store.get(card.id))?.metadata?.comments ?? []).map((comment) => comment.body);
+    for (const attempt of [1, 2]) {
+      await store.move(card.id, "done", undefined);
+      await handoffs.resume(warn);
+      expect((await store.get(card.id))?.status, `done move ${attempt}`).toBe("review");
+    }
+    const refusals = (await bodies()).filter((body) => body.startsWith("This ticket stopped"));
+    expect(refusals).toEqual([
+      "This ticket stopped with open questions, so there is nothing to publish yet. Answer them in a comment and move it to todo, or archive the card; its node worktree stays until removed by hand.",
+    ]);
 
-    await store.move(card.id, "todo", undefined);
-    await handoffs.resume(warn);
-    const unanswered = await store.get(card.id);
-    expect(unanswered?.status).toBe("review");
-    expect(unanswered?.metadata?.comments?.at(-1)?.body).toMatch(
-      /^Moved to todo without an answer/,
-    );
+    for (const attempt of [1, 2]) {
+      await store.move(card.id, "todo", undefined);
+      await handoffs.resume(warn);
+      expect((await store.get(card.id))?.status, `todo move ${attempt}`).toBe("review");
+    }
+    expect((await bodies()).filter((body) => body.startsWith("Moved to todo"))).toHaveLength(1);
 
     await store.addComment(card.id, { body: "Raise ValueError." }, undefined, "operator");
     await store.move(card.id, "todo", undefined);
@@ -882,12 +885,12 @@ describe("node ticket draft PR", () => {
       "Reopened without a review comment; add what should change and move it to todo again to start rework round 1.";
     expect(bounced?.metadata?.comments?.filter((comment) => comment.body === note)).toHaveLength(1);
 
-    // The note itself never counts as the review comment.
+    // The note itself never counts as the review comment, and it is posted once per round.
     await store.move(card.id, "todo", undefined);
     await handoffs.resume(warn);
     const again = await store.get(card.id);
     expect(again?.status).toBe("backlog");
-    expect(again?.metadata?.comments?.filter((comment) => comment.body === note)).toHaveLength(2);
+    expect(again?.metadata?.comments?.filter((comment) => comment.body === note)).toHaveLength(1);
     // A scheduled dispatch pass never starts a reopen that lacks review feedback either.
     await store.move(card.id, "ready", undefined);
     const scheduled = await dispatchAndStartWorkboardCards({

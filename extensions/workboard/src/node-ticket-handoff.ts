@@ -455,7 +455,7 @@ async function drainStartQueue(params: {
   );
 }
 
-/** A ticket moved to done while it waits with questions has no commits to publish. */
+/** A ticket moved to done while it waits with questions has nothing to publish yet. */
 function unansweredDone(card: WorkboardCard): string | undefined {
   const worktree = nodeTicketTarget(card)?.worktree;
   return card.status === "done" &&
@@ -518,7 +518,7 @@ export function createNodeTicketHandoffs(params: {
             await params.store.addNodeTicketNotice(card.id, {
               worktreePath: unanswered,
               status: "review",
-              body: "This ticket stopped with open questions and has no commits to publish. Answer them in a comment and move it to todo, or archive the card; its node worktree stays until removed by hand.",
+              body: "This ticket stopped with open questions, so there is nothing to publish yet. Answer them in a comment and move it to todo, or archive the card; its node worktree stays until removed by hand.",
               applies: (current) => unansweredDone(current) === unanswered,
             });
           }
