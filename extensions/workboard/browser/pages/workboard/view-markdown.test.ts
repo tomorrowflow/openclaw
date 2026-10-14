@@ -11,6 +11,7 @@ import type { WorkboardCard } from "../../lib/workboard/types.ts";
 import { workboardTestHost } from "../../test/host.setup.ts";
 import { waitForFast } from "../../test/wait-for.ts";
 import { renderCardDetailsPanel } from "./view-card-details.ts";
+import { renderColumn } from "./view-card.ts";
 
 function renderDetails(card: WorkboardCard) {
   const host = {};
@@ -71,3 +72,39 @@ it("renders notes and comments as host Markdown and follows note links without e
   );
   expect(textarea.value).toBe(card.notes);
 });
+
+it.each(["page", "widget"] as const)(
+  "previews notes on the %s card face without making them interactive",
+  (surface) => {
+    const card = createWorkboardCard({ status: "ready", notes: "**Ship** the [brief](#b)" });
+    const host = {};
+    const state = getWorkboardState(host);
+    state.loaded = true;
+    state.cards = [card];
+    const container = document.createElement("div");
+    document.body.append(container);
+    onTestFinished(() => {
+      render(nothing, container);
+      container.remove();
+    });
+    workboardTestHost().connection.connected = true;
+    const props = {
+      host,
+      client: createWorkboardTestClient({}),
+      connected: true,
+      canWrite: true,
+      agentsList: null,
+      sessions: [],
+      onOpenSession: vi.fn(),
+    };
+    render(renderColumn(props, "ready", [card], { surface }), container);
+    const preview = container.querySelector<HTMLElement>(".workboard-card__notes");
+    if (surface === "widget") {
+      expect(preview).toBeNull();
+      return;
+    }
+    expect(preview?.hasAttribute("inert")).toBe(true);
+    expect(preview?.getAttribute("aria-hidden")).toBe("true");
+    expect(preview?.textContent).toContain(card.notes);
+  },
+);

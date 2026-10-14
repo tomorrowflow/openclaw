@@ -1,6 +1,7 @@
 import { html, nothing } from "lit";
 import { ref } from "lit/directives/ref.js";
 import { asDateTimestampMs } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { renderMarkdown } from "../../components/host-components.ts";
 import { icons } from "../../components/icons.ts";
 import { t } from "../../i18n/index.ts";
 import { getCardAlerts, visibleCardAlerts } from "../../lib/workboard/card-alerts.ts";
@@ -336,6 +337,14 @@ function renderCard(props: WorkboardProps, card: WorkboardCard, surface: Workboa
                 <h3 class="workboard-truncate-two" title=${card.title}>${card.title}</h3>
                 <div class="workboard-card__header-actions">${actionsMenu}</div>
               </header>
+              ${
+                card.notes && !widget
+                  ? // A glimpse only: the card stays one button, and the drawer reads the notes.
+                    html`<div class="workboard-card__notes" aria-hidden="true" inert>
+                      ${renderMarkdown(card.notes)}
+                    </div>`
+                  : nothing
+              }
               ${renderCardSession(props, card, lifecycle, sessionStatus)}
               ${renderCardMeta(card, archived)} ${renderCardAlert(alerts, alertDescriptionId)}
               ${renderCardCounts(card)}
