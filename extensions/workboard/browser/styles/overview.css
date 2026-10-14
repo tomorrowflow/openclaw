@@ -1,0 +1,148 @@
+.workboard-overview {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  overflow-y: auto;
+  padding-bottom: var(--space-4);
+}
+
+.workboard-overview__heading h1 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: calc(var(--control-ui-text-lg) * 1.75);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.workboard-overview__counters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--control-ui-text-sm);
+}
+
+.workboard-overview__counters > span {
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+.workboard-overview__bands {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.workboard-overview__band {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.workboard-overview__band h2 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--control-ui-text-md);
+  font-weight: 600;
+}
+
+.workboard-overview__count {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.workboard-overview__rows {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workboard-overview__row {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.workboard-overview__row-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.workboard-overview__title {
+  min-width: 0;
+  color: var(--text-strong);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.workboard-overview__title:hover,
+.workboard-overview__title:focus-visible {
+  text-decoration: underline;
+}
+
+.workboard-overview__tag {
+  flex-shrink: 0;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--bg-hover);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.workboard-overview__board,
+.workboard-overview__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workboard-overview__meta {
+  gap: 0;
+}
+
+.workboard-overview__meta > span + span::before {
+  content: "·";
+  margin-inline: 4px;
+}
+
+.workboard-overview__meta a {
+  color: inherit;
+}
+
+.workboard-overview__empty {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  font-size: var(--control-ui-text-sm);
+}
+
+/* The host leaves pages a 4px gutter at this width; the board page adds the same 12px. */
+@media (max-width: 900px) {
+  .workboard-overview {
+    padding-inline: 12px;
+  }
+}

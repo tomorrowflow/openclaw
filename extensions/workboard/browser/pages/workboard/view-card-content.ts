@@ -105,8 +105,7 @@ function stageText(stage: WorkboardCardStage): string {
 }
 
 /** One line on where the card stands, so the operator need not read its activity. */
-export function renderCardStage(card: WorkboardCard, now: number) {
-  const stage = card.stage;
+export function renderCardStage(stage: WorkboardCardStage | undefined, now: number) {
   if (!stage) {
     return nothing;
   }

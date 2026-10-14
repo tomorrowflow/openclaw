@@ -347,7 +347,7 @@ function renderCard(props: WorkboardProps, card: WorkboardCard, surface: Workboa
                     </div>`
                   : nothing
               }
-              ${renderCardStage(card, now)}
+              ${renderCardStage(card.stage, now)}
               ${renderCardSession(props, card, lifecycle, sessionStatus)}
               ${renderCardMeta(card, archived)} ${renderCardAlert(alerts, alertDescriptionId)}
               ${renderCardCounts(card)}

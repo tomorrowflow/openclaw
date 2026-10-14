@@ -954,3 +954,18 @@ it("saves explicit appearance clearing without sending legacy null values", asyn
     }),
   );
 });
+
+it("opens a card another page asked to reveal once a cold card list has it", async () => {
+  const page = mountPage({ boardId: "default" });
+  const card = createWorkboardCard({ id: "card-revealed", title: "Revealed" });
+  page.workboard.state.revealCardId = card.id;
+  page.cards([card]);
+  page.fixture.notify();
+  expect(page.workboard.state.detailCardId).toBeNull();
+
+  page.fixture.connection.connected = true;
+  page.fixture.notify();
+
+  await vi.waitFor(() => expect(page.workboard.state.detailCardId).toBe(card.id));
+  expect(page.workboard.state.revealCardId).toBeNull();
+});

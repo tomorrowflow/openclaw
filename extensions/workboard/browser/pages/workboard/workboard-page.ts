@@ -37,7 +37,7 @@ import {
   renderBoardModal,
   type BoardDraft,
 } from "./view-board-modal.ts";
-import { getVisibleDetailCard } from "./view-card-details.ts";
+import { getVisibleDetailCard, openCardDetails } from "./view-card-details.ts";
 import {
   workboardErrorMessage,
   type BoardAutomationState,
@@ -225,6 +225,17 @@ export function createWorkboardPage(
         resumeWorkboardLiveRefresh(workboard);
       } else {
         stop();
+      }
+      // Stays pending across a cold start until the card list has the card.
+      const revealed = state.revealCardId
+        ? state.cards.find((card) => card.id === state.revealCardId)
+        : undefined;
+      if (revealed) {
+        state.revealCardId = null;
+        if (!matchesAgentScope(revealed, defaultAgentId, scope)) {
+          host.agents.setScope(null);
+        }
+        openCardDetails(state, revealed);
       }
       const detailCard = getVisibleDetailCard(state);
       const detailJobId = detailCard

@@ -11,6 +11,7 @@ import { workboardPageTarget } from "./pages/workboard/page-target.ts";
 import { createWorkboardSessionAccessory } from "./session-accessory.ts";
 import { createWorkboardWidget } from "./widgets.ts";
 import "./styles/workboard.css";
+import "./styles/overview.css";
 import "./styles/widgets.css";
 import "./styles/session-chip.css";
 
@@ -125,6 +126,22 @@ export default defineControlUiPlugin({
         page: workboardPageTarget(),
         icon: "kanban",
         order: 10,
+      }),
+      host.ui.registerPage({
+        id: "overview",
+        label: t("workboard.overviewTitle"),
+        mount: createLazyWorkboardPage(async () => {
+          const { createOverviewPage } = await import("./pages/overview/overview-page.ts");
+          return createOverviewPage(workboard);
+        }),
+      }),
+      host.ui.registerNavigation({
+        id: "overview",
+        parent: "workboard",
+        label: t("workboard.overviewNav"),
+        page: { id: "overview" },
+        icon: "layoutDashboard",
+        order: 11,
       }),
       host.ui.registerAccessory({
         id: "linked-card",
