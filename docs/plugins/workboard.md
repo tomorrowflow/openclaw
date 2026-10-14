@@ -752,8 +752,9 @@ report, address the findings, and report them (see **Report** below).
    previous publish (the review feedback and the session's summary). If the
    comment fails, the push still counts and the card gets a comment saying so.
    The card records `rework.round`, `rework.outsideCommits`, and the first
-   acceptance (`rework.acceptedAt`) on its node worktree. A card imported but not yet published can't be reworked; accept it
-   first. A branch that is gone from `origin` (merged or closed PR) needs a new
+   acceptance (`rework.acceptedAt`) on its node worktree. A card imported but not yet published can't be reworked: Workboard
+   refuses its move to `todo` or `ready` and it stays in `review`. Move it to
+   `done` first. A branch that is gone from `origin` (merged or closed PR) needs a new
    card.
 6. **Stop and restart:** **Stop** on a running node ticket calls
    `workboard.cards.stop {id, expectedUpdatedAt}`, which records the stop on

@@ -9,7 +9,7 @@ import type {
 } from "@openclaw/workboard-contract";
 import { resolveNonNegativeIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { nodeTicketAcceptance } from "./node-ticket.js";
+import { withImportedNodeTicketMove } from "./node-ticket.js";
 import type { PersistedWorkboardCard } from "./persistence-types.js";
 import { normalizeAutomationPatch, normalizeCardAutomation } from "./store-automation.js";
 import { WorkboardBoardStore } from "./store-boards.js";
@@ -43,7 +43,6 @@ import {
   workboardClassRung,
 } from "./store-constants.js";
 import type {
-  WorkboardAgentActor,
   WorkboardCardPatch,
   WorkboardCommentInput,
   WorkboardLinkInput,
@@ -636,7 +635,17 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
         options,
       );
       next = withoutStaleStartRequest(next, now);
-      next = await this.withNodeTicketAcceptance(existing, next, options.actor);
+      const moved = next;
+      next = await withImportedNodeTicketMove({
+        existing,
+        next: moved,
+        actor: options.actor,
+        classRung: async () =>
+          workboardClassRung(
+            (await this.boardStore.lookup(cardBoardId(moved)))?.board.orchestration,
+            moved.labels,
+          ),
+      });
       next.events = appendEvent(
         next,
         options.event ?? updateEvent(existing, next),
@@ -694,53 +703,6 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       throw new Error(`card not found: ${existing.id}`);
     }
     throw new WorkboardCardConflictError(current);
-  }
-
-  /**
-   * The move to done that accepts an imported node ticket records who
-   * decided. The board's rung for an agent's move is read in this queued
-   * write, so a demotion applies to the next move.
-   */
-  private async withNodeTicketAcceptance(
-    existing: WorkboardCard,
-    next: WorkboardCard,
-    actor: WorkboardAgentActor | undefined,
-  ): Promise<WorkboardCard> {
-    const target = next.metadata?.automation?.target;
-    const worktree = target?.worktree;
-    if (
-      !target ||
-      !worktree ||
-      worktree.handoff?.phase !== "imported" ||
-      next.status !== "done" ||
-      existing.status === "done" ||
-      next.metadata?.archivedAt
-    ) {
-      return next;
-    }
-    const classRung = actor
-      ? workboardClassRung(
-          (await this.boardStore.lookup(cardBoardId(next)))?.board.orchestration,
-          next.labels,
-        )
-      : undefined;
-    const handoff = nodeTicketAcceptance({
-      card: next,
-      worktree,
-      handoff: worktree.handoff,
-      actor,
-      classRung,
-    });
-    return {
-      ...next,
-      metadata: {
-        ...next.metadata,
-        automation: {
-          ...next.metadata?.automation,
-          target: { ...target, worktree: { ...worktree, handoff } },
-        },
-      },
-    };
   }
 
   private async assertActiveStatusAllowed(
