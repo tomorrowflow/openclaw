@@ -1038,6 +1038,39 @@ The template id is stored as card metadata.
 6. Let lifecycle sync move running work into `review`/`blocked`, then manually
    move the card to `done` when accepted.
 
+<a id="factory-overview" />
+
+### Factory overview
+
+**Workboard → Overview** shows the whole factory on one page for an operator
+who does not follow each step. Four bands list the cards across every board:
+
+| Band              | Shows                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Needs you         | Cards waiting on you, oldest first: a review only you may accept (rung a, a plain card in `review`, or a rung b round whose class was demoted since or whose board has no automation job), a PR an agent accepted into the human review sample, [questions](#node-tickets) escalated to you or with no automation job to answer them, and blocked cards. |
+| In flight         | Queued and running cards, and node tickets waiting on an agent (a rung b review or questions the board's automation job takes, or a draft an agent published with a rework verdict before it reopens the ticket), with the node, rework round, and the last run's turn-end context.                                                                      |
+| Shipped this week | Node tickets published and other cards done in the last 7 days, newest first: the PR, review rounds, who accepted it, whether it is in the review sample, and the agent's shadow verdict on a round you accepted.                                                                                                                                        |
+| Insights          | Backlog cards labeled `gardener` or `architecture`, newest first.                                                                                                                                                                                                                                                                                        |
+
+Each row shows the title, the [summary](#card-fields), the
+[status line](#card-stage) with its age, and a reason, label, or details line.
+The title opens the card's details on its board, after the board's cards load.
+The header counts unarchived cards per status and this week's accepted tickets
+from the [trust KPIs](#trust-kpis), which count as `workboard.cards.trust`
+does. Rows and the status counts leave out archived cards and cards on archived
+boards, and an agent's pending verdict never shows. Whether you agreed with a
+shadow verdict shows in the trust KPIs once a later rework round does or does
+not follow. Workboard does not see a PR merge, so a sampled PR stays in
+**Needs you** for 7 days after its publish, read or not.
+
+The page reads `workboard.overview {boardId?}` (`operator.read`) and reloads on
+each `plugin.workboard.changed` event. The method projects the same cached
+operator read as `workboard.cards.list`, so it stores nothing and adds no card
+read of its own. It returns `needsYou`, `inFlight`, `shipped`, and `insights`
+rows (`cardId`, `boardId`, `title`, `summary`, `stage`, plus the band's fields),
+`open` counts per status (`done` excluded), and the current trust KPI `week`.
+Without `boardId` it covers every board, and `boardId` reports as `all`.
+
 ### Session-board widgets
 
 Workboard ships three native widgets for session dashboards (see
@@ -1076,7 +1109,7 @@ read/write scopes as boards:
 
 | Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                 |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.runs`                                                                                                                                                                                                                                                            |
+| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `overview`                                                                                                                                                                                                                                 |
 | `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                    |
 | `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
 | `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                            |
