@@ -3,7 +3,7 @@ import { retainGatewayDeviceRevocation } from "../../gateway/device-revocation.j
 import { runOutsideOperatorToolGatewayAuthority } from "../../gateway/operator-tool-gateway-authority.js";
 import { createAbortError, isAbortError } from "../../infra/abort-signal.js";
 import { enqueueCommandInLane } from "../../process/command-queue.js";
-import { runWithGatewayIndependentRootWorkContinuation } from "../../process/gateway-work-admission.js";
+import { runWithGatewayDetachedWorkContinuation } from "../../process/gateway-work-admission.js";
 import { CommandLane } from "../../process/lanes.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { setSafeTimeout } from "../../utils/timer-delay.js";
@@ -278,9 +278,11 @@ export async function enqueueRun(
   };
   let queuedRun: Promise<unknown>;
   try {
-    // The run outlives the calling agent turn, so it must not write through that turn's transcript lifecycle.
+    // The run outlives the calling agent turn, so it must not write through that
+    // turn's transcript lifecycle or track work in its async work scope, which
+    // closes once the caller returns (a plugin hook's nudge retains nothing).
     queuedRun = runWithoutOwnedSessionTranscriptWrites(() =>
-      runWithGatewayIndependentRootWorkContinuation(async () => {
+      runWithGatewayDetachedWorkContinuation(async () => {
         opts?.commitGuard?.();
         const prepared = await prepareManualRun(state, id, mode, {
           runId,
