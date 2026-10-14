@@ -5,6 +5,7 @@ import {
   normalizeExecution,
   normalizeMetadata,
 } from "./metadata-normalization.ts";
+import { normalizeNodeRounds } from "./node-rounds-normalization.ts";
 import {
   isValidWorkboardBoardId,
   normalizeWorkboardSessionsBoardSpec,
@@ -158,6 +159,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
   const events = normalizeEvents(value.events);
   const metadata = normalizeMetadata(value.metadata);
   const stage = normalizeStage(value.stage);
+  const rounds = normalizeNodeRounds(value.rounds);
   return {
     id,
     title,
@@ -180,6 +182,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
     ...(events.length ? { events } : {}),
     ...(metadata ? { metadata } : {}),
     ...(stage ? { stage } : {}),
+    ...(rounds.length > 0 ? { rounds } : {}),
   };
 }
 

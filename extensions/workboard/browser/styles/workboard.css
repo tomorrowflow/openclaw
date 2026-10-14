@@ -3683,6 +3683,120 @@ workboard-inline-text {
   font-size: 0.74rem;
 }
 
+/* A node ticket round: what its import changed and what its session decided. */
+.workboard-round h4 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+
+.workboard-round__totals {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.workboard-round__files,
+.workboard-round__decisions {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.78rem;
+}
+
+.workboard-round__files li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 56px;
+  align-items: center;
+  gap: 2px 10px;
+}
+
+.workboard-round__files code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workboard-round__counts {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.workboard-round__added {
+  color: var(--ok);
+}
+
+.workboard-round__deleted {
+  margin-left: 4px;
+  color: var(--danger);
+}
+
+.workboard-round__bar {
+  display: inline-flex;
+  block-size: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.workboard-round__bar-added {
+  background: var(--ok);
+}
+
+.workboard-round__bar-deleted {
+  background: var(--danger);
+}
+
+.workboard-round__renamed,
+.workboard-round__more {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.workboard-round__decisions li {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.workboard-round__phase {
+  justify-self: start;
+  max-inline-size: 100%;
+  overflow: hidden;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--border);
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workboard-round__decision {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workboard-round__decision p {
+  margin: 0;
+}
+
+.workboard-round__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
 .workboard-detail__list {
   display: grid;
   gap: 10px;

@@ -434,5 +434,13 @@ export default {
     eventArchived: "Archived",
     eventUnarchived: "Unarchived",
     eventStale: "Stale session",
+    roundFirst: "First run",
+    roundRework: "Rework round {number}",
+    roundDecisions: "Decisions",
+    roundChangedFiles: "Changed files",
+    roundChangeTotals: "{files} files, +{added} −{deleted}",
+    roundMoreFiles: "{count} more files not listed",
+    roundBinary: "binary",
+    roundRenamedFrom: "from {path}",
   },
 };

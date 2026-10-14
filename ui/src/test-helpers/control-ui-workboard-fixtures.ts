@@ -322,6 +322,83 @@ export function buildWorkboardMocks(
       ),
       sessionKey: "global",
     },
+    {
+      ...stateCard("rounds", "Parser crash on empty input", "review", 9000, false),
+      rounds: [
+        {
+          round: 0,
+          decisions: [
+            {
+              ts: "09:12",
+              phase: "plan",
+              decision: "Return [] for empty input instead of raising",
+              why: "every caller iterates the result",
+              evidence: "src/parser.py:41",
+              result: "chosen",
+            },
+            {
+              ts: "09:31",
+              phase: "verify",
+              decision: "Regression test fails before the fix",
+              evidence: "pytest tests/test_parser.py -k empty",
+              result: "red",
+            },
+            {
+              ts: "09:40",
+              phase: "verify",
+              decision: "Full suite passes",
+              evidence: "pytest",
+              result: "142 passed",
+            },
+          ],
+          changes: {
+            from: "4f1c2a9e0b7d",
+            to: "a83e51c07d2f",
+            files: [
+              { path: "src/parser.py", added: 18, deleted: 6 },
+              { path: "tests/test_parser.py", added: 24, deleted: 0 },
+              { path: "docs/parser.md", added: 3, deleted: 1 },
+            ],
+            totals: { files: 3, added: 45, deleted: 7 },
+          },
+        },
+        {
+          round: 1,
+          decisions: [
+            {
+              ts: "14:05",
+              phase: "fix",
+              decision: "Rename the --lenient flag to --strict",
+              why: "review asked for the positive form",
+              evidence: "9c0e4b1",
+              result: "done",
+            },
+            {
+              ts: "14:20",
+              phase: "verify",
+              decision: "CLI help and docs match the new flag",
+              evidence: "openclaw-parse --help",
+              result: "passed",
+            },
+          ],
+          changes: {
+            from: "a83e51c07d2f",
+            to: "9c0e4b1d22aa",
+            files: [
+              {
+                path: "src/cli/flags.py",
+                previousPath: "src/cli/options.py",
+                added: 9,
+                deleted: 9,
+              },
+              { path: "tests/test_cli.py", added: 6, deleted: 2 },
+              { path: "assets/flags.png", binary: true },
+            ],
+            totals: { files: 3, added: 15, deleted: 11 },
+          },
+        },
+      ],
+    },
   ];
   const allCards = matrix
     ? [
