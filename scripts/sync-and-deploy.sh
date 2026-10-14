@@ -776,12 +776,28 @@ wait "$SATELLITES_SRC_PID" || SATELLITE_PROBLEMS="prepare"
 wait "$SATELLITES_PREP_PID" || SATELLITE_PROBLEMS="prepare"
 SATELLITES_SRC_PID="" SATELLITES_PREP_PID=""
 cat "$SATELLITES_SRC_LOG" "$SATELLITES_PREP_LOG"
+# The node profile (Claude settings, skills) is independent of the build;
+# A WARNING line means it applied but a node lacks a tool the profile checks
+# for; it is reported even when another satellite failed.
+PROVISION_RC=0
+PROVISION_OUT=$("$REPO_DIR/scripts/deploy-satellites.sh" provision 2>&1) || PROVISION_RC=$?
+echo "$PROVISION_OUT"
+case "$PROVISION_RC" in
+  0 | 3) ;;
+  *) SATELLITE_PROBLEMS="provision" ;;
+esac
 "$REPO_DIR/scripts/deploy-satellites.sh" activate || SATELLITE_PROBLEMS="${SATELLITE_PROBLEMS:+$SATELLITE_PROBLEMS and }activate"
 [ -z "$SATELLITE_PROBLEMS" ] || SATELLITE_PROBLEMS="$SATELLITE_PROBLEMS failed"
 if [ -n "$SATELLITE_PROBLEMS" ]; then
   oc_openclaw message send --channel "$NOTIFY_CHANNEL" --target "$NOTIFY_TARGET" \
-    --message "⚠ OpenClaw deploy v$NEW_VER: gateway is live, but satellite $SATELLITE_PROBLEMS. Re-run scripts/deploy-satellites.sh prepare && … activate once they are reachable. Logs: $HOME/logs/satellites" \
+    --message "⚠ OpenClaw deploy v$NEW_VER: gateway is live, but satellite $SATELLITE_PROBLEMS. Re-run scripts/deploy-satellites.sh prepare && … activate (or provision) once they are reachable. Logs: $HOME/logs/satellites" \
     2>&1 | tail -3 || echo "  (satellite warning send failed)"
+fi
+if grep -q 'WARNING' <<<"$PROVISION_OUT"; then
+  oc_openclaw message send --channel "$NOTIFY_CHANNEL" --target "$NOTIFY_TARGET" \
+    --message "⚠ OpenClaw deploy v$NEW_VER: factory nodes are missing tools from the node profile:
+$(grep 'WARNING' <<<"$PROVISION_OUT" | sed 's/^\[satellites\] provision //')" \
+    2>&1 | tail -3 || echo "  (satellite tool warning send failed)"
 fi
 
 echo ""

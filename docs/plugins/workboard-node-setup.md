@@ -39,7 +39,9 @@ The steps are the same on every platform; only the service wrapper differs.
    example). Use one token per node so you can revoke a node on its own.
 5. **Claude permission rules** in the user's `~/.claude/settings.json`.
    Ticket turns run `claude -p`, which denies any tool use the rules don't
-   allow ("This command requires approval").
+   allow ("This command requires approval"). That includes reading files
+   outside the worktree: a ticket brief that names skill files under
+   `~/.claude/skills` needs an allow rule such as `Read(~/.claude/skills/**)`.
 6. **Node config** in the user's `openclaw.json`:
 
    ```json5 validate=false

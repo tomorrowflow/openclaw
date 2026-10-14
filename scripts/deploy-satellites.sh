@@ -4,6 +4,7 @@
 #   deploy-satellites.sh prepare-source  build the checked-out commit on source satellites
 #   deploy-satellites.sh prepare         stage the installed build next to each running node
 #   deploy-satellites.sh activate        switch each node to the staged build and restart it
+#   deploy-satellites.sh provision       apply the node profile (Claude settings, skills, tool checks)
 #
 # sync-and-deploy.sh starts `prepare-source` in the background before its own
 # build (source satellites only need the commit), `prepare` once the new build
@@ -12,6 +13,14 @@
 # ahead of its Gateway. Satellites run in parallel within each phase. Failures
 # are per satellite and never fail the Gateway deploy: the script reports them
 # and exits 1, and the caller turns that into a warning.
+#
+# The node profile ($OPENCLAW_NODE_PROFILE_DIR, default
+# ~/.config/openclaw-deploy/node-profile; see its README) is what every node
+# user gets in ~/.claude: `provision` replaces settings.json with
+# claude/settings.<linux|macos>.json and skills/ with claude/skills, then runs
+# the profile's tools.manifest checks as the node user. A failed check installs
+# nothing: the satellite reports a WARNING and the script exits 3 (or 1 if a
+# satellite failed).
 #
 # Satellites are listed one per line in $OPENCLAW_SATELLITES_FILE
 # (default ~/.config/openclaw-deploy/satellites.conf), so adding a node needs no
@@ -37,12 +46,13 @@ set -euo pipefail
 PHASE="${1:-}"
 SATELLITES_FILE="${OPENCLAW_SATELLITES_FILE:-$HOME/.config/openclaw-deploy/satellites.conf}"
 LOG_DIR="${OPENCLAW_SATELLITES_LOG_DIR:-$HOME/logs/satellites}"
+PROFILE_DIR="${OPENCLAW_NODE_PROFILE_DIR:-$HOME/.config/openclaw-deploy/node-profile}"
 NODE_USER=factory
 GLOBAL_ROOT="$(npm root -g)/openclaw"
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10)
 
-[[ "$PHASE" == prepare-source || "$PHASE" == prepare || "$PHASE" == activate ]] || {
-  echo "usage: $(basename "$0") prepare-source|prepare|activate" >&2
+[[ "$PHASE" == prepare-source || "$PHASE" == prepare || "$PHASE" == activate || "$PHASE" == provision ]] || {
+  echo "usage: $(basename "$0") prepare-source|prepare|activate|provision" >&2
   exit 2
 }
 if [[ ! -f "$SATELLITES_FILE" ]]; then
@@ -55,7 +65,10 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FORK_REMOTE_URL="$(git -C "$REPO_DIR" remote get-url origin)"
 # The build identity every satellite must end up on: the commit about to be
 # built for prepare-source, otherwise the installed CLI's short sha.
-if [[ "$PHASE" == prepare-source ]]; then
+if [[ "$PHASE" == provision ]]; then
+  # The profile is independent of the build; a broken global CLI must not block it.
+  SHA=profile
+elif [[ "$PHASE" == prepare-source ]]; then
   SHA=$(git -C "$REPO_DIR" rev-parse HEAD)
 else
   SHA=$(cd /tmp && "$GLOBAL_ROOT/openclaw.mjs" --version | grep -o '([0-9a-f]*)' | tr -d '()')
@@ -233,6 +246,70 @@ activate_one() {
   return 1
 }
 
+# Runs as the node user after the profile tarball landed in its ~/.cache (not a
+# shared /tmp name another user could pre-create); the caller prepends OS.
+# No `exit`: see activate_one.
+read -r -d '' PROVISION_SCRIPT <<'SCRIPT' || true
+PAYLOAD=~/.cache/openclaw-node-profile.tar
+stage=$(mktemp -d)
+tar -xf "$PAYLOAD" -C "$stage"
+rm -f "$PAYLOAD"
+mkdir -p ~/.claude
+new="$stage/claude/settings.$OS.json"
+if [ -f ~/.claude/settings.json ] && ! cmp -s "$new" ~/.claude/settings.json; then
+  cp -p ~/.claude/settings.json ~/.claude/settings.json.bak-"$(date +%Y%m%d%H%M%S)"
+fi
+cp "$new" ~/.claude/settings.json.next
+mv ~/.claude/settings.json.next ~/.claude/settings.json
+rm -rf ~/.claude/skills.next
+cp -R "$stage/claude/skills" ~/.claude/skills.next
+rm -rf ~/.claude/skills
+mv ~/.claude/skills.next ~/.claude/skills
+# Rootless Docker listens on the user socket when no docker context names it.
+if [ -z "${DOCKER_HOST:-}" ] && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/docker.sock" ]; then
+  export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/docker.sock"
+fi
+missing=""
+while IFS='|' read -r tool_os label check; do
+  [ "$tool_os" = "$OS" ] || continue
+  bash -c "$check" </dev/null >/dev/null 2>&1 || missing="$missing, $label"
+done <"$stage/tools.manifest"
+rm -rf "$stage"
+echo "settings.$OS.json, skills: $(ls ~/.claude/skills | tr '\n' ' ')"
+if [ -n "$missing" ]; then
+  echo "missing tools: ${missing#, }"
+fi
+SCRIPT
+
+provision_one() {
+  local name="$1" kind="$2" target="$3" os=linux
+  [[ "$kind" == macos-source ]] && os=macos
+  local pack=(tar -C "$PROFILE_DIR" -cf - "claude/settings.$os.json" claude/skills tools.manifest)
+  local land='umask 077 && mkdir -p ~/.cache && cat > ~/.cache/openclaw-node-profile.tar'
+  local script="OS=$os
+$PROVISION_SCRIPT"
+  case "$kind" in
+    local-systemd)
+      "${pack[@]}" | sudo -H -u "$NODE_USER" sh -c "$land"
+      as_node_user "$target" "set -euo pipefail; $script"
+      ;;
+    linux-tarball)
+      "${pack[@]}" | "${SSH[@]}" "$target" "sudo -H -u $NODE_USER sh -c $(printf '%q' "$land")"
+      as_node_user "$target" "set -euo pipefail; $script"
+      ;;
+    macos-source)
+      "${pack[@]}" | "${SSH[@]}" "$target" "$land"
+      as_mac "$target" "$script"
+      ;;
+    *) echo "unknown kind $kind" >&2; return 1 ;;
+  esac
+}
+
+if [[ "$PHASE" == provision && ! -f "$PROFILE_DIR/tools.manifest" ]]; then
+  echo "[satellites] no node profile at $PROFILE_DIR" >&2
+  exit 1
+fi
+
 if [[ "$PHASE" == prepare ]] && grep -qE '^[^#[:space:]]+[[:space:]]+linux-tarball' "$SATELLITES_FILE"; then
   pack_tarball
 fi
@@ -247,15 +324,26 @@ while read -r name kind target _; do
 done <"$SATELLITES_FILE"
 
 FAILED=()
+WARNED=()
 for name in "${!PIDS[@]}"; do
-  if wait "${PIDS[$name]}"; then
+  rc=0
+  wait "${PIDS[$name]}" || rc=$?
+  log="$LOG_DIR/$name.$PHASE.log"
+  if ((rc == 0)) && grep -q '^missing tools:' "$log"; then
+    WARNED+=("$name")
+    echo "[satellites] $PHASE $name: WARNING — $(tail -1 "$log")"
+  elif ((rc == 0)); then
     echo "[satellites] $PHASE $name: ok"
   else
     FAILED+=("$name")
-    echo "[satellites] $PHASE $name: FAILED — $(tail -1 "$LOG_DIR/$name.$PHASE.log")"
+    echo "[satellites] $PHASE $name: FAILED — $(tail -1 "$log")"
   fi
 done
 if ((${#FAILED[@]})); then
   echo "[satellites] $PHASE failed for: ${FAILED[*]} (logs: $LOG_DIR)"
   exit 1
+fi
+if ((${#WARNED[@]})); then
+  echo "[satellites] $PHASE warnings for: ${WARNED[*]} (logs: $LOG_DIR)"
+  exit 3
 fi
