@@ -157,7 +157,10 @@ export function createWorkboardOrchestrationTools(params: {
         maxRuntimeSeconds: Type.Optional(Type.Number({ description: "Runtime budget." })),
         maxRetries: Type.Optional(Type.Number({ description: "Retry budget." })),
         summary: Type.Optional(
-          Type.String({ description: "Specification summary comment (Markdown)." }),
+          Type.String({
+            description:
+              "1-3 plain sentences for the operator: what this is and why. Also posted as a comment.",
+          }),
         ),
         token: Type.Optional(Type.String({ description: "Claim token for claimed cards." })),
       }),
@@ -174,7 +177,12 @@ export function createWorkboardOrchestrationTools(params: {
       parameters: strictObject({
         id: Type.String({ description: "Parent Workboard card id." }),
         token: Type.Optional(Type.String({ description: "Claim token for claimed cards." })),
-        summary: Type.Optional(Type.String({ description: "Decomposition summary (Markdown)." })),
+        summary: Type.Optional(
+          Type.String({
+            description:
+              "Decomposition summary (Markdown). Replaces the parent's operator summary, so keep it to 1-3 plain sentences.",
+          }),
+        ),
         completeParent: Type.Optional(
           Type.Boolean({
             description: "Complete the parent after child creation. Default true.",

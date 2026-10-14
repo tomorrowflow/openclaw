@@ -48,6 +48,8 @@ const HOST_GIT_TIMEOUT_MS = 120_000;
 const REPORT_FENCE = "workboard-report";
 // Comments are capped at 2000 chars on write, so this bounds the brief's feedback section.
 const REWORK_FEEDBACK_MAX_ENTRIES = 5;
+// The headline replaces the card summary shown on the board: a few sentences, not a report.
+const MAX_REPORT_HEADLINE_CHARS = 400;
 const REPORT_PATTERN = new RegExp("```" + REPORT_FENCE + "\\s*\\n([\\s\\S]*?)\\n```", "g");
 
 export function nodeTicketTarget(card: WorkboardCard): NodeTicketTarget | undefined {
@@ -554,10 +556,10 @@ export function buildNodeTicketMessage(params: {
     "- End your final message with exactly one report block:",
     "",
     "```" + REPORT_FENCE,
-    `{"outcome":"done|blocked|needs_input","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${reviewed ? '"review":{"findings":0,"fixed":0,"note":"…"},' : ""}"questions":["…"]}`,
+    `{"outcome":"done|blocked|needs_input","headline":"1-3 plain sentences for the operator","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${reviewed ? '"review":{"findings":0,"fixed":0,"note":"…"},' : ""}"questions":["…"]}`,
     "```",
     "",
-    "Its text fields are Markdown. Use `done` only when the work is committed and its proof passed. Use `needs_input` for open questions, each with your proposed default; the answers come back as the next turn of this session. Use `blocked` for anything else that stops you.",
+    "Its text fields are Markdown. The `headline` of a `done` report replaces the card's summary on the board: say what changed and why in plain words. Use `done` only when the work is committed and its proof passed. Use `needs_input` for open questions, each with your proposed default; the answers come back as the next turn of this session. Use `blocked` for anything else that stops you.",
     "Proof entries describe the final state. Any `failed` entry blocks a `done` report, so a test you ran red before the fix goes in the note of its passing entry, not in an entry of its own.",
     "",
     params.context,
@@ -582,7 +584,13 @@ type NodeTicketStopReport = {
 type NodeTicketReview = { findings: number; fixed: number; note?: string };
 
 type NodeTicketReport =
-  | { outcome: "done"; summary: string; proof: NodeTicketProof[]; review?: NodeTicketReview }
+  | {
+      outcome: "done";
+      headline?: string;
+      summary: string;
+      proof: NodeTicketProof[];
+      review?: NodeTicketReview;
+    }
   | NodeTicketStopReport;
 
 function lastAssistantText(messages: readonly unknown[]): string | undefined {
@@ -654,7 +662,17 @@ function parseNodeTicketReport(
       },
     );
     const review = parseReview(value.review);
-    return { ok: true, report: { outcome: "done", summary, proof, ...(review ? { review } : {}) } };
+    const headline = optionalText(value.headline, MAX_REPORT_HEADLINE_CHARS);
+    return {
+      ok: true,
+      report: {
+        outcome: "done",
+        ...(headline ? { headline } : {}),
+        summary,
+        proof,
+        ...(review ? { review } : {}),
+      },
+    };
   }
   if (value.outcome === "blocked" || value.outcome === "needs_input") {
     const questions = (Array.isArray(value.questions) ? value.questions : []).flatMap((entry) => {
@@ -677,10 +695,10 @@ function blockReason(report: NodeTicketStopReport): string {
 /**
  * Maps a finished node ticket turn onto its card. A done report records its
  * proof and marks the worktree's handoff pending, so only the bundle import
- * moves the card to review. A needs_input report posts the questions and
- * waits in review for an answer; the agent_end nudge wakes the board's
- * automation so `dev` can answer. Every other ending blocks the card so `dev`
- * sees the reason. Proof that did not pass also blocks, and so does a rung b
+ * moves the card to review, and its headline replaces the card summary. A
+ * needs_input report posts the questions and waits in review for an answer;
+ * the agent_end nudge wakes the board's automation so `dev` can answer. Every
+ * other ending blocks the card so `dev` sees the reason. Proof that did not pass also blocks, and so does a rung b
  * round's done report without its standards review.
  */
 export async function applyNodeTicketReport(params: {
@@ -770,7 +788,11 @@ export async function applyNodeTicketReport(params: {
   }
   await store.setNodeHandoff(
     card.id,
-    { worktreePath: worktree.path, handoff: { phase: "pending", reportedAt: Date.now() } },
+    {
+      worktreePath: worktree.path,
+      handoff: { phase: "pending", reportedAt: Date.now() },
+      ...(report.headline ? { summary: report.headline } : {}),
+    },
     scope,
   );
 }

@@ -202,6 +202,8 @@ export type WorkboardNodeHandoffInput = {
   handoff: WorkboardNodeHandoff;
   /** The shadow verdict on the round a publish closes; appended to the worktree's reviews. */
   review?: WorkboardNodeReviewVerdict;
+  /** A done report's headline; replaces the card's `automation.summary` in the same write. */
+  summary?: string;
 };
 
 export function withNodeHandoff(

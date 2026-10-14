@@ -129,6 +129,11 @@ export function createWorkboardTools(params: {
         notes: Type.Optional(
           Type.String({ description: "Card notes or acceptance criteria (Markdown)." }),
         ),
+        summary: Type.Optional(
+          Type.String({
+            description: "1-3 plain sentences for the operator: what this is and why.",
+          }),
+        ),
         sourceUrl: Type.Optional(
           Type.String({
             description:
@@ -321,7 +326,12 @@ export function createWorkboardTools(params: {
       parameters: strictObject({
         id: cardIdField(),
         token: claimTokenField(),
-        summary: Type.Optional(Type.String({ description: "Completion summary (Markdown)." })),
+        summary: Type.Optional(
+          Type.String({
+            description:
+              "Completion summary (Markdown). Replaces the card's operator summary, so keep it to 1-3 plain sentences; put details in a comment.",
+          }),
+        ),
         proofId: Type.Optional(
           Type.String({
             description: "Proof id returned by workboard_proof when resolving that pending proof.",

@@ -34,6 +34,8 @@ type WorkboardCardInput = {
   maxRuntimeSeconds?: unknown;
   maxRetries?: unknown;
   scheduledAt?: unknown;
+  /** The operator summary, `metadata.automation.summary`. */
+  summary?: unknown;
   startedAt?: unknown;
   completedAt?: unknown;
   parents?: unknown;
