@@ -1,7 +1,7 @@
 import { LitElement, html, nothing, type TemplateResult } from "lit";
 import { live } from "lit/directives/live.js";
 import { ref } from "lit/directives/ref.js";
-import { renderAgentPicker } from "../../components/host-components.ts";
+import { renderAgentPicker, renderMarkdown } from "../../components/host-components.ts";
 import { icons } from "../../components/icons.ts";
 import { t } from "../../i18n/index.ts";
 import { normalizeDraftLabels } from "../../lib/workboard/card-state.ts";
@@ -326,7 +326,7 @@ export class WorkboardInlineText extends LitElement {
       return field === "title"
         ? card.title
         : card.notes
-          ? html`<p class="workboard-detail__description">${card.notes}</p>`
+          ? html`<div class="workboard-detail__description">${renderMarkdown(card.notes)}</div>`
           : nothing;
     }
     const label = t(
@@ -363,7 +363,10 @@ export class WorkboardInlineText extends LitElement {
         this.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea")?.focus();
       });
     };
-    const value = html`<span class="workboard-detail__text-value">${content}</span>`;
+    const value =
+      field === "notes" && card.notes
+        ? html`<div class="workboard-detail__text-value">${renderMarkdown(card.notes)}</div>`
+        : html`<span class="workboard-detail__text-value">${content}</span>`;
     // Notes stay selectable so their text can be copied; a native button would block that.
     const trigger =
       field === "notes"
@@ -378,6 +381,7 @@ export class WorkboardInlineText extends LitElement {
               const target = event.currentTarget;
               if (
                 triggerDisabled ||
+                (event.target instanceof Element && event.target.closest("a")) ||
                 (selection &&
                   !selection.isCollapsed &&
                   target instanceof Node &&
@@ -390,7 +394,11 @@ export class WorkboardInlineText extends LitElement {
               openEditor();
             }}
             @keydown=${(event: KeyboardEvent) => {
-              if (triggerDisabled || (event.key !== "Enter" && event.key !== " ")) {
+              if (
+                triggerDisabled ||
+                event.target !== event.currentTarget ||
+                (event.key !== "Enter" && event.key !== " ")
+              ) {
                 return;
               }
               event.preventDefault();

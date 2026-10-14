@@ -3,6 +3,7 @@ import { live } from "lit/directives/live.js";
 import {
   renderAgentPicker,
   renderDialog,
+  renderMarkdown,
   renderSelectPicker,
 } from "../../components/host-components.ts";
 import { icons } from "../../components/icons.ts";
@@ -452,7 +453,7 @@ export function renderCardModal(props: WorkboardProps) {
                       comments.length
                         ? html`
                             <ol>
-                              ${comments.map((comment) => html`<li>${comment.body}</li>`)}
+                              ${comments.map((comment) => html`<li>${renderMarkdown(comment.body)}</li>`)}
                             </ol>
                           `
                         : nothing

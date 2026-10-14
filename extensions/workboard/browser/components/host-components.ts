@@ -12,6 +12,7 @@ type SelectPickerProps = Parameters<Components["mountSelectPicker"]>[1];
 type AppearancePickerProps = Parameters<Components["mountAppearancePicker"]>[1];
 type AppearanceGlyphProps = Parameters<Components["mountAppearanceGlyph"]>[1];
 type SessionSummaryProps = Parameters<Components["mountSessionSummary"]>[1];
+type MarkdownProps = Parameters<Components["mountMarkdown"]>[1];
 function createHostComponent<Props extends object>(
   mount: (container: HTMLElement, props: Props) => ControlUiComponentHandle<Props>,
 ) {
@@ -94,6 +95,9 @@ const mountAppearanceGlyph = createHostComponent((container, props: AppearanceGl
 const mountSessionSummary = createHostComponent((container, props: SessionSummaryProps) =>
   workboardHost().components.mountSessionSummary(container, props),
 );
+const mountMarkdown = createHostComponent((container, props: MarkdownProps) =>
+  workboardHost().components.mountMarkdown(container, props),
+);
 
 export function renderDialog(props: Omit<DialogProps, "content">, content: unknown) {
   return html`<div style="display: contents" ${mountDialog({ ...props, content })}></div>`;
@@ -127,4 +131,8 @@ export function renderAppearanceGlyph(props: AppearanceGlyphProps, className = "
 
 export function renderSessionSummary(props: SessionSummaryProps) {
   return html`<div class="workboard-session-summary" ${mountSessionSummary(props)}></div>`;
+}
+
+export function renderMarkdown(markdown: string) {
+  return html`<div class="workboard-markdown" ${mountMarkdown({ markdown })}></div>`;
 }

@@ -4,6 +4,7 @@ import {
   renderAgentAvatar,
   renderSessionSummary,
   renderDialog,
+  renderMarkdown,
 } from "../../components/host-components.ts";
 import { icons } from "../../components/icons.ts";
 import { renderWorkboardErrorToast } from "../../components/toast.ts";
@@ -547,7 +548,7 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
                         <ol class="workboard-detail__list workboard-detail__comments">
                           ${comments.map(
                             (comment) => html`<li>
-                              <span>${comment.body}</span>
+                              ${renderMarkdown(comment.body)}
                               <time>${formatUpdatedTime(comment.createdAt)}</time>
                             </li>`,
                           )}
