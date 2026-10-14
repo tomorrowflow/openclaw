@@ -276,5 +276,17 @@ export function createControlUiComponents(options: {
           element.presented = next.presented ?? true;
         },
       ),
+    mountMarkdown: (container, props) =>
+      mount(
+        container,
+        props,
+        async () => {
+          await import("./control-ui-markdown.ts");
+          return document.createElement("openclaw-plugin-markdown");
+        },
+        (element, next) => {
+          element.markdown = next.markdown;
+        },
+      ),
   };
 }

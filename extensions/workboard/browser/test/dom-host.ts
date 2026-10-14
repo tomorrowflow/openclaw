@@ -85,6 +85,16 @@ export function installDomComponents(host: ControlUiHost): void {
     container.append(element);
     return { update: vi.fn(apply), dispose: vi.fn(() => element.remove()) };
   });
+  host.components.mountMarkdown = vi.fn((container, initial) => {
+    const element = document.createElement("div");
+    element.dataset.testMarkdown = "";
+    const apply = (props: typeof initial) => {
+      element.textContent = props.markdown;
+    };
+    apply(initial);
+    container.append(element);
+    return { update: vi.fn(apply), dispose: vi.fn(() => element.remove()) };
+  });
   host.components.mountDashboard = vi.fn((container, initial) => {
     const element = document.createElement("section");
     element.dataset.testDashboard = "";

@@ -83,6 +83,11 @@ export type ControlUiAppearancePickerProps = {
   onChange: (appearance: { icon: string | null; color: string | null }) => void;
 };
 
+/** Sanitized host Markdown; raw HTML and remote images are not rendered. */
+export type ControlUiMarkdownProps = {
+  markdown: string;
+};
+
 export type ControlUiComponents = {
   /** Resolve a shared palette or custom hex color; invalid or cleared values return an empty string. */
   resolveAppearanceColor: (value: string | null | undefined) => string;
@@ -118,4 +123,8 @@ export type ControlUiComponents = {
     container: HTMLElement,
     props: ControlUiDashboardProps,
   ) => ControlUiComponentHandle<ControlUiDashboardProps>;
+  mountMarkdown: (
+    container: HTMLElement,
+    props: ControlUiMarkdownProps,
+  ) => ControlUiComponentHandle<ControlUiMarkdownProps>;
 };

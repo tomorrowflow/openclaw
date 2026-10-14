@@ -279,6 +279,9 @@ ownership. Use `mountSelectPicker` for a list of `{ value, label, description? }
 options, a selected `value`, an `accessibleLabel`, and an `onSelect` callback.
 With `searchable: true`, lists longer than eight options show a search field.
 The picker matches option labels, values, and descriptions.
+Use `mountMarkdown` with `{ markdown }` to show user or agent text with the
+host's sanitized Markdown renderer and styles. Raw HTML and remote images are
+not rendered.
 
 ### Dock a conversation
 
