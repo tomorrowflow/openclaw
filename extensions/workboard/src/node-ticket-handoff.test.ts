@@ -408,7 +408,7 @@ describe("node ticket questions", () => {
       phase: "questions",
     });
     expect(asked?.metadata?.comments?.at(-1)?.body).toContain(
-      "Needs input: Empty input handling is ambiguous\n- Should empty input return [] or raise?",
+      "**Needs input:** Empty input handling is ambiguous\n\n- Should empty input return [] or raise?",
     );
     expect(asked?.events?.some((event) => event.toStatus === "blocked")).toBe(false);
     expect(existsSync(worktree)).toBe(true);

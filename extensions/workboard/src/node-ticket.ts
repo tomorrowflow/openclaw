@@ -609,6 +609,7 @@ export function buildNodeTicketMessage(params: {
     "```",
     "",
     "Its text fields are Markdown. The `headline` of a `done` report replaces the card's summary on the board: say what changed and why in plain words. Use `done` only when the work is committed and its proof passed. Use `needs_input` for open questions, each with your proposed default; the answers come back as the next turn of this session. Use `blocked` for anything else that stops you.",
+    'The `summary` of a `done` report is posted as a card comment, so write it as sections the operator can scan: `**What:**` then a `- ` list of the changes, `**Why:**` in a sentence or two, and `**Notes:**` only for follow-ups or anything left open. The proof is recorded from `proof`; don\'t repeat it. Each question is one line, `**Q<n> – <title>:** <question> ➡️ <your proposed default>`, worded so "yes" accepts the default. Use inline code for paths, commands, and identifiers; no headings.',
     "`decisions` is your decision trail for this turn, so the operator sees what you decided without reading the session: one row per decision point or checkpoint (a fork you chose, a unit you verified, a pivot or revert, a blocker), at most 30, not one per step. Each cell is one short line of plain words, not Markdown; `ts` is the time, `phase` a word like plan, build, verify, or fix; `evidence` is a pointer (a commit SHA, `file:line`, or a command), never a paragraph.",
     "Proof entries describe the final state. Any `failed` entry blocks a `done` report, so a test you ran red before the fix goes in the note of its passing entry, not in an entry of its own.",
     "",
@@ -617,9 +618,8 @@ export function buildNodeTicketMessage(params: {
 }
 
 function blockReason(report: NodeTicketStopReport): string {
-  const lead = report.outcome === "needs_input" ? "Needs input" : "Blocked";
   return [
-    `${lead}: ${report.summary || "no summary given"}`,
+    `Blocked: ${report.summary || "no summary given"}`,
     ...report.questions.map((question) => `- ${question}`),
   ].join("\n");
 }
@@ -668,7 +668,13 @@ export async function applyNodeTicketReport(params: {
       card.id,
       {
         body: capText(
-          `${blockReason(report)}\n\nAnswer in a comment, then move the card to todo; the same session resumes with the answer.`,
+          [
+            `**Needs input:** ${report.summary || "no summary given"}`,
+            "",
+            ...report.questions.map((question) => `- ${question}`),
+            "",
+            "Answer in a comment, then move the card to todo; the same session resumes with the answer.",
+          ].join("\n"),
           MAX_COMMENT_BODY_CHARS,
         ),
       },
