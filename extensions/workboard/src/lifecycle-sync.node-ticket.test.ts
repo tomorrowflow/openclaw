@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
 import { runSessionSweep } from "./lifecycle-sync.test-support.js";
 import { nodeTicketTarget } from "./node-ticket.js";
-import { endedSession, startNodeCard } from "./node-ticket.test-support.js";
+import { endedSession, settledSession, startNodeCard } from "./node-ticket.test-support.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 import { projectWorkboardTrust } from "./trust-kpis.js";
 
@@ -278,15 +278,137 @@ describe("Workboard node ticket lifecycle", () => {
     });
   });
 
-  it("leaves a finished node ticket running when only the sweep saw it end", async () => {
+  it("blocks a node ticket whose failed run settled its session without a report", async () => {
     const store = createWorkboardSqliteTestStore();
-    const { card, sessionKey } = await startNodeCard(store);
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    const settled = settledSession(sessionKey);
 
-    await runSessionSweep({
+    // The aborted run's end waits for a fallback; the session then stays idle.
+    await syncWorkboardAgentEnded({
       store,
-      sessions: [{ key: sessionKey, status: "done", updatedAt: card.updatedAt + 1_000 }],
+      event: { runId, success: false, messages: [] },
+      context: { runId, sessionKey },
+      readSessions: settled.readSessions,
+    });
+    // The first sweep only closes the attempt: a retry of the same session
+    // may start right after the abort, and its report must still land.
+    await runSessionSweep({ store, sessions: [settled.session] });
+    const swept = await store.get(card.id);
+    expect(swept?.status).toBe("running");
+    expect(swept?.metadata?.attempts?.at(-1)).toMatchObject({ runId, status: "stopped" });
+
+    await runSessionSweep({ store, sessions: [settled.session] });
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("blocked");
+    expect(stored?.metadata?.comments?.at(-1)?.body).toBe(
+      "The ticket session settled without a workboard-report block and nothing resumed it. The run was aborted or failed, or its report never reached the board. Check the node, then comment what to do next and move the card to todo to restart; the next run reuses the worktree.",
+    );
+    expect(stored?.metadata?.attempts?.at(-1)).toMatchObject({
+      runId,
+      status: "blocked",
+      error: expect.stringMatching(/^The ticket session settled/),
+    });
+    expect(stored?.metadata?.failureCount).toBe(1);
+    expect(stored?.events?.some((event) => event.toStatus === "blocked")).toBe(true);
+  });
+
+  it("still blocks a settled node ticket when the session moved after its attempt closed", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    const settled = settledSession(sessionKey);
+    // A retry turn ran and ended between two sweeps without a report.
+    const moved = { ...settled.session, updatedAt: settled.session.updatedAt + 5_000 };
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: false, messages: [] },
+      context: { runId, sessionKey },
+      readSessions: settled.readSessions,
+    });
+    await runSessionSweep({ store, sessions: [settled.session] });
+    await runSessionSweep({ store, sessions: [moved] });
+    expect((await store.get(card.id))?.status).toBe("running");
+
+    await runSessionSweep({ store, sessions: [moved] });
+    expect((await store.get(card.id))?.status).toBe("blocked");
+  });
+
+  it("settles on the retry's done report when a sweep saw the session idle between abort and retry", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    const settled = settledSession(sessionKey);
+    const resumed = { ...settled.session, updatedAt: settled.session.updatedAt + 5_000 };
+    const done = report({
+      outcome: "done",
+      summary: "Fixed",
+      proof: [{ command: "pytest", status: "passed" }],
     });
 
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: false, messages: [] },
+      context: { runId, sessionKey },
+      readSessions: settled.readSessions,
+    });
+    await runSessionSweep({ store, sessions: [settled.session] });
+    // The retry resumed the session, which moved on, and reported done.
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: true, messages: done },
+      context: { runId, sessionKey },
+      readSessions: async () => ({ sessions: [resumed], complete: true }),
+    });
+    await runSessionSweep({ store, sessions: [resumed] });
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("running");
+    expect(nodeTicketTarget(expectDefined(stored, "card"))?.worktree?.handoff?.phase).toBe(
+      "pending",
+    );
+    expect(stored?.events?.some((event) => event.toStatus === "blocked")).toBe(false);
+  });
+
+  it("keeps a done report's pending handoff running while its session stays idle", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    const settled = settledSession(sessionKey);
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: {
+        runId,
+        success: true,
+        messages: report({
+          outcome: "done",
+          summary: "Fixed",
+          proof: [{ command: "pytest", status: "passed" }],
+        }),
+      },
+      context: { runId, sessionKey },
+      readSessions: settled.readSessions,
+    });
+    await runSessionSweep({ store, sessions: [settled.session] });
+    await runSessionSweep({ store, sessions: [settled.session] });
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("running");
+    expect(nodeTicketTarget(expectDefined(stored, "card"))?.worktree?.handoff?.phase).toBe(
+      "pending",
+    );
+  });
+
+  it("blocks a finished node ticket only when a second sweep still finds no report", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey } = await startNodeCard(store);
+    const session = { key: sessionKey, status: "done" as const, updatedAt: Date.now() };
+
+    // The first idle observation leaves the agent_end report a full sweep to land.
+    await runSessionSweep({ store, sessions: [session] });
     expect((await store.get(card.id))?.status).toBe("running");
+
+    await runSessionSweep({ store, sessions: [session] });
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("blocked");
+    expect(stored?.metadata?.comments?.at(-1)?.body).toMatch(/^The ticket session settled/);
   });
 });
