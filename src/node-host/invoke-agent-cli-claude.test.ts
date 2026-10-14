@@ -812,44 +812,28 @@ process.stdout.write(JSON.stringify({ type: "result", result: prompt }) + "\\n")
     },
   );
 
-  it("caps streamed output consistently with system.run", async () => {
+  it("forwards every stdout byte as progress past the former 200 KB cap", async () => {
+    // The Gateway's only progress and liveness signal for a node run is this
+    // forwarded stream, so a long session must never go quiet after a byte cap.
+    const late = { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash" }] } };
+    const terminal = { type: "result", session_id: "tail-session", result: "done" };
+    const tail = `\n${JSON.stringify(late)}\n${JSON.stringify(terminal)}\n`;
     const executable = await executableScript(
-      `let writes = 0;
-function writeChunk() {
-  if (writes++ < 80) {
-    process.stdout.write("x".repeat(4096));
-    setTimeout(writeChunk, 1);
-    return;
-  }
-  process.stdout.write("\\n" + JSON.stringify({ type: "result", session_id: "tail-session", result: "done" }) + "\\n", () => process.stderr.write("late failure diagnostic"));
-}
-process.stdout.write(Buffer.concat([
-  Buffer.alloc(199_997, 120), Buffer.from([0xe2, 0x82]), Buffer.from("A\\n")
-]), writeChunk);`,
+      `process.stdout.write(Buffer.concat([
+  Buffer.alloc(299_997, 120), Buffer.from([0xe2, 0x82, 0xac]), Buffer.from(${JSON.stringify(tail)})
+]), () => process.stderr.write("late failure diagnostic"));`,
     );
     const calls: Array<{ method: string; params: unknown }> = [];
     const request = { argv: ["-p"], idleTimeoutMs: 1_000, timeoutMs: 5_000 };
     const result = await runCommand(executable, request, { client: client(calls) });
-    const progressBytes = calls
-      .filter((call) => call.method === "node.invoke.progress")
-      .reduce((sum, call) => sum + Buffer.byteLength((call.params as { chunk: string }).chunk), 0);
-
     const progress = calls
       .filter((call) => call.method === "node.invoke.progress")
       .map((call) => (call.params as { chunk: string }).chunk)
       .join("");
-    expect(progress.startsWith(`${"x".repeat(199_997)}�A`)).toBe(true);
-    // OUTPUT_CAP_BYTES + TERMINAL_EVENT_MAX_BYTES from invoke-agent-cli-claude.ts.
-    expect(progressBytes).toBeLessThanOrEqual(200_000 + 1024 * 1024);
-    expect(progress).toContain('"session_id":"tail-session"');
-    expect(result.truncated).toBe(true);
+
+    expect(progress).toBe(`${"x".repeat(299_997)}€${tail}`);
+    expect(result.truncated).toBe(false);
     expect(result.stderr).toContain("late failure diagnostic");
-    expect(
-      calls.filter(
-        (call) =>
-          call.method === "node.invoke.progress" && (call.params as { chunk: string }).chunk === "",
-      ).length,
-    ).toBeLessThanOrEqual(2);
   });
 
   it.each([

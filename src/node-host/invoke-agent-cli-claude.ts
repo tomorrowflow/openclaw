@@ -15,23 +15,13 @@ import type { ClaudeCliNodeRunParams } from "./invoke-agent-cli-claude-params.js
 import type { NodeInvokeRequestPayload, RunResult } from "./invoke-types.js";
 import { createNodeInvokeProgressWriter } from "./node-invoke-progress.js";
 
-const OUTPUT_CAP_BYTES = 200_000;
 const STDERR_TAIL_BYTES = 20_000;
-const TERMINAL_EVENT_MAX_BYTES = 1024 * 1024;
 
-function isClaudeResultLine(line: string): boolean {
-  if (Buffer.byteLength(line, "utf8") > TERMINAL_EVENT_MAX_BYTES) {
-    return false;
-  }
-  try {
-    const value = JSON.parse(line) as { type?: unknown };
-    return value?.type === "result";
-  } catch {
-    return false;
-  }
-}
-
-/** Spawn the node-resolved Claude binary and stream bounded UTF-8 stdout. */
+/**
+ * Spawn the node-resolved Claude binary and stream every UTF-8 stdout chunk.
+ * The Gateway parses this stream incrementally and bounds its own buffers; each
+ * forwarded chunk is also its only progress and liveness signal for the run.
+ */
 export async function runClaudeCliNodeCommand(params: {
   client: NodeHostClient;
   frame: NodeInvokeRequestPayload;
@@ -89,15 +79,9 @@ export async function runClaudeCliNodeCommand(params: {
     const supervisor = getProcessSupervisor();
     const runId = randomUUID();
     let cancelled = false;
-    let truncated = false;
-    let outputBytes = 0;
     let stderr = "";
-    let terminalLineBuffer = "";
-    let terminalLineTouchesTruncation = false;
-    let terminalResultLine: string | undefined;
     const decoder = new StringDecoder("utf8");
     const stderrDecoder = new StringDecoder("utf8");
-    const terminalDecoder = new StringDecoder("utf8");
     const progress = createNodeInvokeProgressWriter({
       client: params.client,
       frame: params.frame,
@@ -118,30 +102,6 @@ export async function runClaudeCliNodeCommand(params: {
     const abortRun = () => {
       cancelled = true;
       supervisor.cancel(runId);
-    };
-    const retain = (chunk: Buffer) => {
-      const remaining = Math.max(0, OUTPUT_CAP_BYTES - outputBytes);
-      const retained = chunk.subarray(0, remaining);
-      outputBytes += retained.length;
-      truncated ||= retained.length !== chunk.length;
-      return retained;
-    };
-    const captureTerminalLines = (raw: Buffer, touchesTruncation: boolean) => {
-      terminalLineBuffer += terminalDecoder.write(raw);
-      terminalLineTouchesTruncation ||= touchesTruncation;
-      for (let newline = terminalLineBuffer.indexOf("\n"); newline >= 0;) {
-        const line = terminalLineBuffer.slice(0, newline).replace(/\r$/u, "");
-        terminalLineBuffer = terminalLineBuffer.slice(newline + 1);
-        if (terminalLineTouchesTruncation && isClaudeResultLine(line)) {
-          terminalResultLine = line;
-        }
-        terminalLineTouchesTruncation = touchesTruncation;
-        newline = terminalLineBuffer.indexOf("\n");
-      }
-      if (Buffer.byteLength(terminalLineBuffer, "utf8") > TERMINAL_EVENT_MAX_BYTES) {
-        terminalLineBuffer = "";
-        terminalLineTouchesTruncation = false;
-      }
     };
 
     let exit: RunExit | undefined;
@@ -164,21 +124,9 @@ export async function runClaudeCliNodeCommand(params: {
         noOutputTimeoutMs: params.request.idleTimeoutMs,
         captureOutput: false,
         onStdoutRaw: (raw) => {
-          const retained = retain(raw);
-          captureTerminalLines(retained, false);
-          if (retained.length < raw.length) {
-            captureTerminalLines(raw.subarray(retained.length), true);
-          }
-          if (retained.length === 0) {
-            if (!skillSession) {
-              progress.queueHeartbeat();
-            }
-            return;
-          }
-          void writeProgress(decoder.write(retained));
+          void writeProgress(decoder.write(raw));
         },
         onStderrRaw: (raw) => {
-          retain(raw);
           stderr = truncateUtf8Suffix(`${stderr}${stderrDecoder.write(raw)}`, STDERR_TAIL_BYTES);
           if (!skillSession) {
             progress.queueHeartbeat();
@@ -220,14 +168,7 @@ export async function runClaudeCliNodeCommand(params: {
     }
 
     void writeProgress(decoder.end());
-    terminalLineBuffer += terminalDecoder.end();
     stderr = truncateUtf8Suffix(`${stderr}${stderrDecoder.end()}`, STDERR_TAIL_BYTES);
-    if (terminalLineTouchesTruncation && isClaudeResultLine(terminalLineBuffer)) {
-      terminalResultLine = terminalLineBuffer;
-    }
-    if (truncated && terminalResultLine) {
-      void writeProgress(`\n${terminalResultLine}\n`);
-    }
     await stdoutQueue.catch((error: unknown) => {
       runError = error instanceof Error ? error : new Error(String(error));
     });
@@ -260,7 +201,7 @@ export async function runClaudeCliNodeCommand(params: {
         STDERR_TAIL_BYTES,
       ),
       error: finalError?.message ?? null,
-      truncated,
+      truncated: false,
     };
   } finally {
     try {
