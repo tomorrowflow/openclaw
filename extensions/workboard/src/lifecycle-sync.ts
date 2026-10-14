@@ -14,6 +14,7 @@ import { applyNodeTicketReport, nodeTicketIdleVerdict, nodeTicketTarget } from "
 import {
   workboardCardMatchesLifecycleLink,
   workboardCardSessionLookupKey,
+  workboardCardTakesEndedRunReport,
 } from "./session-link.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
 import { DEFAULT_WORKBOARD_DISPATCH_OWNER } from "./store-constants.js";
@@ -200,7 +201,7 @@ export async function syncWorkboardSubagentEnded(params: {
 
 export async function syncWorkboardAgentEnded(params: {
   store: WorkboardStore;
-  event: { runId?: string; success: boolean; messages?: unknown[] };
+  event: { runId?: string; success: boolean; messages?: unknown[]; durationMs?: number };
   context: { runId?: string; sessionKey?: string };
   now?: number;
   readSessions: (
@@ -224,8 +225,14 @@ export async function syncWorkboardAgentEnded(params: {
   const session = snapshot.sessions.find((entry) => entry.key === params.context.sessionKey);
   const observation = session ? lifecycleFromSession(session, now) : undefined;
   const terminal = observation?.state === "succeeded" || observation?.state === "failed";
+  // A node ticket's stalled-turn retry reports under a new run id. Only the
+  // report reads it; the lifecycle writes below keep the run-id fence, so the
+  // card stays linked to the round's launch run.
+  const runStartedAt =
+    params.event.durationMs === undefined ? undefined : now - params.event.durationMs;
   const linked = (await params.store.list()).filter(
-    (card) => !card.metadata?.archivedAt && workboardCardMatchesLifecycleLink(card, source),
+    (card) =>
+      !card.metadata?.archivedAt && workboardCardTakesEndedRunReport(card, source, runStartedAt),
   );
   // Node tickets report through their final message, not Workboard tools: a
   // block holds, and a done report leaves the card running with a pending
