@@ -73,12 +73,16 @@ export const STANDARDS_REVIEW_LABEL = "standards review";
 // One in this many agent-accepted PRs is read by a person when the class sets no sampleEvery.
 const DEFAULT_SAMPLE_EVERY = 3;
 
-const REVIEW_VERDICT_PATTERN = /^Verdict:\s*(accept|rework)\b/i;
+// Agents write comments in Markdown, so the label and the value may be
+// emphasized: `**Verdict:** accept`, `__Verdict: rework__: why`,
+// `Verdict: **accept**`. `_` is a word character, so `\b` cannot end the value.
+const REVIEW_VERDICT_PATTERN =
+  /^(\*{1,2}|_{1,2})?Verdict\1?:\1?\s*(?:\*{1,2}|_{1,2})?(accept|rework)(?![a-z0-9])/i;
 
 /** An agent's shadow verdict on a review round (`Verdict: accept|rework`), if the comment is one. */
 export function reviewVerdictOf(comment: WorkboardComment): "accept" | "rework" | undefined {
   const match = comment.source?.startsWith("agent:")
-    ? REVIEW_VERDICT_PATTERN.exec(comment.body.trim())?.[1]?.toLowerCase()
+    ? REVIEW_VERDICT_PATTERN.exec(comment.body.trim())?.[2]?.toLowerCase()
     : undefined;
   return match === "accept" || match === "rework" ? match : undefined;
 }
