@@ -375,6 +375,45 @@ export type WorkboardNodeReviewVerdict = {
   sampled?: boolean;
 };
 
+/**
+ * One row of a node ticket session's decision trail: a fork chosen, a unit
+ * verified, a pivot or revert, a blocker. Cells are single-line session
+ * output; `evidence` points at a commit, a `file:line`, or a command.
+ */
+export type WorkboardNodeDecision = {
+  ts?: string;
+  phase: string;
+  decision: string;
+  why?: string;
+  evidence?: string;
+  result?: string;
+};
+
+/** One file an imported range changed, from `git diff --numstat`; binary files have no line counts. */
+export type WorkboardNodeChangedFile = { path: string; previousPath?: string } & (
+  | { added: number; deleted: number }
+  | { binary: true }
+);
+
+/** What one round's import changed, `from..to`; `files` is capped, `totals` counts every file. */
+export type WorkboardNodeChanges = {
+  from: string;
+  to: string;
+  files: WorkboardNodeChangedFile[];
+  totals: { files: number; added: number; deleted: number };
+};
+
+/**
+ * What one round of a node ticket decided and changed. `round` is the rework
+ * round (0 for the first run); its reports append `decisions`, its import
+ * records `changes`.
+ */
+export type WorkboardNodeRound = {
+  round: number;
+  decisions?: WorkboardNodeDecision[];
+  changes?: WorkboardNodeChanges;
+};
+
 /** A ticket worktree the dispatcher created on a paired node. */
 export type WorkboardNodeWorktree = {
   path: string;
@@ -386,6 +425,8 @@ export type WorkboardNodeWorktree = {
   feedback?: WorkboardNodeFeedback;
   /** One entry per publish, oldest first; kept across rework rounds. */
   reviews?: WorkboardNodeReviewVerdict[];
+  /** Recent rounds, oldest first; kept across rework rounds. */
+  rounds?: WorkboardNodeRound[];
   /**
    * The round runs at rung b: its class was at b on the board when it
    * launched, so its brief asked for the standards review. Absent = rung a.
@@ -615,8 +656,15 @@ export type WorkboardCardStage =
   | { kind: "review"; since?: number }
   | { kind: "done"; since?: number };
 
-/** A card as Gateway operator reads return it; `stage` is absent for idle statuses. */
-export type WorkboardOperatorCard = WorkboardCard & { stage?: WorkboardCardStage };
+/**
+ * A card as Gateway operator reads return it; `stage` is absent for idle
+ * statuses. `rounds` copies a node ticket's round facts out of its worktree
+ * record, which the Control UI never reads.
+ */
+export type WorkboardOperatorCard = WorkboardCard & {
+  stage?: WorkboardCardStage;
+  rounds?: WorkboardNodeRound[];
+};
 
 export type WorkboardListResult = {
   cards: WorkboardCard[];

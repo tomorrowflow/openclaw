@@ -351,6 +351,7 @@ export async function createNodeTicketWorktree(params: {
     ...(questions ? { questions } : {}),
     ...(feedback ? { feedback } : {}),
     ...(previous?.reviews ? { reviews: previous.reviews } : {}),
+    ...(previous?.rounds ? { rounds: previous.rounds } : {}),
   };
   const git = (...args: string[]) =>
     runNodeCommand(runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);
@@ -553,10 +554,11 @@ export function buildNodeTicketMessage(params: {
     "- End your final message with exactly one report block:",
     "",
     "```" + REPORT_FENCE,
-    `{"outcome":"done|blocked|needs_input","headline":"1-3 plain sentences for the operator","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${reviewed ? '"review":{"findings":0,"fixed":0,"note":"…"},' : ""}"questions":["…"]}`,
+    `{"outcome":"done|blocked|needs_input","headline":"1-3 plain sentences for the operator","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${reviewed ? '"review":{"findings":0,"fixed":0,"note":"…"},' : ""}"questions":["…"],"decisions":[{"ts":"…","phase":"…","decision":"…","why":"…","evidence":"…","result":"…"}]}`,
     "```",
     "",
     "Its text fields are Markdown. The `headline` of a `done` report replaces the card's summary on the board: say what changed and why in plain words. Use `done` only when the work is committed and its proof passed. Use `needs_input` for open questions, each with your proposed default; the answers come back as the next turn of this session. Use `blocked` for anything else that stops you.",
+    "`decisions` is your decision trail for this turn, so the operator sees what you decided without reading the session: one row per decision point or checkpoint (a fork you chose, a unit you verified, a pivot or revert, a blocker), at most 30, not one per step. Each cell is one short line of plain words, not Markdown; `ts` is the time, `phase` a word like plan, build, verify, or fix; `evidence` is a pointer (a commit SHA, `file:line`, or a command), never a paragraph.",
     "Proof entries describe the final state. Any `failed` entry blocks a `done` report, so a test you ran red before the fix goes in the note of its passing entry, not in an entry of its own.",
     "",
     params.context,
@@ -603,6 +605,13 @@ export async function applyNodeTicketReport(params: {
     return;
   }
   const { report } = parsed;
+  if (worktree && report.decisions.length > 0) {
+    await store.recordNodeRound(
+      card.id,
+      { worktreePath: worktree.path, decisions: report.decisions },
+      scope,
+    );
+  }
   if (report.outcome === "needs_input" && worktree) {
     await store.addComment(
       card.id,

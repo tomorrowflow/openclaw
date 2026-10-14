@@ -1061,6 +1061,17 @@ export function appendLinkPreservingDependencies(
   return next.filter((_, index) => index !== dropIndex);
 }
 
+/** A node ticket's round facts go before anything else, oldest first; they only inform. */
+function withoutOldestNodeRound(metadata: WorkboardMetadata): WorkboardMetadata | undefined {
+  const target = metadata.automation?.target;
+  const rounds = target?.worktree?.rounds;
+  if (!target?.worktree || !rounds?.length) {
+    return undefined;
+  }
+  const worktree = { ...target.worktree, rounds: rounds.slice(1) };
+  return { ...metadata, automation: { ...metadata.automation, target: { ...target, worktree } } };
+}
+
 export function trimMetadataToBudget(
   metadata: WorkboardMetadata,
   options: { preserveProofId?: string } = {},
@@ -1068,6 +1079,11 @@ export function trimMetadataToBudget(
   let next = removeUndefinedMetadataFields(metadata);
   while (metadataByteSize(next) > MAX_CARD_METADATA_BYTES) {
     const currentSize = metadataByteSize(next);
+    const withoutOldRound = withoutOldestNodeRound(next);
+    if (withoutOldRound) {
+      next = withoutOldRound;
+      continue;
+    }
     for (const key of [
       "attempts",
       "diagnostics",

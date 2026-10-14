@@ -660,6 +660,16 @@ report, address the findings, and report them (see **Report** below).
    `"review": {"findings": n, "fixed": n, "note": "…"}`, recorded as a passed
    `standards review` proof entry whose note gives the counts; a `done` report
    without it blocks the card. Fewer fixed than found is recorded, not blocked.
+   **Decision trail:** any report may carry an optional `decisions` array,
+   one row per decision point or checkpoint of the turn (a fork chosen, a
+   unit verified, a pivot or revert, a blocker):
+   `{"ts": "…", "phase": "…", "decision": "…", "why": "…", "evidence": "…", "result": "…"}`.
+   `phase` and `decision` are required; `evidence` is a pointer such as a
+   commit SHA, `file:line`, or a command. Each cell is cut to one line and a
+   short length, rows without a phase or a decision are dropped, and a round
+   keeps its newest 30 rows within about 3,000 characters. Rows append to the
+   round's trail across its reports (questions, answers, re-runs), so a
+   blocked report's trail is kept too.
    **Questions:** a `needs_input` report posts its questions as a card
    comment and moves the card to `review`, keeping the node worktree. To
    answer, add a comment and move the card to `todo`. The same session resumes
@@ -685,7 +695,15 @@ report, address the findings, and report them (see **Report** below).
    code block, which counts as a block in the trust KPIs; a re-run fixes it with a new commit in the same node worktree
    and imports again. Otherwise it creates `factory/<cardId>` (never moving an
    existing branch), the node worktree is removed, and the
-   card moves to `review` with its claim released. When the board has an
+   card moves to `review` with its claim released. The import records the
+   round's changed files from `git diff --numstat -M` over the same range
+   as the check: the files with the most changed lines, up to 30 and about
+   1,500 characters of paths, each with its added and deleted lines (or
+   `binary`) and a rename's old path, plus totals over every file. When that
+   diff fails, the import still completes and the Gateway logs a warning. A
+   card keeps the facts of its last five rounds; when the card's metadata
+   outgrows its 24 KiB budget, round facts are dropped first, oldest round
+   first, before comments or proof. When the board has an
    automation job, reaching `review` nudges it, so the assignee agent can
    give a shadow verdict (see [Trust KPIs](#trust-kpis)).
 4. **Accept:** moving the card from `review` to `done` pushes the imported
@@ -1013,7 +1031,10 @@ The template id is stored as card metadata.
    engine opens its session. A node ticket started while its slot is full is
    [queued](#queued-starts).
 5. Read where a card stands from its summary and [status line](#card-stage);
-   open the linked session from the card while the agent works.
+   open the linked session from the card while the agent works. For a
+   [node ticket](#node-tickets), the card's Activity tab shows each round,
+   newest first: the files its import changed with +/- bars and totals, and
+   its session's decision trail.
 6. Let lifecycle sync move running work into `review`/`blocked`, then manually
    move the card to `done` when accepted.
 

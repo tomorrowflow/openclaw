@@ -41,6 +41,7 @@ import {
   renderTechnicalDetails,
 } from "./view-card-detail-records.ts";
 import { renderCardDiscardDialog } from "./view-card-modal.ts";
+import { renderNodeRounds } from "./view-card-rounds.ts";
 import {
   formatEventLabel,
   formatLifecycle,
@@ -536,6 +537,7 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
               tabindex="0"
               ?hidden=${activeTab !== "activity"}
             >
+              ${renderNodeRounds(card.rounds)}
               <section class="workboard-detail__section workboard-detail__activity">
                 ${
                   events.length
