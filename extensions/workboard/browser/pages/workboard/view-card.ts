@@ -28,6 +28,7 @@ import {
 } from "./view-card-actions.ts";
 import {
   renderCardAlert,
+  renderCardStage,
   renderCardUpdatedTime,
   renderCardPriority,
   renderCardMeta,
@@ -71,6 +72,7 @@ function renderCard(props: WorkboardProps, card: WorkboardCard, surface: Workboa
   const lifecycle = getWorkboardLifecycle(card, props.sessions, props.sessionResolution);
   const now = Date.now();
   const updatedAt = asDateTimestampMs(card.updatedAt);
+  const glimpse = card.metadata?.automation?.summary ?? card.notes;
   const sessionStatus = getSessionStatus(card, lifecycle, now);
   const alerts = visibleCardAlerts(
     getCardAlerts(card, lifecycle, dependencies, now),
@@ -338,13 +340,14 @@ function renderCard(props: WorkboardProps, card: WorkboardCard, surface: Workboa
                 <div class="workboard-card__header-actions">${actionsMenu}</div>
               </header>
               ${
-                card.notes && !widget
-                  ? // A glimpse only: the card stays one button, and the drawer reads the notes.
+                glimpse && !widget
+                  ? // A glimpse only: the card stays one button, and the drawer reads the text.
                     html`<div class="workboard-card__notes" aria-hidden="true" inert>
-                      ${renderMarkdown(card.notes)}
+                      ${renderMarkdown(glimpse)}
                     </div>`
                   : nothing
               }
+              ${renderCardStage(card, now)}
               ${renderCardSession(props, card, lifecycle, sessionStatus)}
               ${renderCardMeta(card, archived)} ${renderCardAlert(alerts, alertDescriptionId)}
               ${renderCardCounts(card)}

@@ -101,28 +101,57 @@ describe("workboard card list revisions", () => {
     const store = createWorkboardSqliteTestStore();
     const { card } = await startNodeCard(store);
     const worktree = (await store.get(card.id))!.metadata!.automation!.target!.worktree!;
+    const importedAt = Date.now();
     await store.setNodeHandoff(card.id, {
       worktreePath: worktree.path,
-      handoff: { phase: "imported", headCommit: "b".repeat(40), importedAt: Date.now() },
+      handoff: { phase: "imported", headCommit: "b".repeat(40), importedAt },
     });
     await store.update(card.id, { status: "review" });
     await store.addComment(card.id, { body: "Proof looks thin." }, undefined, "operator");
-    await store.addComment(card.id, { body: "Verdict: rework: no test" }, undefined, "agent:dev");
+    await store.addComment(
+      card.id,
+      { body: "**Verdict:** rework: no test" },
+      undefined,
+      "agent:dev",
+    );
     const listCards = captureCardsList(store);
+    const listed = async () => (await listCards({})).mock.calls[0]?.[1].cards[0];
     const comments = async () =>
-      (await listCards({})).mock.calls[0]?.[1].cards[0].metadata.comments.map(
-        (comment: { body: string }) => comment.body,
-      );
+      (await listed()).metadata.comments.map((comment: { body: string }) => comment.body);
 
     expect(await comments()).toEqual(["Proof looks thin."]);
+    expect((await listed()).stage).toEqual({ kind: "awaiting_review", since: importedAt });
     expect((await store.get(card.id))?.metadata?.comments).toHaveLength(2);
 
     await store.update(card.id, { status: "done" });
-    expect(await comments()).toEqual(["Proof looks thin.", "Verdict: rework: no test"]);
+    expect(await comments()).toEqual(["Proof looks thin.", "**Verdict:** rework: no test"]);
+    expect((await listed()).stage).toMatchObject({ kind: "done" });
 
     // A failed publish blocks the decided card; the verdict stays visible.
     await store.update(card.id, { status: "blocked" });
-    expect(await comments()).toEqual(["Proof looks thin.", "Verdict: rework: no test"]);
+    expect(await comments()).toEqual(["Proof looks thin.", "**Verdict:** rework: no test"]);
+    expect((await listed()).stage).toMatchObject({ kind: "blocked" });
+  });
+
+  it("lists a card's summary and derived stage but never stores the stage", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const card = await store.create({
+      title: "Parser crash",
+      summary: "Empty input crashes the parser. Users lose their draft.",
+    });
+    const listCards = captureCardsList(store);
+    const listed = async () => (await listCards({})).mock.calls[0]?.[1].cards[0];
+
+    expect((await listed()).metadata.automation.summary).toBe(
+      "Empty input crashes the parser. Users lose their draft.",
+    );
+    expect((await listed()).stage).toBeUndefined();
+
+    await store.claim(card.id, { ownerId: "worker", token: "test-claim-token" });
+    const running = await listed();
+    expect(running.stage).toEqual({ kind: "running", since: expect.any(Number) });
+    expect(Object.isFrozen(running.stage)).toBe(true);
+    expect(await store.get(card.id)).not.toHaveProperty("stage");
   });
 
   it("replaces a pending card read when a mutation advances its revision", async () => {

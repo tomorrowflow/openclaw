@@ -12,6 +12,7 @@ import {
   WORKBOARD_STATUSES,
   type WorkboardBoardSummary,
   type WorkboardCard,
+  type WorkboardCardStage,
   type WorkboardPriority,
   type WorkboardStatus,
 } from "./types.ts";
@@ -88,6 +89,56 @@ function normalizeBoardSummary(value: unknown): WorkboardBoardSummary | null {
   };
 }
 
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** The Gateway derives the stage; the UI keeps only shapes it can render. */
+function normalizeStage(value: unknown): WorkboardCardStage | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const since = finiteNumber(value.since);
+  const at = since === undefined ? {} : { since };
+  const kind = value.kind;
+  switch (kind) {
+    case "queued":
+    case "awaiting_review":
+      return since === undefined ? undefined : { kind, since };
+    case "questions": {
+      const escalatedAt = finiteNumber(value.escalatedAt);
+      return since === undefined
+        ? undefined
+        : { kind, since, ...(escalatedAt === undefined ? {} : { escalatedAt }) };
+    }
+    case "published": {
+      const reworkRound = finiteNumber(value.reworkRound);
+      return since === undefined ||
+        reworkRound === undefined ||
+        typeof value.pullRequestUrl !== "string"
+        ? undefined
+        : { kind, since, pullRequestUrl: value.pullRequestUrl, reworkRound };
+    }
+    case "running": {
+      const reworkRound = finiteNumber(value.reworkRound);
+      const attempt = finiteNumber(value.attempt);
+      return {
+        kind,
+        ...at,
+        ...(typeof value.nodeId === "string" ? { nodeId: value.nodeId } : {}),
+        ...(reworkRound ? { reworkRound } : {}),
+        ...(attempt ? { attempt } : {}),
+      };
+    }
+    case "blocked":
+    case "review":
+    case "done":
+      return { kind, ...at };
+    default:
+      return undefined;
+  }
+}
+
 function normalizeCard(value: unknown): WorkboardCard | null {
   if (!isRecord(value)) {
     return null;
@@ -106,6 +157,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
   const execution = normalizeExecution(value.execution);
   const events = normalizeEvents(value.events);
   const metadata = normalizeMetadata(value.metadata);
+  const stage = normalizeStage(value.stage);
   return {
     id,
     title,
@@ -127,6 +179,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
     ...(typeof value.completedAt === "number" ? { completedAt: value.completedAt } : {}),
     ...(events.length ? { events } : {}),
     ...(metadata ? { metadata } : {}),
+    ...(stage ? { stage } : {}),
   };
 }
 

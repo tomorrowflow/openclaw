@@ -1,6 +1,6 @@
 import type {
   WorkboardBoardSummary,
-  WorkboardCard,
+  WorkboardOperatorCard,
   WorkboardPriority,
   WorkboardStatus,
   WorkboardTemplateId,
@@ -9,6 +9,8 @@ import type { GatewaySessionRow } from "../../api/types.ts";
 
 export * from "@openclaw/workboard-contract";
 export type { WorkboardBoardSummary } from "@openclaw/workboard-contract";
+/** Cards as the Gateway's operator reads return them, with the derived stage. */
+export type WorkboardCard = WorkboardOperatorCard;
 
 type WorkboardLifecycleState =
   | "unlinked"

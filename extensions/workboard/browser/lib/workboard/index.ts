@@ -4,6 +4,7 @@ export {
   WORKBOARD_CHANGED_EVENT,
   type WorkboardBoardSummary,
   type WorkboardCard,
+  type WorkboardCardStage,
   type WorkboardDependencyState,
   type WorkboardEvent,
   type WorkboardExecutionEngine,

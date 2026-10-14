@@ -34,6 +34,7 @@ import {
   renderStartExecutionButton,
   renderStopCardAction,
 } from "./view-card-actions.ts";
+import { renderCardStage } from "./view-card-content.ts";
 import {
   renderDependencyDetailList,
   renderDetailRow,
@@ -450,6 +451,17 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
                   </div>
                 </aside>
                 <div class="workboard-detail__content">
+                  ${
+                    automation?.summary || card.stage
+                      ? html`<section
+                          class="workboard-detail__summary"
+                          aria-label=${t("workboard.detailSummary")}
+                        >
+                          ${automation?.summary ? renderMarkdown(automation.summary) : nothing}
+                          ${renderCardStage(card, Date.now())}
+                        </section>`
+                      : nothing
+                  }
                   ${renderInlineText(props, card, "notes", busy, !writable || archived)}
                   <section
                     class="workboard-detail__execution ${
@@ -501,12 +513,11 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
                   </section>
                   ${renderBoardAutomation(props.detailBoardAutomation, navigateAutomation)}
                   ${
-                    automation?.summary || visibleAutomationFields.length
+                    visibleAutomationFields.length
                       ? html`<section
                           class="workboard-detail__section workboard-detail__automation"
                         >
                           <h3>${t("workboard.detailCardAutomation")}</h3>
-                          ${automation?.summary ? renderMarkdown(automation.summary) : nothing}
                           ${visibleAutomationFields.map(([label, value]) =>
                             renderDetailRow(label, value),
                           )}
