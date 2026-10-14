@@ -186,6 +186,16 @@ export function endedSession(success = true) {
   });
 }
 
+/**
+ * The session owner's view after a run ended without failing the session, as
+ * after a watchdog abort whose retry turn finished: no active run, no outcome.
+ * The same session feeds agent_end and the sweep.
+ */
+export function settledSession(key: string) {
+  const session = { key, hasActiveRun: false, updatedAt: Date.now() };
+  return { session, readSessions: async () => ({ sessions: [session], complete: true }) };
+}
+
 /** A GitHub API stand-in for the publish step; pushes go to the local `remote`. */
 export function createFakeGitHub(remote: string) {
   const tokens = new Map<string, string>();

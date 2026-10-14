@@ -10,7 +10,7 @@ import {
   type WorkboardWorktreeCleanupRuntime,
 } from "./dispatcher-workspace.js";
 import type { WorkboardNodeTicketHandoffs } from "./node-ticket-handoff.js";
-import { applyNodeTicketReport, nodeTicketTarget } from "./node-ticket.js";
+import { applyNodeTicketReport, nodeTicketIdleVerdict, nodeTicketTarget } from "./node-ticket.js";
 import {
   workboardCardMatchesLifecycleLink,
   workboardCardSessionLookupKey,
@@ -231,7 +231,8 @@ export async function syncWorkboardAgentEnded(params: {
   // block holds, and a done report leaves the card running with a pending
   // handoff that only the bundle import moves to review. The report exists
   // only in this message, so a successful attempt maps it even before the
-  // session settles; a failed one waits while fallback may still continue.
+  // session settles; a failed one waits while fallback may still continue,
+  // and the sweep blocks the card if the session then stays idle.
   let nodeTicket = false;
   for (const card of linked) {
     if (card.status === "running" && nodeTicketTarget(card)) {
@@ -427,6 +428,18 @@ async function syncWorkboardLifecycleSessions(params: {
       sessionObservation.state === "succeeded" && nodeTicketTarget(card)
         ? { state: "idle", sourceUpdatedAt: sessionObservation.sourceUpdatedAt }
         : sessionObservation;
+    // A second settled observation with no report and no session activity
+    // since blocks the card. The block is terminal, so the card skips this
+    // sweep's idle write.
+    if (
+      observation.state === "idle" &&
+      nodeTicketIdleVerdict(card, observation.sourceUpdatedAt) !== undefined &&
+      (await params.store.settleIdleNodeTicket(card.id, observation.sourceUpdatedAt))
+    ) {
+      count += 1;
+      await params.onMatched?.({ cards: [card], sessionKey: session.key });
+      continue;
+    }
     if (
       await params.store.syncLifecycle(card.id, {
         ...LIFECYCLE_TARGETS[observation.state],

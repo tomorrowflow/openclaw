@@ -770,3 +770,42 @@ export async function applyNodeTicketReport(params: {
     scope,
   );
 }
+
+export const NODE_TICKET_SETTLED_WITHOUT_REPORT =
+  "The ticket session settled without a workboard-report block and nothing resumed it. The run was aborted or failed, or its report never reached the board. Check the node, then comment what to do next and move the card to todo to restart; the next run reuses the worktree.";
+
+/**
+ * What a sweep that found the session idle does with a running node ticket.
+ * `block`: an earlier observation already closed this round's attempt, the
+ * session has not moved since, and no report, pending import, or operator
+ * stop owns the card. `observe`: the session moved since that record, so the
+ * wait restarts from this sweep. Judged on the card as recorded before the
+ * observation, so a report's agent_end has a full sweep to land.
+ */
+export function nodeTicketIdleVerdict(
+  card: WorkboardCard,
+  sessionUpdatedAt: number | undefined,
+): "block" | "observe" | undefined {
+  const worktree = nodeTicketTarget(card)?.worktree;
+  const claim = card.metadata?.claim;
+  const execution = card.execution;
+  if (
+    !worktree ||
+    !claim ||
+    card.status !== "running" ||
+    execution?.status !== "idle" ||
+    sessionUpdatedAt === undefined ||
+    worktree.stopRequestedAt !== undefined ||
+    // A re-run claims the card seconds before its launch replaces the previous round's idle record.
+    claim.claimedAt > execution.updatedAt
+  ) {
+    return undefined;
+  }
+  // A done report owns the card through its import; a re-run after a failed
+  // import carries that stale pending record.
+  const handoff = worktree.handoff;
+  if (handoff && !(handoff.phase === "pending" && claim.claimedAt > handoff.reportedAt)) {
+    return undefined;
+  }
+  return sessionUpdatedAt > execution.updatedAt ? "observe" : "block";
+}
