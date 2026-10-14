@@ -389,8 +389,8 @@ describe("executeAgentTurn: CLI admission", () => {
     },
   );
 
-  it.each(["ordinary", "room-event"] as const)(
-    "keeps a fresh %s session reported before the turn is aborted",
+  it.each(["ordinary", "room-event", "preserved"] as const)(
+    "keeps an aborted %s turn's fresh session only when it may establish continuity",
     async (kind) => {
       // Stalled-run recovery aborts a turn before settlement; its continuation
       // must resume the native session that already holds the turn's work.
@@ -408,6 +408,12 @@ describe("executeAgentTurn: CLI admission", () => {
       followupRun.run.model = "claude-sonnet-4-6";
       if (kind === "room-event") {
         followupRun.currentInboundEventKind = "room_event";
+      }
+      if (kind === "preserved") {
+        followupRun.run.inputProvenance = {
+          kind: "inter_session",
+          sourceTool: "exec_approval_followup",
+        };
       }
       state.isCliProviderMock.mockImplementation((provider) => provider === "claude-cli");
       state.runWithModelFallbackMock.mockImplementationOnce(
@@ -448,7 +454,7 @@ describe("executeAgentTurn: CLI admission", () => {
         expect(state.runCliAgentMock).toHaveBeenCalledOnce();
         expect(
           loadSessionEntry({ sessionKey, storePath })?.cliSessionBindings?.["claude-cli"],
-        ).toEqual(kind === "room-event" ? undefined : startedBinding);
+        ).toEqual(kind === "ordinary" ? startedBinding : undefined);
       } finally {
         uninstall();
       }
