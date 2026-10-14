@@ -606,7 +606,9 @@ report, address the findings, and report them (see **Report** below).
 1. **Start:** the dispatcher fetches `origin` in the node clone, creates branch
    `factory/<cardId>` at `baseRef` (default `origin/HEAD`) in
    `<worktreesRoot>/wb-<cardId>`, and starts the session there.
-2. **Report:** the session ends with a `workboard-report` block. A `done`
+2. **Report:** the session ends with a `workboard-report` block. A retry turn
+   the Gateway runs in the same session after a stuck-session abort reports
+   for the same round. A `done`
    report with passing proof starts the import. A `needs_input` report waits
    for an answer (see **Questions**). Anything else blocks the card,
    including a `done` report with any `failed` proof entry. The brief tells the

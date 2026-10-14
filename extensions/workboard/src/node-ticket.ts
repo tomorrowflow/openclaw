@@ -801,11 +801,20 @@ export function nodeTicketIdleVerdict(
   ) {
     return undefined;
   }
-  // A done report owns the card through its import; a re-run after a failed
-  // import carries that stale pending record.
-  const handoff = worktree.handoff;
-  if (handoff && !(handoff.phase === "pending" && claim.claimedAt > handoff.reportedAt)) {
+  if (nodeTicketReportOwnsRound(worktree, claim.claimedAt)) {
     return undefined;
   }
   return sessionUpdatedAt > execution.updatedAt ? "observe" : "block";
+}
+
+/**
+ * A done report owns the card through its import; a re-run after a failed
+ * import carries that stale pending record from before its claim.
+ */
+export function nodeTicketReportOwnsRound(
+  worktree: WorkboardNodeWorktree,
+  claimedAt: number,
+): boolean {
+  const handoff = worktree.handoff;
+  return handoff !== undefined && !(handoff.phase === "pending" && claimedAt > handoff.reportedAt);
 }
