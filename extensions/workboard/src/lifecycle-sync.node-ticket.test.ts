@@ -1,10 +1,17 @@
 import { expectDefined } from "@openclaw/normalization-core";
 // Workboard tests cover how a node ticket's run ending maps onto its card.
-import { describe, expect, it } from "vitest";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { describe, expect, it, vi } from "vitest";
+import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
 import { runSessionSweep } from "./lifecycle-sync.test-support.js";
 import { nodeTicketTarget } from "./node-ticket.js";
-import { endedSession, settledSession, startNodeCard } from "./node-ticket.test-support.js";
+import {
+  createNodeGateway,
+  endedSession,
+  settledSession,
+  startNodeCard,
+} from "./node-ticket.test-support.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 import { projectWorkboardTrust } from "./trust-kpis.js";
 
@@ -366,6 +373,112 @@ describe("Workboard node ticket lifecycle", () => {
       "pending",
     );
     expect(stored?.events?.some((event) => event.toStatus === "blocked")).toBe(false);
+  });
+
+  it("settles on a stalled-turn retry's done report under a new run id", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    const claimedAt = expectDefined((await store.get(card.id))?.metadata?.claim, "claim").claimedAt;
+    const settled = settledSession(sessionKey);
+    const resumed = { ...settled.session, updatedAt: settled.session.updatedAt + 5_000 };
+    const retryRunId = `${runId}-retry`;
+
+    // The watchdog aborted the round's run; core queued a retry turn in the same session.
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: false, messages: [] },
+      context: { runId, sessionKey },
+      readSessions: settled.readSessions,
+    });
+    await runSessionSweep({ store, sessions: [settled.session] });
+    // The retry ran under its own run id, from after the round's claim, and reported done.
+    await syncWorkboardAgentEnded({
+      store,
+      event: {
+        runId: retryRunId,
+        success: true,
+        messages: report({
+          outcome: "done",
+          summary: "Fixed",
+          proof: [{ command: "pytest", status: "passed" }],
+        }),
+        durationMs: 60_000,
+      },
+      context: { runId: retryRunId, sessionKey },
+      readSessions: async () => ({ sessions: [resumed], complete: true }),
+      now: claimedAt + 90_000,
+    });
+    await runSessionSweep({ store, sessions: [resumed] });
+    await runSessionSweep({ store, sessions: [resumed] });
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("running");
+    expect(nodeTicketTarget(expectDefined(stored, "card"))?.worktree?.handoff?.phase).toBe(
+      "pending",
+    );
+    expect(stored?.metadata?.comments?.at(-1)?.body).toBe("Fixed");
+    expect(stored?.events?.some((event) => event.toStatus === "blocked")).toBe(false);
+  });
+
+  it("still fences a run from before the current round's claim after a restart", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const gateway = createNodeGateway();
+    const respond = expectDefined(gateway.respond.getMockImplementation(), "respond");
+    let runs = 0;
+    gateway.respond.mockImplementation((method, params) => {
+      const reply = respond(method, params);
+      return method === "sessions.create" && isRecord(reply)
+        ? { ...reply, runId: `run-node-${++runs}` }
+        : reply;
+    });
+    const { card, sessionKey, runId: firstRunId } = await startNodeCard(store, gateway);
+    // Round 1 ended without a report and was restarted as round 2.
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId: firstRunId, success: true, messages: [{ role: "assistant", content: "ok" }] },
+      context: { runId: firstRunId, sessionKey },
+      readSessions: endedSession(),
+    });
+    expect((await store.get(card.id))?.status).toBe("blocked");
+    await store.move(card.id, "ready", undefined);
+    const restarted = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets: gateway,
+      options: { now: Date.now(), maxStarts: 1 },
+    });
+    expect(restarted.startFailures).toEqual([]);
+    const secondRunId = expectDefined(restarted.started[0], "restart").runId;
+    expect(secondRunId).not.toBe(firstRunId);
+    const claimedAt = expectDefined((await store.get(card.id))?.metadata?.claim, "claim").claimedAt;
+
+    // A retry of round 1's run, started before the restart, ends with a done report.
+    const staleRunId = `${firstRunId}-retry`;
+    await syncWorkboardAgentEnded({
+      store,
+      event: {
+        runId: staleRunId,
+        success: true,
+        messages: report({
+          outcome: "done",
+          summary: "Stale",
+          proof: [{ command: "pytest", status: "passed" }],
+        }),
+        durationMs: 60_000,
+      },
+      context: { runId: staleRunId, sessionKey },
+      readSessions: async () => ({
+        sessions: [{ key: sessionKey, status: "running" as const, hasActiveRun: true }],
+        complete: true,
+      }),
+      now: claimedAt + 30_000,
+    });
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("running");
+    expect(stored?.runId).toBe(secondRunId);
+    expect(nodeTicketTarget(expectDefined(stored, "card"))?.worktree?.handoff).toBeUndefined();
+    expect(stored?.metadata?.comments?.some((comment) => comment.body === "Stale")).toBe(false);
   });
 
   it("keeps a done report's pending handoff running while its session stays idle", async () => {
