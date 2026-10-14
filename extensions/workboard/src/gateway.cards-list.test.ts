@@ -11,21 +11,25 @@ import {
   createWorkboardSqliteTestStore,
 } from "./test/sqlite-store.js";
 
-function captureCardsList(store: WorkboardStore) {
-  let list: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
+function captureMethod(store: WorkboardStore, method: string) {
+  let handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
   const api = createTestPluginApi({
-    registerGatewayMethod: (name, handler) => {
-      if (name === "workboard.cards.list") {
-        list = handler;
+    registerGatewayMethod: (name, registered) => {
+      if (name === method) {
+        handler = registered;
       }
     },
   });
   registerWorkboardGatewayMethods({ api, store });
   return async (params: Record<string, unknown>) => {
     const respond = vi.fn();
-    await list({ params, respond } as never);
+    await handler({ params, respond } as never);
     return respond;
   };
+}
+
+function captureCardsList(store: WorkboardStore) {
+  return captureMethod(store, "workboard.cards.list");
 }
 
 describe("workboard card list revisions", () => {
@@ -152,6 +156,36 @@ describe("workboard card list revisions", () => {
     expect(running.stage).toEqual({ kind: "running", since: expect.any(Number) });
     expect(Object.isFrozen(running.stage)).toBe(true);
     expect(await store.get(card.id)).not.toHaveProperty("stage");
+  });
+
+  it("serves the overview from the cached operator card read in the requested board scope", async () => {
+    const { store, stores } = createWorkboardSqliteTestHarness();
+    const blocked = await store.create({ title: "Flaky deploy", boardId: "ops" });
+    await store.move(blocked.id, "blocked", 1);
+    const running = await store.create({ title: "Other board" });
+    await store.claim(running.id, { ownerId: "worker", token: "test-claim-token" });
+    const listCards = captureCardsList(store);
+    const overview = captureMethod(store, "workboard.overview");
+    expect((await listCards({ boardId: "ops" })).mock.calls[0]?.[0]).toBe(true);
+    const reads = vi.spyOn(stores.cards, "entries");
+
+    const respond = await overview({ boardId: "ops" });
+
+    expect(respond.mock.calls[0]?.[0]).toBe(true);
+    expect(respond.mock.calls[0]?.[1]).toMatchObject({
+      boardId: "ops",
+      needsYou: [{ cardId: blocked.id, title: "Flaky deploy", reason: "blocked" }],
+      inFlight: [],
+      open: { blocked: 1 },
+    });
+    expect(reads).not.toHaveBeenCalled();
+    expect((await overview({})).mock.calls[0]?.[1].inFlight).toEqual([
+      expect.objectContaining({
+        cardId: running.id,
+        stage: expect.objectContaining({ kind: "running" }),
+      }),
+    ]);
+    expect((await overview({ boardId: "not a board" })).mock.calls[0]?.[0]).toBe(false);
   });
 
   it("replaces a pending card read when a mutation advances its revision", async () => {

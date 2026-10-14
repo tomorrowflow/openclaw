@@ -5,6 +5,8 @@ import type {
   WorkboardChange,
   WorkboardListResult,
   WorkboardMetadata,
+  WorkboardOperatorCard,
+  WorkboardOverviewResult,
   WorkboardSessionPlacement,
   WorkboardSessionsBoard,
   WorkboardSessionsBoardSpec,
@@ -14,6 +16,7 @@ import type {
 import { WORKBOARD_STATUSES } from "@openclaw/workboard-contract";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { redactOperatorCard } from "./card-redaction.js";
+import { projectWorkboardOverview } from "./overview.js";
 import type {
   PersistedWorkboardAttachment,
   PersistedWorkboardBoard,
@@ -87,6 +90,7 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
 
   listCards(board: unknown): Promise<
     WorkboardListResult & {
+      cards: WorkboardOperatorCard[];
       boards: WorkboardBoardSummary[];
       revision: WorkboardChange & { boardId?: string };
     }
@@ -214,6 +218,12 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
       ? ((await this.boardStore.lookup(boardId))?.board.orchestration ?? {})
       : undefined;
     return projectWorkboardTrust(await this.list({ boardId }), boardId ?? "all", now, board);
+  }
+
+  /** The Factory overview, from the same cached operator read as `listCards`. */
+  async overview(board: unknown, now = Date.now()): Promise<WorkboardOverviewResult> {
+    const { cards, boards } = await this.listCards(board);
+    return projectWorkboardOverview(cards, boards, normalizeBoardId(board) ?? "all", now);
   }
 
   /**

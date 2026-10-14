@@ -757,3 +757,79 @@ export type WorkboardTrustResult = {
   /** The last 8 weeks, oldest first, including the current one. */
   weeks: WorkboardTrustWeek[];
 };
+
+/** One card as a Factory overview row: what it is and where it stands. */
+export type WorkboardOverviewCard = {
+  cardId: string;
+  boardId: string;
+  title: string;
+  /** The operator summary (`metadata.automation.summary`), when the card has one. */
+  summary?: string;
+  stage?: WorkboardCardStage;
+};
+
+/**
+ * Why a card waits on the operator: a review only the operator may decide, a
+ * PR an agent accepted into the human review sample, questions passed to the
+ * operator (or with no automation job to answer them), or a block.
+ */
+export type WorkboardOverviewWaitReason = "decide" | "sampled" | "questions" | "blocked";
+
+export type WorkboardOverviewWaiting = WorkboardOverviewCard & {
+  reason: WorkboardOverviewWaitReason;
+  /** Absent when the card entered the wait before its newest 50 events. */
+  waitingSince?: number;
+};
+
+/** A card waiting on the factory: queued, running, or with an agent to review, answer, or reopen it. */
+export type WorkboardOverviewInFlight = WorkboardOverviewCard & {
+  /** Node tickets only: the paired node, the rework round, and the last run's turn-end context. */
+  nodeId?: string;
+  round?: number;
+  contextTokens?: number;
+};
+
+export type WorkboardOverviewShipped = WorkboardOverviewCard & {
+  shippedAt: number;
+  pullRequestUrl?: string;
+  /** Node tickets only: review rounds published, and who accepted the latest. */
+  rounds?: number;
+  decidedBy?: "agent" | "operator";
+  /** Whether an agent-accepted PR is in the human review sample. */
+  sampled?: boolean;
+  /**
+   * The agent's shadow verdict on an operator-decided round. Whether the
+   * operator agreed shows only once a later rework round does or does not
+   * follow, so the trust KPIs score it, not this row.
+   */
+  shadowVerdict?: "accept" | "rework";
+};
+
+export type WorkboardOverviewInsight = WorkboardOverviewCard & {
+  label: "gardener" | "architecture";
+  createdAt: number;
+};
+
+/**
+ * The Factory overview: a read-time projection of the operator's cards, never
+ * stored. Rows and `open` leave out archived cards and cards on archived
+ * boards; `week` counts as `workboard.cards.trust` does. A pending agent
+ * verdict never shows.
+ */
+export type WorkboardOverviewResult = {
+  /** The board read, or `all`. */
+  boardId: string;
+  generatedAt: number;
+  /** Oldest wait first. */
+  needsYou: WorkboardOverviewWaiting[];
+  /** Longest in its stage first. */
+  inFlight: WorkboardOverviewInFlight[];
+  /** Shipped in the last 7 days, newest first. */
+  shipped: WorkboardOverviewShipped[];
+  /** Open backlog cards labeled `gardener` or `architecture`, newest first. */
+  insights: WorkboardOverviewInsight[];
+  /** Unarchived cards per status, `done` excluded. */
+  open: Partial<Record<WorkboardStatus, number>>;
+  /** The current week of the trust KPIs (`workboard.cards.trust`). */
+  week: WorkboardTrustWeek;
+};
