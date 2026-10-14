@@ -190,6 +190,25 @@ describe("Workboard rung b", () => {
     });
   });
 
+  it("refuses reopening an imported round before its draft PR exists, leaving it in review", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const card = await importedDocsTicket(store);
+    const refusal = "This ticket's branch was imported but has no draft PR yet.";
+
+    await expect(store.move(card.id, "todo", undefined)).rejects.toThrow(refusal);
+    await expect(store.move(card.id, "ready", undefined)).rejects.toThrow(refusal);
+    await expect(
+      agentTools(store)("workboard_move").execute("move", { id: card.id, status: "todo" }),
+    ).rejects.toThrow(refusal);
+
+    expect((await store.get(card.id))?.status).toBe("review");
+    await expect(handoffOf(store, card)).resolves.toEqual({
+      phase: "imported",
+      headCommit: "b".repeat(40),
+      importedAt: expect.any(Number),
+    });
+  });
+
   it("refuses an agent's acceptance of a round that ran before its class reached rung b", async () => {
     const store = createWorkboardSqliteTestStore();
     const card = await importedDocsTicket(store, { later: { docs: { rung: "b" } } });

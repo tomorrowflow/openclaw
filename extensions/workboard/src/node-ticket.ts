@@ -137,6 +137,57 @@ export function nodeTicketAcceptance(params: {
 }
 
 /**
+ * An imported round's move. The move to done records who accepted it; the
+ * board's rung for an agent's move is read in the queued write, so a demotion
+ * applies to the next move. A move to todo or ready is refused until that
+ * move published the draft PR: the next session starts from the PR branch,
+ * so the dispatcher would only block the card.
+ */
+export async function withImportedNodeTicketMove(params: {
+  existing: WorkboardCard;
+  next: WorkboardCard;
+  actor?: WorkboardAgentActor;
+  classRung: () => Promise<WorkboardClassRung | undefined>;
+}): Promise<WorkboardCard> {
+  const { existing, next, actor } = params;
+  const target = nodeTicketTarget(next);
+  const worktree = target?.worktree;
+  if (
+    !target ||
+    worktree?.handoff?.phase !== "imported" ||
+    existing.status === "done" ||
+    next.metadata?.archivedAt
+  ) {
+    return next;
+  }
+  if (next.status === "todo" || next.status === "ready") {
+    throw new Error(
+      "This ticket's branch was imported but has no draft PR yet. Move the card to done to publish it, then move it to todo for rework.",
+    );
+  }
+  if (next.status !== "done") {
+    return next;
+  }
+  const handoff = nodeTicketAcceptance({
+    card: next,
+    worktree,
+    handoff: worktree.handoff,
+    actor,
+    classRung: actor ? await params.classRung() : undefined,
+  });
+  return {
+    ...next,
+    metadata: {
+      ...next.metadata,
+      automation: {
+        ...next.metadata?.automation,
+        target: { ...target, worktree: { ...worktree, handoff } },
+      },
+    },
+  };
+}
+
+/**
  * The review feedback for a published ticket's next rework round, or the
  * answers to a ticket's questions: card comments newer than the publish or
  * the questions and Workboard's own notices since. The slot wait notice is

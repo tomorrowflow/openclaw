@@ -1002,16 +1002,16 @@ describe("node ticket draft PR", () => {
   it("refuses to rework an imported ticket before its draft PR exists", async () => {
     const { store, card, handoffs, warn, gateway } = await finishNodeTicket({});
     await handoffs.resume(warn);
-    await store.move(card.id, "todo", undefined);
+    await expect(store.move(card.id, "todo", undefined)).rejects.toThrow("has no draft PR yet");
 
-    const result = await dispatchAndStartWorkboardCards({
+    await dispatchAndStartWorkboardCards({
       store,
       subagent: { run: vi.fn() },
       nodeTickets: gateway,
       options: { cardId: card.id, now: Date.now() },
     });
 
-    expect(result.startFailures[0]?.error).toContain("has no draft PR yet");
+    expect((await store.get(card.id))?.status).toBe("review");
     expect(gateway.respond).not.toHaveBeenLastCalledWith("sessions.create", expect.anything());
   });
 
