@@ -145,7 +145,7 @@ export function createWorkboardOrchestrationTools(params: {
         id: Type.String({ description: "Workboard card id." }),
         title: Type.Optional(Type.String({ description: "Clarified title." })),
         notes: Type.Optional(
-          Type.String({ description: "Clarified notes or acceptance criteria." }),
+          Type.String({ description: "Clarified notes or acceptance criteria (Markdown)." }),
         ),
         agentId: Type.Optional(Type.String({ description: "Assigned agent id." })),
         priority: Type.Optional(Type.String({ description: "low, normal, high, or urgent." })),
@@ -156,7 +156,9 @@ export function createWorkboardOrchestrationTools(params: {
         workspace: workspaceField(),
         maxRuntimeSeconds: Type.Optional(Type.Number({ description: "Runtime budget." })),
         maxRetries: Type.Optional(Type.Number({ description: "Retry budget." })),
-        summary: Type.Optional(Type.String({ description: "Specification summary comment." })),
+        summary: Type.Optional(
+          Type.String({ description: "Specification summary comment (Markdown)." }),
+        ),
         token: Type.Optional(Type.String({ description: "Claim token for claimed cards." })),
       }),
       execute: async (_toolCallId, rawParams) => {
@@ -172,7 +174,7 @@ export function createWorkboardOrchestrationTools(params: {
       parameters: strictObject({
         id: Type.String({ description: "Parent Workboard card id." }),
         token: Type.Optional(Type.String({ description: "Claim token for claimed cards." })),
-        summary: Type.Optional(Type.String({ description: "Decomposition summary." })),
+        summary: Type.Optional(Type.String({ description: "Decomposition summary (Markdown)." })),
         completeParent: Type.Optional(
           Type.Boolean({
             description: "Complete the parent after child creation. Default true.",
@@ -181,7 +183,7 @@ export function createWorkboardOrchestrationTools(params: {
         children: Type.Array(
           strictObject({
             title: Type.String({ description: "Child title." }),
-            notes: Type.Optional(Type.String({ description: "Child notes." })),
+            notes: Type.Optional(Type.String({ description: "Child notes (Markdown)." })),
             agentId: Type.Optional(Type.String({ description: "Assigned agent id." })),
             priority: Type.Optional(Type.String({ description: "low, normal, high, or urgent." })),
             labels: Type.Optional(Type.Array(Type.String())),

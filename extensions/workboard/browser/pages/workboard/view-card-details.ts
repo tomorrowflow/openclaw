@@ -506,7 +506,7 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
                           class="workboard-detail__section workboard-detail__automation"
                         >
                           <h3>${t("workboard.detailCardAutomation")}</h3>
-                          ${automation?.summary ? html`<p>${automation.summary}</p>` : nothing}
+                          ${automation?.summary ? renderMarkdown(automation.summary) : nothing}
                           ${visibleAutomationFields.map(([label, value]) =>
                             renderDetailRow(label, value),
                           )}
