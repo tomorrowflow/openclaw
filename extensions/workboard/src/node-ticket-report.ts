@@ -1,5 +1,7 @@
+import type { WorkboardNodeDecision } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeNodeDecisions } from "./node-ticket-rounds.js";
 import {
   MAX_BLOCK_REASON_CHARS,
   MAX_COMMENT_BODY_CHARS,
@@ -26,6 +28,7 @@ export type NodeTicketStopReport = {
   outcome: "blocked" | "needs_input";
   summary: string;
   questions: string[];
+  decisions: WorkboardNodeDecision[];
 };
 
 /** The rung b standards review the session ran before its done report. */
@@ -38,6 +41,7 @@ type NodeTicketReport =
       summary: string;
       proof: NodeTicketProof[];
       review?: NodeTicketReview;
+      decisions: WorkboardNodeDecision[];
     }
   | NodeTicketStopReport;
 
@@ -95,6 +99,7 @@ export function parseNodeTicketReport(
     return { ok: false, reason: "The ticket session's workboard-report block is not an object." };
   }
   const summary = optionalText(value.summary, MAX_COMMENT_BODY_CHARS) ?? "";
+  const decisions = normalizeNodeDecisions(value.decisions);
   if (value.outcome === "done") {
     const proof = (Array.isArray(value.proof) ? value.proof : []).flatMap(
       (entry): NodeTicketProof[] => {
@@ -119,6 +124,7 @@ export function parseNodeTicketReport(
         summary,
         proof,
         ...(review ? { review } : {}),
+        decisions,
       },
     };
   }
@@ -127,7 +133,7 @@ export function parseNodeTicketReport(
       const question = optionalText(entry, MAX_BLOCK_REASON_CHARS);
       return question ? [question] : [];
     });
-    return { ok: true, report: { outcome: value.outcome, summary, questions } };
+    return { ok: true, report: { outcome: value.outcome, summary, questions, decisions } };
   }
   return { ok: false, reason: "The ticket session's workboard-report has an unknown outcome." };
 }

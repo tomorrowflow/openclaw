@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
 import { createNodeTicketHandoffs } from "./node-ticket-handoff.js";
+import { hostGit } from "./node-ticket.js";
 import {
   createFakeGitHub,
   createLocalNodeGateway,
@@ -19,9 +20,17 @@ import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 import { createWorkboardTools } from "./tools.js";
 
+vi.mock("./node-ticket.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./node-ticket.js")>();
+  return { ...actual, hostGit: vi.fn(actual.hostGit) };
+});
+const { hostGit: actualHostGit } =
+  await vi.importActual<typeof import("./node-ticket.js")>("./node-ticket.js");
+
 const roots: string[] = [];
 
 afterEach(() => {
+  vi.mocked(hostGit).mockImplementation(actualHostGit);
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -180,9 +189,39 @@ describe("node ticket handoff", () => {
       note: `Imported ${branch} ${base.slice(0, 12)}..${head.slice(0, 12)} into ${repos.hostRepo}`,
     });
     expect(git(repos.hostRepo, "rev-parse", branch)).toBe(head);
+    expect(stored?.metadata?.automation?.target?.worktree?.rounds).toEqual([
+      {
+        round: 0,
+        changes: {
+          from: base,
+          to: head,
+          files: [{ path: "parser.py", added: 1, deleted: 0 }],
+          totals: { files: 1, added: 1, deleted: 0 },
+        },
+      },
+    ]);
     expect(existsSync(worktree)).toBe(false);
     expect(existsSync(`${worktree}.bundle`)).toBe(false);
     expect(git(repos.target.repoPath, "branch", "--list", branch)).toBe("");
+  });
+
+  it("imports without a diffstat when git diff --numstat fails", async () => {
+    const { store, card, repos, handoffs, warn } = await finishNodeTicket({});
+    vi.mocked(hostGit).mockImplementation(async (repoPath, args, env) =>
+      args.includes("--numstat")
+        ? { code: 128, stdout: "", stderr: "fatal: bad revision" }
+        : await actualHostGit(repoPath, args, env),
+    );
+
+    await handoffs.resume(warn);
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("review");
+    expect(git(repos.hostRepo, "rev-parse", `factory/${card.id}`)).toBeTruthy();
+    expect(stored?.metadata?.automation?.target?.worktree?.rounds).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      `workboard could not record the changed files of card ${card.id}: fatal: bad revision`,
+    );
   });
 
   it("bases the ticket on the fetched origin even when both clones are stale", async () => {
@@ -655,9 +694,23 @@ describe("node ticket draft PR", () => {
     git(worktree, "commit", "-q", "-m", "rename flag");
     const reworked = git(worktree, "rev-parse", "HEAD");
     const started = result.started[0];
+    const decision = {
+      phase: "fix",
+      decision: "Rename the flag to --strict",
+      evidence: "flags.py:1",
+    };
     await syncWorkboardAgentEnded({
       store,
-      event: { runId: started?.runId, success: true, messages: doneReport },
+      event: {
+        runId: started?.runId,
+        success: true,
+        messages: reportMessages({
+          outcome: "done",
+          summary: "Parser accepts empty input",
+          proof: [{ command: "pytest", status: "passed" }],
+          decisions: [decision],
+        }),
+      },
       context: { runId: started?.runId, sessionKey: started?.sessionKey },
       readSessions: endedSession(),
     });
@@ -688,6 +741,20 @@ describe("node ticket draft PR", () => {
       reviews: [
         { round: 0, verdict: "rework" },
         { round: 1, verdict: "missed" },
+      ],
+      // Round 1 answers for its own commit, not the reviewer's parser.py fixup.
+      rounds: [
+        { round: 0, changes: { files: [{ path: "parser.py", added: 1, deleted: 0 }] } },
+        {
+          round: 1,
+          decisions: [decision],
+          changes: {
+            from: reviewed,
+            to: reworked,
+            files: [{ path: "flags.py", added: 1, deleted: 0 }],
+            totals: { files: 1, added: 1, deleted: 0 },
+          },
+        },
       ],
     });
     const trust = await store.trust({});

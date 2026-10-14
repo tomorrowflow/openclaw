@@ -9,6 +9,7 @@ import {
   publishNodeTicket,
   type WorkboardGitHubAccess,
 } from "./node-ticket-publish.js";
+import { parseNumstat } from "./node-ticket-rounds.js";
 import {
   HandoffSupersededError,
   hostGit,
@@ -120,7 +121,7 @@ async function importNodeBundle(
   runtime: WorkboardNodeTicketRuntime,
   item: HandoffCard,
   assertCurrent: () => Promise<void>,
-): Promise<string> {
+): Promise<{ from: string; headCommit: string }> {
   const { nodeId, worktree, bundlePath, hostRepoPath } = item;
   const git = (...args: string[]) =>
     runNodeCommand(runtime, nodeId, ["git", "-C", worktree.path, ...args]);
@@ -215,7 +216,7 @@ async function importNodeBundle(
       // The old value makes git refuse if another writer moved or created the ref meanwhile.
       await requireHostGit(hostRepoPath, ["update-ref", ref, headCommit, existingHead]);
     }
-    return headCommit;
+    return { from: checkFrom, headCommit };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
@@ -244,15 +245,16 @@ async function runNodeTicketHandoff(params: {
   store: WorkboardStore;
   item: HandoffCard;
   now: () => number;
+  warn: (message: string) => void;
 }): Promise<void> {
   const { runtime, store, item } = params;
   const { card, worktree } = item;
   const claim = card.metadata?.claim;
   const scope = claim ? { ownerId: claim.ownerId, token: claim.token } : undefined;
   if (worktree.handoff.phase === "pending") {
-    let headCommit: string;
+    let imported: { from: string; headCommit: string };
     try {
-      headCommit = await importNodeBundle(runtime, item, async () => {
+      imported = await importNodeBundle(runtime, item, async () => {
         // The card may have been cancelled or re-dispatched while the bundle travelled.
         const current = await store.get(card.id);
         const fresh = current ? handoffCard(current) : undefined;
@@ -314,6 +316,7 @@ async function runNodeTicketHandoff(params: {
       );
       return;
     }
+    const { headCommit } = imported;
     const range = `${worktree.baseCommit.slice(0, 12)}..${headCommit.slice(0, 12)}`;
     await store.addProof(
       card.id,
@@ -325,6 +328,29 @@ async function runNodeTicketHandoff(params: {
       },
       scope,
     );
+    // The diffstat only informs the operator; the import stands without it.
+    const numstat = await hostGit(item.hostRepoPath, [
+      "diff",
+      "--numstat",
+      "-z",
+      "-M",
+      imported.from,
+      headCommit,
+    ]);
+    if (numstat.code === 0) {
+      await store.recordNodeRound(
+        card.id,
+        {
+          worktreePath: worktree.path,
+          changes: parseNumstat(numstat.stdout, imported.from, headCommit),
+        },
+        scope,
+      );
+    } else {
+      params.warn(
+        `workboard could not record the changed files of card ${card.id}: ${numstat.stderr.trim() || `exit ${numstat.code}`}`,
+      );
+    }
     await store.setNodeHandoff(
       card.id,
       {
@@ -507,7 +533,13 @@ export function createNodeTicketHandoffs(params: {
         inFlight.add(card.id);
         try {
           if (item) {
-            await runNodeTicketHandoff({ runtime: params.runtime, store: params.store, item, now });
+            await runNodeTicketHandoff({
+              runtime: params.runtime,
+              store: params.store,
+              item,
+              now,
+              warn,
+            });
             const current = await params.store.get(card.id);
             if (current?.status === "review") {
               await params.onReview?.(current);

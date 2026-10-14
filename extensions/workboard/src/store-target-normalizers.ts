@@ -9,6 +9,7 @@ import type {
 } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeNodeRounds } from "./node-ticket-rounds.js";
 import { MAX_NODE_REVIEW_VERDICTS } from "./store-constants.js";
 import { normalizeBoundedString, normalizeCommentSource } from "./store-value-normalizers.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
@@ -180,6 +181,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
   const questions = normalizeNodeQuestions(value.questions);
   const feedback = normalizeNodeFeedback(value.feedback);
   const reviews = normalizeNodeReviews(value.reviews);
+  const rounds = normalizeNodeRounds(value.rounds);
   const stopRequestedAt = resolveOptionalIntegerOption(value.stopRequestedAt, { min: 0 });
   return worktreePath && branch && baseCommit
     ? {
@@ -191,6 +193,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         ...(questions ? { questions } : {}),
         ...(feedback ? { feedback } : {}),
         ...(reviews.length > 0 ? { reviews } : {}),
+        ...(rounds.length > 0 ? { rounds } : {}),
         ...(value.rung === "b" ? { rung: "b" as const } : {}),
         ...(stopRequestedAt !== undefined ? { stopRequestedAt } : {}),
       }

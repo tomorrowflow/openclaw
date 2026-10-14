@@ -91,4 +91,47 @@ describe("redactOperatorCard", () => {
       "Verdict: accept",
     ]);
   });
+
+  it("carries a node ticket's rounds beside the card while a pending verdict stays hidden", () => {
+    const rounds = [
+      {
+        round: 0,
+        decisions: [{ phase: "plan", decision: "Return [] for empty input" }],
+        changes: {
+          from: "a".repeat(40),
+          to: "b".repeat(40),
+          files: [{ path: "parser.py", added: 3, deleted: 1 }],
+          totals: { files: 1, added: 3, deleted: 1 },
+        },
+      },
+    ];
+    const card: WorkboardCard = {
+      ...createCard({
+        automation: {
+          target: {
+            kind: "node-claude",
+            nodeId: "node",
+            repoPath: "/repo",
+            worktreesRoot: "/wt",
+            hostRepoPath: "/host",
+            worktree: {
+              path: "/wt/wb-card-1",
+              branch: "factory/card-1",
+              baseCommit: "a".repeat(40),
+              handoff: { phase: "imported", headCommit: "b".repeat(40), importedAt: 10 },
+              rounds,
+            },
+          },
+        },
+        comments: [{ id: "verdict", body: "Verdict: accept", createdAt: 20, source: "agent:dev" }],
+      }),
+      status: "review",
+    };
+
+    const operatorCard = redactOperatorCard(card);
+
+    expect(operatorCard.rounds).toEqual(rounds);
+    expect(operatorCard.metadata?.comments).toEqual([]);
+    expect(redactOperatorCard(createCard())).not.toHaveProperty("rounds");
+  });
 });

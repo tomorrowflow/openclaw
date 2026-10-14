@@ -141,6 +141,44 @@ describe("Workboard node ticket lifecycle", () => {
     expect(blocked?.metadata?.automation?.summary).toBe("Empty input crashes the parser.");
   });
 
+  it("records a report's decision trail on the worktree's round, a blocked one too", async () => {
+    const end = async (value: Record<string, unknown>) => {
+      const store = createWorkboardSqliteTestStore();
+      const { card, sessionKey, runId } = await startNodeCard(store);
+      await syncWorkboardAgentEnded({
+        store,
+        event: { runId, success: true, messages: report(value) },
+        context: { runId, sessionKey },
+        readSessions: endedSession(),
+      });
+      return nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree;
+    };
+
+    const blocked = await end({
+      outcome: "blocked",
+      summary: "The fixture repo is missing",
+      decisions: [
+        { phase: "verify", decision: "pytest cannot import fixtures", evidence: "pytest -x" },
+        { phase: "verify" },
+      ],
+    });
+    expect(blocked?.rounds).toEqual([
+      {
+        round: 0,
+        decisions: [
+          { phase: "verify", decision: "pytest cannot import fixtures", evidence: "pytest -x" },
+        ],
+      },
+    ]);
+
+    const silent = await end({
+      outcome: "done",
+      summary: "Parser accepts empty input",
+      proof: [{ command: "pytest", status: "passed" }],
+    });
+    expect(silent?.rounds).toBeUndefined();
+  });
+
   it.each([
     {
       name: "a block reason longer than an attempt error",

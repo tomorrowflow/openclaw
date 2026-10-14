@@ -41,10 +41,9 @@ import type {
   WorkboardDispatchResult,
   WorkboardMutationScope,
 } from "./store-inputs.js";
+import { WorkboardNodeWorktreeStore } from "./store-node-worktree.js";
 import { capText, normalizeBoardId, normalizeTimestamp } from "./store-normalizers.js";
-import { WorkboardNotificationStore } from "./store-notifications.js";
 import { readCards } from "./store-read.js";
-import { type WorkboardNodeHandoffInput, withNodeHandoff } from "./store-target-normalizers.js";
 
 export type { WorkboardDispatchResult } from "./store-inputs.js";
 export { WorkboardCardConflictError } from "./store-core.js";
@@ -192,7 +191,7 @@ function lifecycleExecution(params: {
 }
 
 // Capability layers share persistence handles and the runtime's mutation ordering.
-export class WorkboardStore extends WorkboardNotificationStore {
+export class WorkboardStore extends WorkboardNodeWorktreeStore {
   async prepareExecutionLaunch(
     id: string,
     input: {
@@ -265,38 +264,6 @@ export class WorkboardStore extends WorkboardNotificationStore {
       }
       return { card: result.card, launch };
     }, input.assertOwnerCurrent);
-  }
-
-  /** Records the handoff phase on the card's node worktree; a replaced worktree is left alone. */
-  async setNodeHandoff(
-    id: string,
-    input: WorkboardNodeHandoffInput,
-    scope?: WorkboardMutationScope,
-  ): Promise<WorkboardCard | undefined> {
-    return await this.enqueueMutation(async () => {
-      const result = await this.updateLatestCard(
-        id,
-        (card) => {
-          assertCanMutateClaimedCard(card, scope);
-          const target = card.metadata?.automation?.target;
-          if (!target?.worktree || target.worktree.path !== input.worktreePath) {
-            return undefined;
-          }
-          return {
-            metadata: {
-              ...card.metadata,
-              automation: {
-                ...card.metadata?.automation,
-                ...(input.summary ? { summary: input.summary } : {}),
-                target: { ...target, worktree: withNodeHandoff(target.worktree, input) },
-              },
-            },
-          };
-        },
-        { allowAutomationLaunch: true },
-      );
-      return result.updated ? result.card : undefined;
-    });
   }
 
   async acceptExecutionLaunch(
