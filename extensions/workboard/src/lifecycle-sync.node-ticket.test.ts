@@ -48,7 +48,7 @@ describe("Workboard node ticket lifecycle", () => {
       }),
       status: "review",
       comment:
-        "Needs input: Two schemas fit\n- Keep v1 fields?\n\nAnswer in a comment, then move the card to todo; the same session resumes with the answer.",
+        "**Needs input:** Two schemas fit\n\n- Keep v1 fields?\n\nAnswer in a comment, then move the card to todo; the same session resumes with the answer.",
     },
     {
       name: "done with failing proof blocks the card",

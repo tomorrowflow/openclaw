@@ -3805,7 +3805,7 @@ workboard-inline-text {
   list-style: none;
 }
 
-.workboard-detail__list li {
+.workboard-detail__list > li {
   min-width: 0;
   color: var(--text);
   font-size: 0.8rem;
@@ -3814,7 +3814,7 @@ workboard-inline-text {
   white-space: pre-wrap;
 }
 
-.workboard-detail__events li {
+.workboard-detail__events > li {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
@@ -3826,7 +3826,7 @@ workboard-inline-text {
   font-size: 0.73rem;
 }
 
-.workboard-detail__comments li {
+.workboard-detail__comments > li {
   display: grid;
   gap: 4px;
   white-space: normal;
