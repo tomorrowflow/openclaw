@@ -103,6 +103,72 @@ describe("Workboard node ticket lifecycle", () => {
     expect(stored?.metadata?.comments?.at(-1)?.body).toBe(comment);
   });
 
+  it.each([
+    {
+      name: "while the session is still finishing",
+      readSessions: async (options: { sessionKey?: string }) => ({
+        sessions: options.sessionKey
+          ? [{ key: options.sessionKey, hasActiveRun: true, updatedAt: Date.now() }]
+          : [],
+        complete: true,
+      }),
+    },
+    { name: "after the session ended", readSessions: endedSession() },
+  ])("wakes the board automation once for a question round $name", async ({ readSessions }) => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    const onMatched = vi.fn<
+      NonNullable<Parameters<typeof syncWorkboardAgentEnded>[0]["onMatched"]>
+    >(async () => {});
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: {
+        runId,
+        success: true,
+        messages: report({ outcome: "needs_input", summary: "Two schemas fit", questions: ["Q1"] }),
+      },
+      context: { runId, sessionKey },
+      readSessions,
+      onMatched,
+    });
+
+    expect(onMatched).toHaveBeenCalledTimes(1);
+    expect(onMatched).toHaveBeenCalledWith({
+      cards: [expect.objectContaining({ id: card.id, status: "review" })],
+      sessionKey,
+    });
+  });
+
+  it("leaves a done report's wake-up to its bundle import", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { sessionKey, runId } = await startNodeCard(store);
+    const onMatched = vi.fn<
+      NonNullable<Parameters<typeof syncWorkboardAgentEnded>[0]["onMatched"]>
+    >(async () => {});
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: {
+        runId,
+        success: true,
+        messages: report({
+          outcome: "done",
+          summary: "Parser accepts empty input",
+          proof: [{ command: "pytest", status: "passed" }],
+        }),
+      },
+      context: { runId, sessionKey },
+      readSessions: async () => ({
+        sessions: [{ key: sessionKey, hasActiveRun: true, updatedAt: Date.now() }],
+        complete: true,
+      }),
+      onMatched,
+    });
+
+    expect(onMatched).not.toHaveBeenCalled();
+  });
+
   it("replaces the card summary with a done report's headline and keeps the summary a comment", async () => {
     const end = async (value: Record<string, unknown>) => {
       const store = createWorkboardSqliteTestStore();

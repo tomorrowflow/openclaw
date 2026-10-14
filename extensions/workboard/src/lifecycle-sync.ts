@@ -241,6 +241,7 @@ export async function syncWorkboardAgentEnded(params: {
   // session settles; a failed one waits while fallback may still continue,
   // and the sweep blocks the card if the session then stays idle.
   let nodeTicket = false;
+  const reported: WorkboardCard[] = [];
   for (const card of linked) {
     if (card.status === "running" && nodeTicketTarget(card)) {
       nodeTicket = true;
@@ -251,6 +252,10 @@ export async function syncWorkboardAgentEnded(params: {
           messages: params.event.messages ?? [],
           success: params.event.success,
         });
+        const current = await params.store.get(card.id);
+        if (current && current.status !== "running") {
+          reported.push(current);
+        }
       }
     }
   }
@@ -274,6 +279,13 @@ export async function syncWorkboardAgentEnded(params: {
     });
     count = synced.count;
     cards = synced.cards;
+  } else if (reported.length > 0) {
+    // The report settled its card (questions or a block) while the session was
+    // still finishing, so no lifecycle write wakes the board automation.
+    await params.onMatched?.({
+      cards: reported,
+      ...(source.sessionKey ? { sessionKey: source.sessionKey } : {}),
+    });
   }
   // After any lifecycle write, which gives a session-linked attempt its run id.
   const contextTokens = turnEndContextTokens(params.event.messages ?? []);
