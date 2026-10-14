@@ -77,7 +77,7 @@ export async function executeCliProcess(params: {
   outputMode: CliBackendConfig["output"];
   logOutputText: boolean;
   cliTurnStartedAt: number;
-  observeForkSuccessor: (sessionId: string) => void;
+  observeSessionId: (sessionId: string) => void;
   options?: ExecuteCliProcessOptions;
 }): Promise<CliOutput> {
   const context = params.context;
@@ -148,7 +148,7 @@ export async function executeCliProcess(params: {
           params.events.emitLiveEvents && runParams.emitCommentaryText
             ? params.events.emitCliCommentaryText
             : undefined,
-        onSessionId: params.observeForkSuccessor,
+        onSessionId: params.observeSessionId,
         onNativeTools: context.preparedBackend.mcpClientGrantCapture?.captureNativeTools,
         onAssistantMessage: params.diagnostics?.observeAssistantMessage,
         onUsage: params.diagnostics?.observeUsage,
@@ -399,8 +399,10 @@ export async function executeCliProcess(params: {
   if (streamingParserErrorText) {
     throw createCliFailoverError(streamingParserErrorText, "format", failoverContext);
   }
-  // The node re-injects the terminal result after truncation. If even that is
-  // missing, the turn outcome is unknowable and cannot pass as a clean exit.
+  // Older node hosts cap forwarded stdout and re-inject only the terminal result;
+  // current ones forward everything and never report truncation. Keep this guard
+  // until no supported node host truncates: without the terminal result the turn
+  // outcome is unknowable and cannot pass as a clean exit.
   if (
     nodeRunTruncated &&
     result.exitCode === 0 &&

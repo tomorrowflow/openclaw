@@ -6,6 +6,7 @@ import { buildCliMcpDelegationCapabilityBinding } from "../../agents/cli-runner/
 import {
   buildCliSessionForkRunParams,
   clearCliSessionInStore,
+  persistStartedCliSessionInStore,
   settleCliSessionResult,
 } from "../../agents/cli-session-store.js";
 import { shouldClearFailedCliSessionBinding } from "../../agents/cli-session.js";
@@ -17,6 +18,7 @@ import {
 } from "../../agents/media-generation-activity.js";
 import { findModelInCatalog } from "../../agents/model-catalog-lookup.js";
 import { normalizeChatType } from "../../channels/chat-type.js";
+import type { CliSessionBinding } from "../../config/sessions.js";
 import { shouldPreserveUserFacingSessionStateForInputProvenance } from "../../sessions/input-provenance.js";
 import { createAgentLifecycleTerminalBackstop } from "./agent-lifecycle-terminal.js";
 import { resolveRunAuthProfile } from "./agent-runner-auth-profile.js";
@@ -182,11 +184,14 @@ export async function runCliFallbackCandidate(
         settleResult,
       }) => {
         let sessionEntry = initialSessionEntry;
-        const clearCliBinding = () =>
+        // A fresh session published mid-run follows the same failure policy as
+        // the binding the turn started from.
+        let startedCliSessionBinding: CliSessionBinding | undefined;
+        const clearCliBinding = (expectedCliSessionId = cliSessionBinding?.sessionId) =>
           clearCliSessionInStore({
             agentId: turn.followupRun.run.agentId,
             provider: params.cliExecutionProvider,
-            expectedCliSessionId: cliSessionBinding?.sessionId,
+            expectedCliSessionId,
             expectedSessionId: sessionEntry?.sessionId,
             assertCommitAllowed: assertSettlementCurrent,
             sessionKey: turn.sessionKey,
@@ -229,6 +234,37 @@ export async function runCliFallbackCandidate(
                 },
               )
             : undefined;
+        const { activeSessionStore, storePath } = turn;
+        // Room events and preserved-provenance turns never establish continuity;
+        // settlement keeps the same exceptions.
+        const persistStartedCliSession =
+          sessionKey &&
+          activeSessionStore &&
+          storePath &&
+          turn.followupRun.currentInboundEventKind !== "room_event" &&
+          !shouldPreserveUserFacingSessionStateForInputProvenance(
+            turn.followupRun.run.inputProvenance,
+          )
+            ? async (binding: CliSessionBinding) => {
+                const persisted = await persistStartedCliSessionInStore({
+                  agentId: turn.followupRun.run.agentId,
+                  provider: params.cliExecutionProvider,
+                  startingCliSessionId: cliSessionBinding?.sessionId,
+                  binding,
+                  sessionKey,
+                  sessionStore: activeSessionStore,
+                  storePath,
+                  assertCommitAllowed: () => {
+                    assertSettlementCurrent();
+                    params.runAbortSignal?.throwIfAborted();
+                  },
+                });
+                if (persisted) {
+                  sessionEntry = persisted;
+                  startedCliSessionBinding = binding;
+                }
+              }
+            : undefined;
         const mediaTaskIdsBefore = getGeneratedMediaTaskIdsForSessionKey(
           turn.sessionKey,
           turn.followupRun.run.agentId,
@@ -244,12 +280,14 @@ export async function runCliFallbackCandidate(
           suppressAssistantBridge: turn.followupRun.run.silentExpected,
           onActivity: () => turn.replyOperation?.recordActivity(),
           onErrorBeforeLifecycle:
-            params.cliExecutionProvider === "claude-cli" && cliSessionBinding?.sessionId
+            params.cliExecutionProvider === "claude-cli"
               ? async (error) => {
+                  const failedBinding = startedCliSessionBinding ?? cliSessionBinding;
                   if (
+                    !failedBinding ||
                     !shouldClearFailedCliSessionBinding({
                       error,
-                      binding: cliSessionBinding,
+                      binding: failedBinding,
                       hasNewGeneratedMediaTask: hasNewGeneratedMediaTaskForSessionKey(
                         turn.sessionKey,
                         mediaTaskIdsBefore,
@@ -259,7 +297,7 @@ export async function runCliFallbackCandidate(
                   ) {
                     return;
                   }
-                  await clearCliBinding();
+                  await clearCliBinding(failedBinding.sessionId);
                 }
               : undefined,
           preserveProgressCallbackStartOrder: params.preserveProgressCallbackStartOrder,
@@ -399,6 +437,7 @@ export async function runCliFallbackCandidate(
             cliSessionBinding,
             forkCliSessionOnResume,
             ...forkRunParams,
+            persistStartedCliSession,
             authProfileId,
             mediaImageLayout: params.currentTurnImages.mediaImageLayout,
             messageChannel: turn.followupRun.originatingChannel ?? undefined,

@@ -198,6 +198,41 @@ async function persistCliSessionForkSuccessorInStore(
   );
 }
 
+/**
+ * Publishes a fresh native session as soon as the CLI reports it. A turn
+ * interrupted before settlement then resumes that session instead of starting
+ * over without its work; settlement later overwrites it with the full binding.
+ */
+export async function persistStartedCliSessionInStore(
+  params: Required<CliSessionStoreTarget> & {
+    /** The binding the turn started from; another writer's newer binding wins. */
+    startingCliSessionId: string | undefined;
+    binding: CliSessionBinding;
+    assertCommitAllowed: SessionSourceAssertion;
+  },
+): Promise<SessionEntry | undefined> {
+  const { provider, sessionKey, sessionStore } = params;
+  const unchanged = (entry: SessionEntry) =>
+    getCliSessionBinding(entry, provider)?.sessionId === params.startingCliSessionId;
+  const entry = sessionStore[sessionKey];
+  if (!entry || !unchanged(entry)) {
+    return undefined;
+  }
+  return await patchCliSessionBindingInStore({
+    ...params,
+    expectedSession: entry,
+    preserveActivity: true,
+    skipMaintenance: true,
+    update: (current) => {
+      if (!unchanged(current)) {
+        return false;
+      }
+      setCliSessionBinding(current, provider, params.binding);
+      return true;
+    },
+  });
+}
+
 /** A rejected continuity write cannot erase completed effects or reopen model fallback. */
 export async function settleCliSessionResult(
   result: EmbeddedAgentRunResult,

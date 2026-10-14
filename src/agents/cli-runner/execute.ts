@@ -34,6 +34,7 @@ import {
   buildCliLiveOwnerKey,
   restartCliLiveSession,
 } from "./cli-live-session-registry.js";
+import { buildCliSessionBinding } from "./cli-run-settlement.js";
 import { executeDeps } from "./execute-deps.js";
 import { createCliEventHandlers } from "./execute-events.js";
 import {
@@ -285,7 +286,22 @@ export async function executePreparedCliRun(
     forkSuccessorPersistence = params.persistCliSessionForkSuccessor?.(sessionId);
     void forkSuccessorPersistence?.catch(() => undefined);
   };
-  const finishForkSuccessorPersistence = async () => {
+  let startedSessionPersistence: Promise<void> | undefined;
+  const observeSessionId = (sessionId: string) => {
+    observeForkSuccessor(sessionId);
+    if (startedSessionPersistence || !params.persistStartedCliSession) {
+      return;
+    }
+    startedSessionPersistence = params
+      .persistStartedCliSession(buildCliSessionBinding(context, sessionId))
+      .catch((error: unknown) => {
+        // Settlement still publishes the binding; this write only covers interruption.
+        cliBackendLog.warn(`CLI started-session binding not saved: ${formatErrorMessage(error)}`);
+      });
+  };
+  const finishSessionBindingPersistence = async () => {
+    // Settlement must not race an in-flight early write of the same binding.
+    await startedSessionPersistence;
     try {
       await forkSuccessorPersistence;
     } catch (error) {
@@ -580,7 +596,7 @@ export async function executePreparedCliRun(
         outputMode,
         logOutputText,
         cliTurnStartedAt,
-        observeForkSuccessor,
+        observeSessionId,
         options,
       });
     } catch (error) {
@@ -647,7 +663,7 @@ export async function executePreparedCliRun(
     if (completedOutput.sessionId) {
       observeForkSuccessor(completedOutput.sessionId);
     }
-    await finishForkSuccessorPersistence();
+    await finishSessionBindingPersistence();
     if (forkResumeClaimed && !forkSuccessorObserved) {
       await params.restoreCliSessionFork?.();
       forkResumeClaimed = false;
@@ -658,7 +674,7 @@ export async function executePreparedCliRun(
     diagnostics?.emitError(error);
     let failure = error;
     try {
-      await finishForkSuccessorPersistence();
+      await finishSessionBindingPersistence();
     } catch (persistenceError) {
       failure = new AggregateError(
         [error, persistenceError],

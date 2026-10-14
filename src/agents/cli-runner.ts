@@ -336,11 +336,17 @@ async function runPreparedCliAgentOwned(
             options.onForkSuccessorPersisted?.(sessionId);
           }
         : context.params.persistCliSessionForkSuccessor;
+    // Only a fresh conversation session becomes continuity; settlement applies the same rule.
+    const persistStartedCliSession =
+      cliSessionIdToUse || turnSideEffectsDisabled || sessionBindingDisabled
+        ? undefined
+        : context.params.persistStartedCliSession;
     const attemptContext =
       timeoutMs === params.timeoutMs &&
       forkCliSessionOnResume === context.params.forkCliSessionOnResume &&
       cliSessionResumeAt === context.params.cliSessionResumeAt &&
-      persistCliSessionForkSuccessor === context.params.persistCliSessionForkSuccessor
+      persistCliSessionForkSuccessor === context.params.persistCliSessionForkSuccessor &&
+      persistStartedCliSession === context.params.persistStartedCliSession
         ? context
         : {
             ...context,
@@ -350,6 +356,7 @@ async function runPreparedCliAgentOwned(
               forkCliSessionOnResume,
               cliSessionResumeAt,
               persistCliSessionForkSuccessor,
+              persistStartedCliSession,
             },
           };
     diagnosticLifecycle?.setPhase("send");

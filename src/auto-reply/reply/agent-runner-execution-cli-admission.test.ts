@@ -389,6 +389,78 @@ describe("executeAgentTurn: CLI admission", () => {
     },
   );
 
+  it.each(["ordinary", "room-event", "preserved"] as const)(
+    "keeps an aborted %s turn's fresh session only when it may establish continuity",
+    async (kind) => {
+      // Stalled-run recovery aborts a turn before settlement; its continuation
+      // must resume the native session that already holds the turn's work.
+      const sessionKey = "agent:main:cli-started-session";
+      const storePath = makeTestSessionStorePath();
+      const controller = new AbortController();
+      const startedBinding = {
+        sessionId: "started-native-session",
+        authProfileId: "anthropic:cli",
+      };
+      const entry: SessionEntry = { sessionId: "session", updatedAt: 1 };
+      await replaceSessionEntry({ sessionKey, storePath }, entry);
+      const followupRun = createFollowupRun();
+      followupRun.run.provider = "claude-cli";
+      followupRun.run.model = "claude-sonnet-4-6";
+      if (kind === "room-event") {
+        followupRun.currentInboundEventKind = "room_event";
+      }
+      if (kind === "preserved") {
+        followupRun.run.inputProvenance = {
+          kind: "inter_session",
+          sourceTool: "exec_approval_followup",
+        };
+      }
+      state.isCliProviderMock.mockImplementation((provider) => provider === "claude-cli");
+      state.runWithModelFallbackMock.mockImplementationOnce(
+        async (params: FallbackRunnerParams) => ({
+          result: await params.run(
+            "claude-cli",
+            "claude-sonnet-4-6",
+            initialFallbackAttemptOptions(params),
+          ),
+          provider: "claude-cli",
+          model: "claude-sonnet-4-6",
+          attempts: [],
+        }),
+      );
+      state.runCliAgentMock.mockImplementationOnce(async (params: RunCliAgentParams) => {
+        expect(params.cliSessionBinding).toBeUndefined();
+        await params.persistStartedCliSession?.(startedBinding);
+        controller.abort(new DOMException("run stalled", "AbortError"));
+        throw new DOMException("run stalled", "AbortError");
+      });
+      const uninstall = installSessionPlacementAdmissionProvider({
+        assertCompactionSuccessorAllowed: rejectUnexpectedCompactionSuccessor,
+        executeLocalTurn: async (_claim, runLocal) => await runLocal(),
+        executeTurn: async (_claim, _params, runLocal) => await runLocal(),
+      });
+      try {
+        const executeAgentTurn = await getExecuteAgentTurnForTest();
+        await executeAgentTurn({
+          ...createMinimalRunAgentTurnParams({
+            followupRun,
+            opts: { abortSignal: controller.signal },
+          }),
+          sessionKey,
+          storePath,
+          activeSessionStore: { [sessionKey]: entry },
+          getActiveSessionEntry: () => entry,
+        }).catch(() => undefined);
+        expect(state.runCliAgentMock).toHaveBeenCalledOnce();
+        expect(
+          loadSessionEntry({ sessionKey, storePath })?.cliSessionBindings?.["claude-cli"],
+        ).toEqual(kind === "ordinary" ? startedBinding : undefined);
+      } finally {
+        uninstall();
+      }
+    },
+  );
+
   it.each(["ordinary", "rejected-clear", "room-event"] as const)(
     "retains the %s reply after its continuity write loses ownership",
     async (kind) => {

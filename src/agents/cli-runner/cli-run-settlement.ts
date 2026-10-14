@@ -1,5 +1,6 @@
 import { setReplyPayloadMetadata, type ReplyPayload } from "../../auto-reply/reply-payload.js";
 import { SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
+import type { CliSessionBinding } from "../../config/sessions.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
@@ -431,6 +432,33 @@ export function buildCliDeliveredFailure(params: {
   };
 }
 
+/** The reuse facts a later turn validates before resuming this native session. */
+export function buildCliSessionBinding(
+  context: PreparedCliRunContext,
+  sessionId: string,
+): CliSessionBinding {
+  return {
+    sessionId,
+    ...(context.effectiveAuthProfileId ? { authProfileId: context.effectiveAuthProfileId } : {}),
+    ...(context.authEpoch ? { authEpoch: context.authEpoch } : {}),
+    authEpochVersion: context.authEpochVersion,
+    ...(context.extraSystemPromptHash
+      ? { extraSystemPromptHash: context.extraSystemPromptHash }
+      : {}),
+    ...(context.messageToolPolicyHash
+      ? { messageToolPolicyHash: context.messageToolPolicyHash }
+      : {}),
+    ...(context.promptToolNamesHash ? { promptToolNamesHash: context.promptToolNamesHash } : {}),
+    ...(context.cwdHash ? { cwdHash: context.cwdHash } : {}),
+    ...(context.preparedBackend.mcpConfigHash
+      ? { mcpConfigHash: context.preparedBackend.mcpConfigHash }
+      : {}),
+    ...(context.preparedBackend.mcpResumeHash
+      ? { mcpResumeHash: context.preparedBackend.mcpResumeHash }
+      : {}),
+  };
+}
+
 export function buildCliRunResult(params: {
   context: PreparedCliRunContext;
   output: CliOutput;
@@ -608,30 +636,9 @@ export function buildCliRunResult(params: {
         ...(persistedCliSessionId
           ? {
               cliSessionBinding: {
-                sessionId: persistedCliSessionId,
-                ...(context.effectiveAuthProfileId
-                  ? { authProfileId: context.effectiveAuthProfileId }
-                  : {}),
+                ...buildCliSessionBinding(context, persistedCliSessionId),
                 ...(output.resumeCheckpointId
                   ? { resumeCheckpointId: output.resumeCheckpointId }
-                  : {}),
-                ...(context.authEpoch ? { authEpoch: context.authEpoch } : {}),
-                authEpochVersion: context.authEpochVersion,
-                ...(context.extraSystemPromptHash
-                  ? { extraSystemPromptHash: context.extraSystemPromptHash }
-                  : {}),
-                ...(context.messageToolPolicyHash
-                  ? { messageToolPolicyHash: context.messageToolPolicyHash }
-                  : {}),
-                ...(context.promptToolNamesHash
-                  ? { promptToolNamesHash: context.promptToolNamesHash }
-                  : {}),
-                ...(context.cwdHash ? { cwdHash: context.cwdHash } : {}),
-                ...(context.preparedBackend.mcpConfigHash
-                  ? { mcpConfigHash: context.preparedBackend.mcpConfigHash }
-                  : {}),
-                ...(context.preparedBackend.mcpResumeHash
-                  ? { mcpResumeHash: context.preparedBackend.mcpResumeHash }
                   : {}),
                 ...(reseedReceipt ? { reseedReceipt } : {}),
               },

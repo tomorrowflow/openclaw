@@ -800,6 +800,31 @@ describe("executePreparedCliRun supervisor output capture", () => {
     expect(restoreCliSessionFork).toHaveBeenCalledTimes(1);
   });
 
+  it("publishes a fresh session as soon as the CLI reports it, even if the turn then fails", async () => {
+    const init = jsonl({ type: "system", subtype: "init", session_id: "fresh-session" });
+    const failure = jsonl({
+      type: "result",
+      subtype: "error_max_turns",
+      session_id: "fresh-session",
+      terminal_reason: "max_turns",
+      errors: ["Reached maximum number of turns (1)"],
+    });
+    mockOutput([init, failure], { exitCode: 1 }, true);
+    const persistStartedCliSession = vi.fn().mockResolvedValue(undefined);
+    const context = buildPreparedCliRunContext({
+      output: "jsonl",
+      provider: "claude-cli",
+      runId: "run-fresh-session-failure",
+    });
+    context.params.persistStartedCliSession = persistStartedCliSession;
+
+    await expect(executePreparedCliRun(context)).rejects.toMatchObject({ code: "cli_max_turns" });
+    expect(persistStartedCliSession).toHaveBeenCalledOnce();
+    expect(persistStartedCliSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "fresh-session" }),
+    );
+  });
+
   it("composes plugin-owned JSONL parsing into the production executor", async () => {
     const agentEvents: Array<{ stream: string; phase?: string; text?: string }> = [];
     const trustedEvents: TrustedToolExecutionEvent[] = [];
