@@ -352,6 +352,7 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.trust", READ_SCOPE, ({ params: input }) =>
     store.trust({ boardId: input.boardId }),
   );
+  register("workboard.overview", READ_SCOPE, ({ params: input }) => store.overview(input.boardId));
   register("workboard.cards.runs", READ_SCOPE, async ({ params: input }) => {
     const result = await store.runs(readId(input));
     return { ...result, card: redactOperatorCard(result.card) };

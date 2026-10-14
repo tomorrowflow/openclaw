@@ -156,6 +156,50 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
   return counts;
 }
 
+function trustWeek(tickets: readonly TicketFacts[], start: number): WorkboardTrustWeek {
+  const accepted = tickets.flatMap((ticket) =>
+    ticket.acceptedAt !== undefined && weekStart(ticket.acceptedAt) === start
+      ? [{ ...ticket, leadTimeMs: ticket.acceptedAt - ticket.createdAt }]
+      : [],
+  );
+  const leadTime = median(accepted.map((ticket) => ticket.leadTimeMs));
+  const turnEndContext = median(
+    tickets.flatMap((ticket) =>
+      ticket.contexts.flatMap((context) =>
+        weekStart(context.endedAt) === start ? [context.contextTokens] : [],
+      ),
+    ),
+  );
+  const reviewWait = median(
+    tickets.flatMap((ticket) =>
+      ticket.reviews.flatMap(({ importedAt, publishedAt }) =>
+        importedAt !== undefined && publishedAt !== undefined && weekStart(publishedAt) === start
+          ? [publishedAt - importedAt]
+          : [],
+      ),
+    ),
+  );
+  return {
+    weekStart: start,
+    accepted: accepted.length,
+    autonomous: accepted.filter((ticket) => isClean(ticket) && ticket.blocks === 0).length,
+    ...(leadTime === undefined ? {} : { medianLeadTimeMs: leadTime }),
+    ...(reviewWait === undefined ? {} : { medianReviewWaitMs: reviewWait }),
+    ...(turnEndContext === undefined ? {} : { medianContextTokens: turnEndContext }),
+  };
+}
+
+/** The current week of the trust KPIs alone, for a projection that shows only it. */
+export function projectWorkboardTrustWeek(
+  cards: readonly WorkboardCard[],
+  now: number,
+): WorkboardTrustWeek {
+  return trustWeek(
+    cards.flatMap((card) => ticketFacts(card) ?? []),
+    weekStart(now),
+  );
+}
+
 /**
  * Projects the dev loop trust KPIs (D9/D53) from node ticket cards on read.
  * Per-class counts gate trust-ladder promotions; the weekly autonomy trend
@@ -176,40 +220,9 @@ export function projectWorkboardTrust(
     byClass.set(ticket.taskClass, [...(byClass.get(ticket.taskClass) ?? []), ticket]);
   }
   const currentWeek = weekStart(now);
-  const weeks: WorkboardTrustWeek[] = [];
-  for (let index = TRUST_WEEKS - 1; index >= 0; index -= 1) {
-    const start = currentWeek - index * WEEK_MS;
-    const accepted = tickets.flatMap((ticket) =>
-      ticket.acceptedAt !== undefined && weekStart(ticket.acceptedAt) === start
-        ? [{ ...ticket, leadTimeMs: ticket.acceptedAt - ticket.createdAt }]
-        : [],
-    );
-    const leadTime = median(accepted.map((ticket) => ticket.leadTimeMs));
-    const turnEndContext = median(
-      tickets.flatMap((ticket) =>
-        ticket.contexts.flatMap((context) =>
-          weekStart(context.endedAt) === start ? [context.contextTokens] : [],
-        ),
-      ),
-    );
-    const reviewWait = median(
-      tickets.flatMap((ticket) =>
-        ticket.reviews.flatMap(({ importedAt, publishedAt }) =>
-          importedAt !== undefined && publishedAt !== undefined && weekStart(publishedAt) === start
-            ? [publishedAt - importedAt]
-            : [],
-        ),
-      ),
-    );
-    weeks.push({
-      weekStart: start,
-      accepted: accepted.length,
-      autonomous: accepted.filter((ticket) => isClean(ticket) && ticket.blocks === 0).length,
-      ...(leadTime === undefined ? {} : { medianLeadTimeMs: leadTime }),
-      ...(reviewWait === undefined ? {} : { medianReviewWaitMs: reviewWait }),
-      ...(turnEndContext === undefined ? {} : { medianContextTokens: turnEndContext }),
-    });
-  }
+  const weeks = Array.from({ length: TRUST_WEEKS }, (_, index) =>
+    trustWeek(tickets, currentWeek - (TRUST_WEEKS - 1 - index) * WEEK_MS),
+  );
   return {
     boardId,
     generatedAt: now,

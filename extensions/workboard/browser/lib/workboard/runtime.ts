@@ -151,6 +151,7 @@ function createDefaultState(): WorkboardUiState {
     draftTemplateId: "",
     draftCommentBody: "",
     detailCardId: null,
+    revealCardId: null,
     detailTab: "overview",
     detailCommentBody: "",
     detailCommentDrafts: new Map(),

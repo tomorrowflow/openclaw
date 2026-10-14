@@ -459,7 +459,7 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
                           aria-label=${t("workboard.detailSummary")}
                         >
                           ${automation?.summary ? renderMarkdown(automation.summary) : nothing}
-                          ${renderCardStage(card, Date.now())}
+                          ${renderCardStage(card.stage, Date.now())}
                         </section>`
                       : nothing
                   }

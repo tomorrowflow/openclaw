@@ -3,6 +3,7 @@ import {
   createControlUiChatHistoryMessage as chatHistoryMessage,
   createControlUiMockSessionRow as sessionRow,
 } from "./control-ui-session-fixtures.ts";
+import { buildWorkboardOverviewFixture } from "./control-ui-workboard-overview-fixture.ts";
 import { buildWorkboardProgressResponses } from "./control-ui-workboard-progress-fixtures.ts";
 import {
   buildWorkboardStateCells,
@@ -697,6 +698,7 @@ export function buildWorkboardMocks(
       "workboard.cards.list": { boards, cards: allCards, statuses },
       "workboard.cards.stats": { ...board, byAgent: {} },
       "workboard.cards.trust": buildWorkboardTrustFixture(boardId, baseTime),
+      "workboard.overview": buildWorkboardOverviewFixture(boardId, baseTime),
       "workboard.cards.move": { card: cards[0] },
       "progressCard.get": buildWorkboardProgressResponses(baseTime, sessionKey, cardSessions),
     },
