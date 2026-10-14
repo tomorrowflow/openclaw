@@ -103,6 +103,44 @@ describe("Workboard node ticket lifecycle", () => {
     expect(stored?.metadata?.comments?.at(-1)?.body).toBe(comment);
   });
 
+  it("replaces the card summary with a done report's headline and keeps the summary a comment", async () => {
+    const end = async (value: Record<string, unknown>) => {
+      const store = createWorkboardSqliteTestStore();
+      const { card, sessionKey, runId } = await startNodeCard(store);
+      await store.update(card.id, { summary: "Empty input crashes the parser." });
+      await syncWorkboardAgentEnded({
+        store,
+        event: { runId, success: true, messages: report(value) },
+        context: { runId, sessionKey },
+        readSessions: endedSession(),
+      });
+      return await store.get(card.id);
+    };
+    const done = {
+      outcome: "done",
+      summary: "Parser accepts empty input: `parse('')` returns `[]`.",
+      proof: [{ command: "pytest", status: "passed" }],
+    };
+
+    const headlined = await end({
+      ...done,
+      headline: `The parser no longer crashes. ${"x".repeat(500)}`,
+    });
+    expect(headlined?.metadata?.automation?.summary).toMatch(
+      /^The parser no longer crashes\. x+…$/,
+    );
+    expect(headlined?.metadata?.automation?.summary).toHaveLength(400);
+    expect(headlined?.metadata?.comments?.at(-1)?.body).toBe(done.summary);
+
+    const plain = await end(done);
+    expect(plain?.metadata?.automation?.summary).toBe("Empty input crashes the parser.");
+
+    // Only a done report the import will carry owns the summary.
+    const blocked = await end({ ...done, outcome: "blocked", headline: "Gave up." });
+    expect(blocked?.status).toBe("blocked");
+    expect(blocked?.metadata?.automation?.summary).toBe("Empty input crashes the parser.");
+  });
+
   it.each([
     {
       name: "a block reason longer than an attempt error",

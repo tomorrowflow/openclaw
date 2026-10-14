@@ -1,6 +1,6 @@
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { describe, expect, it } from "vitest";
-import { redactClaimToken } from "./card-redaction.js";
+import { redactClaimToken, redactOperatorCard } from "./card-redaction.js";
 
 function createCard(metadata?: WorkboardCard["metadata"]): WorkboardCard {
   return {
@@ -41,5 +41,54 @@ describe("redactClaimToken", () => {
     expect(redacted.metadata?.claim).not.toBe(card.metadata?.claim);
     expect(redacted.metadata?.claim?.token).toBe("[redacted]");
     expect(card.metadata?.claim?.token).toBe("secret-token");
+  });
+});
+
+describe("redactOperatorCard", () => {
+  it("hides plain and Markdown-emphasized agent verdicts on an undecided review", () => {
+    const comment = (body: string, source?: "operator" | "agent:dev") => ({
+      id: body,
+      body,
+      createdAt: 20,
+      ...(source ? { source } : {}),
+    });
+    const card: WorkboardCard = {
+      ...createCard({
+        automation: {
+          target: {
+            kind: "node-claude",
+            nodeId: "node",
+            repoPath: "/repo",
+            worktreesRoot: "/wt",
+            hostRepoPath: "/host",
+            worktree: {
+              path: "/wt/wb-card-1",
+              branch: "factory/card-1",
+              baseCommit: "a".repeat(40),
+              handoff: { phase: "imported", headCommit: "b".repeat(40), importedAt: 10 },
+            },
+          },
+        },
+        comments: [
+          comment("Verdict: accept", "agent:dev"),
+          comment("**Verdict:** accept", "agent:dev"),
+          comment("**Verdict**: rework: no test", "agent:dev"),
+          comment("**Verdict: rework**: no test", "agent:dev"),
+          comment("__Verdict:__ accept", "agent:dev"),
+          comment("__Verdict: rework__: no test", "agent:dev"),
+          comment("Verdict: **accept**", "agent:dev"),
+          comment("My verdict: accept, once the test lands.", "agent:dev"),
+          comment("**Verdict pending** until CI is green.", "agent:dev"),
+          comment("Verdict: accept", "operator"),
+        ],
+      }),
+      status: "review",
+    };
+
+    expect(redactOperatorCard(card).metadata?.comments?.map((entry) => entry.body)).toEqual([
+      "My verdict: accept, once the test lands.",
+      "**Verdict pending** until CI is green.",
+      "Verdict: accept",
+    ]);
   });
 });

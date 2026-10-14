@@ -36,15 +36,16 @@ function onVisibilityChange() {
   }
 }
 
-function formatCardTime(value: number, now: number) {
+/** Time since `value` in its largest whole unit, as "3h"; undefined under a minute. */
+function formatElapsed(value: number, now: number) {
   const minutes = Math.floor(Math.max(0, now - value) / 60_000);
-  if (!minutes) {
-    return t("workboard.cardUpdatedNow");
-  }
   const unit = minutes >= 1440 ? 1440 : minutes >= 60 ? 60 : 1;
-  return t("workboard.cardUpdatedAgo", {
-    time: formatDurationCompact(Math.floor(minutes / unit) * unit * 60_000) ?? "",
-  });
+  return formatDurationCompact(Math.floor(minutes / unit) * unit * 60_000);
+}
+
+function formatCardTime(value: number, now: number) {
+  const time = formatElapsed(value, now);
+  return time ? t("workboard.cardUpdatedAgo", { time }) : t("workboard.cardUpdatedNow");
 }
 
 class RelativeTimeDirective extends AsyncDirective {
@@ -103,5 +104,12 @@ class AutomationNextRunTimeDirective extends RelativeTimeDirective {
   }
 }
 
+class StageAgeDirective extends RelativeTimeDirective {
+  protected override formatTime(timestamp: number, now: number) {
+    return formatElapsed(timestamp, now) ?? t("workboard.cardUpdatedNow");
+  }
+}
+
 export const cardRelativeTime = directive(RelativeTimeDirective);
+export const stageAge = directive(StageAgeDirective);
 export const automationNextRunTime = directive(AutomationNextRunTimeDirective);

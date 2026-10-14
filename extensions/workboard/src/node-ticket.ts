@@ -11,10 +11,7 @@ import type {
   WorkboardNodeRework,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
-import {
-  isFutureDateTimestampMs,
-  resolveOptionalIntegerOption,
-} from "openclaw/plugin-sdk/number-runtime";
+import { isFutureDateTimestampMs } from "openclaw/plugin-sdk/number-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import {
   runPluginCommandWithTimeout,
@@ -22,12 +19,16 @@ import {
 } from "openclaw/plugin-sdk/run-command";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
+  type NodeTicketStopReport,
+  parseNodeTicketReport,
+  REPORT_FENCE,
+} from "./node-ticket-report.js";
+import {
   type WorkboardNodeTicketRouteSlot,
   workboardRouteName,
   workboardRoutePinnedNode,
   MAX_BLOCK_REASON_CHARS,
   MAX_COMMENT_BODY_CHARS,
-  MAX_PROOF_COMMAND_CHARS,
   MAX_PROOF_NOTE_CHARS,
   workboardTaskClass,
 } from "./store-constants.js";
@@ -45,10 +46,8 @@ type NodeTicketTarget = WorkboardExecutionTarget & { kind: "node-claude" };
 
 const NODE_COMMAND_TIMEOUT_MS = 120_000;
 const HOST_GIT_TIMEOUT_MS = 120_000;
-const REPORT_FENCE = "workboard-report";
 // Comments are capped at 2000 chars on write, so this bounds the brief's feedback section.
 const REWORK_FEEDBACK_MAX_ENTRIES = 5;
-const REPORT_PATTERN = new RegExp("```" + REPORT_FENCE + "\\s*\\n([\\s\\S]*?)\\n```", "g");
 
 export function nodeTicketTarget(card: WorkboardCard): NodeTicketTarget | undefined {
   const target = card.metadata?.automation?.target;
@@ -73,12 +72,16 @@ export const STANDARDS_REVIEW_LABEL = "standards review";
 // One in this many agent-accepted PRs is read by a person when the class sets no sampleEvery.
 const DEFAULT_SAMPLE_EVERY = 3;
 
-const REVIEW_VERDICT_PATTERN = /^Verdict:\s*(accept|rework)\b/i;
+// Agents write comments in Markdown, so the label and the value may be
+// emphasized: `**Verdict:** accept`, `__Verdict: rework__: why`,
+// `Verdict: **accept**`. `_` is a word character, so `\b` cannot end the value.
+const REVIEW_VERDICT_PATTERN =
+  /^(\*{1,2}|_{1,2})?Verdict\1?:\1?\s*(?:\*{1,2}|_{1,2})?(accept|rework)(?![a-z0-9])/i;
 
 /** An agent's shadow verdict on a review round (`Verdict: accept|rework`), if the comment is one. */
 export function reviewVerdictOf(comment: WorkboardComment): "accept" | "rework" | undefined {
   const match = comment.source?.startsWith("agent:")
-    ? REVIEW_VERDICT_PATTERN.exec(comment.body.trim())?.[1]?.toLowerCase()
+    ? REVIEW_VERDICT_PATTERN.exec(comment.body.trim())?.[2]?.toLowerCase()
     : undefined;
   return match === "accept" || match === "rework" ? match : undefined;
 }
@@ -550,116 +553,14 @@ export function buildNodeTicketMessage(params: {
     "- End your final message with exactly one report block:",
     "",
     "```" + REPORT_FENCE,
-    `{"outcome":"done|blocked|needs_input","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${reviewed ? '"review":{"findings":0,"fixed":0,"note":"…"},' : ""}"questions":["…"]}`,
+    `{"outcome":"done|blocked|needs_input","headline":"1-3 plain sentences for the operator","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${reviewed ? '"review":{"findings":0,"fixed":0,"note":"…"},' : ""}"questions":["…"]}`,
     "```",
     "",
-    "Use `done` only when the work is committed and its proof passed. Use `needs_input` for open questions, each with your proposed default; the answers come back as the next turn of this session. Use `blocked` for anything else that stops you.",
+    "Its text fields are Markdown. The `headline` of a `done` report replaces the card's summary on the board: say what changed and why in plain words. Use `done` only when the work is committed and its proof passed. Use `needs_input` for open questions, each with your proposed default; the answers come back as the next turn of this session. Use `blocked` for anything else that stops you.",
     "Proof entries describe the final state. Any `failed` entry blocks a `done` report, so a test you ran red before the fix goes in the note of its passing entry, not in an entry of its own.",
     "",
     params.context,
   ].join("\n");
-}
-
-const REPORT_PROOF_STATUSES = ["passed", "failed", "skipped"] as const;
-
-type NodeTicketProof = {
-  command?: string;
-  status: (typeof REPORT_PROOF_STATUSES)[number];
-  note?: string;
-};
-
-type NodeTicketStopReport = {
-  outcome: "blocked" | "needs_input";
-  summary: string;
-  questions: string[];
-};
-
-/** The rung b standards review the session ran before its done report. */
-type NodeTicketReview = { findings: number; fixed: number; note?: string };
-
-type NodeTicketReport =
-  | { outcome: "done"; summary: string; proof: NodeTicketProof[]; review?: NodeTicketReview }
-  | NodeTicketStopReport;
-
-function lastAssistantText(messages: readonly unknown[]): string | undefined {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!isRecord(message) || message.role !== "assistant") {
-      continue;
-    }
-    if (typeof message.content === "string") {
-      return message.content;
-    }
-    if (Array.isArray(message.content)) {
-      return message.content
-        .flatMap((part) => (isRecord(part) && typeof part.text === "string" ? [part.text] : []))
-        .join("\n");
-    }
-  }
-  return undefined;
-}
-
-// Report fields are session output; bound them to the store limits they land in.
-function optionalText(value: unknown, max: number): string | undefined {
-  return typeof value === "string" ? capText(value.trim(), max) : undefined;
-}
-
-function parseReview(value: unknown): NodeTicketReview | undefined {
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  const findings = resolveOptionalIntegerOption(value.findings, { min: 0 });
-  const fixed = resolveOptionalIntegerOption(value.fixed, { min: 0 });
-  const note = optionalText(value.note, MAX_PROOF_NOTE_CHARS);
-  return findings === undefined || fixed === undefined
-    ? undefined
-    : { findings, fixed, ...(note ? { note } : {}) };
-}
-
-/** Reads the last report block of the final assistant message; anything else is a contract miss. */
-function parseNodeTicketReport(
-  messages: readonly unknown[],
-): { ok: true; report: NodeTicketReport } | { ok: false; reason: string } {
-  const text = lastAssistantText(messages);
-  const block = text ? [...text.matchAll(REPORT_PATTERN)].at(-1)?.[1] : undefined;
-  if (!block) {
-    return { ok: false, reason: "The ticket session ended without a workboard-report block." };
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(block);
-  } catch {
-    return { ok: false, reason: "The ticket session's workboard-report block is not valid JSON." };
-  }
-  if (!isRecord(value)) {
-    return { ok: false, reason: "The ticket session's workboard-report block is not an object." };
-  }
-  const summary = optionalText(value.summary, MAX_COMMENT_BODY_CHARS) ?? "";
-  if (value.outcome === "done") {
-    const proof = (Array.isArray(value.proof) ? value.proof : []).flatMap(
-      (entry): NodeTicketProof[] => {
-        const status = isRecord(entry)
-          ? REPORT_PROOF_STATUSES.find((candidate) => candidate === entry.status)
-          : undefined;
-        if (!isRecord(entry) || !status) {
-          return [];
-        }
-        const command = optionalText(entry.command, MAX_PROOF_COMMAND_CHARS);
-        const note = optionalText(entry.note, MAX_PROOF_NOTE_CHARS);
-        return [{ status, ...(command ? { command } : {}), ...(note ? { note } : {}) }];
-      },
-    );
-    const review = parseReview(value.review);
-    return { ok: true, report: { outcome: "done", summary, proof, ...(review ? { review } : {}) } };
-  }
-  if (value.outcome === "blocked" || value.outcome === "needs_input") {
-    const questions = (Array.isArray(value.questions) ? value.questions : []).flatMap((entry) => {
-      const question = optionalText(entry, MAX_BLOCK_REASON_CHARS);
-      return question ? [question] : [];
-    });
-    return { ok: true, report: { outcome: value.outcome, summary, questions } };
-  }
-  return { ok: false, reason: "The ticket session's workboard-report has an unknown outcome." };
 }
 
 function blockReason(report: NodeTicketStopReport): string {
@@ -673,10 +574,10 @@ function blockReason(report: NodeTicketStopReport): string {
 /**
  * Maps a finished node ticket turn onto its card. A done report records its
  * proof and marks the worktree's handoff pending, so only the bundle import
- * moves the card to review. A needs_input report posts the questions and
- * waits in review for an answer; the agent_end nudge wakes the board's
- * automation so `dev` can answer. Every other ending blocks the card so `dev`
- * sees the reason. Proof that did not pass also blocks, and so does a rung b
+ * moves the card to review, and its headline replaces the card summary. A
+ * needs_input report posts the questions and waits in review for an answer;
+ * the agent_end nudge wakes the board's automation so `dev` can answer. Every
+ * other ending blocks the card so `dev` sees the reason. Proof that did not pass also blocks, and so does a rung b
  * round's done report without its standards review.
  */
 export async function applyNodeTicketReport(params: {
@@ -766,7 +667,11 @@ export async function applyNodeTicketReport(params: {
   }
   await store.setNodeHandoff(
     card.id,
-    { worktreePath: worktree.path, handoff: { phase: "pending", reportedAt: Date.now() } },
+    {
+      worktreePath: worktree.path,
+      handoff: { phase: "pending", reportedAt: Date.now() },
+      ...(report.headline ? { summary: report.headline } : {}),
+    },
     scope,
   );
 }

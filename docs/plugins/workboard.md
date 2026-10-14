@@ -289,6 +289,45 @@ sessions or its Board agent conversation.
 | linked refs | optional task, run, session, or source URL                                                                    |
 | `execution` | optional metadata for a Codex/Claude run started from the card (engine, mode, model, session, run id, status) |
 
+Card text is Markdown: notes, comments, block reasons, and summaries render as
+sanitized Markdown in the Control UI, and the agent tools that write them say
+so.
+
+Each card can carry an operator summary in `metadata.automation.summary`: one
+to three plain sentences that say what the card is and why. The agent that
+drafts a card sets it with `summary` on `workboard_create` (Gateway clients pass
+`summary` to `workboard.cards.create` or `workboard.cards.update`).
+`workboard_specify`, `workboard_complete`, and `workboard_decompose` replace it
+with their own summary, and a node ticket's `done` report replaces it with its
+`headline` (see [node tickets](#node-tickets)). The board card shows the
+summary under the title, clamped to three lines, in place of the notes preview.
+
+<a id="card-stage" />
+
+Gateway operator reads (`workboard.cards.list`, card results of card methods,
+the CLI) add a derived, read-only `stage` beside each card's metadata. It is
+never stored. The Control UI shows it as one status line under the summary on
+the card and in the card's overview tab, with the time since the card entered
+that stage:
+
+| `stage.kind`      | When                                                                       | Fields                                      |
+| ----------------- | -------------------------------------------------------------------------- | ------------------------------------------- |
+| `queued`          | A [queued start](#queued-starts) waits for a node ticket slot.             | `since`                                     |
+| `running`         | The card is `running`.                                                     | `since`, `nodeId`, `reworkRound`, `attempt` |
+| `questions`       | A node ticket waits with open questions; `escalatedAt` once passed to you. | `since`, `escalatedAt`                      |
+| `awaiting_review` | A node ticket's branch is imported and waits for the operator's decision.  | `since`                                     |
+| `published`       | A node ticket's draft PR is open.                                          | `since`, `pullRequestUrl`, `reworkRound`    |
+| `blocked`         | The card is `blocked`.                                                     | `since`                                     |
+| `review`          | Any other card in `review`.                                                | `since`                                     |
+| `done`            | Any other card in `done`.                                                  | `since`                                     |
+
+Idle statuses (`triage`, `backlog`, `todo`, `scheduled`, `ready`) and archived
+cards have no stage. `since` comes from recorded facts: the start request, the
+handoff timestamps, the running attempt, or the newest card event that entered
+the status. A status entered before the newest 50 events has no `since`. The
+stage never reads comments, so an agent's pending verdict stays hidden: an
+imported round reads `awaiting_review` until the card moves to `done`.
+
 Cards also carry compact metadata:
 
 | Metadata      | Values                                                                                                                                                                                                                                                                                                                                                       |
@@ -378,7 +417,7 @@ plugin using the linked run and session lifecycle (see
 | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `workboard_list`                                                                                                                                 | List compact cards with claim/diagnostic state; optional board filter.                                                                                                                    |
 | `workboard_read`                                                                                                                                 | Return one card plus bounded worker context (notes, attempts, comments, links, proof, artifacts, parent results, recent assignee work, active diagnostics).                               |
-| `workboard_create`                                                                                                                               | Create a card with optional parents, tenant, skills, board, workspace metadata, idempotency key, runtime limit, retry budget.                                                             |
+| `workboard_create`                                                                                                                               | Create a card with optional parents, tenant, skills, board, workspace metadata, idempotency key, runtime limit, retry budget, operator summary.                                           |
 | `workboard_link`                                                                                                                                 | Link a parent to a child card. Children stay `todo` until every parent reaches `done`, then dispatch promotion moves them to `ready`.                                                     |
 | `workboard_claim`                                                                                                                                | Claim a card for the calling agent; moves `backlog`/`todo`/`ready` into `running`.                                                                                                        |
 | `workboard_heartbeat`                                                                                                                            | Refresh the claim heartbeat during a longer run.                                                                                                                                          |
@@ -606,11 +645,15 @@ report, address the findings, and report them (see **Report** below).
 1. **Start:** the dispatcher fetches `origin` in the node clone, creates branch
    `factory/<cardId>` at `baseRef` (default `origin/HEAD`) in
    `<worktreesRoot>/wb-<cardId>`, and starts the session there.
-2. **Report:** the session ends with a `workboard-report` block. A retry turn
-   the Gateway runs in the same session after a stuck-session abort reports
-   for the same round. A `done`
-   report with passing proof starts the import. A `needs_input` report waits
-   for an answer (see **Questions**). Anything else blocks the card,
+2. **Report:** the session ends with a `workboard-report` block whose text
+   fields are Markdown. A retry turn the Gateway runs in the same session
+   after a stuck-session abort reports for the same round. A `done` report
+   with passing proof starts the import. Its optional `headline`, one to
+   three plain sentences for the operator (capped at 400 characters),
+   replaces the card's [summary](#card-fields) in the same write; the longer
+   `summary` is posted as a comment. A report without a headline leaves the
+   summary unchanged. A `needs_input` report waits for an answer (see
+   **Questions**). Anything else blocks the card,
    including a `done` report with any `failed` proof entry. The brief tells the
    session to record red-first evidence (a test that failed before the fix) in
    the note of its passing entry. A rung b round's report also carries
@@ -638,8 +681,8 @@ report, address the findings, and report them (see **Report** below).
    fetches `origin` when it lacks the base commit and runs `git diff --check`
    over the ticket's commits (a rework round: only the round's own commits,
    not what a reviewer pushed). A failure adds a failed `import check` proof
-   entry and blocks the card with the output, which counts as a block in the
-   trust KPIs; a re-run fixes it with a new commit in the same node worktree
+   entry and blocks the card with the command first and the output in a fenced
+   code block, which counts as a block in the trust KPIs; a re-run fixes it with a new commit in the same node worktree
    and imports again. Otherwise it creates `factory/<cardId>` (never moving an
    existing branch), the node worktree is removed, and the
    card moves to `review` with its claim released. When the board has an
@@ -741,7 +784,9 @@ smaller tickets.
 
 **Shadow verdicts:** an agent reviewing a ticket in `review` can leave a
 comment starting with `Verdict: accept` or `Verdict: rework: <finding>`
-before the operator acts. Authority does not change; the verdict is advisory.
+before the operator acts. Markdown emphasis on the label counts too, as in
+`**Verdict:** accept` or `**Verdict: rework**: <finding>`. Authority does not
+change; the verdict is advisory.
 The verdict is blind: Gateway and CLI card reads hide it until the operator
 moves the card to `done`, so it cannot prime that decision. Agent tools still
 see it.
@@ -967,7 +1012,8 @@ The template id is stored as card metadata.
    An autonomous start keeps you on the board; opening a card manually in an
    engine opens its session. A node ticket started while its slot is full is
    [queued](#queued-starts).
-5. Open the linked session from the card while the agent works.
+5. Read where a card stands from its summary and [status line](#card-stage);
+   open the linked session from the card while the agent works.
 6. Let lifecycle sync move running work into `review`/`blocked`, then manually
    move the card to `done` when accepted.
 

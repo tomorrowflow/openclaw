@@ -287,6 +287,7 @@ export class WorkboardStore extends WorkboardNotificationStore {
               ...card.metadata,
               automation: {
                 ...card.metadata?.automation,
+                ...(input.summary ? { summary: input.summary } : {}),
                 target: { ...target, worktree: withNodeHandoff(target.worktree, input) },
               },
             },

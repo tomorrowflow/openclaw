@@ -7,9 +7,13 @@ import { formatUiExternalText } from "../../lib/format-error.ts";
 import { formatDurationCompact } from "../../lib/format.ts";
 import { selectCardAlert, type CardAlert } from "../../lib/workboard/card-alerts.ts";
 import { isWorkboardStartQueued } from "../../lib/workboard/execution.ts";
-import type { WorkboardCard, WorkboardLifecycle } from "../../lib/workboard/index.ts";
+import type {
+  WorkboardCard,
+  WorkboardCardStage,
+  WorkboardLifecycle,
+} from "../../lib/workboard/index.ts";
 import { cardAgentLabel } from "./agent-filter.ts";
-import { cardRelativeTime } from "./view-card-time.ts";
+import { cardRelativeTime, stageAge } from "./view-card-time.ts";
 import {
   formatPriorityLabel,
   formatUpdatedTime,
@@ -61,6 +65,63 @@ export function renderCardAlert(alerts: CardAlert[], descriptionId: string) {
       >
     </div>
     <span id=${descriptionId} hidden>${fullText}</span>`;
+}
+
+const STAGE_LABEL_KEYS = {
+  queued: "workboard.stageQueued",
+  awaiting_review: "workboard.stageAwaitingReview",
+  blocked: "workboard.stageBlocked",
+  review: "workboard.stageReview",
+  done: "workboard.stageDone",
+} as const;
+
+function stageText(stage: WorkboardCardStage): string {
+  if (stage.kind === "running") {
+    return [
+      stage.nodeId
+        ? t("workboard.stageRunningOn", { node: stage.nodeId })
+        : t("workboard.stageRunning"),
+      ...(stage.reworkRound
+        ? [t("workboard.stageReworkRound", { round: String(stage.reworkRound) })]
+        : []),
+      ...(stage.attempt && stage.attempt > 1
+        ? [t("workboard.stageAttempt", { attempt: String(stage.attempt) })]
+        : []),
+    ].join(" · ");
+  }
+  if (stage.kind === "questions") {
+    return t(
+      stage.escalatedAt === undefined
+        ? "workboard.stageQuestions"
+        : "workboard.stageQuestionsEscalated",
+    );
+  }
+  if (stage.kind === "published") {
+    return stage.reworkRound
+      ? t("workboard.stagePublishedRework", { round: String(stage.reworkRound) })
+      : t("workboard.stagePublished");
+  }
+  return t(STAGE_LABEL_KEYS[stage.kind]);
+}
+
+/** One line on where the card stands, so the operator need not read its activity. */
+export function renderCardStage(card: WorkboardCard, now: number) {
+  const stage = card.stage;
+  if (!stage) {
+    return nothing;
+  }
+  return html`<p class="workboard-card__stage workboard-card__stage--${stage.kind}">
+    <span>${stageText(stage)}</span>
+    ${
+      stage.since === undefined
+        ? nothing
+        : html`<time
+            datetime=${new Date(stage.since).toISOString()}
+            title=${t("workboard.stageSince", { time: formatUpdatedTime(stage.since) })}
+            >${stageAge(stage.since, now)}</time
+          >`
+    }
+  </p>`;
 }
 
 export function renderCardUpdatedTime(updatedAt: number | undefined, now: number) {

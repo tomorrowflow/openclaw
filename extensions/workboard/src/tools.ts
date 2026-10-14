@@ -126,7 +126,14 @@ export function createWorkboardTools(params: {
         "Create a Workboard card, optionally with parent dependencies, tenant, skills, workspace, and idempotency key. Sessions boards do not hold cards; use workboard_sessions_board_read/update/move for them.",
       parameters: strictObject({
         title: Type.String({ description: "Card title." }),
-        notes: Type.Optional(Type.String({ description: "Card notes or acceptance criteria." })),
+        notes: Type.Optional(
+          Type.String({ description: "Card notes or acceptance criteria (Markdown)." }),
+        ),
+        summary: Type.Optional(
+          Type.String({
+            description: "1-3 plain sentences for the operator: what this is and why.",
+          }),
+        ),
         sourceUrl: Type.Optional(
           Type.String({
             description:
@@ -229,7 +236,9 @@ export function createWorkboardTools(params: {
       parameters: strictObject({
         id: cardIdField(),
         token: claimTokenField(),
-        note: Type.Optional(Type.String({ description: "Optional compact progress note." })),
+        note: Type.Optional(
+          Type.String({ description: "Optional compact progress note (Markdown)." }),
+        ),
       }),
       execute: scopedCardMutation((id, record, scope) =>
         store.heartbeat(id, { ...scope, note: record.note }),
@@ -257,7 +266,7 @@ export function createWorkboardTools(params: {
       description: "Append a compact comment to a Workboard card.",
       parameters: strictObject({
         id: cardIdField(),
-        body: Type.String({ description: "Comment body." }),
+        body: Type.String({ description: "Comment body (Markdown)." }),
         token: ScopedClaimTokenField,
       }),
       execute: scopedCardMutation((id, record, scope) =>
@@ -317,7 +326,12 @@ export function createWorkboardTools(params: {
       parameters: strictObject({
         id: cardIdField(),
         token: claimTokenField(),
-        summary: Type.Optional(Type.String({ description: "Completion summary." })),
+        summary: Type.Optional(
+          Type.String({
+            description:
+              "Completion summary (Markdown). Replaces the card's operator summary, so keep it to 1-3 plain sentences; put details in a comment.",
+          }),
+        ),
         proofId: Type.Optional(
           Type.String({
             description: "Proof id returned by workboard_proof when resolving that pending proof.",
@@ -406,7 +420,7 @@ export function createWorkboardTools(params: {
       parameters: strictObject({
         id: cardIdField(),
         token: claimTokenField(),
-        reason: Type.Optional(Type.String({ description: "Blocker summary." })),
+        reason: Type.Optional(Type.String({ description: "Blocker summary (Markdown)." })),
       }),
       execute: claimedCardMutation((id, record, scope) => store.block(id, record, scope)),
     },

@@ -25,6 +25,7 @@ import { capText } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
 
 // file.fetch's hard cap; a larger bundle fails on the node with FILE_TOO_LARGE.
+const MAX_IMPORT_CHECK_FENCE = 16;
 const BUNDLE_MAX_BYTES = 16 * 1024 * 1024;
 
 type HandoffCard = {
@@ -285,14 +286,20 @@ async function runNodeTicketHandoff(params: {
           scope,
         );
         // The reason becomes a comment the re-run session sees cut to 400
-        // characters, so the command and its output come first.
+        // characters, so the command and its output come first. The output
+        // is capped inside the fence, so the fence always closes. The fence
+        // length is bounded so a backtick-heavy diff cannot eat the budget.
+        const lead = `Import check: ${error.message}; fix it with a new commit in the same worktree, then re-run the card to import again.`;
+        const fence = "`".repeat(
+          Math.min(
+            MAX_IMPORT_CHECK_FENCE,
+            Math.max(3, ...(error.output.match(/`+/g) ?? []).map((run) => run.length + 1)),
+          ),
+        );
         await store.block(
           card.id,
           {
-            reason: capText(
-              `Import check: ${error.message}; fix it with a new commit in the same worktree:\n${error.output}\nRe-run the card to import again.`,
-              MAX_BLOCK_REASON_CHARS,
-            ),
+            reason: `${lead}\n${fence}\n${capText(error.output, MAX_BLOCK_REASON_CHARS - lead.length - 2 * fence.length - 3) ?? ""}\n${fence}`,
           },
           scope,
         );

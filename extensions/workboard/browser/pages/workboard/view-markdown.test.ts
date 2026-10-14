@@ -2,6 +2,7 @@ import "../../test/dom.setup.ts";
 import { expectDefined } from "@openclaw/normalization-core";
 import { nothing, render, type LitElement } from "lit";
 import { expect, it, onTestFinished, vi } from "vitest";
+import { normalizeCardsPayload } from "../../lib/workboard/normalization.ts";
 import { getWorkboardState } from "../../lib/workboard/runtime.ts";
 import {
   createWorkboardCard,
@@ -108,3 +109,58 @@ it.each(["page", "widget"] as const)(
     expect(preview?.textContent).toContain(card.notes);
   },
 );
+
+it("shows the summary and the stage the Gateway derived on the card face and in the drawer", () => {
+  const since = Date.now() - 3 * 3_600_000 - 60_000;
+  const [card, malformed] = normalizeCardsPayload({
+    cards: [
+      {
+        ...createWorkboardCard({
+          status: "review",
+          notes: "Long acceptance criteria",
+          metadata: { automation: { summary: "Empty input crashes the **parser**." } },
+        }),
+        stage: { kind: "questions", since, escalatedAt: since + 1 },
+      },
+      // A stage the UI cannot render is dropped, not guessed.
+      { ...createWorkboardCard({ id: "card-2" }), stage: { kind: "published", since } },
+    ],
+  }).cards;
+  expect(malformed).not.toHaveProperty("stage");
+  const listed = expectDefined(card, "card");
+  const host = {};
+  const state = getWorkboardState(host);
+  state.loaded = true;
+  state.cards = [listed];
+  const container = document.createElement("div");
+  document.body.append(container);
+  onTestFinished(() => {
+    render(nothing, container);
+    container.remove();
+  });
+  workboardTestHost().connection.connected = true;
+  const props = {
+    host,
+    client: createWorkboardTestClient({}),
+    connected: true,
+    canWrite: true,
+    agentsList: null,
+    sessions: [],
+    onOpenSession: vi.fn(),
+  };
+  render(renderColumn(props, "review", [listed], { surface: "page" }), container);
+
+  const preview = container.querySelector(".workboard-card__notes")?.textContent;
+  expect(preview).toContain("Empty input crashes the **parser**.");
+  expect(preview).not.toContain("Long acceptance criteria");
+  expect(
+    container.querySelector(".workboard-card__stage")?.textContent?.replace(/\s+/g, " ").trim(),
+  ).toBe("Questions waiting for you 3h");
+
+  const drawer = renderDetails(listed);
+  expect(drawer.querySelector(".workboard-detail__summary .workboard-card__stage")).not.toBeNull();
+  expect(workboardTestHost().host.components.mountMarkdown).toHaveBeenCalledWith(
+    expect.any(HTMLElement),
+    { markdown: "Empty input crashes the **parser**." },
+  );
+});

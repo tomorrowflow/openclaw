@@ -585,31 +585,9 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
         // lifecycle source is provenance; copied markers must not survive a manual transition.
         metadata = { ...metadata, lifecycleStatusSourceUpdatedAt: undefined };
       }
-      const automationPatch: Record<string, unknown> = {};
-      for (const key of [
-        "tenant",
-        "boardId",
-        "createdByCardId",
-        "idempotencyKey",
-        "skills",
-        "workspace",
-        "workspaceAccess",
-        "maxRuntimeSeconds",
-        "maxRetries",
-        "scheduledAt",
-      ] as const) {
-        if (Object.hasOwn(effectivePatch, key) && effectivePatch[key] !== undefined) {
-          automationPatch[key] = effectivePatch[key];
-        }
-      }
-      if (Object.keys(automationPatch).length > 0) {
-        metadata = trimMetadataToBudget(
-          {
-            ...metadata,
-            automation: normalizeAutomationPatch(automationPatch, metadata.automation),
-          },
-          options,
-        );
+      const automationPatch = normalizeAutomationPatch(effectivePatch, metadata.automation);
+      if (automationPatch) {
+        metadata = trimMetadataToBudget({ ...metadata, ...automationPatch }, options);
       }
       next = removeUndefinedCardFields({
         ...existing,

@@ -2219,6 +2219,41 @@
   display: none;
 }
 
+/* Where the card stands, followed by how long it has stood there. */
+.workboard-card__stage {
+  min-width: 0;
+  margin: 0;
+  color: color-mix(in srgb, var(--muted) 82%, var(--text) 18%);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workboard-card__stage > time {
+  margin-left: 4px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.workboard-card__stage > time::before {
+  content: "·";
+  margin-right: 4px;
+}
+
+.workboard-card__stage--blocked {
+  color: var(--danger);
+}
+
+.workboard-card__stage--questions,
+.workboard-card__stage--awaiting_review {
+  color: var(--warn);
+}
+
+.workboard-detail__summary {
+  display: grid;
+  gap: 8px;
+  font-size: 0.92rem;
+}
+
 .workboard-card__header-actions {
   display: flex;
   align-items: center;

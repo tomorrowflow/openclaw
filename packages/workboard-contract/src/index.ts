@@ -598,6 +598,26 @@ export type WorkboardCard = {
   metadata?: WorkboardMetadata;
 };
 
+/**
+ * Where a card stands, for an operator who does not follow each step.
+ * Derived from recorded facts on operator reads and never stored. `since` is
+ * when the card entered the stage; stages read from card events lack it once
+ * the event aged out. A pending agent verdict never shows: an imported round
+ * stays `awaiting_review` until the card moves to done.
+ */
+export type WorkboardCardStage =
+  | { kind: "queued"; since: number }
+  | { kind: "running"; since?: number; nodeId?: string; reworkRound?: number; attempt?: number }
+  | { kind: "questions"; since: number; escalatedAt?: number }
+  | { kind: "awaiting_review"; since: number }
+  | { kind: "published"; since: number; pullRequestUrl: string; reworkRound: number }
+  | { kind: "blocked"; since?: number }
+  | { kind: "review"; since?: number }
+  | { kind: "done"; since?: number };
+
+/** A card as Gateway operator reads return it; `stage` is absent for idle statuses. */
+export type WorkboardOperatorCard = WorkboardCard & { stage?: WorkboardCardStage };
+
 export type WorkboardListResult = {
   cards: WorkboardCard[];
   statuses: readonly WorkboardStatus[];

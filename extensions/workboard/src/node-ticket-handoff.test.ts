@@ -274,7 +274,7 @@ describe("node ticket handoff", () => {
       note: expect.stringContaining("parser.py:1: trailing whitespace."),
     });
     expect(blocked?.metadata?.comments?.at(-1)?.body).toMatch(
-      /^Import check: `git diff --check [0-9a-f]{12}\.\.[0-9a-f]{12}` failed; fix it with a new commit in the same worktree:\nparser\.py:1: trailing whitespace\./,
+      /^Import check: `git diff --check [0-9a-f]{12}\.\.[0-9a-f]{12}` failed; fix it with a new commit in the same worktree, then re-run the card to import again\.\n```\nparser\.py:1: trailing whitespace\.\n\+ok *\n```$/,
     );
     expect(git(repos.hostRepo, "branch", "--list", branch)).toBe("");
     expect(existsSync(worktree)).toBe(true);

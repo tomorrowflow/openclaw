@@ -1,6 +1,6 @@
 import type { WorkboardAutomation, WorkboardWorkspaceAccess } from "@openclaw/workboard-contract";
 // Workboard automation helpers normalize trusted host-issued workspace provenance.
-import type { WorkboardLinkedCreateInput } from "./store-inputs.js";
+import type { WorkboardCardPatch, WorkboardLinkedCreateInput } from "./store-inputs.js";
 import { normalizeAutomation } from "./store-normalizers.js";
 import { normalizeBoundedString } from "./store-value-normalizers.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
@@ -55,20 +55,46 @@ export function normalizeCardAutomation(input: WorkboardLinkedCreateInput) {
       maxRuntimeSeconds: input.maxRuntimeSeconds,
       maxRetries: input.maxRetries,
       scheduledAt: input.scheduledAt,
+      summary: input.summary,
     },
     workspaceAccess ? { workspaceAccess } : undefined,
   );
 }
 
+const AUTOMATION_PATCH_KEYS = [
+  "tenant",
+  "boardId",
+  "createdByCardId",
+  "idempotencyKey",
+  "skills",
+  "workspace",
+  "workspaceAccess",
+  "maxRuntimeSeconds",
+  "maxRetries",
+  "scheduledAt",
+  "summary",
+] as const;
+
+/** The card's automation after a patch; undefined when the patch sets no automation field. */
 export function normalizeAutomationPatch(
-  patch: Record<string, unknown>,
+  patch: WorkboardCardPatch,
   current?: WorkboardAutomation,
-) {
-  const workspaceAccess = Object.hasOwn(patch, "workspaceAccess")
-    ? normalizeTrustedWorkspaceAccess(patch.workspaceAccess, current?.workspaceAccess)
+): { automation: WorkboardAutomation | undefined } | undefined {
+  const fields = Object.fromEntries(
+    AUTOMATION_PATCH_KEYS.flatMap((key) =>
+      Object.hasOwn(patch, key) && patch[key] !== undefined ? [[key, patch[key]]] : [],
+    ),
+  );
+  if (Object.keys(fields).length === 0) {
+    return undefined;
+  }
+  const workspaceAccess = Object.hasOwn(fields, "workspaceAccess")
+    ? normalizeTrustedWorkspaceAccess(fields.workspaceAccess, current?.workspaceAccess)
     : current?.workspaceAccess;
-  return normalizeAutomation(patch, {
-    ...current,
-    ...(workspaceAccess ? { workspaceAccess } : {}),
-  });
+  return {
+    automation: normalizeAutomation(fields, {
+      ...current,
+      ...(workspaceAccess ? { workspaceAccess } : {}),
+    }),
+  };
 }
