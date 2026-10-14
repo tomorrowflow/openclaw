@@ -77,7 +77,7 @@ export async function executeCliProcess(params: {
   outputMode: CliBackendConfig["output"];
   logOutputText: boolean;
   cliTurnStartedAt: number;
-  observeForkSuccessor: (sessionId: string) => void;
+  observeSessionId: (sessionId: string) => void;
   options?: ExecuteCliProcessOptions;
 }): Promise<CliOutput> {
   const context = params.context;
@@ -148,7 +148,7 @@ export async function executeCliProcess(params: {
           params.events.emitLiveEvents && runParams.emitCommentaryText
             ? params.events.emitCliCommentaryText
             : undefined,
-        onSessionId: params.observeForkSuccessor,
+        onSessionId: params.observeSessionId,
         onNativeTools: context.preparedBackend.mcpClientGrantCapture?.captureNativeTools,
         onAssistantMessage: params.diagnostics?.observeAssistantMessage,
         onUsage: params.diagnostics?.observeUsage,
