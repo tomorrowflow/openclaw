@@ -146,6 +146,8 @@ export async function executeNodeClaudeRun(params: {
   noOutputTimeoutMs: number;
   consumeStdout: (chunk: string) => void;
   consumeStderr: (chunk: string) => void;
+  /** Runner-owned stop (rejected output); cancels the node run like a caller abort would. */
+  stopSignal: AbortSignal;
   deps: ExecuteNodeClaudeRunDeps;
 }): Promise<{
   result: RunExit;
@@ -166,7 +168,8 @@ export async function executeNodeClaudeRun(params: {
   }, hardTimeoutMs);
   const abortNodeRun = () => nodeAbortController.abort();
   contextParams.abortSignal?.addEventListener("abort", abortNodeRun, { once: true });
-  if (contextParams.abortSignal?.aborted) {
+  params.stopSignal.addEventListener("abort", abortNodeRun, { once: true });
+  if (contextParams.abortSignal?.aborted || params.stopSignal.aborted) {
     abortNodeRun();
   }
   const detachReplyBackend = attachCliReplyBackend(contextParams, abortNodeRun);
@@ -281,6 +284,7 @@ export async function executeNodeClaudeRun(params: {
     clearTimeout(hardDeadlineTimer);
     detachReplyBackend?.();
     contextParams.abortSignal?.removeEventListener("abort", abortNodeRun);
+    params.stopSignal.removeEventListener("abort", abortNodeRun);
   }
   if (hardDeadlineReached) {
     nodeResult = hardTimeoutResult();

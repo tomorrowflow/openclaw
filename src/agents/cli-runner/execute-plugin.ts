@@ -419,6 +419,8 @@ export async function executePluginOwnedProcess(params: {
   noOutputTimeoutMs: number;
   watchdogClock?: CliWatchdogClock;
   consumeStdout: (chunk: string) => void;
+  /** Runner-owned stop (rejected output); ends the turn like a reply-backend cancel. */
+  stopSignal: AbortSignal;
   onOutstandingWorkChange?: (active: boolean) => void;
   activeToolCount?: () => number;
   compactionActive?: () => boolean;
@@ -524,10 +526,12 @@ export async function executePluginOwnedProcess(params: {
     reportOutstandingWork(),
   );
 
-  const detachReplyBackend = attachCliReplyBackend(run, () => {
+  const cancelRun = () => {
     termination.reason = "manual-cancel";
     controller.abort(createCliAbortError());
-  });
+  };
+  const detachReplyBackend = attachCliReplyBackend(run, cancelRun);
+  params.stopSignal.addEventListener("abort", cancelRun, { once: true });
 
   let iterator: AsyncIterator<Record<string, unknown>> | undefined;
   let liveSession: ReturnType<typeof createCliLiveSessionCapability> | undefined;
@@ -675,6 +679,7 @@ export async function executePluginOwnedProcess(params: {
     if (!controller.signal.aborted) {
       controller.abort(new Error("CLI plugin runtime turn is no longer active."));
     }
+    params.stopSignal.removeEventListener("abort", cancelRun);
     detachReplyBackend?.();
     await closePluginIterator(iterator);
   }

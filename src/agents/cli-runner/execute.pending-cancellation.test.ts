@@ -157,6 +157,10 @@ describe("CLI execution cancellation", () => {
       context.preparedBackend.backend.jsonlDialect = "claude-stream-json";
       context.backendResolved.parseJsonlEvent = (line) => {
         if (JSON.parse(line).type === "parser-failure") {
+          // A parser failure now stops the child itself, so the caller's abort
+          // must land before the runner reads parserFailureUnlessAborted to
+          // stay the reported interruption.
+          controller.abort();
           throw new Error("Unrelated parser failure");
         }
         return null;

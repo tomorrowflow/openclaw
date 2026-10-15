@@ -118,6 +118,7 @@ export function runPlugin(
     ...(options.onInterrupted ? { onInterrupted: options.onInterrupted } : {}),
     noOutputTimeoutMs: options.noOutputTimeoutMs ?? 2_000,
     consumeStdout: options.consumeStdout ?? (() => {}),
+    stopSignal: new AbortController().signal,
   });
 }
 

@@ -1,88 +1,66 @@
-import { isRecord } from "@openclaw/normalization-core/record-coerce";
 // Stream-json output limits and raw-line framing for the CLI streaming parser.
 // Kept beside `cli-output-stream.ts` so the parser stays within the file-size
 // budget; the limits are process constants, not per-backend configuration.
 import type { CliStreamJsonOutputLimits } from "./cli-output-contracts.js";
 
-const CLI_STREAM_JSON_DEFAULT_MAX_TURN_RAW_CHARS = 8 * 1024 * 1024;
-const CLI_STREAM_JSON_DEFAULT_MAX_TURN_LINES = 20_000;
+const CLI_STREAM_JSON_DEFAULT_BUDGET_CHARS = 8 * 1024 * 1024;
 export const CLI_STREAM_JSON_OUTPUT_LIMITS = Object.freeze({
-  maxTurnRawChars: CLI_STREAM_JSON_DEFAULT_MAX_TURN_RAW_CHARS,
-  maxPendingLineChars: CLI_STREAM_JSON_DEFAULT_MAX_TURN_RAW_CHARS,
-  maxTurnLines: CLI_STREAM_JSON_DEFAULT_MAX_TURN_LINES,
+  maxTurnRetainedChars: CLI_STREAM_JSON_DEFAULT_BUDGET_CHARS,
+  maxPendingLineChars: CLI_STREAM_JSON_DEFAULT_BUDGET_CHARS,
 } satisfies CliStreamJsonOutputLimits);
 
-const PARTIAL_RECORD_KEYS = new Set(["type", "event", "uuid", "session_id", "parent_tool_use_id"]);
-const PARTIAL_EVENT_KEYS = new Set(["type", "index", "delta"]);
+// Every retained append also keeps a string piece or map entry behind the
+// payload, so a flood of one-character appends costs memory the payload length
+// alone would not show. The fixed share bounds such floods at 8 MiB / 33 appends.
+const CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD = 32;
 
-/** Discount recognized token envelopes, retaining payload, padding, and a per-frame budget. */
-export function measureClaudePartialMessage(
-  parsed: Record<string, unknown>,
-  rawLine: string,
-): number | undefined {
-  if (
-    parsed.type !== "stream_event" ||
-    !isRecord(parsed.event) ||
-    Object.keys(parsed).some((key) => !PARTIAL_RECORD_KEYS.has(key))
-  ) {
-    return undefined;
-  }
-  for (const key of ["uuid", "session_id", "parent_tool_use_id"]) {
-    const value = parsed[key];
-    if (value != null && (typeof value !== "string" || value.length > 128)) {
-      return undefined;
+/** Charges for state that lives until the owner releases it as one unit. */
+export type RetainedOutputScope = {
+  retain(chars: number): void;
+  release(): void;
+};
+
+/** Live gauge of what the parser currently holds; trips once it exceeds the budget. */
+export type RetainedOutputLedger = {
+  /** Charges state that lives for the rest of the turn. */
+  retain(chars: number): void;
+  /** Refunds one earlier `retain(chars)` whose state was freed. */
+  release(chars: number): void;
+  /** Opens a lifetime whose charges are refunded together when its state is freed. */
+  scope(): RetainedOutputScope;
+};
+
+export function createRetainedOutputLedger(
+  maxRetainedChars: number,
+  onExceeded: () => void,
+): RetainedOutputLedger {
+  let retainedChars = 0;
+  const charge = (amount: number) => {
+    retainedChars += amount;
+    if (retainedChars > maxRetainedChars) {
+      onExceeded();
     }
-  }
-  const event = parsed.event;
-  if (
-    event.type !== "content_block_delta" ||
-    !isRecord(event.delta) ||
-    Object.keys(event).some((key) => !PARTIAL_EVENT_KEYS.has(key)) ||
-    (event.index !== undefined &&
-      (typeof event.index !== "number" || !Number.isSafeInteger(event.index) || event.index < 0))
-  ) {
-    return undefined;
-  }
-  const delta = event.delta;
-  const field =
-    delta.type === "text_delta"
-      ? "text"
-      : delta.type === "thinking_delta"
-        ? "thinking"
-        : delta.type === "input_json_delta"
-          ? "partial_json"
-          : undefined;
-  const payload = field ? delta[field] : undefined;
-  if (
-    typeof payload !== "string" ||
-    !payload ||
-    Object.keys(delta).some(
-      (key) =>
-        key !== "type" &&
-        key !== field &&
-        !(delta.type === "thinking_delta" && key === "estimated_tokens"),
-    )
-  ) {
-    return undefined;
-  }
-  const estimatedTokens = delta.estimated_tokens;
-  if (
-    estimatedTokens != null &&
-    (typeof estimatedTokens !== "number" || !Number.isFinite(estimatedTokens))
-  ) {
-    return undefined;
-  }
-  // The fixed charge bounds tiny delta floods and retained chunk bookkeeping:
-  // the 8 MiB budget admits fewer than 262,144 partial frames. Empty deltas,
-  // unknown fields, and oversized metadata keep the ordinary raw/frame limits.
-  return (
-    JSON.stringify(payload).length +
-    32 +
-    (estimatedTokens === undefined
-      ? 0
-      : JSON.stringify({ estimated_tokens: estimatedTokens }).length) +
-    Math.max(0, rawLine.length - JSON.stringify(parsed).length)
-  );
+  };
+  return {
+    retain: (chars) => charge(chars + CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD),
+    release: (chars) => {
+      retainedChars -= chars + CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD;
+    },
+    scope: () => {
+      let charged = 0;
+      return {
+        retain: (chars) => {
+          const amount = chars + CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD;
+          charged += amount;
+          charge(amount);
+        },
+        release: () => {
+          retainedChars -= charged;
+          charged = 0;
+        },
+      };
+    },
+  };
 }
 
 /** Frames arbitrary stdout chunks while bounding each individual raw JSONL line. */
@@ -114,15 +92,12 @@ export function frameBoundedCliJsonlChunk(
   return true;
 }
 
-export function streamJsonOutputLimitErrorText(
-  kind: "raw" | "line" | "lines",
-  limit: number,
-): string {
+const STREAM_JSON_OUTPUT_LIMIT_CONSEQUENCE =
+  "the CLI was stopped and its final reply was lost. Work the CLI already did (files, commits) may exist; check it before re-running.";
+
+export function streamJsonOutputLimitErrorText(kind: "retained" | "line", limit: number): string {
   if (kind === "line") {
-    return `CLI JSONL line exceeded ${limit} characters; refusing to parse output.`;
+    return `CLI JSONL line exceeded ${limit} characters; ${STREAM_JSON_OUTPUT_LIMIT_CONSEQUENCE}`;
   }
-  if (kind === "lines") {
-    return `CLI JSONL output exceeded ${limit} lines; refusing to parse output.`;
-  }
-  return `CLI JSONL output exceeded ${limit} characters; refusing to parse output.`;
+  return `CLI turn retained output exceeded the ${limit}-character Gateway parse budget; ${STREAM_JSON_OUTPUT_LIMIT_CONSEQUENCE}`;
 }

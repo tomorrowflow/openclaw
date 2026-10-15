@@ -611,6 +611,9 @@ export function parseClaudeCliStreamingDelta(params: {
     return null;
   }
   if (params.parsed.type === "stream_event" && isRecord(params.parsed.event)) {
+    if (isClaudeSubagentRecord(params.parsed)) {
+      return null;
+    }
     const event = params.parsed.event;
     if (event.type !== "content_block_delta" || !isRecord(event.delta)) {
       return null;
