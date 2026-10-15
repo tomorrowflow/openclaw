@@ -1,24 +1,36 @@
 import { describe, expect, it } from "vitest";
 import { createCliJsonlStreamingParser } from "./cli-output-stream.js";
 
-function streamDelta(delta: Record<string, unknown>) {
+function streamDelta(delta: Record<string, unknown>, index = 0) {
   return {
     type: "stream_event",
-    event: { type: "content_block_delta", index: 0, delta },
+    event: { type: "content_block_delta", index, delta },
     uuid: "11111111-1111-4111-8111-111111111111",
     session_id: "22222222-2222-4222-8222-222222222222",
     parent_tool_use_id: null,
   };
 }
 
-const openToolBlock = {
-  type: "stream_event",
-  event: {
-    type: "content_block_start",
-    index: 0,
-    content_block: { type: "tool_use", id: "tool-0", name: "Write", input: {} },
-  },
-};
+function messageStart(id: string) {
+  return { type: "stream_event", event: { type: "message_start", message: { id } } };
+}
+
+function toolBlockStart(index: number, id: string, input: Record<string, unknown> = {}) {
+  return {
+    type: "stream_event",
+    event: {
+      type: "content_block_start",
+      index,
+      content_block: { type: "tool_use", id, name: "Write", input },
+    },
+  };
+}
+
+function blockStop(index: number) {
+  return { type: "stream_event", event: { type: "content_block_stop", index } };
+}
+
+const openToolBlock = toolBlockStart(0, "tool-0");
 
 function createParser() {
   return createCliJsonlStreamingParser({
@@ -115,6 +127,90 @@ describe("Claude partial-message output budgets", () => {
     const line = `${JSON.stringify(streamDelta({ type: "input_json_delta", partial_json: "a" }))}\n`;
     for (let index = 0; index < 262_145 && !parser.getErrorText(); index += 1) {
       parser.push(line);
+    }
+    expect(parser.getErrorText()).toContain("Gateway parse budget");
+  });
+
+  it("frees streamed tool input at block stop so long tool-heavy turns stay within budget", () => {
+    const starts: string[] = [];
+    const parser = createCliJsonlStreamingParser({
+      backend: { command: "claude", output: "jsonl", jsonlDialect: "claude-stream-json" },
+      providerId: "claude-cli",
+      onAssistantDelta: () => {},
+      onToolUseStart: (tool) => starts.push(tool.toolCallId),
+    });
+    const push = (record: unknown) => parser.push(`${JSON.stringify(record)}\n`);
+    // 30 Write calls of 300 KB each stream 9 MB of input over the turn while at
+    // most one block's input is pending at a time.
+    const content = "a".repeat(300_000);
+    for (let round = 0; round < 30; round += 1) {
+      push(messageStart(`msg-${round}`));
+      push(toolBlockStart(0, `write-${round}`));
+      push(streamDelta({ type: "input_json_delta", partial_json: '{"content":"' }));
+      push(streamDelta({ type: "input_json_delta", partial_json: content }));
+      push(streamDelta({ type: "input_json_delta", partial_json: '"}' }));
+      push(blockStop(0));
+    }
+    push(messageStart("final"));
+    push(streamDelta({ type: "text_delta", text: "done" }));
+    push({ type: "result", subtype: "success", result: "done" });
+    parser.finish();
+
+    expect(parser.getErrorText()).toBeNull();
+    expect(parser.getOutput()?.text).toBe("done");
+    expect(starts).toHaveLength(30);
+  });
+
+  it("charges tool input carried on content_block_start until the block stops", () => {
+    const parser = createParser();
+    const push = (record: unknown) => parser.push(`${JSON.stringify(record)}\n`);
+    push(messageStart("msg-0"));
+    // 40 blocks at distinct indexes never stop, so every start snapshot stays pending.
+    for (let index = 0; index < 40 && !parser.getErrorText(); index += 1) {
+      push(toolBlockStart(index, `write-${index}`, { content: "a".repeat(300_000) }));
+    }
+    expect(parser.getErrorText()).toContain("Gateway parse budget");
+  });
+
+  it("frees native thinking when the next message starts", () => {
+    const parser = createParser();
+    const push = (record: unknown) => parser.push(`${JSON.stringify(record)}\n`);
+    // 20 messages stream 20 MB of thinking in total while each message holds 1 MB.
+    for (let round = 0; round < 20; round += 1) {
+      push(messageStart(`msg-${round}`));
+      push({
+        type: "stream_event",
+        event: { type: "content_block_start", index: 0, content_block: { type: "thinking" } },
+      });
+      push(streamDelta({ type: "thinking_delta", thinking: "t".repeat(1_000_000) }));
+      push(blockStop(0));
+    }
+    push(messageStart("final"));
+    push(streamDelta({ type: "text_delta", text: "done" }));
+    push({ type: "result", subtype: "success", result: "done" });
+    parser.finish();
+
+    expect(parser.getErrorText()).toBeNull();
+    expect(parser.getOutput()?.text).toBe("done");
+  });
+
+  it("charges tool names retained from custom tool result events", () => {
+    const parser = createCliJsonlStreamingParser({
+      backend: { command: "custom-cli", output: "jsonl" },
+      providerId: "custom-cli",
+      parseJsonlEvent: (line) => JSON.parse(line),
+      onAssistantDelta: () => {},
+      onToolResult: () => {},
+    });
+    for (let index = 0; index < 10 && !parser.getErrorText(); index += 1) {
+      parser.push(
+        `${JSON.stringify({
+          kind: "toolResult",
+          toolCallId: `call-${index}`,
+          name: "n".repeat(1_000_000),
+          result: "ok",
+        })}\n`,
+      );
     }
     expect(parser.getErrorText()).toContain("Gateway parse budget");
   });
