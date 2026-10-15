@@ -43,6 +43,11 @@ model-authored arguments cannot override it. The app-server request watchdog
 leaves another 30000 ms beyond the applicable tool budget for the result to reach
 Codex.
 
+Both watchdogs stop counting while the call waits on a plugin approval
+(`before_tool_call` returning `requireApproval`). The approval keeps its own
+timeout (up to 600 seconds); after it resolves, the call continues with the
+budget it had left.
+
 Foreground `node_exec` uses the exec tool's resolved command and node transport
 budget instead of the ordinary 90 second default or 600 second cap. An omitted
 `timeoutSeconds` inherits the exec tool's runtime, per-agent, or global default

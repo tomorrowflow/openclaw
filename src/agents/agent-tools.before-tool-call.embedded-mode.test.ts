@@ -17,6 +17,7 @@ import {
 import { createDeferredCore } from "../shared/deferred.js";
 import { resolveBeforeToolCallApprovalOutcome } from "./agent-tools.before-tool-call.approval.js";
 import { runBeforeToolCallHook } from "./agent-tools.before-tool-call.js";
+import { observeToolCallHumanInputWaits } from "./tool-call-human-input-wait.js";
 import { callGatewayTool } from "./tools/gateway.js";
 
 vi.mock("../plugins/hook-runner-global.js", async () => {
@@ -190,6 +191,34 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
       approvalResolution: PluginApprovalResolutions.ALLOW_ONCE,
     });
     expect(mockCallGatewayTool).not.toHaveBeenCalled();
+  });
+
+  it("marks the tool call as waiting on a human until the approval resolves", async () => {
+    const broker = embeddedBroker();
+    runBeforeToolCallMock.mockResolvedValue(approvalResult());
+    const events: string[] = [];
+    const unobserve = observeToolCallHumanInputWaits("call-wait", () => {
+      events.push("start");
+      return () => events.push("end");
+    });
+    try {
+      const resultPromise = runBeforeToolCallHook({
+        toolName: "demo_write",
+        params: {},
+        toolCallId: "call-wait",
+        ctx: { agentId: "main", sessionKey: "agent:main:main" },
+      });
+      await vi.waitFor(() => {
+        expect(broker.listPending()).toHaveLength(1);
+      });
+      expect(events).toEqual(["start"]);
+      const approval = expectDefined(broker.listPending()[0], "pending approval");
+      broker.resolve(approval.id, "allow-once");
+      await resultPromise;
+      expect(events).toEqual(["start", "end"]);
+    } finally {
+      unobserve();
+    }
   });
 
   it("does not allow embedded approvals when the broker stops", async () => {

@@ -29,6 +29,7 @@ import {
   type JsonValue,
 } from "./protocol.js";
 import { resolveCodexToolAbortTerminalReason } from "./tool-abort-terminal-reason.js";
+import { startToolCallWatchdog, type ToolCallWatchdog } from "./tool-call-watchdog.js";
 
 const CODEX_DYNAMIC_TOOL_TIMEOUT_MS = 90_000;
 const CODEX_DYNAMIC_TOOL_MAX_TIMEOUT_MS = 600_000;
@@ -249,7 +250,7 @@ export async function handleDynamicToolCallWithTimeout(
     }
 
     const controller = new AbortController();
-    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let watchdog: ToolCallWatchdog | undefined;
     let timedOut = false;
     let toolCallSettled = false;
     let completedSuccessfully = false;
@@ -286,20 +287,23 @@ export async function handleDynamicToolCallWithTimeout(
     });
     const timeoutPromise = new Promise<CodexDynamicToolRuntimeResponse>((resolve) => {
       const { timeoutMs } = params;
-      timeout = setTimeout(() => {
-        timedOut = true;
-        const timeoutDetails = formatDynamicToolTimeoutDetails({ call: params.call, timeoutMs });
-        params.onFallbackSelected?.();
-        controller.abort(new Error(timeoutDetails.responseMessage));
-        params.onTimeout?.();
-        embeddedAgentLog.warn("codex dynamic tool call timed out", {
-          ...timeoutDetails.meta,
-          consoleMessage: timeoutDetails.consoleMessage,
-        });
-        notifyFailedToolResult(timeoutDetails.responseMessage, "timed_out");
-        resolve(createFailedAfterPossibleDispatch(timeoutDetails.responseMessage, "timed_out"));
-      }, timeoutMs);
-      timeout.unref?.();
+      watchdog = startToolCallWatchdog({
+        toolCallId: params.call.callId,
+        timeoutMs,
+        onTimeout: () => {
+          timedOut = true;
+          const timeoutDetails = formatDynamicToolTimeoutDetails({ call: params.call, timeoutMs });
+          params.onFallbackSelected?.();
+          controller.abort(new Error(timeoutDetails.responseMessage));
+          params.onTimeout?.();
+          embeddedAgentLog.warn("codex dynamic tool call timed out", {
+            ...timeoutDetails.meta,
+            consoleMessage: timeoutDetails.consoleMessage,
+          });
+          notifyFailedToolResult(timeoutDetails.responseMessage, "timed_out");
+          resolve(createFailedAfterPossibleDispatch(timeoutDetails.responseMessage, "timed_out"));
+        },
+      });
     });
 
     try {
@@ -334,7 +338,7 @@ export async function handleDynamicToolCallWithTimeout(
       notifyFailedToolResult(message, terminalReason);
       return finalizeTerminal(createFailedAfterPossibleDispatch(message, terminalReason));
     } finally {
-      clearTimeout(timeout);
+      watchdog?.dispose();
       toolCallSettled = true;
       resolveAbort = undefined;
       if (!completedSuccessfully || timedOut || controller.signal.aborted) {

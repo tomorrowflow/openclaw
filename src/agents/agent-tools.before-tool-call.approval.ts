@@ -37,6 +37,7 @@ import type {
   HookOutcome,
 } from "./agent-tools.before-tool-call.types.js";
 import { registerActiveEmbeddedRunHumanInputWaitForRun } from "./embedded-agent-runner/run-state.js";
+import { beginToolCallHumanInputWait } from "./tool-call-human-input-wait.js";
 import { withGatewayToolApprovalOwner } from "./tools/gateway-caller-context.js";
 import { callGatewayTool } from "./tools/gateway.js";
 
@@ -216,12 +217,14 @@ async function requestPluginToolApproval(params: PluginToolApprovalParams): Prom
         () => pending && params.signal?.aborted !== true && Date.now() < deadlineAtMs,
       )
     : undefined;
+  const endToolCallWait = beginToolCallHumanInputWait(params.toolCallId);
   try {
     return await requestPluginToolApprovalDecision(params, () => {
       resolved = true;
     });
   } finally {
     pending = false;
+    endToolCallWait();
     release?.(resolved);
   }
 }
