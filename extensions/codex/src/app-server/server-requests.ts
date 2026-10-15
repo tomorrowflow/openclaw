@@ -7,6 +7,7 @@ import { resolveDynamicToolServerRequestTimeoutMs } from "./dynamic-tool-executi
 import { createCodexElicitationResponse } from "./elicitation-response.js";
 import { readCodexDynamicToolCallParams } from "./protocol-validators.js";
 import { isJsonObject, type JsonValue, type RpcRequest, type RpcResponse } from "./protocol.js";
+import { startToolCallWatchdog, type ToolCallWatchdog } from "./tool-call-watchdog.js";
 
 export class CodexServerRequestResolvedError extends Error {
   constructor() {
@@ -75,28 +76,34 @@ export class CodexServerRequests {
     const deadline = createDeferred<JsonValue | undefined>();
     const onAbort = () => deadline.resolve(undefined);
     controller.signal.addEventListener("abort", onAbort, { once: true });
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    let timeoutMs = resolveDynamicToolServerRequestTimeoutMs(
-      readCodexDynamicToolCallParams(request.params),
-    );
+    let watchdog: ToolCallWatchdog | undefined;
+    const dynamicToolCall = readCodexDynamicToolCallParams(request.params);
+    let timeoutMs = resolveDynamicToolServerRequestTimeoutMs(dynamicToolCall);
     let settled = false;
     let executionTimeoutResolved = false;
     const armTimeout = () => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => {
-        embeddedAgentLog.warn("codex app-server server request timed out", {
-          id: request.id,
-          method: request.method,
-          timeoutMs,
-        });
-        deadline.resolve(
-          failedToolResponse(
-            `OpenClaw dynamic tool call timed out after ${timeoutMs}ms before sending a response to Codex.`,
-          ),
-        );
-        controller.abort(new Error("codex app-server server request timed out"));
-      }, timeoutMs);
-      timeout.unref?.();
+      if (watchdog) {
+        watchdog.reset(timeoutMs);
+        return;
+      }
+      // Paused like the execution watchdog while the call waits on an approval.
+      watchdog = startToolCallWatchdog({
+        toolCallId: dynamicToolCall?.callId,
+        timeoutMs,
+        onTimeout: () => {
+          embeddedAgentLog.warn("codex app-server server request timed out", {
+            id: request.id,
+            method: request.method,
+            timeoutMs,
+          });
+          deadline.resolve(
+            failedToolResponse(
+              `OpenClaw dynamic tool call timed out after ${timeoutMs}ms before sending a response to Codex.`,
+            ),
+          );
+          controller.abort(new Error("codex app-server server request timed out"));
+        },
+      });
     };
     const setExecutionTimeoutMs = (executionTimeoutMs: number) => {
       if (
@@ -162,7 +169,7 @@ export class CodexServerRequests {
       }
     } finally {
       settled = true;
-      clearTimeout(timeout);
+      watchdog?.dispose();
       controller.signal.removeEventListener("abort", onAbort);
       if (this.active.get(request.id) === entry) {
         this.active.delete(request.id);
