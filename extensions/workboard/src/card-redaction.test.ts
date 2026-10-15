@@ -144,4 +144,44 @@ describe("redactOperatorCard", () => {
     ]);
     expect(redactOperatorCard(createCard())).not.toHaveProperty("rounds");
   });
+
+  it("shows the real verdict once the round is decided, and leaves a verdict from before the import", () => {
+    const reviewCard = (status: WorkboardCard["status"], events?: WorkboardCard["events"]) => ({
+      ...createCard({
+        automation: {
+          target: {
+            kind: "node-claude" as const,
+            nodeId: "node",
+            repoPath: "/repo",
+            worktreesRoot: "/wt",
+            hostRepoPath: "/host",
+            worktree: {
+              path: "/wt/wb-card-1",
+              branch: "factory/card-1",
+              baseCommit: "a".repeat(40),
+              handoff: {
+                phase: "imported" as const,
+                headCommit: "b".repeat(40),
+                importedAt: 10,
+              },
+            },
+          },
+        },
+        comments: [
+          { id: "old", body: "Verdict: rework", createdAt: 5, source: "agent:dev" as const },
+          { id: "new", body: "Verdict: accept", createdAt: 20, source: "agent:dev" as const },
+        ],
+      }),
+      status,
+      ...(events ? { events } : {}),
+    });
+    const bodies = (card: WorkboardCard) =>
+      redactOperatorCard(card).metadata?.comments?.map((entry) => entry.body);
+
+    expect(bodies(reviewCard("review"))).toEqual(["Verdict: rework", HIDDEN_VERDICT_NOTICE]);
+    expect(bodies(reviewCard("done"))).toEqual(["Verdict: rework", "Verdict: accept"]);
+    expect(
+      bodies(reviewCard("blocked", [{ id: "e", kind: "moved", at: 30, toStatus: "done" }])),
+    ).toEqual(["Verdict: rework", "Verdict: accept"]);
+  });
 });
