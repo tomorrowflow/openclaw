@@ -670,6 +670,9 @@ describe("node ticket draft PR", () => {
         ),
       }),
     );
+    expect(gateway.respond.mock.lastCall?.[1]?.message).toContain(
+      `make \`git diff --check ${reviewed}..HEAD\` pass`,
+    );
     expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.rework).toEqual({
       round: 1,
       pullRequestUrl,

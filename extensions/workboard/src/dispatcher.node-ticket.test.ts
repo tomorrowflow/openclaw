@@ -203,6 +203,11 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     );
     expect(briefs()[0]).toContain('"review":{"findings":0,"fixed":0,"note":"…"}');
     await expect(rung()).resolves.toBe("b");
+    const baseCommit = nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree
+      ?.baseCommit;
+    expect(briefs()[0]).toContain(
+      `leave the worktree clean (\`git status --porcelain\` prints nothing) and make \`git diff --check ${baseCommit}..HEAD\` pass`,
+    );
 
     // A demotion applies from the next launch: the re-run is briefed and recorded at rung a.
     await store.upsertBoard({ id: "default", orchestration: { classRungs: null } });

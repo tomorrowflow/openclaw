@@ -563,6 +563,9 @@ export function buildNodeTicketMessage(params: {
         : [];
   const feedback = rework || answering ? comments.slice(-REWORK_FEEDBACK_MAX_ENTRIES) : [];
   const reviewed = params.worktree.rung === "b";
+  // The range the host import checks with `git diff --check` (node-ticket-handoff.ts). A
+  // legacy rework without startCommit is checked from the host head, a subset of this range.
+  const checkFrom = params.worktree.rework?.startCommit ?? params.worktree.baseCommit;
   return [
     `Work on this ticket: ${params.card.title}`,
     "",
@@ -595,6 +598,7 @@ export function buildNodeTicketMessage(params: {
     "## Turn contract",
     `- Your working directory is the ticket worktree ${params.worktree.path} on branch ${params.worktree.branch}. Stay inside it.`,
     "- Commit your work on this branch. Never push, add remotes, or change other branches.",
+    `- Before a \`done\` report, leave the worktree clean (\`git status --porcelain\` prints nothing) and make \`git diff --check ${checkFrom}..HEAD\` pass: commit what belongs in the change, delete scratch files, and fix whitespace errors in a new commit. The import refuses either and blocks the card.`,
     "- Do not end the turn while a background job is still running; wait for it or stop it.",
     "- If something needs a decision you cannot make from the ticket and the repository, stop and ask; propose a default.",
     ...(reviewed
