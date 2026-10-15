@@ -23,6 +23,7 @@ import {
   isGeminiStreamJsonDialect,
   supportsCliJsonlToolEvents,
 } from "./cli-output-records.js";
+import type { RetainedOutputLedger, RetainedOutputScope } from "./cli-output-stream-limits.js";
 
 type PendingToolUse = {
   toolCallId: string;
@@ -36,16 +37,15 @@ type PendingToolUse = {
    * dropped by the `startedIds` dedup in `emitToolStartOnce`.
    */
   blockInput?: Record<string, unknown>;
+  /** Charges for this block's pending input, refunded when the block stops. */
+  retained: RetainedOutputScope;
 };
 
 type ToolUseTracker = ReturnType<typeof createToolUseTracker>;
 
-/** Reports characters appended to state that lives for the rest of the turn. */
-export type RetainChars = (chars: number) => void;
-
-export function createToolUseTracker(retain: RetainChars) {
+export function createToolUseTracker(ledger: RetainedOutputLedger) {
   return {
-    retain,
+    ledger,
     pendingByIndex: new Map<number, PendingToolUse>(),
     nameById: new Map<string, string>(),
     startedIds: new Set<string>(),
@@ -65,10 +65,29 @@ function emitToolStartOnce(
   if (tracker.startedIds.has(toolCallId)) {
     return;
   }
-  tracker.retain(toolCallId.length + name.length);
+  tracker.ledger.retain(toolCallId.length);
   tracker.startedIds.add(toolCallId);
-  tracker.nameById.set(toolCallId, name);
+  retainToolName(tracker, toolCallId, name);
   onToolUseStart?.({ toolCallId, name, kind, args });
+}
+
+function retainToolName(tracker: ToolUseTracker, toolCallId: string, name: string): void {
+  const previous = tracker.nameById.get(toolCallId);
+  if (previous === name) {
+    return;
+  }
+  if (previous !== undefined) {
+    tracker.ledger.release(previous.length);
+  }
+  tracker.ledger.retain(name.length);
+  tracker.nameById.set(toolCallId, name);
+}
+
+function dropPendingToolBlocks(tracker: ToolUseTracker): void {
+  for (const pending of tracker.pendingByIndex.values()) {
+    pending.retained.release();
+  }
+  tracker.pendingByIndex.clear();
 }
 
 function emitToolResultOnce(
@@ -82,7 +101,7 @@ function emitToolResultOnce(
   if (tracker.resultDeliveredIds.has(toolCallId)) {
     return;
   }
-  tracker.retain(toolCallId.length);
+  tracker.ledger.retain(toolCallId.length);
   tracker.resultDeliveredIds.add(toolCallId);
   onToolResult?.({
     toolCallId,
@@ -106,7 +125,7 @@ export function projectCliBackendEvent(params: {
   state: CliEventProjectionState;
   texts: string[];
   toolTracker: ToolUseTracker;
-  retain: RetainChars;
+  ledger: RetainedOutputLedger;
   onAssistantDelta: (delta: CliStreamingDelta) => void;
   onThinkingDelta?: (delta: CliThinkingDelta) => void;
   onDisplayToolUseStart?: (delta: CliToolUseStartDelta) => void;
@@ -138,7 +157,7 @@ export function projectCliBackendEvent(params: {
     if (!event.text) {
       return;
     }
-    params.retain(event.text.length);
+    params.ledger.retain(event.text.length);
     state.assistantText += event.text;
     params.onAssistantDelta({
       text: state.assistantText,
@@ -152,7 +171,7 @@ export function projectCliBackendEvent(params: {
     if (!event.text || !params.onThinkingDelta) {
       return;
     }
-    params.retain(event.text.length);
+    params.ledger.retain(event.text.length);
     state.customThinkingText += event.text;
     params.onThinkingDelta({
       text: state.customThinkingText,
@@ -174,7 +193,7 @@ export function projectCliBackendEvent(params: {
   }
   if (event.kind === "toolResult") {
     if (event.name) {
-      params.toolTracker.nameById.set(event.toolCallId, event.name);
+      retainToolName(params.toolTracker, event.toolCallId, event.name);
     }
     emitToolResultOnce(
       params.toolTracker,
@@ -191,7 +210,7 @@ export function projectCliBackendEvent(params: {
     params.onUsage?.(event.usage, true);
   }
   if (event.text) {
-    params.retain(event.text.length);
+    params.ledger.retain(event.text.length);
   }
   const existingErrorText = state.output?.errorText;
   // Stop at the authoritative winner before composing fallback transcripts.
@@ -276,6 +295,12 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
 
   if (params.parsed.type === "stream_event" && isRecord(params.parsed.event)) {
     const event = params.parsed.event;
+    if (event.type === "message_start") {
+      // Block indexes restart per message, so a block the CLI never stopped
+      // can only be abandoned; its pending input is freed with the message.
+      dropPendingToolBlocks(tracker);
+      return;
+    }
     if (
       event.type === "content_block_start" &&
       typeof event.index === "number" &&
@@ -286,13 +311,19 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
         const toolCallId = typeof block.id === "string" ? block.id.trim() : "";
         const name = typeof block.name === "string" ? block.name.trim() : "";
         if (toolCallId && name) {
-          tracker.retain(toolCallId.length + name.length);
+          const blockInput = isRecord(block.input) ? block.input : undefined;
+          const retained = tracker.ledger.scope();
+          retained.retain(
+            toolCallId.length + name.length + (blockInput ? JSON.stringify(blockInput).length : 0),
+          );
+          tracker.pendingByIndex.get(event.index)?.retained.release();
           tracker.pendingByIndex.set(event.index, {
             toolCallId,
             name,
             kind: block.type,
             inputJsonParts: [],
-            ...(isRecord(block.input) ? { blockInput: block.input } : {}),
+            ...(blockInput ? { blockInput } : {}),
+            retained,
           });
         }
       } else if (isClaudeAssistantToolResultBlockType(block.type)) {
@@ -308,7 +339,7 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
       if (event.delta.type === "input_json_delta" && typeof event.delta.partial_json === "string") {
         const pending = tracker.pendingByIndex.get(event.index);
         if (pending) {
-          tracker.retain(event.delta.partial_json.length);
+          pending.retained.retain(event.delta.partial_json.length);
           pending.inputJsonParts.push(event.delta.partial_json);
         }
       }
@@ -333,6 +364,7 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
           args,
           params.onToolUseStart,
         );
+        pending.retained.release();
       }
       return;
     }
@@ -364,7 +396,8 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
 }
 
 type ThinkingTracker = {
-  retain: RetainChars;
+  /** Charges for this message's thinking copies, refunded when the message changes. */
+  retained: RetainedOutputScope;
   currentMessageId?: string;
   // Thinking text already streamed via thinking_delta, keyed by the Anthropic
   // content-block index. Snapshot frames repeat streamed thinking, so each block
@@ -381,9 +414,9 @@ type ThinkingTracker = {
   progressTokens: number;
 };
 
-export function createThinkingTracker(retain: RetainChars): ThinkingTracker {
+export function createThinkingTracker(ledger: RetainedOutputLedger): ThinkingTracker {
   return {
-    retain,
+    retained: ledger.scope(),
     streamedByIndex: new Map(),
     highestStreamedIndex: Number.NEGATIVE_INFINITY,
     emittedText: "",
@@ -393,6 +426,7 @@ export function createThinkingTracker(retain: RetainChars): ThinkingTracker {
 }
 
 function resetThinkingBlockState(tracker: ThinkingTracker): void {
+  tracker.retained.release();
   tracker.streamedByIndex.clear();
   tracker.highestStreamedIndex = Number.NEGATIVE_INFINITY;
   tracker.emittedText = "";
@@ -451,7 +485,8 @@ function emitClaudeThinking(
   onThinkingDelta: (delta: CliThinkingDelta) => void,
 ): void {
   const appendToAggregate = index >= tracker.highestStreamedIndex;
-  tracker.retain(delta.length);
+  // Two copies grow by this delta: the block's own text and the message aggregate.
+  tracker.retained.retain(2 * delta.length);
   tracker.streamedByIndex.set(index, `${streamed}${delta}`);
   tracker.highestStreamedIndex = Math.max(tracker.highestStreamedIndex, index);
   tracker.emittedText = appendToAggregate
@@ -543,13 +578,17 @@ export function dispatchClaudeCliThinking(params: {
       if (!params.onThinkingDelta) {
         continue;
       }
+      const previous = tracker.streamedByIndex.get(index) ?? "";
       tracker.streamedByIndex.set(index, block.thinking);
       tracker.highestStreamedIndex = Math.max(tracker.highestStreamedIndex, index);
       const text = assembleThinkingTextByIndex(tracker.streamedByIndex);
       if (text === tracker.emittedText) {
         continue;
       }
-      tracker.retain(Math.max(0, text.length - tracker.emittedText.length));
+      tracker.retained.retain(
+        Math.max(0, block.thinking.length - previous.length) +
+          Math.max(0, text.length - tracker.emittedText.length),
+      );
       tracker.emittedText = text;
       params.onThinkingDelta({ text, delta: block.thinking, isReasoningSnapshot: true });
     }
@@ -654,7 +693,7 @@ export function partitionLeadingTaggedReasoning(
     : { pending: false, reasoningText: "", visibleText: text };
 }
 
-export function createLeadingTaggedReasoningRouter() {
+export function createLeadingTaggedReasoningRouter(retained: RetainedOutputScope) {
   let pending = "";
   let settled = false;
   let openWithoutPendingTag = false;
@@ -662,6 +701,7 @@ export function createLeadingTaggedReasoningRouter() {
     if (settled) {
       return chunk ? [{ kind: "text", text: chunk }] : [];
     }
+    retained.retain(chunk.length);
     pending += chunk;
     // Without an unfinished tag, only '<' can change the open lexical block.
     if (!final && openWithoutPendingTag && !chunk.includes("<")) {
@@ -674,6 +714,7 @@ export function createLeadingTaggedReasoningRouter() {
     }
     settled = true;
     pending = "";
+    retained.release();
     return [
       ...(result.reasoningText
         ? ([{ kind: "thinking", text: result.reasoningText }] as const)

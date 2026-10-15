@@ -99,10 +99,14 @@ describe("Claude partial-message output budgets", () => {
   ])("still bounds retained $type payloads", ({ type, field }) => {
     const parser = createParser();
     parser.push(`${JSON.stringify(openToolBlock)}\n`);
-    const line = `${JSON.stringify(streamDelta({ type, [field]: "a".repeat(4_300_000) }))}\n`;
+    // One 2 MB payload fits however many copies the parser keeps of it; a
+    // stream of them within one message is bounded by the 8 MiB budget.
+    const line = `${JSON.stringify(streamDelta({ type, [field]: "a".repeat(2_000_000) }))}\n`;
     parser.push(line);
     expect(parser.getErrorText()).toBeNull();
-    parser.push(line);
+    for (let pushes = 1; pushes < 5 && !parser.getErrorText(); pushes += 1) {
+      parser.push(line);
+    }
     expect(parser.getErrorText()).toContain("Gateway parse budget");
     expect(parser.getOutput()?.text).toBe("");
   });
@@ -213,6 +217,22 @@ describe("Claude partial-message output budgets", () => {
       );
     }
     expect(parser.getErrorText()).toContain("Gateway parse budget");
+  });
+
+  it("holds a streamed reply twice at most when the result repeats it", () => {
+    const parser = createParser();
+    const push = (record: unknown) => parser.push(`${JSON.stringify(record)}\n`);
+    // 3 MB streamed in one message and repeated by the result: the reply text
+    // and the result text stay charged, the message's own copy is refunded at
+    // the result, so 6 MB of the 8 MiB budget is held and the reply survives.
+    const reply = "r".repeat(3_000_000);
+    push(messageStart("reply"));
+    push(streamDelta({ type: "text_delta", text: reply }));
+    push({ type: "result", subtype: "success", result: reply });
+    parser.finish();
+
+    expect(parser.getErrorText()).toBeNull();
+    expect(parser.getOutput()?.text).toBe(reply);
   });
 
   it("does not charge deltas the parser drops", () => {

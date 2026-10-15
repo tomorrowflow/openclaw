@@ -48,7 +48,7 @@ import {
 import { appendCliResultText } from "./cli-output-results.js";
 import {
   CLI_STREAM_JSON_OUTPUT_LIMITS,
-  CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD,
+  createRetainedOutputLedger,
   frameBoundedCliJsonlChunk,
   streamJsonOutputLimitErrorText,
 } from "./cli-output-stream-limits.js";
@@ -79,38 +79,41 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
   let output: CliOutput | null = null;
   let parseErrorText = "";
   let rawLines = 0;
-  let retainedChars = 0;
   const texts: string[] = [];
   let sawCustomJsonlEvent = false;
   let sawGeminiStructuredOutput = false;
   let sawTerminalResult = false;
   let sawClaudeSyntheticNoResponse = false;
   const outputLimits = CLI_STREAM_JSON_OUTPUT_LIMITS;
-  // The turn budget meters what this parser keeps for the rest of the turn:
-  // streamed text, reasoning, result text, and tool bookkeeping. Records it
-  // hands off and drops (tool results, system records, subagent traffic) only
-  // meet the per-line limit, so long tool-heavy turns stay within budget.
-  const retain = (chars: number) => {
-    retainedChars += chars + CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD;
-    if (retainedChars > outputLimits.maxTurnRetainedChars && !parseErrorText) {
+  // The turn budget is a live gauge of what this parser holds: reply text,
+  // result text, and tool ids live for the turn; the message's snapshot diff
+  // base, tagged reasoning, native thinking, and pending tool input are
+  // refunded when their message or block ends. Records the parser hands off
+  // and drops (tool results, system records, subagent traffic) only meet the
+  // per-line limit, so long tool-heavy turns stay within budget.
+  const ledger = createRetainedOutputLedger(outputLimits.maxTurnRetainedChars, () => {
+    if (!parseErrorText) {
       parseErrorText = streamJsonOutputLimitErrorText(
         "retained",
         outputLimits.maxTurnRetainedChars,
       );
       lineBuffer.pending = "";
     }
-  };
-  const toolTracker = createToolUseTracker(retain);
+  });
+  const messageRetained = ledger.scope();
+  const commentaryRetained = ledger.scope();
+  const toolTracker = createToolUseTracker(ledger);
   // Classification is keyed on consumer presence so reclassified pre-tool text
   // always has a destination; a separate enable flag let it be dropped (#92092).
   const classifyClaudeCommentary =
     Boolean(params.onCommentaryText) && supportsCliJsonlToolEvents(params);
-  const thinkingTracker = createThinkingTracker(retain);
+  const thinkingTracker = createThinkingTracker(ledger);
   const claudeStreamJson = isClaudeStreamJsonDialect(params);
-  let taggedReasoningRouter = createLeadingTaggedReasoningRouter();
+  let taggedReasoningRouter = createLeadingTaggedReasoningRouter(ledger.scope());
   let currentTaggedReasoningText = "";
 
   const appendAssistantText = (delta: string) => {
+    ledger.retain(delta.length);
     assistantText += delta;
     params.onAssistantDelta({ text: assistantText, delta, sessionId, usage });
   };
@@ -121,6 +124,7 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
     }
     const text = kind === "commentary" ? pendingClaudeText.trim() : pendingClaudeText;
     pendingClaudeText = "";
+    commentaryRetained.release();
     if (kind === "assistant") {
       appendAssistantText(text);
     } else if (text) {
@@ -133,6 +137,7 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
       return;
     }
     if (classifyClaudeCommentary) {
+      commentaryRetained.retain(delta.length);
       pendingClaudeText = `${pendingClaudeText}${delta}`;
       return;
     }
@@ -160,16 +165,25 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
     appendAssistantText(`${separator}${delta}`);
   };
 
+  const setTaggedReasoningText = (text: string) => {
+    if (text.length > currentTaggedReasoningText.length) {
+      messageRetained.retain(text.length - currentTaggedReasoningText.length);
+    }
+    currentTaggedReasoningText = text;
+  };
+
   const routeTaggedReasoningDeltas = (
     deltas: Parameters<typeof projectCliTaggedReasoning>[0]["deltas"],
   ) => {
-    currentTaggedReasoningText = projectCliTaggedReasoning({
-      deltas,
-      currentText: currentTaggedReasoningText,
-      hasNativeThinking: Boolean(thinkingTracker.emittedText),
-      onThinkingDelta: params.onThinkingDelta,
-      onVisibleText: emitClaudeVisibleText,
-    });
+    setTaggedReasoningText(
+      projectCliTaggedReasoning({
+        deltas,
+        currentText: currentTaggedReasoningText,
+        hasNativeThinking: Boolean(thinkingTracker.emittedText),
+        onThinkingDelta: params.onThinkingDelta,
+        onVisibleText: emitClaudeVisibleText,
+      }),
+    );
   };
 
   const finishTaggedReasoningMessage = () => {
@@ -178,15 +192,22 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
     }
   };
 
-  const beginClaudeMessage = (messageId?: string) => {
+  // A result or the next message start ends the current message: its snapshot
+  // diff base and tagged reasoning are dropped and their charges refunded.
+  const endClaudeMessage = () => {
     finishTaggedReasoningMessage();
-    taggedReasoningRouter = createLeadingTaggedReasoningRouter();
+    messageRetained.release();
     currentTaggedReasoningText = "";
+    currentClaudeMessageText = "";
+  };
+
+  const beginClaudeMessage = (messageId?: string) => {
+    endClaudeMessage();
+    taggedReasoningRouter = createLeadingTaggedReasoningRouter(ledger.scope());
     pendingMessageSeparator = true;
     previousMessageHadToolUse = currentMessageHadToolUse;
     currentMessageHadToolUse = false;
     currentClaudeMessageId = messageId;
-    currentClaudeMessageText = "";
   };
 
   const handleCustomJsonlEvent = (event: CliBackendParsedJsonlEvent) => {
@@ -204,7 +225,7 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
       state,
       texts,
       toolTracker,
-      retain,
+      ledger,
     });
     ({ assistantText, customThinkingText, sessionId, usage, output, sawCustomJsonlEvent } = state);
   };
@@ -349,7 +370,7 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
     }
 
     if (parsed.type === "result") {
-      finishTaggedReasoningMessage();
+      endClaudeMessage();
       if (classifyClaudeCommentary) {
         flushPendingClaudeText("assistant");
       }
@@ -379,7 +400,7 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
         return;
       }
       if (result.text) {
-        retain(result.text.length);
+        ledger.retain(result.text.length);
       }
       if (claudeStreamJson && result.text) {
         const taggedResult = partitionLeadingTaggedReasoning(result.text, true);
@@ -388,13 +409,15 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
             !thinkingTracker.emittedText &&
             taggedResult.reasoningText !== currentTaggedReasoningText
           ) {
-            currentTaggedReasoningText = projectCliTaggedReasoning({
-              deltas: [{ kind: "thinking", text: taggedResult.reasoningText }],
-              currentText: "",
-              hasNativeThinking: false,
-              onThinkingDelta: params.onThinkingDelta,
-              onVisibleText: emitClaudeVisibleText,
-            });
+            setTaggedReasoningText(
+              projectCliTaggedReasoning({
+                deltas: [{ kind: "thinking", text: taggedResult.reasoningText }],
+                currentText: "",
+                hasNativeThinking: false,
+                onThinkingDelta: params.onThinkingDelta,
+                onVisibleText: emitClaudeVisibleText,
+              }),
+            );
           }
           result = { ...result, text: taggedResult.visibleText.trim() };
         }
@@ -467,7 +490,7 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
     if (item && typeof item.text === "string") {
       const type = normalizeLowercaseStringOrEmpty(item.type);
       if (!type || type.includes("message")) {
-        retain(item.text.length);
+        ledger.retain(item.text.length);
         texts.push(item.text);
       }
     }
@@ -518,9 +541,10 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
       previousText: currentClaudeMessageText,
     });
     if (delta) {
-      // Charged once here: the message text, the reasoning router's buffer, and
-      // the visible reply are all slices of this same retained delta.
-      retain(delta.length);
+      // Charged per copy: the message holds this delta as its snapshot diff
+      // base until it ends, the router charges what it still holds back, and
+      // the reply text is charged for the turn where it is appended.
+      messageRetained.retain(delta.length);
       currentClaudeMessageText = `${currentClaudeMessageText}${delta}`;
       if (claudeStreamJson) {
         routeTaggedReasoningDeltas(taggedReasoningRouter.push(delta));
@@ -567,7 +591,6 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
         typeof parsed.content === "string" &&
         parsed.content
       ) {
-        retain(parsed.content.length);
         appendAssistantText(parsed.content);
       } else if (parsed.type === "result" && parsed.status === "success") {
         output = {

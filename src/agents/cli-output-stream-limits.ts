@@ -14,6 +14,55 @@ export const CLI_STREAM_JSON_OUTPUT_LIMITS = Object.freeze({
 // alone would not show. The fixed share bounds such floods at 8 MiB / 33 appends.
 export const CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD = 32;
 
+/** Charges for state that lives until the owner releases it as one unit. */
+export type RetainedOutputScope = {
+  retain(chars: number): void;
+  release(): void;
+};
+
+/** Live gauge of what the parser currently holds; trips once it exceeds the budget. */
+export type RetainedOutputLedger = {
+  /** Charges state that lives for the rest of the turn. */
+  retain(chars: number): void;
+  /** Refunds one earlier `retain(chars)` whose state was freed. */
+  release(chars: number): void;
+  /** Opens a lifetime whose charges are refunded together when its state is freed. */
+  scope(): RetainedOutputScope;
+};
+
+export function createRetainedOutputLedger(
+  maxRetainedChars: number,
+  onExceeded: () => void,
+): RetainedOutputLedger {
+  let retainedChars = 0;
+  const charge = (amount: number) => {
+    retainedChars += amount;
+    if (retainedChars > maxRetainedChars) {
+      onExceeded();
+    }
+  };
+  return {
+    retain: (chars) => charge(chars + CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD),
+    release: (chars) => {
+      retainedChars -= chars + CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD;
+    },
+    scope: () => {
+      let charged = 0;
+      return {
+        retain: (chars) => {
+          const amount = chars + CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD;
+          charged += amount;
+          charge(amount);
+        },
+        release: () => {
+          retainedChars -= charged;
+          charged = 0;
+        },
+      };
+    },
+  };
+}
+
 /** Frames arbitrary stdout chunks while bounding each individual raw JSONL line. */
 export function frameBoundedCliJsonlChunk(
   state: { pending: string },
@@ -44,7 +93,7 @@ export function frameBoundedCliJsonlChunk(
 }
 
 const STREAM_JSON_OUTPUT_LIMIT_CONSEQUENCE =
-  "the CLI was stopped and its report was lost. Work it completed on the node or worktree may exist; check it before re-running.";
+  "the CLI was stopped and its final reply was lost. Work the CLI already did (files, commits) may exist; check it before re-running.";
 
 export function streamJsonOutputLimitErrorText(kind: "retained" | "line", limit: number): string {
   if (kind === "line") {
