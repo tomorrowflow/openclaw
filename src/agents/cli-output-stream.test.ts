@@ -447,6 +447,30 @@ describe("createCliJsonlStreamingParser", () => {
     expect(deltas.at(-1)?.text).toBe("Before.\n\nDONE");
   });
 
+  it("keeps subagent stream events out of the parent reply", () => {
+    const deltas: string[] = [];
+    const parser = createClaudeParser({ onAssistantDelta: (delta) => deltas.push(delta.delta) });
+    const subagent = (event: Record<string, unknown>) => ({
+      ...claudeStreamEvent(event),
+      parent_tool_use_id: "task-call",
+    });
+    finishFrames(
+      parser,
+      init("session-subagent"),
+      messageStart,
+      claudeTextDelta("Hello"),
+      subagent({ type: "message_start" }),
+      subagent({ type: "content_block_delta", delta: { type: "text_delta", text: "SUBAGENT" } }),
+      {
+        type: "assistant",
+        message: { stop_reason: null, content: [{ type: "text", text: "Hello" }] },
+      },
+      messageStop,
+    );
+    expect(deltas.join("")).toBe("Hello");
+    expect(parser.getOutput()?.text).toBe("Hello");
+  });
+
   it("judges post-interim-result segments on their own stream state", () => {
     const deltas: Array<{ text: string; delta: string }> = [];
     const parser = createParser({ onAssistantDelta: (delta) => deltas.push(delta) });
