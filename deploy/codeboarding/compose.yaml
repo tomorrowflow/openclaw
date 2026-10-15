@@ -1,0 +1,13 @@
+# One-shot runner: docker compose run --rm codeboarding full --local /repos/<repo>[/subdir]
+# Host network because Ollama listens on 127.0.0.1:11434 only.
+# Analyzed clones and their .codeboarding baselines live outside the checkout.
+services:
+  codeboarding:
+    build: .
+    image: codeboarding:0.15.1
+    network_mode: host
+    environment:
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
+      AGENT_MODEL: ${AGENT_MODEL:-glm-5.3:cloud}
+    volumes:
+      - ${CODEBOARDING_REPOS:-${HOME}/codeboarding/repos}:/repos
