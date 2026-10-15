@@ -162,6 +162,17 @@ export async function executeCliProcess(params: {
         },
       })
     : null;
+  // A parser failure discards everything the child still writes, so from that
+  // point it only burns time and side effects. The runner stops it and reports
+  // the parser's reason ahead of the cancellation it caused.
+  const outputRejected = new AbortController();
+  const streamingParserFailure = () => {
+    const errorText = streamingParser?.getErrorText();
+    return errorText ? createCliFailoverError(errorText, "format", failoverContext) : undefined;
+  };
+  // A caller abort outranks the parser failure that may have stopped the child.
+  const parserFailureUnlessAborted = () =>
+    runParams.abortSignal?.aborted ? undefined : streamingParserFailure();
   let stdoutTail = "";
   const stdoutCapture = createCapturedOutputBuffers();
   let stdoutBytes = 0;
@@ -199,6 +210,9 @@ export async function executeCliProcess(params: {
       appendCapturedOutput(stdoutCapture, chunk, CLI_RUNNER_OUTPUT_PARSE_BYTES, "head");
     }
     streamingParser?.push(chunk);
+    if (streamingParser?.getErrorText()) {
+      outputRejected.abort();
+    }
   };
   const consumeStderr = (chunk: string) => {
     params.diagnostics?.observeCliOutput(chunk, "stderr");
@@ -247,6 +261,7 @@ export async function executeCliProcess(params: {
         noOutputTimeoutMs: params.noOutputTimeoutMs,
         consumeStdout,
         consumeStderr,
+        stopSignal: outputRejected.signal,
         deps: params.deps,
       });
       result = nodeRun.result;
@@ -269,6 +284,7 @@ export async function executeCliProcess(params: {
         sessionId: params.resolvedSessionId,
         noOutputTimeoutMs: params.noOutputTimeoutMs,
         consumeStdout,
+        stopSignal: outputRejected.signal,
         onOutstandingWorkChange: backendActivity?.setOutstandingWork,
         activeToolCount: params.events.activeParsedToolCount,
         compactionActive: params.events.hasActiveCompaction,
@@ -341,6 +357,7 @@ export async function executeCliProcess(params: {
         supervisor.cancel(runParams.runId, "manual-cancel");
       };
       runParams.abortSignal?.addEventListener("abort", abortManagedRun, { once: true });
+      outputRejected.signal.addEventListener("abort", abortManagedRun, { once: true });
       try {
         params.toolTracking.beginGatewayCapture(
           params.initialGatewayCaptureKey,
@@ -381,10 +398,17 @@ export async function executeCliProcess(params: {
         }
       } finally {
         runParams.abortSignal?.removeEventListener("abort", abortManagedRun);
+        outputRejected.signal.removeEventListener("abort", abortManagedRun);
       }
     }
+  } catch (error) {
+    throw parserFailureUnlessAborted() ?? error;
   } finally {
     backendActivity?.close();
+  }
+  const earlyParserFailure = parserFailureUnlessAborted();
+  if (earlyParserFailure) {
+    throw earlyParserFailure;
   }
   if (
     (runParams.abortSignal?.aborted || nodeRunAbortSignal?.aborted) &&
@@ -395,9 +419,9 @@ export async function executeCliProcess(params: {
   }
   params.options?.onPhase?.("resolve");
   streamingParser?.finish();
-  const streamingParserErrorText = streamingParser?.getErrorText();
-  if (streamingParserErrorText) {
-    throw createCliFailoverError(streamingParserErrorText, "format", failoverContext);
+  const streamingParserError = streamingParserFailure();
+  if (streamingParserError) {
+    throw streamingParserError;
   }
   // Older node hosts cap forwarded stdout and re-inject only the terminal result;
   // current ones forward everything and never report truncation. Keep this guard

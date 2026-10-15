@@ -48,8 +48,8 @@ import {
 import { appendCliResultText } from "./cli-output-results.js";
 import {
   CLI_STREAM_JSON_OUTPUT_LIMITS,
+  CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD,
   frameBoundedCliJsonlChunk,
-  measureClaudePartialMessage,
   streamJsonOutputLimitErrorText,
 } from "./cli-output-stream-limits.js";
 export const CLI_STREAM_JSON_MISSING_RESULT_ERROR =
@@ -78,21 +78,34 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
   let diagnosticUsage: CliUsage | undefined;
   let output: CliOutput | null = null;
   let parseErrorText = "";
-  let rawChars = 0;
   let rawLines = 0;
-  let ordinaryClaudeLines = 0;
+  let retainedChars = 0;
   const texts: string[] = [];
   let sawCustomJsonlEvent = false;
   let sawGeminiStructuredOutput = false;
   let sawTerminalResult = false;
   let sawClaudeSyntheticNoResponse = false;
-  const toolTracker = createToolUseTracker();
   const outputLimits = CLI_STREAM_JSON_OUTPUT_LIMITS;
+  // The turn budget meters what this parser keeps for the rest of the turn:
+  // streamed text, reasoning, result text, and tool bookkeeping. Records it
+  // hands off and drops (tool results, system records, subagent traffic) only
+  // meet the per-line limit, so long tool-heavy turns stay within budget.
+  const retain = (chars: number) => {
+    retainedChars += chars + CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD;
+    if (retainedChars > outputLimits.maxTurnRetainedChars && !parseErrorText) {
+      parseErrorText = streamJsonOutputLimitErrorText(
+        "retained",
+        outputLimits.maxTurnRetainedChars,
+      );
+      lineBuffer.pending = "";
+    }
+  };
+  const toolTracker = createToolUseTracker(retain);
   // Classification is keyed on consumer presence so reclassified pre-tool text
   // always has a destination; a separate enable flag let it be dropped (#92092).
   const classifyClaudeCommentary =
     Boolean(params.onCommentaryText) && supportsCliJsonlToolEvents(params);
-  const thinkingTracker = createThinkingTracker();
+  const thinkingTracker = createThinkingTracker(retain);
   const claudeStreamJson = isClaudeStreamJsonDialect(params);
   let taggedReasoningRouter = createLeadingTaggedReasoningRouter();
   let currentTaggedReasoningText = "";
@@ -191,23 +204,9 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
       state,
       texts,
       toolTracker,
+      retain,
     });
     ({ assistantText, customThinkingText, sessionId, usage, output, sawCustomJsonlEvent } = state);
-  };
-
-  const accountClaudeJsonlLine = (lineChars: number, partialMessage = false): boolean => {
-    if (!partialMessage && ++ordinaryClaudeLines > outputLimits.maxTurnLines) {
-      parseErrorText = streamJsonOutputLimitErrorText("lines", outputLimits.maxTurnLines);
-      lineBuffer.pending = "";
-      return false;
-    }
-    rawChars += lineChars + 1;
-    if (rawChars <= outputLimits.maxTurnRawChars) {
-      return true;
-    }
-    parseErrorText = streamJsonOutputLimitErrorText("raw", outputLimits.maxTurnRawChars);
-    lineBuffer.pending = "";
-    return false;
   };
 
   const observeSessionId = (parsed: Record<string, unknown>) => {
@@ -218,7 +217,7 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
     }
   };
 
-  const handleCustomJsonlLine = (line: string, rawLine: string): boolean => {
+  const handleCustomJsonlLine = (line: string): boolean => {
     const lifecycle = cliOutputLifecycle.parseCliBackendLifecycleLine({
       line,
       backendId: params.providerId,
@@ -229,9 +228,6 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
       if ("errorText" in lifecycle) {
         parseErrorText = lifecycle.errorText;
       } else {
-        if (claudeStreamJson && !accountClaudeJsonlLine(rawLine.length)) {
-          return true;
-        }
         for (const parsed of decodeCliRecords(line)) {
           observeSessionId(parsed);
         }
@@ -259,9 +255,6 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
     }
     if (parsed == null) {
       return false;
-    }
-    if (claudeStreamJson && !accountClaudeJsonlLine(rawLine.length)) {
-      return true;
     }
     for (const event of Array.isArray(parsed) ? parsed : [parsed]) {
       if (event.kind === "result") {
@@ -385,6 +378,9 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
         output = result;
         return;
       }
+      if (result.text) {
+        retain(result.text.length);
+      }
       if (claudeStreamJson && result.text) {
         const taggedResult = partitionLeadingTaggedReasoning(result.text, true);
         if (!taggedResult.pending && taggedResult.reasoningText) {
@@ -471,6 +467,7 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
     if (item && typeof item.text === "string") {
       const type = normalizeLowercaseStringOrEmpty(item.type);
       if (!type || type.includes("message")) {
+        retain(item.text.length);
         texts.push(item.text);
       }
     }
@@ -521,6 +518,9 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
       previousText: currentClaudeMessageText,
     });
     if (delta) {
+      // Charged once here: the message text, the reasoning router's buffer, and
+      // the visible reply are all slices of this same retained delta.
+      retain(delta.length);
       currentClaudeMessageText = `${currentClaudeMessageText}${delta}`;
       if (claudeStreamJson) {
         routeTaggedReasoningDeltas(taggedReasoningRouter.push(delta));
@@ -567,6 +567,7 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
         typeof parsed.content === "string" &&
         parsed.content
       ) {
+        retain(parsed.content.length);
         appendAssistantText(parsed.content);
       } else if (parsed.type === "result" && parsed.status === "success") {
         output = {
@@ -587,39 +588,16 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
       return;
     }
     rawLines += 1;
-    if (!claudeStreamJson && rawLines > outputLimits.maxTurnLines) {
-      parseErrorText = streamJsonOutputLimitErrorText("lines", outputLimits.maxTurnLines);
-      lineBuffer.pending = "";
-      return;
-    }
     if (!line) {
-      accountClaudeJsonlLine(rawLine.length);
       return;
     }
-    if (handleCustomJsonlLine(line, rawLine)) {
+    if (handleCustomJsonlLine(line)) {
       return;
     }
-    const parsedRecords = decodeCliRecords(line);
-    if (claudeStreamJson) {
-      const partialChars =
-        parsedRecords.length === 1
-          ? measureClaudePartialMessage(parsedRecords[0]!, rawLine)
-          : undefined;
-      const normalized =
-        parsedRecords.length === 1
-          ? normalizeClaudeCliStreamJsonRecord(parsedRecords[0]!)
-          : undefined;
-      // Neither media omission nor token-envelope discounts may erase wire whitespace.
-      const retainedChars =
-        partialChars ??
-        (normalized
-          ? Math.max(normalized.line.length, rawLine.length - normalized.omittedRawChars)
-          : rawLine.length);
-      if (!accountClaudeJsonlLine(retainedChars, partialChars !== undefined)) {
-        return;
+    for (const parsed of decodeCliRecords(line)) {
+      if (claudeStreamJson) {
+        normalizeClaudeCliStreamJsonRecord(parsed);
       }
-    }
-    for (const parsed of parsedRecords) {
       handleParsedRecord(parsed);
     }
   };
@@ -628,14 +606,6 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
     push(chunk: string) {
       if (!chunk || parseErrorText) {
         return;
-      }
-      if (!claudeStreamJson) {
-        rawChars += chunk.length;
-        if (rawChars > outputLimits.maxTurnRawChars) {
-          parseErrorText = streamJsonOutputLimitErrorText("raw", outputLimits.maxTurnRawChars);
-          lineBuffer.pending = "";
-          return;
-        }
       }
       if (
         !frameBoundedCliJsonlChunk(lineBuffer, chunk, outputLimits.maxPendingLineChars, (line) => {

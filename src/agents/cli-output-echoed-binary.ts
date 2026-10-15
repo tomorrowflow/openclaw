@@ -1,15 +1,11 @@
 import { estimateBase64DecodedBytes } from "@openclaw/media-core/base64";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 
-/** Drops Claude's echoed binary bytes before they enter retained tool/transcript state. */
-export function normalizeClaudeCliStreamJsonRecord(
-  parsed: Record<string, unknown>,
-): { line: string; omittedRawChars: number } | undefined {
+/** Drops Claude's echoed binary bytes before the record reaches tool-result and transcript consumers. */
+export function normalizeClaudeCliStreamJsonRecord(parsed: Record<string, unknown>): void {
   if (parsed.type !== "user" || !isRecord(parsed.message)) {
-    return undefined;
+    return;
   }
-  let normalized = false;
-  let omittedRawChars = 0;
   // Claude echoes each payload twice, under `message` and under `tool_use_result`, so the
   // whole record is walked. The walk is iterative to stay stack-safe on deep records.
   const pending: unknown[] = [parsed];
@@ -36,8 +32,6 @@ export function normalizeClaudeCliStreamJsonRecord(
       node.source = rest;
       node.omitted = true;
       node.bytes = estimateBase64DecodedBytes(data);
-      omittedRawChars += data.length;
-      normalized = true;
     }
     const directBase64Outputs = [
       node.file,
@@ -52,20 +46,9 @@ export function normalizeClaudeCliStreamJsonRecord(
       delete output.base64;
       output.omitted = true;
       output.bytes = estimateBase64DecodedBytes(base64);
-      omittedRawChars += base64.length;
-      normalized = true;
     }
     for (const value of Object.values(node)) {
       pending.push(value);
     }
-  }
-  if (!normalized) {
-    return undefined;
-  }
-  try {
-    // JSON.stringify recurses; a record too deep to re-serialize falls back to raw accounting.
-    return { line: JSON.stringify(parsed), omittedRawChars };
-  } catch {
-    return undefined;
   }
 }

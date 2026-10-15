@@ -189,10 +189,7 @@ describe("createCliJsonlStreamingParser framing", () => {
     }
   });
 
-  it.each([
-    { name: "echoed media bytes", padded: false },
-    { name: "surrounding raw whitespace", padded: true },
-  ])("counts $name claimed by Claude plugin parsers before dispatch", ({ padded }) => {
+  it("hands every plugin-claimed media line to the plugin without charging its wire bytes", () => {
     const pluginLines: string[] = [];
     const assistantDeltas: string[] = [];
     const parser = createCliJsonlStreamingParser({
@@ -214,90 +211,34 @@ describe("createCliJsonlStreamingParser framing", () => {
             content: [
               {
                 type: "image",
-                source: {
-                  type: "base64",
-                  media_type: "image/png",
-                  data: padded ? "YQ==" : "a".repeat(4_300_000),
-                },
+                source: { type: "base64", media_type: "image/png", data: "a".repeat(4_300_000) },
               },
             ],
           },
         ],
       },
     });
-    const rawLine = padded ? `${" ".repeat(4_300_000)}${semanticLine}` : semanticLine;
 
-    parser.push(`${rawLine}\n${rawLine}\n`);
+    parser.push(`${semanticLine}\n${semanticLine}\n`);
 
     expect(pluginLines).toEqual([semanticLine, semanticLine]);
-    expect(assistantDeltas).toEqual(["claimed"]);
-    expect(parser.getErrorText()).toContain("JSONL output exceeded");
+    expect(assistantDeltas).toEqual(["claimed", "claimed"]);
+    expect(parser.getErrorText()).toBeNull();
   });
 
-  it("counts actual blank Claude frames without invoking hooks or inventing a finish frame", () => {
+  it("ignores blank Claude frames without invoking hooks or counting them against the turn", () => {
     const parseJsonlEvent = vi.fn(() => null);
-    const createParser = () =>
-      createCliJsonlStreamingParser({
-        backend: { command: "claude", output: "jsonl", jsonlDialect: "claude-stream-json" },
-        providerId: "claude-cli",
-        parseJsonlEvent,
-        onAssistantDelta: () => {},
-      });
-    const completeParser = createParser();
-    completeParser.push("\r\n".repeat(20_000));
-    completeParser.finish();
-
-    expect(completeParser.getErrorText()).toBeNull();
-    expect(parseJsonlEvent).not.toHaveBeenCalled();
-
-    const overflowParser = createParser();
-    overflowParser.push("\n".repeat(20_001));
-
-    expect(overflowParser.getErrorText()).toContain("exceeded 20000 lines");
-    expect(parseJsonlEvent).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    {
-      name: "whitespace-only records",
-      createLine: () => " ".repeat(4_300_000),
-    },
-    {
-      name: "padding around valid JSON",
-      createLine: () => `${" ".repeat(4_300_000)}{}`,
-    },
-    {
-      name: "formatting inside a compacted media record",
-      createLine: () =>
-        JSON.stringify({
-          type: "user",
-          message: {
-            content: [
-              {
-                type: "tool_result",
-                tool_use_id: "padded-image",
-                content: [
-                  {
-                    type: "image",
-                    source: { type: "base64", media_type: "image/png", data: "YQ==" },
-                  },
-                ],
-              },
-            ],
-          },
-        }).replace('"message":', `"message":${" ".repeat(4_300_000)}`),
-    },
-  ])("charges $name against the Claude raw-output budget", ({ createLine }) => {
     const parser = createCliJsonlStreamingParser({
       backend: { command: "claude", output: "jsonl", jsonlDialect: "claude-stream-json" },
       providerId: "claude-cli",
+      parseJsonlEvent,
       onAssistantDelta: () => {},
     });
-    const line = createLine();
+    parser.push("\r\n".repeat(20_001));
+    parser.finish();
 
-    parser.push(`${line}\n${line}\n`);
-
-    expect(parser.getErrorText()).toContain("JSONL output exceeded 8388608 characters");
+    expect(parser.getErrorText()).toBeNull();
+    expect(parseJsonlEvent).not.toHaveBeenCalled();
   });
 
   it("normalizes empty Claude image data without treating zero omitted bytes as unchanged", () => {
@@ -524,28 +465,30 @@ describe("createCliJsonlStreamingParser framing", () => {
     growingPartialLineParser.push("a".repeat(4_300_000));
     expect(growingPartialLineParser.getErrorText()).toContain("JSONL line exceeded");
 
+    // Streamed reply text is retained for the turn, so two 4.3 MB deltas trip
+    // the budget even though each line is within the line limit.
     const oversizedTextParser = createParser();
-    for (const toolCallId of ["first", "second"]) {
+    for (let index = 0; index < 2; index += 1) {
       oversizedTextParser.push(
-        `${JSON.stringify({
-          type: "user",
-          message: {
-            content: [
-              {
-                type: "tool_result",
-                tool_use_id: toolCallId,
-                content: [{ type: "text", text: "a".repeat(4_300_000) }],
-              },
-            ],
-          },
-        })}\n`,
+        `${JSON.stringify(
+          claudeStreamEvent({
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "a".repeat(4_300_000) },
+          }),
+        )}\n`,
       );
     }
-    expect(oversizedTextParser.getErrorText()).toContain("JSONL output exceeded");
+    expect(oversizedTextParser.getErrorText()).toContain(
+      "retained output exceeded the 8388608-character Gateway parse budget",
+    );
+    expect(oversizedTextParser.getErrorText()).toContain("the CLI was stopped");
+    expect(oversizedTextParser.getOutput()?.text).toBe("");
 
-    const excessiveLinesParser = createParser();
-    excessiveLinesParser.push("{}\n".repeat(20_001));
-    expect(excessiveLinesParser.getErrorText()).toContain("exceeded 20000 lines");
+    // Records that retain nothing are free: a long turn of empty frames stays within budget.
+    const emptyFramesParser = createParser();
+    emptyFramesParser.push("{}\n".repeat(20_001));
+    expect(emptyFramesParser.getErrorText()).toBeNull();
   });
 
   it.each([

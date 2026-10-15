@@ -603,6 +603,48 @@ describe("executePreparedCliRun supervisor output capture", () => {
     expect(spawnInput.captureOutput).toBe(false);
   });
 
+  it("stops the child and reports the parse budget once retained output exceeds it", async () => {
+    const exit = {
+      reason: "manual-cancel" as const,
+      exitCode: null,
+      exitSignal: "SIGTERM" as const,
+      durationMs: 50,
+      stdout: "",
+      stderr: "",
+      timedOut: false,
+      noOutputTimedOut: false,
+    };
+    const managedRun = createManagedRun(exit);
+    const cancelled = createDeferred();
+    managedRun.cancel.mockImplementation(() => cancelled.resolve());
+    const replyDelta = (text: string) =>
+      jsonl({
+        type: "stream_event",
+        event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
+      });
+    supervisorSpawnMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const input = args[0] as SupervisorSpawnInput;
+      managedRun.wait.mockImplementation(async () => {
+        for (let index = 0; index < 3; index += 1) {
+          input.onStdout?.(replyDelta("x".repeat(3 * 1024 * 1024)));
+        }
+        // The child only exits once the runner stops it.
+        await cancelled.promise;
+        return exit;
+      });
+      return managedRun;
+    });
+    const context = buildPreparedCliRunContext({ output: "jsonl", provider: "claude-cli" });
+
+    await expect(executePreparedCliRun(context)).rejects.toMatchObject({
+      reason: "format",
+      message: expect.stringContaining(
+        "retained output exceeded the 8388608-character Gateway parse budget; the CLI was stopped",
+      ),
+    });
+    expect(managedRun.cancel).toHaveBeenCalledWith("manual-cancel");
+  });
+
   it("parses oversized resume JSONL output from the effective resume output mode", async () => {
     const largeToolEvent = jsonl({
       type: "stream_event",

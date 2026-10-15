@@ -3035,6 +3035,7 @@ describe("prepareCliRunContext", () => {
           useResume: false,
           noOutputTimeoutMs: 5_000,
           consumeStdout: () => {},
+          stopSignal: new AbortController().signal,
         });
         void processRun.catch(() => undefined);
         try {

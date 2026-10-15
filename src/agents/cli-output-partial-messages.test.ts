@@ -11,6 +11,15 @@ function streamDelta(delta: Record<string, unknown>) {
   };
 }
 
+const openToolBlock = {
+  type: "stream_event",
+  event: {
+    type: "content_block_start",
+    index: 0,
+    content_block: { type: "tool_use", id: "tool-0", name: "Write", input: {} },
+  },
+};
+
 function createParser() {
   return createCliJsonlStreamingParser({
     backend: { command: "claude", output: "jsonl", jsonlDialect: "claude-stream-json" },
@@ -25,7 +34,7 @@ describe("Claude partial-message output budgets", () => {
     { name: "envelope characters", count: 18_000, chars: 128, resultChars: 2_000_000 },
     { name: "delta frames", count: 20_001, chars: 1, resultChars: 0 },
   ])(
-    "delivers completed tool turns beyond the raw $name limit",
+    "delivers completed tool turns through long $name streams",
     ({ count, chars, resultChars }) => {
       const inputs: unknown[] = [];
       const parser = createCliJsonlStreamingParser({
@@ -72,17 +81,17 @@ describe("Claude partial-message output budgets", () => {
   );
 
   it.each([
-    { type: "text_delta", field: "text", payload: "a".repeat(4_300_000) },
-    { type: "thinking_delta", field: "thinking", payload: "a".repeat(4_300_000) },
-    { type: "input_json_delta", field: "partial_json", payload: "a".repeat(4_300_000) },
-    { type: "input_json_delta", field: "partial_json", payload: '"'.repeat(2_150_000) },
-  ])("still bounds encoded $type payloads", ({ type, field, payload }) => {
+    { type: "text_delta", field: "text" },
+    { type: "thinking_delta", field: "thinking" },
+    { type: "input_json_delta", field: "partial_json" },
+  ])("still bounds retained $type payloads", ({ type, field }) => {
     const parser = createParser();
-    const line = `${JSON.stringify(streamDelta({ type, [field]: payload }))}\n`;
+    parser.push(`${JSON.stringify(openToolBlock)}\n`);
+    const line = `${JSON.stringify(streamDelta({ type, [field]: "a".repeat(4_300_000) }))}\n`;
     parser.push(line);
     expect(parser.getErrorText()).toBeNull();
     parser.push(line);
-    expect(parser.getErrorText()).toContain("exceeded 8388608 characters");
+    expect(parser.getErrorText()).toContain("Gateway parse budget");
     expect(parser.getOutput()?.text).toBe("");
   });
 
@@ -100,67 +109,21 @@ describe("Claude partial-message output budgets", () => {
     }
   });
 
-  it.each([
-    { name: "empty deltas", record: streamDelta({ type: "text_delta", text: "" }) },
-    {
-      name: "unknown delta fields",
-      record: streamDelta({ type: "text_delta", text: "a", extra: true }),
-    },
-    {
-      name: "unknown envelope fields",
-      record: { ...streamDelta({ type: "text_delta", text: "a" }), extra: true },
-    },
-    {
-      name: "unknown event fields",
-      record: {
-        ...streamDelta({ type: "text_delta", text: "a" }),
-        event: { ...streamDelta({ type: "text_delta", text: "a" }).event, extra: true },
-      },
-    },
-    {
-      name: "oversized metadata",
-      record: { ...streamDelta({ type: "text_delta", text: "a" }), uuid: "u".repeat(129) },
-    },
-  ])("keeps the ordinary frame limit for $name", ({ record }) => {
+  it("bounds tiny retained delta floods through the per-append overhead", () => {
     const parser = createParser();
-    parser.push(`${JSON.stringify(record)}\n`.repeat(20_001));
-    expect(parser.getErrorText()).toContain("exceeded 20000 lines");
-  });
-
-  it("keeps the ordinary frame limit when a custom parser claims deltas", () => {
-    const parser = createCliJsonlStreamingParser({
-      backend: { command: "claude", output: "jsonl", jsonlDialect: "claude-stream-json" },
-      providerId: "claude-cli",
-      parseJsonlEvent: () => ({ kind: "text", text: "a" }),
-      onAssistantDelta: () => {},
-    });
-    parser.push(
-      `${JSON.stringify(streamDelta({ type: "text_delta", text: "a" }))}\n`.repeat(20_001),
-    );
-    expect(parser.getErrorText()).toContain("exceeded 20000 lines");
-  });
-
-  it.each(["outer", "inner"])(
-    "still counts %s whitespace around a recognized delta",
-    (location) => {
-      const parser = createParser();
-      const compact = JSON.stringify(streamDelta({ type: "text_delta", text: "a" }));
-      const padding = " ".repeat(4_300_000);
-      const line =
-        location === "outer"
-          ? padding + compact
-          : compact.replace('"event":', `"event":${padding}`);
-      parser.push(`${line}\n${line}\n`);
-      expect(parser.getErrorText()).toContain("exceeded 8388608 characters");
-    },
-  );
-
-  it("bounds tiny nonempty delta floods even without ordinary frames", () => {
-    const parser = createParser();
+    parser.push(`${JSON.stringify(openToolBlock)}\n`);
     const line = `${JSON.stringify(streamDelta({ type: "input_json_delta", partial_json: "a" }))}\n`;
     for (let index = 0; index < 262_145 && !parser.getErrorText(); index += 1) {
       parser.push(line);
     }
-    expect(parser.getErrorText()).toContain("CLI JSONL output exceeded");
+    expect(parser.getErrorText()).toContain("Gateway parse budget");
+  });
+
+  it("does not charge deltas the parser drops", () => {
+    const parser = createParser();
+    // No open tool block: the input JSON is dropped, so 12 MB of it retains nothing.
+    const line = `${JSON.stringify(streamDelta({ type: "input_json_delta", partial_json: "a".repeat(4_000_000) }))}\n`;
+    parser.push(`${line}${line}${line}`);
+    expect(parser.getErrorText()).toBeNull();
   });
 });

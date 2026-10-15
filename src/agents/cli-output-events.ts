@@ -40,8 +40,12 @@ type PendingToolUse = {
 
 type ToolUseTracker = ReturnType<typeof createToolUseTracker>;
 
-export function createToolUseTracker() {
+/** Reports characters appended to state that lives for the rest of the turn. */
+export type RetainChars = (chars: number) => void;
+
+export function createToolUseTracker(retain: RetainChars) {
   return {
+    retain,
     pendingByIndex: new Map<number, PendingToolUse>(),
     nameById: new Map<string, string>(),
     startedIds: new Set<string>(),
@@ -61,6 +65,7 @@ function emitToolStartOnce(
   if (tracker.startedIds.has(toolCallId)) {
     return;
   }
+  tracker.retain(toolCallId.length + name.length);
   tracker.startedIds.add(toolCallId);
   tracker.nameById.set(toolCallId, name);
   onToolUseStart?.({ toolCallId, name, kind, args });
@@ -77,6 +82,7 @@ function emitToolResultOnce(
   if (tracker.resultDeliveredIds.has(toolCallId)) {
     return;
   }
+  tracker.retain(toolCallId.length);
   tracker.resultDeliveredIds.add(toolCallId);
   onToolResult?.({
     toolCallId,
@@ -100,6 +106,7 @@ export function projectCliBackendEvent(params: {
   state: CliEventProjectionState;
   texts: string[];
   toolTracker: ToolUseTracker;
+  retain: RetainChars;
   onAssistantDelta: (delta: CliStreamingDelta) => void;
   onThinkingDelta?: (delta: CliThinkingDelta) => void;
   onDisplayToolUseStart?: (delta: CliToolUseStartDelta) => void;
@@ -131,6 +138,7 @@ export function projectCliBackendEvent(params: {
     if (!event.text) {
       return;
     }
+    params.retain(event.text.length);
     state.assistantText += event.text;
     params.onAssistantDelta({
       text: state.assistantText,
@@ -144,6 +152,7 @@ export function projectCliBackendEvent(params: {
     if (!event.text || !params.onThinkingDelta) {
       return;
     }
+    params.retain(event.text.length);
     state.customThinkingText += event.text;
     params.onThinkingDelta({
       text: state.customThinkingText,
@@ -180,6 +189,9 @@ export function projectCliBackendEvent(params: {
   if (event.usage) {
     state.usage = event.usage;
     params.onUsage?.(event.usage, true);
+  }
+  if (event.text) {
+    params.retain(event.text.length);
   }
   const existingErrorText = state.output?.errorText;
   // Stop at the authoritative winner before composing fallback transcripts.
@@ -274,6 +286,7 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
         const toolCallId = typeof block.id === "string" ? block.id.trim() : "";
         const name = typeof block.name === "string" ? block.name.trim() : "";
         if (toolCallId && name) {
+          tracker.retain(toolCallId.length + name.length);
           tracker.pendingByIndex.set(event.index, {
             toolCallId,
             name,
@@ -293,7 +306,11 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
       isRecord(event.delta)
     ) {
       if (event.delta.type === "input_json_delta" && typeof event.delta.partial_json === "string") {
-        tracker.pendingByIndex.get(event.index)?.inputJsonParts.push(event.delta.partial_json);
+        const pending = tracker.pendingByIndex.get(event.index);
+        if (pending) {
+          tracker.retain(event.delta.partial_json.length);
+          pending.inputJsonParts.push(event.delta.partial_json);
+        }
       }
       return;
     }
@@ -347,6 +364,7 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
 }
 
 type ThinkingTracker = {
+  retain: RetainChars;
   currentMessageId?: string;
   // Thinking text already streamed via thinking_delta, keyed by the Anthropic
   // content-block index. Snapshot frames repeat streamed thinking, so each block
@@ -363,8 +381,9 @@ type ThinkingTracker = {
   progressTokens: number;
 };
 
-export function createThinkingTracker(): ThinkingTracker {
+export function createThinkingTracker(retain: RetainChars): ThinkingTracker {
   return {
+    retain,
     streamedByIndex: new Map(),
     highestStreamedIndex: Number.NEGATIVE_INFINITY,
     emittedText: "",
@@ -432,6 +451,7 @@ function emitClaudeThinking(
   onThinkingDelta: (delta: CliThinkingDelta) => void,
 ): void {
   const appendToAggregate = index >= tracker.highestStreamedIndex;
+  tracker.retain(delta.length);
   tracker.streamedByIndex.set(index, `${streamed}${delta}`);
   tracker.highestStreamedIndex = Math.max(tracker.highestStreamedIndex, index);
   tracker.emittedText = appendToAggregate
@@ -529,6 +549,7 @@ export function dispatchClaudeCliThinking(params: {
       if (text === tracker.emittedText) {
         continue;
       }
+      tracker.retain(Math.max(0, text.length - tracker.emittedText.length));
       tracker.emittedText = text;
       params.onThinkingDelta({ text, delta: block.thinking, isReasoningSnapshot: true });
     }

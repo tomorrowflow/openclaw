@@ -297,6 +297,7 @@ async function fixture(
                 output += text;
               },
               consumeStderr: () => {},
+              stopSignal: new AbortController().signal,
               deps: {
                 invokeNodeClaudeCliRun,
                 registerExecApprovalRequestForHostOrThrow: async () => {
