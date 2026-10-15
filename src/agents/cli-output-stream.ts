@@ -500,10 +500,12 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
       // Tool-split turns stream as separate assistant messages. Mark the
       // boundary so accumulated text joins with a paragraph break instead of
       // gluing the pre-tool text to the next message's first delta.
-      if (evt.type === "message_start") {
+      // Subagent messages interleave with the parent's and never bound its reply.
+      const parentRecord = !isClaudeSubagentRecord(parsed);
+      if (parentRecord && evt.type === "message_start") {
         const message = isRecord(evt.message) ? evt.message : undefined;
         beginClaudeMessage(typeof message?.id === "string" ? message.id : undefined);
-      } else if (evt.type === "message_stop") {
+      } else if (parentRecord && evt.type === "message_stop") {
         finishTaggedReasoningMessage();
       }
       const isToolUseBlockStart =

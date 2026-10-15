@@ -12,7 +12,7 @@ export const CLI_STREAM_JSON_OUTPUT_LIMITS = Object.freeze({
 // Every retained append also keeps a string piece or map entry behind the
 // payload, so a flood of one-character appends costs memory the payload length
 // alone would not show. The fixed share bounds such floods at 8 MiB / 33 appends.
-export const CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD = 32;
+const CLI_STREAM_JSON_RETAINED_APPEND_OVERHEAD = 32;
 
 /** Charges for state that lives until the owner releases it as one unit. */
 export type RetainedOutputScope = {
