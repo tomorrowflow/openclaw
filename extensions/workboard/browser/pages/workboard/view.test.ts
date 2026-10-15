@@ -1437,6 +1437,66 @@ describe("renderWorkboard", () => {
     }
   });
 
+  it("opens a linked card and the card's run session from the details tab", () => {
+    const onOpenSession = vi.fn();
+    const sessionKey = "agent:dev:subagent:ticket";
+    const { state, container, renderView } = createWorkboardView({ onOpenSession });
+    state.cards = [
+      createWorkboardCard({
+        status: "done",
+        sessionKey,
+        runId: "run-7",
+        metadata: {
+          links: [
+            { id: "l1", type: "parent", createdAt: 1, targetCardId: "card-2" },
+            { id: "l2", type: "child", createdAt: 1, targetCardId: "gone" },
+            { id: "l3", type: "child", createdAt: 1, targetCardId: "card-3" },
+            { id: "l4", type: "reference", createdAt: 1, url: "javascript:alert(1)" },
+            { id: "l5", type: "reference", createdAt: 1, url: "https://example.com/pr/1" },
+          ],
+        },
+      }),
+      createWorkboardCard({ id: "card-2", title: "Failure contract", position: 2000 }),
+      createWorkboardCard({
+        id: "card-3",
+        title: "Archived child",
+        position: 3000,
+        metadata: { archivedAt: 2 },
+      }),
+    ];
+    state.detailCardId = "card-1";
+    renderView();
+    textButton(container.querySelector('[role="tablist"]')!, "Details").click();
+    renderView();
+    const panel = expectDefined(
+      container.querySelector<HTMLElement>(".workboard-detail__tabpanel:not([hidden])"),
+      "details panel",
+    );
+    const links = [...panel.querySelectorAll(".workboard-detail__list li")].map((item) =>
+      item.textContent?.replace(/\s+/g, " ").trim(),
+    );
+    expect(links).toEqual([
+      "parent - Failure contract",
+      "child - gone",
+      "child - card-3",
+      "reference - javascript:alert(1)",
+      "reference - https://example.com/pr/1",
+    ]);
+    expect([...panel.querySelectorAll("a")].map((anchor) => anchor.getAttribute("href"))).toEqual([
+      "https://example.com/pr/1",
+    ]);
+
+    requireButton(panel, "run-7").click();
+    expect(onOpenSession).toHaveBeenLastCalledWith({ sessionKey });
+    onOpenSession.mockClear();
+    requireButton(panel, sessionKey).click();
+    expect(onOpenSession).toHaveBeenLastCalledWith({ sessionKey });
+
+    requireButton(panel, "Failure contract").click();
+    renderView();
+    expect(state.detailCardId).toBe("card-2");
+  });
+
   it("keeps queued session context readable until an outside pointer dismisses it", async () => {
     const { state, container, renderView } = createWorkboardView({
       sessions: [

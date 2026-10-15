@@ -36,6 +36,7 @@ import {
 } from "./view-card-actions.ts";
 import { renderCardStage } from "./view-card-content.ts";
 import {
+  type DetailNavigation,
   renderDependencyDetailList,
   renderDetailRow,
   renderTechnicalDetails,
@@ -193,10 +194,23 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
   const board = state.boards.find((entry) => entry.id === boardId);
   const events = (card.events ?? []).toReversed();
   const dependencies = getWorkboardDependencyState(card, state.cards);
+  const navigation: DetailNavigation = {
+    resolveCard: (cardId) =>
+      state.cards.find(
+        (entry) => entry.id === cardId && (!entry.metadata?.archivedAt || state.showArchived),
+      ),
+    openCard: (target) =>
+      requestTransition(() => {
+        openCardDetails(state, target);
+        props.onRequestUpdate?.();
+      }),
+    ...(sessionTarget ? { openSession: () => actionProps.onOpenSession(sessionTarget) } : {}),
+  };
   const technicalDetails = renderTechnicalDetails(
     card,
     linkedSessionKey,
     state.detailTab === "details",
+    navigation,
   );
   const hasTechnicalDetails = technicalDetails !== nothing;
   const tabs = [
@@ -525,7 +539,7 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
                         </section>`
                       : nothing
                   }
-                  ${renderDependencyDetailList(dependencies)}
+                  ${renderDependencyDetailList(dependencies, navigation)}
                 </div>
               </div>
             </section>

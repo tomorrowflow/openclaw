@@ -6,7 +6,18 @@ import { formatUiExternalText } from "../../lib/format-error.ts";
 import type { WorkboardCard, WorkboardDependencyState } from "../../lib/workboard/index.ts";
 import { formatStatusLabel, formatUpdatedTime } from "./view-helpers.ts";
 
-export function renderDependencyDetailList(dependencies: WorkboardDependencyState) {
+/** Opens a card or the card's run from the technical details; absent when not reachable. */
+export type DetailNavigation = {
+  /** A card the drawer can show; archived cards only while archived cards are shown. */
+  readonly resolveCard: (cardId: string) => WorkboardCard | undefined;
+  readonly openCard: (card: WorkboardCard) => void;
+  readonly openSession?: () => void;
+};
+
+export function renderDependencyDetailList(
+  dependencies: WorkboardDependencyState,
+  navigation: DetailNavigation,
+) {
   if (dependencies.parents.length === 0) {
     return nothing;
   }
@@ -22,7 +33,7 @@ export function renderDependencyDetailList(dependencies: WorkboardDependencyStat
                   ? html`<span class="workboard-detail__dependency-spacer"></span>`
                   : icons.alertTriangle
               }
-              <span>${parent.title}</span>
+              ${renderCardReference(parent.id, parent.title, navigation)}
               <span>
                 ${
                   parent.missing
@@ -53,6 +64,81 @@ export function renderDetailRow(label: string, value: unknown) {
       <span>${label}</span>
       <strong>${text}</strong>
     </div>
+  `;
+}
+
+function renderCardLink(label: string, open: () => void) {
+  return html`<button type="button" class="workboard-detail__card-link" @click=${open}>
+    ${label}
+  </button>`;
+}
+
+function renderCardReference(cardId: string, fallback: string, navigation: DetailNavigation) {
+  const target = navigation.resolveCard(cardId);
+  return target
+    ? renderCardLink(target.title, () => navigation.openCard(target))
+    : html`<span>${fallback}</span>`;
+}
+
+function renderSessionRow(label: string, value: string | undefined, openSession?: () => void) {
+  const text = value?.trim();
+  if (!text || !openSession) {
+    return renderDetailRow(label, value);
+  }
+  return html`
+    <div class="workboard-detail__row">
+      <span>${label}</span>
+      <button
+        type="button"
+        class="workboard-detail__card-link"
+        title=${t("workboard.openSession")}
+        @click=${openSession}
+      >
+        ${text}
+      </button>
+    </div>
+  `;
+}
+
+function safeExternalUrl(url: string): string | undefined {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "http:" || protocol === "https:" ? url : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function renderLinkDetailList(
+  links: NonNullable<NonNullable<WorkboardCard["metadata"]>["links"]>,
+  navigation: DetailNavigation,
+) {
+  if (links.length === 0) {
+    return nothing;
+  }
+  return html`
+    <section class="workboard-detail__section">
+      <h3>${t("workboard.badgeLinks", { count: String(links.length) })}</h3>
+      <ol class="workboard-detail__list">
+        ${links.map((link) => {
+          const target = link.targetCardId ? navigation.resolveCard(link.targetCardId) : undefined;
+          if (target) {
+            const open = () => navigation.openCard(target);
+            return html`<li>${link.type} - ${renderCardLink(target.title, open)}</li>`;
+          }
+          const url = link.url ? safeExternalUrl(link.url) : undefined;
+          if (url) {
+            const prefix = joinDetailParts(link.type, link.title);
+            const anchor = html`<a href=${url} target="_blank" rel="noopener noreferrer"
+              >${url}</a
+            >`;
+            return html`<li>${prefix ? `${prefix} - ` : ""}${anchor}</li>`;
+          }
+          const text = joinDetailParts(link.type, link.title, link.targetCardId, link.url);
+          return html`<li>${text}</li>`;
+        })}
+      </ol>
+    </section>
   `;
 }
 
@@ -160,17 +246,12 @@ function detailValues<T>(entries: readonly T[], ...fields: Array<keyof T>): stri
 }
 
 function getDetailSections(card: WorkboardCard) {
-  const links = card.metadata?.links ?? [];
   const artifacts = card.metadata?.artifacts ?? [];
   const attachments = card.metadata?.attachments ?? [];
   const diagnostics = card.metadata?.diagnostics ?? [];
   const workerLogs = card.metadata?.workerLogs ?? [];
   const workerProtocol = card.metadata?.workerProtocol;
   const detailSections: Array<readonly [string, readonly string[]]> = [
-    [
-      t("workboard.badgeLinks", { count: String(links.length) }),
-      detailValues(links, "type", "title", "targetCardId", "url"),
-    ],
     [
       t("workboard.badgeArtifacts", { count: String(artifacts.length) }),
       detailValues(artifacts, "label", "url", "path", "mimeType"),
@@ -217,7 +298,9 @@ export function renderTechnicalDetails(
   card: WorkboardCard,
   linkedSessionKey: string | undefined,
   active: boolean,
+  navigation: DetailNavigation,
 ) {
+  const links = card.metadata?.links ?? [];
   const attempts = card.metadata?.attempts ?? [];
   const proof = card.metadata?.proof ?? [];
   const automation = card.metadata?.automation;
@@ -254,6 +337,7 @@ export function renderTechnicalDetails(
     notifications.length ||
     attempts.length ||
     proof.length ||
+    links.length ||
     detailSections.some(([, values]) => values.some((value) => value.trim())),
   );
   if (!hasTechnicalDetails) {
@@ -269,8 +353,12 @@ export function renderTechnicalDetails(
   >
     <h3>${t("workboard.detailTechnical")}</h3>
     <div class="workboard-detail__technical-properties">
-      ${renderDetailRow(t("workboard.fieldSession"), linkedSessionKey)}
-      ${renderDetailRow(t("workboard.detailRun"), card.runId ?? card.execution?.runId)}
+      ${renderSessionRow(t("workboard.fieldSession"), linkedSessionKey, navigation.openSession)}
+      ${renderSessionRow(
+        t("workboard.detailRun"),
+        card.runId ?? card.execution?.runId,
+        navigation.openSession,
+      )}
       ${renderDetailRow(t("workboard.detailTenant"), automation?.tenant)}
       ${metadataFields.map(([label, value]) => renderDetailRow(label, value))}
     </div>
@@ -287,6 +375,7 @@ export function renderTechnicalDetails(
         : nothing
     }
     ${renderAttemptDetails(attempts)} ${renderProofDetails(proof)}
+    ${renderLinkDetailList(links, navigation)}
     ${detailSections.map(([title, values]) => renderDetailList(title, values))}
   </section>`;
 }
