@@ -37,6 +37,72 @@ function claudeInputJsonDelta(partialJson: string, index?: number) {
 }
 
 describe("createCliJsonlStreamingParser framing", () => {
+  it("keeps the reply when handed-off tool results exceed the former wire budget", () => {
+    const results: CliToolResultDelta[] = [];
+    const parser = createCliJsonlStreamingParser({
+      backend: { command: "claude", output: "jsonl", jsonlDialect: "claude-stream-json" },
+      providerId: "claude-cli",
+      onAssistantDelta: () => {},
+      onToolUseStart: () => {},
+      onToolResult: (result) => results.push(result),
+    });
+    const push = (record: unknown) => parser.push(`${JSON.stringify(record)}\n`);
+    const logText = "x".repeat(1_500_000);
+    // Four tool rounds carry 12 MB of tool output on the wire: the message copy
+    // and the tool_use_result echo each repeat it, and the parser hands both off.
+    for (let round = 0; round < 4; round += 1) {
+      const toolUse = {
+        type: "tool_use",
+        id: `read-${round}`,
+        name: "Read",
+        input: { file_path: `/tmp/test-${round}.log` },
+      };
+      push(claudeStreamEvent({ type: "message_start", message: { id: `tool-msg-${round}` } }));
+      push(claudeBlockStart({ ...toolUse, input: {} }, 0));
+      push(claudeInputJsonDelta(JSON.stringify(toolUse.input), 0));
+      push(claudeBlockStop(0));
+      push({ type: "assistant", message: { id: `tool-msg-${round}`, content: [toolUse] } });
+      push({
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: toolUse.id,
+              content: [{ type: "text", text: logText }],
+            },
+          ],
+        },
+        tool_use_result: {
+          type: "text",
+          file: { filePath: `/tmp/test-${round}.log`, content: logText },
+        },
+      });
+    }
+    const reply = "Report: every check passed; see the worktree for the diff.";
+    push(claudeStreamEvent({ type: "message_start", message: { id: "reply-msg" } }));
+    push(
+      claudeStreamEvent({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: reply },
+      }),
+    );
+    // The full assistant snapshot repeats the streamed delta.
+    push({
+      type: "assistant",
+      message: { id: "reply-msg", content: [{ type: "text", text: reply }] },
+    });
+    push({ type: "result", subtype: "success", result: reply });
+    parser.finish();
+
+    expect(parser.getErrorText()).toBeNull();
+    expect(parser.hasTerminalResult()).toBe(true);
+    expect(parser.getOutput()?.text).toBe(reply);
+    expect(results).toHaveLength(4);
+    expect(results[3]?.result).toEqual([{ type: "text", text: logText }]);
+  });
+
   it("frames coalesced Claude image and PDF lines before omitting retained binary bytes", () => {
     const results: CliToolResultDelta[] = [];
     const pluginLines: string[] = [];
