@@ -1,6 +1,6 @@
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { describe, expect, it } from "vitest";
-import { redactClaimToken, redactOperatorCard } from "./card-redaction.js";
+import { HIDDEN_VERDICT_NOTICE, redactClaimToken, redactOperatorCard } from "./card-redaction.js";
 
 function createCard(metadata?: WorkboardCard["metadata"]): WorkboardCard {
   return {
@@ -45,7 +45,7 @@ describe("redactClaimToken", () => {
 });
 
 describe("redactOperatorCard", () => {
-  it("hides plain and Markdown-emphasized agent verdicts on an undecided review", () => {
+  it("replaces plain and Markdown-emphasized agent verdicts on an undecided review with a notice", () => {
     const comment = (body: string, source?: "operator" | "agent:dev") => ({
       id: body,
       body,
@@ -85,7 +85,15 @@ describe("redactOperatorCard", () => {
       status: "review",
     };
 
+    const hidden = HIDDEN_VERDICT_NOTICE;
     expect(redactOperatorCard(card).metadata?.comments?.map((entry) => entry.body)).toEqual([
+      hidden,
+      hidden,
+      hidden,
+      hidden,
+      hidden,
+      hidden,
+      hidden,
       "My verdict: accept, once the test lands.",
       "**Verdict pending** until CI is green.",
       "Verdict: accept",
@@ -131,7 +139,49 @@ describe("redactOperatorCard", () => {
     const operatorCard = redactOperatorCard(card);
 
     expect(operatorCard.rounds).toEqual(rounds);
-    expect(operatorCard.metadata?.comments).toEqual([]);
+    expect(operatorCard.metadata?.comments).toEqual([
+      { id: "verdict", body: HIDDEN_VERDICT_NOTICE, createdAt: 20, source: "agent:dev" },
+    ]);
     expect(redactOperatorCard(createCard())).not.toHaveProperty("rounds");
+  });
+
+  it("shows the real verdict once the round is decided, and leaves a verdict from before the import", () => {
+    const reviewCard = (status: WorkboardCard["status"], events?: WorkboardCard["events"]) => ({
+      ...createCard({
+        automation: {
+          target: {
+            kind: "node-claude" as const,
+            nodeId: "node",
+            repoPath: "/repo",
+            worktreesRoot: "/wt",
+            hostRepoPath: "/host",
+            worktree: {
+              path: "/wt/wb-card-1",
+              branch: "factory/card-1",
+              baseCommit: "a".repeat(40),
+              handoff: {
+                phase: "imported" as const,
+                headCommit: "b".repeat(40),
+                importedAt: 10,
+              },
+            },
+          },
+        },
+        comments: [
+          { id: "old", body: "Verdict: rework", createdAt: 5, source: "agent:dev" as const },
+          { id: "new", body: "Verdict: accept", createdAt: 20, source: "agent:dev" as const },
+        ],
+      }),
+      status,
+      ...(events ? { events } : {}),
+    });
+    const bodies = (card: WorkboardCard) =>
+      redactOperatorCard(card).metadata?.comments?.map((entry) => entry.body);
+
+    expect(bodies(reviewCard("review"))).toEqual(["Verdict: rework", HIDDEN_VERDICT_NOTICE]);
+    expect(bodies(reviewCard("done"))).toEqual(["Verdict: rework", "Verdict: accept"]);
+    expect(
+      bodies(reviewCard("blocked", [{ id: "e", kind: "moved", at: 30, toStatus: "done" }])),
+    ).toEqual(["Verdict: rework", "Verdict: accept"]);
   });
 });

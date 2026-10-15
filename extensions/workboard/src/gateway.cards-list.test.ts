@@ -3,6 +3,7 @@ import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../api.js";
+import { HIDDEN_VERDICT_NOTICE } from "./card-redaction.js";
 import { registerWorkboardGatewayMethods } from "./gateway.js";
 import { startNodeCard } from "./node-ticket.test-support.js";
 import type { WorkboardStore } from "./store.js";
@@ -123,7 +124,7 @@ describe("workboard card list revisions", () => {
     const comments = async () =>
       (await listed()).metadata.comments.map((comment: { body: string }) => comment.body);
 
-    expect(await comments()).toEqual(["Proof looks thin."]);
+    expect(await comments()).toEqual(["Proof looks thin.", HIDDEN_VERDICT_NOTICE]);
     expect((await listed()).stage).toEqual({ kind: "awaiting_review", since: importedAt });
     expect((await store.get(card.id))?.metadata?.comments).toHaveLength(2);
 
