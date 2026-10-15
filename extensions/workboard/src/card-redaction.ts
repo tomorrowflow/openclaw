@@ -3,6 +3,8 @@ import { workboardCardStage } from "./card-stage.js";
 import { nodeTicketTarget, reviewVerdictOf } from "./node-ticket.js";
 import type { WorkboardDispatchResult } from "./store-inputs.js";
 
+export const HIDDEN_VERDICT_NOTICE = "Verdict posted. It stays hidden until you decide this round.";
+
 export function redactClaimToken(card: WorkboardCard): WorkboardCard {
   const claim = card.metadata?.claim;
   if (!claim) {
