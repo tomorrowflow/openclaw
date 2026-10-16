@@ -19,9 +19,11 @@ import {
 } from "openclaw/plugin-sdk/run-command";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
+  cutReportText,
   type NodeTicketStopReport,
   parseNodeTicketReport,
   REPORT_FENCE,
+  reportComments,
 } from "./node-ticket-report.js";
 import {
   type WorkboardNodeTicketRouteSlot,
@@ -33,7 +35,6 @@ import {
   workboardTaskClass,
 } from "./store-constants.js";
 import type { WorkboardAgentActor } from "./store-inputs.js";
-import { capText } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
 
 // Node output that reaches host git as a revision argument.
@@ -646,8 +647,16 @@ export async function applyNodeTicketReport(params: {
   const { store, card } = params;
   const claim = card.metadata?.claim;
   const scope = claim ? { ownerId: claim.ownerId, token: claim.token } : undefined;
-  const block = async (reason: string) =>
-    await store.block(card.id, { reason: capText(reason, MAX_BLOCK_REASON_CHARS) }, scope);
+  // The block comment leads; the rest of a long reason follows it as comments.
+  const block = async (reason: string) => {
+    const [lead, ...rest] = reportComments(reason, {
+      max: Math.min(MAX_BLOCK_REASON_CHARS, MAX_COMMENT_BODY_CHARS),
+    });
+    await store.block(card.id, { reason: lead }, scope);
+    for (const body of rest) {
+      await store.addComment(card.id, { body }, scope);
+    }
+  };
   const parsed = parseNodeTicketReport(params.messages);
   const worktree = nodeTicketTarget(card)?.worktree;
   if (!parsed.ok) {
@@ -668,22 +677,20 @@ export async function applyNodeTicketReport(params: {
     );
   }
   if (report.outcome === "needs_input" && worktree) {
-    await store.addComment(
-      card.id,
+    const round = reportComments(
+      [
+        `**Needs input:** ${report.summary || "no summary given"}`,
+        "",
+        ...report.questions.map((question) => `- ${question}`),
+      ].join("\n"),
       {
-        body: capText(
-          [
-            `**Needs input:** ${report.summary || "no summary given"}`,
-            "",
-            ...report.questions.map((question) => `- ${question}`),
-            "",
-            "Answer in a comment, then move the card to todo; the same session resumes with the answer.",
-          ].join("\n"),
-          MAX_COMMENT_BODY_CHARS,
-        ),
+        footer:
+          "Answer in a comment, then move the card to todo; the same session resumes with the answer.",
       },
-      scope,
     );
+    for (const body of round) {
+      await store.addComment(card.id, { body }, scope);
+    }
     await store.setNodeHandoff(
       card.id,
       { worktreePath: worktree.path, handoff: { phase: "questions", askedAt: Date.now() } },
@@ -707,7 +714,7 @@ export async function applyNodeTicketReport(params: {
       {
         status: "passed",
         label: STANDARDS_REVIEW_LABEL,
-        note: capText(
+        note: cutReportText(
           `${findings} findings, ${fixed} fixed${note ? `. ${note}` : ""}`,
           MAX_PROOF_NOTE_CHARS,
         ),
@@ -728,8 +735,8 @@ export async function applyNodeTicketReport(params: {
     );
     return;
   }
-  if (report.summary) {
-    await store.addComment(card.id, { body: report.summary }, scope);
+  for (const body of reportComments(report.summary)) {
+    await store.addComment(card.id, { body }, scope);
   }
   if (!worktree) {
     await block("Reported done, but the card has no recorded node worktree to import.");
