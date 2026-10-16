@@ -6,7 +6,7 @@ import type {
   WorkboardScreenshotResult,
   WorkboardScreenshotRound,
 } from "@openclaw/workboard-contract";
-import { hostGit, nodeTicketTarget, requireHostGit } from "./node-ticket.js";
+import { COMMIT_ID, hostGit, nodeTicketTarget } from "./node-ticket.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -42,25 +42,59 @@ export async function listNodeTicketScreenshots(
     return { rounds: [] };
   }
   const listed: WorkboardScreenshotRound[] = [];
+  let missing = 0;
   for (const { round, changes } of rounds) {
     const paths = await roundImagePaths(target.hostRepoPath, changes.from, changes.to);
-    if (paths.length > 0) {
+    if (!paths) {
+      missing += 1;
+    } else if (paths.length > 0) {
       listed.push({ round, commit: changes.to, paths });
     }
+  }
+  if (missing === rounds.length) {
+    throw new Error(`no round's commits are left in ${target.hostRepoPath}`);
   }
   return { rounds: listed };
 }
 
-async function roundImagePaths(repoPath: string, from: string, to: string): Promise<string[]> {
-  const output = await requireHostGit(repoPath, [
+/** The round's image paths; undefined when its commits are gone from the host clone. */
+async function roundImagePaths(
+  repoPath: string,
+  from: string,
+  to: string,
+): Promise<string[] | undefined> {
+  if (!COMMIT_ID.test(from) || !COMMIT_ID.test(to)) {
+    throw new Error(`round commits ${from}..${to} are not commit ids`);
+  }
+  const result = await hostGit(repoPath, [
     "diff",
     "--name-only",
     "-z",
-    "--diff-filter=AMR",
+    "--no-renames",
+    "--diff-filter=AM",
+    "--end-of-options",
     from,
     to,
   ]);
-  return output
+  if (result.code !== 0) {
+    for (const commit of [from, to]) {
+      const verify = await hostGit(repoPath, [
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "--end-of-options",
+        `${commit}^{commit}`,
+      ]);
+      // A quiet exit 1 is a name the repository lacks; the command runner also
+      // reports timeouts and spawn failures as 1, but with a message.
+      if (verify.code === 1 && !verify.stderr.trim()) {
+        return undefined;
+      }
+    }
+    const detail = (result.stderr || result.stdout).trim() || `exit ${result.code}`;
+    throw new Error(`host git diff ${from}..${to} failed in ${repoPath}: ${detail}`);
+  }
+  return result.stdout
     .split("\0")
     .filter((path) => path && imageType(path))
     .toSorted()
@@ -76,12 +110,11 @@ export async function readNodeTicketScreenshot(
   const target = nodeTicketTarget(card);
   const changes = target?.worktree?.rounds?.find((entry) => entry.round === round)?.changes;
   const mimeType = imageType(path);
-  if (
-    !target ||
-    !changes ||
-    !mimeType ||
-    !(await roundImagePaths(target.hostRepoPath, changes.from, changes.to)).includes(path)
-  ) {
+  const paths =
+    target && changes && mimeType
+      ? await roundImagePaths(target.hostRepoPath, changes.from, changes.to)
+      : undefined;
+  if (!target || !changes || !mimeType || !paths?.includes(path)) {
     throw new Error(`screenshot not found: round ${round} ${path}`);
   }
   const repoPath = target.hostRepoPath;

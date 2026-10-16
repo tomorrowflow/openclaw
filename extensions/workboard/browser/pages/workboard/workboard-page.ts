@@ -38,6 +38,7 @@ import {
   type BoardDraft,
 } from "./view-board-modal.ts";
 import { getVisibleDetailCard, openCardDetails } from "./view-card-details.ts";
+import { createCardScreenshots, type CardScreenshots } from "./view-card-screenshots.ts";
 import {
   workboardErrorMessage,
   type BoardAutomationState,
@@ -76,6 +77,7 @@ export function createWorkboardPage(
     let boardDraft: BoardDraft | null = null;
     const automations = new Map<string, BoardAutomationState>();
     let trust: BoardTrustState | undefined;
+    let screenshots: CardScreenshots | undefined;
     let queued = false;
     let connected = false;
     let refreshActive = false;
@@ -148,6 +150,8 @@ export function createWorkboardPage(
         return;
       }
       connected = nextConnected;
+      screenshots?.dispose();
+      screenshots = connected ? createCardScreenshots(client, requestUpdate) : undefined;
       metadataGeneration += 1;
       metadataLoad = null;
       if (connected) {
@@ -238,6 +242,7 @@ export function createWorkboardPage(
         openCardDetails(state, revealed);
       }
       const detailCard = getVisibleDetailCard(state);
+      screenshots?.show((context.presented && detailCard) || undefined);
       const detailJobId = detailCard
         ? state.boards.find((board) => board.id === workboardCardBoardId(detailCard))
             ?.automationJobId
@@ -408,6 +413,7 @@ export function createWorkboardPage(
             overlayOpen: Boolean(boardDraft),
             presented: context.presented,
             detailBoardAutomation: detailJobId ? automations.get(detailJobId) : undefined,
+            detailScreenshots: screenshots,
             host: workboard,
             client: connected ? client : null,
             connected,
@@ -425,6 +431,7 @@ export function createWorkboardPage(
             onRefresh: () => {
               automations.clear();
               trust = undefined;
+              screenshots?.refresh();
               void refreshMetadata();
               sessionResolver.refresh();
               void refreshWorkboard({
@@ -536,6 +543,7 @@ export function createWorkboardPage(
         unsubscribeCron();
         sessionsBoard.dispose();
         sessionResolver.dispose();
+        screenshots?.dispose();
         document.removeEventListener("visibilitychange", onVisibilityChange);
         stop();
         render(nothing, container);

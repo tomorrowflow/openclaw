@@ -4,122 +4,185 @@ import type {
   WorkboardScreenshotRound,
 } from "@openclaw/workboard-contract";
 import { html, nothing } from "lit";
+import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
 import type { WorkboardCard } from "../../lib/workboard/index.ts";
-import type { WorkboardProps } from "./view-helpers.ts";
 
-type ListState = { key: string } & (
+type ListState =
   | { status: "loading" }
   | { status: "loaded"; rounds: WorkboardScreenshotRound[] }
-  | { status: "unavailable"; error: string }
-);
+  | { status: "unavailable"; error: string };
+
+type SettledList = Exclude<ListState, { status: "loading" }>;
 
 type ImageState = { status: "loading" } | { status: "loaded"; url: string } | { status: "failed" };
 
-// The drawer shows one card at a time, so the cache holds one card's
-// screenshots; opening another card revokes the previous object URLs.
-let list: (ListState & { cardId: string }) | undefined;
-const images = new Map<string, ImageState>();
+// Each read returns up to ~10.7 MB of base64; three in flight stay well under
+// the Gateway's 50 MB send buffer, past which it closes a slow client.
+const MAX_IMAGE_READS = 3;
+
+/** The drawer card's screenshots on one Gateway connection. */
+export type CardScreenshots = {
+  /** Lists the shown card's screenshots; another card or none drops the rest. */
+  show(card: WorkboardCard | undefined): void;
+  /** Lists the shown card again, keeping its rounds meanwhile, and retries failed images. */
+  refresh(): void;
+  /** Undefined hides the tab: another card, still listing, or no round committed an image. */
+  list(cardId: string): SettledList | undefined;
+  /** The image's state, queueing its read on first use. */
+  image(cardId: string, round: WorkboardScreenshotRound, path: string): ImageState;
+  dispose(): void;
+};
 
 function listKey(card: WorkboardCard): string | undefined {
   const commits = (card.rounds ?? []).flatMap((round) => (round.changes ? [round.changes.to] : []));
-  return commits.length > 0 ? `${card.id}:${commits.join(",")}` : undefined;
+  return commits.length > 0 ? commits.join(",") : undefined;
 }
 
-function forgetImages() {
-  for (const image of images.values()) {
-    if (image.status === "loaded") {
-      URL.revokeObjectURL(image.url);
-    }
-  }
-  images.clear();
+function objectUrl(result: WorkboardScreenshotResult): string {
+  const bytes = Uint8Array.from(atob(result.contentBase64), (char) => char.charCodeAt(0));
+  return URL.createObjectURL(new Blob([bytes], { type: result.mimeType }));
 }
 
 /**
- * The card's screenshot rounds once listed; starts the listing for a node
- * ticket with imported rounds. Undefined hides the tab: no imported round,
- * still listing, or no round committed an image.
+ * Created per connection, so a reconnect lists and reads afresh; nothing it
+ * learned on the previous connection, failures included, carries over.
  */
-export function loadedCardScreenshots(
-  props: WorkboardProps,
-  card: WorkboardCard,
-): ListState | undefined {
-  const key = listKey(card);
-  if (!key || !props.client) {
-    return undefined;
-  }
-  if (list?.key !== key) {
-    if (list?.cardId !== card.id) {
-      forgetImages();
+export function createCardScreenshots(
+  client: GatewayBrowserClient,
+  requestUpdate: () => void,
+): CardScreenshots {
+  let shown: { cardId: string; key: string; list: ListState; previous?: SettledList } | undefined;
+  const images = new Map<string, ImageState>();
+  const queue: Array<{
+    key: string;
+    cardId: string;
+    round: number;
+    path: string;
+    pending: ImageState;
+  }> = [];
+  let reading = 0;
+
+  const forget = () => {
+    for (const image of images.values()) {
+      if (image.status === "loaded") {
+        URL.revokeObjectURL(image.url);
+      }
     }
-    const requested: ListState & { cardId: string } = { key, cardId: card.id, status: "loading" };
-    list = requested;
-    void props.client
-      .request<WorkboardScreenshotListResult>("workboard.cards.screenshots.list", { id: card.id })
+    images.clear();
+    queue.length = 0;
+  };
+
+  const read = () => {
+    for (let next; reading < MAX_IMAGE_READS && (next = queue.shift());) {
+      const { key, cardId, round, path, pending } = next;
+      reading += 1;
+      // Started inside the chain so a throwing request still releases its slot.
+      void Promise.resolve()
+        .then(() =>
+          client.request<WorkboardScreenshotResult>("workboard.cards.screenshots.get", {
+            id: cardId,
+            round,
+            path,
+          }),
+        )
+        .then((result): ImageState => ({ status: "loaded", url: objectUrl(result) }))
+        .catch((): ImageState => ({ status: "failed" }))
+        .then((settled) => {
+          reading -= 1;
+          // A forgotten read (drawer closed, card switched) no longer owns its key.
+          if (images.get(key) === pending) {
+            images.set(key, settled);
+            requestUpdate();
+          } else if (settled.status === "loaded") {
+            URL.revokeObjectURL(settled.url);
+          }
+          read();
+        });
+    }
+  };
+
+  const relist = (cardId: string, key: string, previous: SettledList | undefined) => {
+    const listing: NonNullable<typeof shown> = {
+      cardId,
+      key,
+      list: { status: "loading" },
+      ...(previous ? { previous } : {}),
+    };
+    shown = listing;
+    void client
+      .request<WorkboardScreenshotListResult>("workboard.cards.screenshots.list", { id: cardId })
       .then(
-        (result): ListState => ({ key, status: "loaded", rounds: result.rounds }),
-        (error: unknown): ListState => ({
-          key,
-          status: "unavailable",
-          error: formatUiError(error),
-        }),
+        (result): SettledList => ({ status: "loaded", rounds: result.rounds }),
+        (error: unknown): SettledList => ({ status: "unavailable", error: formatUiError(error) }),
       )
       .then((settled) => {
-        if (list === requested) {
-          list = { ...settled, cardId: card.id };
-          props.onRequestUpdate?.();
+        if (shown === listing) {
+          listing.list = settled;
+          delete listing.previous;
+          requestUpdate();
         }
       });
-  }
-  if (list.status === "loading" || (list.status === "loaded" && list.rounds.length === 0)) {
-    return undefined;
-  }
-  return list;
-}
+  };
 
-function imageKey(round: WorkboardScreenshotRound, path: string): string {
-  return `${round.commit}:${path}`;
-}
+  const settledList = () =>
+    shown && (shown.list.status === "loading" ? shown.previous : shown.list);
 
-function loadImage(
-  props: WorkboardProps,
-  card: WorkboardCard,
-  round: WorkboardScreenshotRound,
-  path: string,
-) {
-  const key = imageKey(round, path);
-  if (images.has(key) || !props.client) {
-    return;
-  }
-  images.set(key, { status: "loading" });
-  void props.client
-    .request<WorkboardScreenshotResult>("workboard.cards.screenshots.get", {
-      id: card.id,
-      round: round.round,
-      path,
-    })
-    .then(
-      (result): ImageState => {
-        const bytes = Uint8Array.from(atob(result.contentBase64), (char) => char.charCodeAt(0));
-        return {
-          status: "loaded",
-          url: URL.createObjectURL(new Blob([bytes], { type: result.mimeType })),
-        };
-      },
-      (): ImageState => ({ status: "failed" }),
-    )
-    .then((settled) => {
-      // A newer card's listing cleared the cache; this image belongs to no shown card.
-      if (images.get(key)?.status !== "loading") {
-        if (settled.status === "loaded") {
-          URL.revokeObjectURL(settled.url);
-        }
+  return {
+    show(card) {
+      const key = card ? listKey(card) : undefined;
+      if (!card || !key) {
+        shown = undefined;
+        forget();
         return;
       }
-      images.set(key, settled);
-      props.onRequestUpdate?.();
-    });
+      if (shown?.cardId === card.id && shown.key === key) {
+        return;
+      }
+      if (shown?.cardId !== card.id) {
+        forget();
+        relist(card.id, key, undefined);
+        return;
+      }
+      // A new import of the same card keeps its listed rounds until the new list arrives.
+      relist(card.id, key, settledList());
+    },
+    refresh() {
+      if (!shown) {
+        return;
+      }
+      for (const [key, image] of images) {
+        if (image.status === "failed") {
+          images.delete(key);
+        }
+      }
+      relist(shown.cardId, shown.key, settledList());
+    },
+    list(cardId) {
+      if (shown?.cardId !== cardId) {
+        return undefined;
+      }
+      const list = settledList();
+      return list?.status === "loaded" && list.rounds.length === 0 ? undefined : list;
+    },
+    image(cardId, round, path) {
+      const key = `${round.commit}:${path}`;
+      const known = images.get(key);
+      if (known) {
+        return known;
+      }
+      const pending: ImageState = { status: "loading" };
+      images.set(key, pending);
+      queue.push({ key, cardId, round: round.round, path, pending });
+      read();
+      return pending;
+    },
+    dispose() {
+      shown = undefined;
+      forget();
+    },
+  };
 }
 
 const VARIANT = /-(light|dark)(\.[a-z]+)$/i;
@@ -142,26 +205,25 @@ function fileName(path: string): string {
 }
 
 function renderImage(
-  props: WorkboardProps,
-  card: WorkboardCard,
+  screenshots: CardScreenshots,
+  cardId: string,
   round: WorkboardScreenshotRound,
   path: string,
   paired: boolean,
 ) {
-  loadImage(props, card, round, path);
-  const image = images.get(imageKey(round, path));
+  const image = screenshots.image(cardId, round, path);
   const variant = paired ? VARIANT.exec(path)?.[1]?.toLowerCase() : undefined;
   const label =
     variant === "light" ? t("workboard.screenshotLight") : t("workboard.screenshotDark");
   return html`<div class="workboard-screenshot__variant">
     ${
-      image?.status === "loaded"
+      image.status === "loaded"
         ? html`<a href=${image.url} target="_blank" rel="noopener" title=${path}
             ><img src=${image.url} alt=${fileName(path)} loading="lazy"
           /></a>`
         : html`<span class="workboard-screenshot__placeholder"
             >${
-              image?.status === "failed"
+              image.status === "failed"
                 ? t("workboard.screenshotFailed")
                 : t("workboard.screenshotLoading")
             }</span
@@ -173,9 +235,9 @@ function renderImage(
 
 /** The Screenshots tab: each round's committed images, newest round first. */
 export function renderScreenshotsPanel(
-  props: WorkboardProps,
-  card: WorkboardCard,
-  state: ListState,
+  screenshots: CardScreenshots,
+  cardId: string,
+  state: SettledList,
   active: boolean,
 ) {
   return html`<section
@@ -191,7 +253,7 @@ export function renderScreenshotsPanel(
         ? html`<p class="workboard-detail__empty">
             ${t("workboard.screenshotsUnavailable", { error: state.error })}
           </p>`
-        : active && state.status === "loaded"
+        : active
           ? state.rounds.toReversed().map(
               (round) => html`<section class="workboard-detail__section">
                 <h3>
@@ -206,7 +268,7 @@ export function renderScreenshotsPanel(
                     (group) => html`<figure class="workboard-screenshot">
                       <div class="workboard-screenshot__variants">
                         ${group.paths.map((path) =>
-                          renderImage(props, card, round, path, group.paths.length === 2),
+                          renderImage(screenshots, cardId, round, path, group.paths.length === 2),
                         )}
                       </div>
                       <figcaption title=${group.name}>${fileName(group.name)}</figcaption>

@@ -3067,6 +3067,7 @@
   min-width: 0;
 }
 .workboard-detail__activity-panel,
+.workboard-detail__screenshots,
 .workboard-detail__session-panel,
 .workboard-detail__technical {
   display: grid;
@@ -5180,8 +5181,10 @@ workboard-inline-text {
   display: grid;
   place-items: center;
   min-height: 120px;
+  padding: 8px;
   color: var(--muted);
   font-size: 12px;
+  text-align: center;
 }
 
 .workboard-screenshot__label,
@@ -5191,4 +5194,8 @@ workboard-inline-text {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workboard-screenshot figcaption {
+  color: var(--text);
 }

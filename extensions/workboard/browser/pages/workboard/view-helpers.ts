@@ -23,6 +23,7 @@ import { isReservedSessionKey } from "../../lib/workboard/session-links.ts";
 import type { WorkboardSessionResolution } from "../../lib/workboard/session-resolution.ts";
 import { getCardSessionState } from "../../lib/workboard/session-state.ts";
 import { agentDisplayName, findCardAgent, type WorkboardAgentsList } from "./agent-filter.ts";
+import type { CardScreenshots } from "./view-card-screenshots.ts";
 
 export type BoardAutomationState = { jobId: string } & (
   | { status: "loading" }
@@ -37,6 +38,7 @@ export type WorkboardProps = {
   overlayOpen?: boolean;
   presented?: boolean;
   detailBoardAutomation?: BoardAutomationState;
+  detailScreenshots?: CardScreenshots;
   host: object;
   client: GatewayBrowserClient | null;
   connected: boolean;

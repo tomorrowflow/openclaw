@@ -43,7 +43,7 @@ import {
 } from "./view-card-detail-records.ts";
 import { renderCardDiscardDialog } from "./view-card-modal.ts";
 import { renderNodeRounds } from "./view-card-rounds.ts";
-import { loadedCardScreenshots, renderScreenshotsPanel } from "./view-card-screenshots.ts";
+import { renderScreenshotsPanel } from "./view-card-screenshots.ts";
 import {
   formatEventLabel,
   formatLifecycle,
@@ -214,7 +214,7 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
     navigation,
   );
   const hasTechnicalDetails = technicalDetails !== nothing;
-  const screenshots = loadedCardScreenshots(props, card);
+  const screenshots = props.detailScreenshots?.list(card.id);
   const tabs = [
     { id: "overview", label: t("workboard.detailTabOverview") },
     { id: "activity", label: t("workboard.detailTabActivity") },
@@ -631,8 +631,13 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
               </section>
             </section>
             ${
-              screenshots
-                ? renderScreenshotsPanel(props, card, screenshots, activeTab === "screenshots")
+              props.detailScreenshots && screenshots
+                ? renderScreenshotsPanel(
+                    props.detailScreenshots,
+                    card.id,
+                    screenshots,
+                    activeTab === "screenshots",
+                  )
                 : nothing
             }
             ${technicalDetails}
