@@ -2,6 +2,10 @@ import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { describe, expect, it } from "vitest";
 import { HIDDEN_VERDICT_NOTICE, redactClaimToken, redactOperatorCard } from "./card-redaction.js";
 
+type NodeTarget = NonNullable<
+  NonNullable<NonNullable<WorkboardCard["metadata"]>["automation"]>["target"]
+>;
+
 function createCard(metadata?: WorkboardCard["metadata"]): WorkboardCard {
   return {
     id: "card-1",
@@ -143,6 +147,52 @@ describe("redactOperatorCard", () => {
       { id: "verdict", body: HIDDEN_VERDICT_NOTICE, createdAt: 20, source: "agent:dev" },
     ]);
     expect(redactOperatorCard(createCard())).not.toHaveProperty("rounds");
+  });
+
+  it("names a node ticket's draft PR once published and keeps it through a rework round", () => {
+    const pullRequestUrl = "https://github.com/acme/app/pull/96";
+    const nodeCard = (
+      status: WorkboardCard["status"],
+      worktree: Partial<NonNullable<Extract<NodeTarget, { kind: "node-claude" }>["worktree"]>>,
+    ): WorkboardCard => ({
+      ...createCard({
+        automation: {
+          target: {
+            kind: "node-claude",
+            nodeId: "node",
+            repoPath: "/repo",
+            worktreesRoot: "/wt",
+            hostRepoPath: "/host",
+            worktree: {
+              path: "/wt/wb-card-1",
+              branch: "factory/card-1",
+              baseCommit: "a".repeat(40),
+              ...worktree,
+            },
+          },
+        },
+      }),
+      status,
+    });
+    const imported = { phase: "imported", headCommit: "b".repeat(40), importedAt: 10 } as const;
+
+    expect(redactOperatorCard(nodeCard("review", { handoff: imported }))).not.toHaveProperty(
+      "pullRequestUrl",
+    );
+    expect(
+      redactOperatorCard(
+        nodeCard("done", {
+          handoff: { ...imported, phase: "published", publishedAt: 20, pullRequestUrl },
+        }),
+      ).pullRequestUrl,
+    ).toBe(pullRequestUrl);
+    expect(
+      redactOperatorCard(
+        nodeCard("running", {
+          rework: { round: 1, pullRequestUrl, acceptedAt: 20, outsideCommits: 0 },
+        }),
+      ).pullRequestUrl,
+    ).toBe(pullRequestUrl);
   });
 
   it("shows the real verdict once the round is decided, and leaves a verdict from before the import", () => {

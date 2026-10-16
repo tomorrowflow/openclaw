@@ -2,7 +2,7 @@ import "../../test/dom.setup.ts";
 import { render } from "lit";
 import { afterEach, expect, it, vi } from "vitest";
 import { createWorkboardCard } from "../../lib/workboard/test/index-helpers.ts";
-import { renderCardMeta } from "./view-card-content.ts";
+import { renderCardMeta, renderCardPullRequest } from "./view-card-content.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -94,4 +94,17 @@ it("shows a queued card's chip in the tile meta, which is visible without hover"
 
   expect(meta()).toBeNull();
   expect(meta({ requestedAt: 1 })?.textContent?.trim()).toBe("Queued");
+});
+
+it("links a card's draft PR by its number, and renders nothing before a PR exists", () => {
+  const container = document.createElement("div");
+  render(renderCardPullRequest(createWorkboardCard()), container);
+  expect(container.querySelector("a")).toBeNull();
+
+  const url = "https://github.com/acme/app/pull/96";
+  render(renderCardPullRequest(createWorkboardCard({ pullRequestUrl: url })), container);
+  const link = container.querySelector<HTMLAnchorElement>("a.workboard-card__pull-request")!;
+  expect(link.href).toBe(url);
+  expect(link.target).toBe("_blank");
+  expect(link.textContent?.trim()).toBe("PR #96");
 });

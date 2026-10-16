@@ -34,7 +34,7 @@ import {
   renderStartExecutionButton,
   renderStopCardAction,
 } from "./view-card-actions.ts";
-import { renderCardStage } from "./view-card-content.ts";
+import { renderCardPullRequest, renderCardStage } from "./view-card-content.ts";
 import {
   type DetailNavigation,
   renderDependencyDetailList,
@@ -467,13 +467,13 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
                 </aside>
                 <div class="workboard-detail__content">
                   ${
-                    automation?.summary || card.stage
+                    automation?.summary || card.stage || card.pullRequestUrl
                       ? html`<section
                           class="workboard-detail__summary"
                           aria-label=${t("workboard.detailSummary")}
                         >
                           ${automation?.summary ? renderMarkdown(automation.summary) : nothing}
-                          ${renderCardStage(card.stage, Date.now())}
+                          ${renderCardStage(card.stage, Date.now())} ${renderCardPullRequest(card)}
                         </section>`
                       : nothing
                   }

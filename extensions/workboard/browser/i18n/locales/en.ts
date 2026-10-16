@@ -371,6 +371,7 @@ export default {
     stageAwaitingReview: "Ready for your review",
     stagePublished: "PR open",
     stagePublishedRework: "PR updated after rework round {round}",
+    cardPullRequest: "PR #{number}",
     stageBlocked: "Blocked",
     stageReview: "In review",
     stageDone: "Done",
