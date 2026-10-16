@@ -3,42 +3,13 @@ import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../api.js";
 import { registerWorkboardGatewayMethods } from "./gateway.js";
+import { createGatewayMethodCapture } from "./test/gateway-methods.js";
 import { startEmptySessionsBoardService } from "./test/sessions-board.js";
 import {
   createWorkboardSqliteTestHarness,
   createWorkboardSqliteTestStore,
 } from "./test/sqlite-store.js";
 import { createWorkboardTools } from "./tools.js";
-
-function createGatewayMethodCapture() {
-  type RegisteredMethod = {
-    handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
-    opts: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[2];
-  };
-  const methods = new Map<string, RegisteredMethod>();
-  const api = {
-    runtime: {
-      state: {
-        openKeyedStore: vi.fn(),
-      },
-    },
-    registerGatewayMethod: vi.fn(
-      (method: string, handler: RegisteredMethod["handler"], opts: RegisteredMethod["opts"]) => {
-        methods.set(method, { handler, opts });
-      },
-    ),
-  } as unknown as OpenClawPluginApi;
-  const invoke = async (name: string, params: Record<string, unknown>) => {
-    const method = methods.get(name);
-    if (!method) {
-      throw new Error(`Missing Gateway method: ${name}`);
-    }
-    const respond = vi.fn();
-    await method.handler({ params, respond } as never);
-    return respond;
-  };
-  return { api, methods, invoke, registerGatewayMethod: api.registerGatewayMethod };
-}
 
 describe("workboard gateway methods", () => {
   it("refuses a Sessions board edit after the Gateway caller loses authority", async () => {
@@ -256,157 +227,6 @@ describe("workboard gateway methods", () => {
       await expect(store.get(base.id)).resolves.toEqual(claimed.card);
     },
   );
-
-  it("registers CRUD methods with read/write scopes", async () => {
-    const { api, methods, invoke } = createGatewayMethodCapture();
-
-    const store = createWorkboardSqliteTestStore();
-    registerWorkboardGatewayMethods({ api, store });
-
-    expect([...methods.keys()]).toEqual([
-      "workboard.cards.list",
-      "workboard.cards.create",
-      "workboard.cards.captureSession",
-      "workboard.cards.update",
-      "workboard.cards.start",
-      "workboard.cards.stop",
-      "workboard.cards.move",
-      "workboard.cards.delete",
-      "workboard.cards.comment",
-      "workboard.cards.link",
-      "workboard.cards.linkDependency",
-      "workboard.cards.proof",
-      "workboard.cards.artifact",
-      "workboard.cards.claim",
-      "workboard.cards.heartbeat",
-      "workboard.cards.release",
-      "workboard.cards.promote",
-      "workboard.cards.reassign",
-      "workboard.cards.reclaim",
-      "workboard.cards.complete",
-      "workboard.cards.block",
-      "workboard.cards.unblock",
-      "workboard.cards.bulk",
-      "workboard.cards.diagnostics",
-      "workboard.cards.diagnostics.refresh",
-      "workboard.cards.dispatch",
-      "workboard.cards.dispatchWithOptions",
-      "workboard.boards.list",
-      "workboard.boards.upsert",
-      "workboard.sessionsBoard.read",
-      "workboard.sessionsBoard.update",
-      "workboard.sessionsBoard.move",
-      "workboard.boards.archive",
-      "workboard.boards.delete",
-      "workboard.cards.stats",
-      "workboard.cards.trust",
-      "workboard.overview",
-      "workboard.cards.runs",
-      "workboard.cards.specify",
-      "workboard.cards.decompose",
-      "workboard.notifications.subscribe",
-      "workboard.notifications.list",
-      "workboard.notifications.delete",
-      "workboard.notifications.events",
-      "workboard.notifications.advance",
-      "workboard.cards.attachments.list",
-      "workboard.cards.attachments.get",
-      "workboard.cards.attachments.add",
-      "workboard.cards.attachments.delete",
-      "workboard.cards.workerLog",
-      "workboard.cards.protocolViolation",
-      "workboard.cards.archive",
-      "workboard.cards.export",
-    ]);
-    for (const [scope, names] of [
-      [
-        "operator.read",
-        [
-          "cards.list",
-          "cards.diagnostics",
-          "cards.export",
-          "cards.runs",
-          "overview",
-          "cards.attachments.get",
-          "notifications.list",
-          "notifications.events",
-        ],
-      ],
-      [
-        "operator.write",
-        [
-          "cards.diagnostics.refresh",
-          "cards.create",
-          "cards.stop",
-          "cards.attachments.add",
-          "boards.upsert",
-          "notifications.advance",
-        ],
-      ],
-    ] as const) {
-      for (const name of names) {
-        expect(methods.get(`workboard.${name}`)?.opts).toEqual({ scope });
-      }
-    }
-
-    const boardRespond = await invoke("workboard.boards.upsert", {
-      id: "planning",
-      automationJobId: "job-categorize-planning",
-    });
-    expect(boardRespond.mock.calls[0]?.[0]).toBe(true);
-    await expect(store.listBoards()).resolves.toMatchObject({
-      boards: [
-        expect.objectContaining({ id: "default" }),
-        expect.objectContaining({
-          id: "planning",
-          automationJobId: "job-categorize-planning",
-        }),
-      ],
-    });
-
-    const createHandler = methods.get("workboard.cards.create")?.handler;
-    const listHandler = methods.get("workboard.cards.list")?.handler;
-    const createRespond = vi.fn();
-    await createHandler?.({
-      params: { title: "Investigate queue drift", priority: "urgent" },
-      respond: createRespond,
-    } as never);
-    expect(createRespond.mock.calls[0]?.[0]).toBe(true);
-    expect(createRespond.mock.calls[0]?.[1]?.card).toMatchObject({
-      metadata: { automation: { workspaceAccess: { unrestricted: true } } },
-    });
-    const createdCard = createRespond.mock.calls[0]?.[1]?.card;
-    await store.move(createdCard.id, "blocked", 2000);
-    const conflictRespond = await invoke("workboard.cards.update", {
-      id: createdCard.id,
-      expectedUpdatedAt: createdCard.updatedAt,
-      patch: { title: "Stale edit" },
-    });
-    expect(conflictRespond).toHaveBeenCalledWith(
-      false,
-      undefined,
-      expect.objectContaining({
-        code: "workboard_conflict",
-        details: {
-          type: "workboard_card_conflict",
-          card: expect.objectContaining({ status: "blocked", position: 2000 }),
-        },
-      }),
-    );
-
-    const listRespond = vi.fn();
-    await listHandler?.({ params: {}, respond: listRespond } as never);
-    expect(listRespond.mock.calls[0]?.[1]).toMatchObject({
-      cards: [expect.objectContaining({ title: "Investigate queue drift" })],
-      boards: expect.arrayContaining([
-        expect.objectContaining({ id: "default", total: 1, active: 1 }),
-      ]),
-    });
-
-    const eventsRespond = await invoke("workboard.notifications.events", { advance: true });
-    expect(eventsRespond.mock.calls[0]?.[0]).toBe(false);
-    expect(eventsRespond.mock.calls[0]?.[2]?.message).toContain("workboard.notifications.advance");
-  });
 
   it("validates Sessions board RPC input and keeps card writes out of Sessions boards", async () => {
     vi.useFakeTimers();

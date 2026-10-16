@@ -14,6 +14,7 @@ import {
   WorkboardUploadsDisabledError,
   type GatewayMethodContext,
 } from "./gateway-helpers.js";
+import { listNodeTicketScreenshots, readNodeTicketScreenshot } from "./node-ticket-screenshots.js";
 import type { WorkboardSessionsBoardService } from "./sessions-board.js";
 import { resolveWorkboardSqliteWorkerModuleUrl } from "./sqlite-store-paths.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
@@ -409,6 +410,23 @@ export function registerWorkboardGatewayMethods(params: {
       throw new Error(`attachment not found: ${readId(input)}`);
     }
     return attachment;
+  });
+  const requireCard = async (id: string) => {
+    const card = await store.get(id);
+    if (!card) {
+      throw new Error(`card not found: ${id}`);
+    }
+    return card;
+  };
+  register("workboard.cards.screenshots.list", READ_SCOPE, async ({ params: input }) =>
+    listNodeTicketScreenshots(await requireCard(readId(input))),
+  );
+  register("workboard.cards.screenshots.get", READ_SCOPE, async ({ params: input }) => {
+    const { round, path } = input;
+    if (typeof round !== "number" || typeof path !== "string" || !path) {
+      throw new Error("round and path are required.");
+    }
+    return readNodeTicketScreenshot(await requireCard(readId(input)), round, path);
   });
   register("workboard.cards.attachments.add", WRITE_SCOPE, ({ params: input, client }) =>
     redactCardResult(

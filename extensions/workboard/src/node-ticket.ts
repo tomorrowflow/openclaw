@@ -38,7 +38,7 @@ import type { WorkboardAgentActor } from "./store-inputs.js";
 import type { WorkboardStore } from "./store.js";
 
 // Node output that reaches host git as a revision argument.
-const COMMIT_ID = /^[0-9a-f]{40,64}$/;
+export const COMMIT_ID = /^[0-9a-f]{40,64}$/;
 
 /** Gateway methods a node ticket needs; both run with the dispatcher's admin authority. */
 export type WorkboardNodeTicketRuntime = Pick<PluginRuntime["gateway"], "request">;
