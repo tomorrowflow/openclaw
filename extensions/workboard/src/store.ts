@@ -381,6 +381,17 @@ export class WorkboardStore extends WorkboardNodeWorktreeStore {
           ) {
             patch.status = input.targetStatus;
             metadata = { lifecycleStatusSourceUpdatedAt: input.sourceUpdatedAt };
+            // The failed run's claim fenced that run, which is over; a node
+            // ticket's claim would otherwise refuse a restart for hours. A
+            // claim taken after the failure belongs to newer work.
+            const claim = card.metadata?.claim;
+            if (
+              input.targetStatus === "blocked" &&
+              claim &&
+              claim.claimedAt <= input.sourceUpdatedAt
+            ) {
+              metadata = { ...metadata, claim: undefined };
+            }
           }
           const acceptedLaunch = input.association
             ? acceptedLaunchForAssociation(card, input.association)

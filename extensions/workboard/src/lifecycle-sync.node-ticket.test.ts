@@ -400,6 +400,82 @@ describe("Workboard node ticket lifecycle", () => {
     expect(settled?.metadata?.automation?.target?.worktree?.handoff?.phase).toBe("pending");
   });
 
+  it("releases a failed run's claim so the card restarts after a move to todo", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const nodeTickets = createNodeGateway();
+    const { card, sessionKey, runId } = await startNodeCard(store, nodeTickets);
+    // The CLI runner failed; agent_end fires while fallback may still continue.
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: false, messages: [] },
+      context: { runId, sessionKey },
+      readSessions: async () => ({
+        sessions: [{ key: sessionKey, status: "running" as const, hasActiveRun: true }],
+        complete: true,
+      }),
+    });
+    await runSessionSweep({
+      store,
+      sessions: [
+        { key: sessionKey, status: "failed", hasActiveRun: false, updatedAt: Date.now() + 1_000 },
+      ],
+    });
+    const failed = await store.get(card.id);
+    expect(failed?.status).toBe("blocked");
+    expect(failed?.metadata?.claim).toBeUndefined();
+
+    await store.move(card.id, "todo", undefined);
+    const restarted = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets,
+      options: { now: Date.now(), maxStarts: 1, cardId: card.id },
+    });
+    expect(restarted.startFailures).toEqual([]);
+    expect(restarted.started.map((run) => run.cardId)).toEqual([card.id]);
+  });
+
+  it("leaves a restarted round running when the previous run's failure is observed late", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const nodeTickets = createNodeGateway();
+    const respond = expectDefined(nodeTickets.respond.getMockImplementation(), "respond");
+    let runs = 0;
+    nodeTickets.respond.mockImplementation((method, params) => {
+      const reply = respond(method, params);
+      return method === "sessions.create" && isRecord(reply)
+        ? { ...reply, runId: `run-node-${++runs}` }
+        : reply;
+    });
+    const { card, sessionKey } = await startNodeCard(store, nodeTickets);
+    const first = expectDefined((await store.get(card.id))?.metadata?.claim, "claim");
+    await store.block(card.id, { reason: "node restarted" }, first);
+    await store.move(card.id, "ready", undefined);
+    const restarted = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets,
+      options: { now: Date.now(), maxStarts: 1, cardId: card.id },
+    });
+    expect(restarted.startFailures).toEqual([]);
+    const second = expectDefined((await store.get(card.id))?.metadata?.claim, "claim");
+
+    await runSessionSweep({
+      store,
+      sessions: [
+        {
+          key: sessionKey,
+          status: "failed",
+          hasActiveRun: false,
+          updatedAt: second.claimedAt - 1,
+        },
+      ],
+    });
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("running");
+    expect(stored?.metadata?.claim?.token).toBe(second.token);
+  });
+
   it("keeps a blocked node ticket's attempt blocked when the sweep later sees its session end", async () => {
     const store = createWorkboardSqliteTestStore();
     const { card, sessionKey, runId } = await startNodeCard(store);
