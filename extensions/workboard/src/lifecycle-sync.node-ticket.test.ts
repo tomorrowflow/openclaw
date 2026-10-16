@@ -268,6 +268,7 @@ describe("Workboard node ticket lifecycle", () => {
   ])("blocks a node ticket on $name", async ({ value, lead }) => {
     const store = createWorkboardSqliteTestStore();
     const { card, sessionKey, runId } = await startNodeCard(store);
+    const before = (await store.get(card.id))?.metadata?.comments?.length ?? 0;
 
     await syncWorkboardAgentEnded({
       store,
@@ -278,13 +279,156 @@ describe("Workboard node ticket lifecycle", () => {
 
     const stored = await store.get(card.id);
     expect(stored?.status).toBe("blocked");
-    const comment = stored?.metadata?.comments?.at(-1)?.body ?? "";
+    // The block comment leads the report; a long one continues in the comments after it.
+    const comment = stored?.metadata?.comments?.[before]?.body ?? "";
     expect(comment.startsWith(lead)).toBe(true);
     expect(comment.length).toBeLessThanOrEqual(2000);
     const attempt = stored?.metadata?.attempts?.at(-1);
     expect(attempt?.status).toBe("blocked");
     expect(attempt?.error?.length).toBeLessThanOrEqual(800);
     expect(attempt?.error?.startsWith(lead)).toBe(true);
+  });
+
+  it.each([
+    {
+      name: "a question round",
+      value: {
+        outcome: "needs_input",
+        summary: `The retry-only gap needs a call. ${"s".repeat(600)}`,
+        questions: [
+          `**Q1 – Delete the marker yourself:** ${"a".repeat(700)} ➡️ Yes; I then capture the run.`,
+          `**Q2 – Or accept the gap:** ${"b".repeat(700)} ➡️ Yes; the README documents it.`,
+        ],
+      },
+      status: "review",
+      footer:
+        "Answer in a comment, then move the card to todo; the same session resumes with the answer.",
+    },
+    {
+      name: "a blocked report",
+      value: {
+        outcome: "blocked",
+        summary: `The node lost its clone. ${"s".repeat(600)}`,
+        questions: [`Re-clone? ${"a".repeat(900)}`, `Or move nodes? ${"b".repeat(900)}`],
+      },
+      status: "blocked",
+      footer: undefined,
+    },
+    {
+      name: "a done report's summary",
+      value: {
+        outcome: "done",
+        summary: [
+          "**What:**",
+          `- ${"a".repeat(900)}`,
+          `- ${"b".repeat(900)}`,
+          `**Why:** ${"c".repeat(600)}`,
+        ].join("\n"),
+        proof: [{ command: "pytest", status: "passed" }],
+      },
+      status: "running",
+      footer: undefined,
+    },
+    {
+      name: "a run-on question",
+      value: {
+        outcome: "needs_input",
+        summary: "One long fork.",
+        questions: [`**Q1 – Pick the schema:** ${"word ".repeat(700)}➡️ Yes; keep v1.`],
+      },
+      status: "review",
+      footer:
+        "Answer in a comment, then move the card to todo; the same session resumes with the answer.",
+    },
+  ])("keeps every line of $name past one comment's limit", async ({ value, status, footer }) => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    const before = (await store.get(card.id))?.metadata?.comments?.length ?? 0;
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: true, messages: report(value) },
+      context: { runId, sessionKey },
+      readSessions: endedSession(),
+    });
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe(status);
+    const bodies = (stored?.metadata?.comments ?? []).slice(before).map((comment) => comment.body);
+    expect(bodies.length).toBeGreaterThan(1);
+    for (const body of bodies) {
+      expect(body.length).toBeLessThanOrEqual(2000);
+    }
+    // A line too long for one comment continues in the next one.
+    const text = bodies.join("").replace(/\s/g, "");
+    const lines = [...value.summary.split("\n"), ...("questions" in value ? value.questions : [])];
+    for (const line of lines) {
+      expect(text).toContain(line.replace(/\s/g, ""));
+    }
+    expect(text).not.toContain("…");
+    expect(text).not.toContain("(cut,");
+    if (footer) {
+      expect(bodies.at(-1)?.endsWith(footer)).toBe(true);
+    }
+  });
+
+  it("bounds a question round that overshoots the card's budget and says where the rest is", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    const before = (await store.get(card.id))?.metadata?.comments?.length ?? 0;
+    const questions = Array.from(
+      { length: 20 },
+      (_, index) => `**Q${index + 1}:** ${"q".repeat(1500)}`,
+    );
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: {
+        runId,
+        success: true,
+        messages: report({ outcome: "needs_input", summary: "Many forks.", questions }),
+      },
+      context: { runId, sessionKey },
+      readSessions: endedSession(),
+    });
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("review");
+    const bodies = (stored?.metadata?.comments ?? []).slice(before).map((comment) => comment.body);
+    expect(bodies).toHaveLength(3);
+    expect(bodies[0]?.startsWith("**Needs input:** Many forks.")).toBe(true);
+    expect(bodies.at(-1)).toMatch(
+      /\(cut, \d+ chars dropped; the full report is in the ticket session's final message\)\n\nAnswer in a comment, then move the card to todo; the same session resumes with the answer\.$/,
+    );
+    for (const body of bodies) {
+      expect(body.length).toBeLessThanOrEqual(2000);
+    }
+  });
+
+  it("marks a proof note cut to the store limit", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: {
+        runId,
+        success: true,
+        messages: report({
+          outcome: "done",
+          summary: "Parser accepts empty input",
+          proof: [{ command: "pytest", status: "passed", note: "n".repeat(3000) }],
+        }),
+      },
+      context: { runId, sessionKey },
+      readSessions: endedSession(),
+    });
+
+    const note = (await store.get(card.id))?.metadata?.proof?.at(-1)?.note ?? "";
+    expect(note.length).toBeLessThanOrEqual(2000);
+    expect(note).toMatch(
+      /^n+ \(cut, \d+ chars dropped; the full report is in the ticket session's final message\)$/,
+    );
   });
 
   it("needs the standards review in a rung b round's done report and records it as proof", async () => {
