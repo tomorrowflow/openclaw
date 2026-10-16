@@ -395,6 +395,17 @@ export type WorkboardNodeChangedFile = { path: string; previousPath?: string } &
   | { binary: true }
 );
 
+/** The images a node ticket round added or changed, read from its `to` commit on the host. */
+export type WorkboardScreenshotRound = {
+  round: number;
+  commit: string;
+  paths: string[];
+};
+
+export type WorkboardScreenshotListResult = { rounds: WorkboardScreenshotRound[] };
+
+export type WorkboardScreenshotResult = { mimeType: string; contentBase64: string };
+
 /** What one round's import changed, `from..to`; `files` is capped, `totals` counts every file. */
 export type WorkboardNodeChanges = {
   from: string;
