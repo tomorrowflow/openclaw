@@ -267,6 +267,32 @@ describe("Workboard gateway lifecycle sync", () => {
     );
   });
 
+  it("releases the claim of a subagent run that ended in failure", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const sessionKey = "agent:main:subagent:workboard-default-claimed-failure";
+    const card = await createLinkedCard(store, {
+      status: "ready",
+      sessionKey,
+      runId: "run-failure",
+      execution: execution(sessionKey, "run-failure"),
+    });
+    const claimed = await store.claim(card.id, { ownerId: "main" });
+
+    await syncWorkboardSubagentEnded({
+      store,
+      event: {
+        targetSessionKey: sessionKey,
+        runId: "run-failure",
+        endedAt: claimed.card.updatedAt + 1,
+        outcome: "error",
+      },
+    });
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("blocked");
+    expect(stored?.metadata?.claim).toBeUndefined();
+  });
+
   it("updates execution attempts once when duplicate failure hooks arrive", async () => {
     const store = createWorkboardSqliteTestStore();
     const sessionKey = "agent:main:subagent:workboard-default-failure";
