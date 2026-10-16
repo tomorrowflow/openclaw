@@ -1,9 +1,9 @@
 import type { WorkboardNodeDecision } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { normalizeNodeDecisions } from "./node-ticket-rounds.js";
 import {
-  MAX_BLOCK_REASON_CHARS,
   MAX_COMMENT_BODY_CHARS,
   MAX_PROOF_COMMAND_CHARS,
   MAX_PROOF_NOTE_CHARS,
@@ -15,6 +15,10 @@ export const REPORT_FENCE = "workboard-report";
 // The headline replaces the card summary shown on the board: a few sentences, not a report.
 const MAX_REPORT_HEADLINE_CHARS = 400;
 const REPORT_PATTERN = new RegExp("```" + REPORT_FENCE + "\\s*\\n([\\s\\S]*?)\\n```", "g");
+
+// One report posts at most this many comments, so a run-on report cannot evict
+// the card's other comments from its metadata budget.
+const MAX_REPORT_COMMENTS = 3;
 
 const REPORT_PROOF_STATUSES = ["passed", "failed", "skipped"] as const;
 
@@ -63,9 +67,61 @@ function lastAssistantText(messages: readonly unknown[]): string | undefined {
   return undefined;
 }
 
-// Report fields are session output; bound them to the store limits they land in.
-function optionalText(value: unknown, max: number): string | undefined {
-  return typeof value === "string" ? capText(value.trim(), max) : undefined;
+function optionalText(value: unknown): string | undefined {
+  return typeof value === "string" ? value.trim() || undefined : undefined;
+}
+
+function cutMarker(dropped: number): string {
+  return `(cut, ${dropped} chars dropped; the full report is in the ticket session's final message)`;
+}
+
+/** Report fields are session output: bounds one to the store limit it lands in, and says so. */
+export function cutReportText(text: string, max: number): string {
+  if (text.length <= max) {
+    return text;
+  }
+  const kept = truncateUtf16Safe(text, Math.max(0, max - cutMarker(text.length).length - 1));
+  return `${kept} ${cutMarker(text.length - kept.length)}`;
+}
+
+/**
+ * Splits report text into card comments of at most `max` chars, at line breaks
+ * and inside a line too long for one comment, so no text is lost to one
+ * comment's limit. Past the report's comment budget the rest is cut with a
+ * marker; the footer always ends the last comment.
+ */
+export function reportComments(
+  text: string,
+  { footer, max = MAX_COMMENT_BODY_CHARS }: { footer?: string; max?: number } = {},
+): string[] {
+  const tail = footer ? `\n\n${footer}` : "";
+  const room = max - tail.length - cutMarker(text.length).length - 2;
+  const lines = text.split("\n");
+  const bodies: string[] = [];
+  let dropped = "";
+  for (let index = 0; index < lines.length; index += 1) {
+    let line = lines[index] ?? "";
+    const last = bodies.at(-1);
+    if (last !== undefined && last.length + 1 + line.length <= room) {
+      bodies[bodies.length - 1] = `${last}\n${line}`;
+      continue;
+    }
+    while (line.trim() && bodies.length < MAX_REPORT_COMMENTS) {
+      const chunk = truncateUtf16Safe(line, room);
+      bodies.push(chunk);
+      line = line.slice(chunk.length).trimStart();
+    }
+    if (line.trim()) {
+      dropped = [line, ...lines.slice(index + 1)].join("\n").trim();
+      break;
+    }
+  }
+  const ending = [...(dropped ? [cutMarker(dropped.length)] : []), ...(footer ? [footer] : [])];
+  const trimmed = bodies.map((body) => body.trimEnd()).filter(Boolean);
+  if (ending.length === 0) {
+    return trimmed;
+  }
+  return [...trimmed.slice(0, -1), [...trimmed.slice(-1), ...ending].join("\n\n")];
 }
 
 function parseReview(value: unknown): NodeTicketReview | undefined {
@@ -74,7 +130,7 @@ function parseReview(value: unknown): NodeTicketReview | undefined {
   }
   const findings = resolveOptionalIntegerOption(value.findings, { min: 0 });
   const fixed = resolveOptionalIntegerOption(value.fixed, { min: 0 });
-  const note = optionalText(value.note, MAX_PROOF_NOTE_CHARS);
+  const note = optionalText(value.note);
   return findings === undefined || fixed === undefined
     ? undefined
     : { findings, fixed, ...(note ? { note } : {}) };
@@ -98,7 +154,7 @@ export function parseNodeTicketReport(
   if (!isRecord(value)) {
     return { ok: false, reason: "The ticket session's workboard-report block is not an object." };
   }
-  const summary = optionalText(value.summary, MAX_COMMENT_BODY_CHARS) ?? "";
+  const summary = optionalText(value.summary) ?? "";
   const decisions = normalizeNodeDecisions(value.decisions);
   if (value.outcome === "done") {
     const proof = (Array.isArray(value.proof) ? value.proof : []).flatMap(
@@ -109,13 +165,19 @@ export function parseNodeTicketReport(
         if (!isRecord(entry) || !status) {
           return [];
         }
-        const command = optionalText(entry.command, MAX_PROOF_COMMAND_CHARS);
-        const note = optionalText(entry.note, MAX_PROOF_NOTE_CHARS);
-        return [{ status, ...(command ? { command } : {}), ...(note ? { note } : {}) }];
+        const command = optionalText(entry.command);
+        const note = optionalText(entry.note);
+        return [
+          {
+            status,
+            ...(command ? { command: cutReportText(command, MAX_PROOF_COMMAND_CHARS) } : {}),
+            ...(note ? { note: cutReportText(note, MAX_PROOF_NOTE_CHARS) } : {}),
+          },
+        ];
       },
     );
     const review = parseReview(value.review);
-    const headline = optionalText(value.headline, MAX_REPORT_HEADLINE_CHARS);
+    const headline = capText(optionalText(value.headline), MAX_REPORT_HEADLINE_CHARS);
     return {
       ok: true,
       report: {
@@ -130,7 +192,7 @@ export function parseNodeTicketReport(
   }
   if (value.outcome === "blocked" || value.outcome === "needs_input") {
     const questions = (Array.isArray(value.questions) ? value.questions : []).flatMap((entry) => {
-      const question = optionalText(entry, MAX_BLOCK_REASON_CHARS);
+      const question = optionalText(entry);
       return question ? [question] : [];
     });
     return { ok: true, report: { outcome: value.outcome, summary, questions, decisions } };
