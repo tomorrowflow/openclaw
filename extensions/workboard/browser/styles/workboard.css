@@ -3067,6 +3067,7 @@
   min-width: 0;
 }
 .workboard-detail__activity-panel,
+.workboard-detail__changes,
 .workboard-detail__screenshots,
 .workboard-detail__session-panel,
 .workboard-detail__technical {
@@ -3725,7 +3726,8 @@ workboard-inline-text {
 }
 
 /* A node ticket round: what its import changed and what its session decided. */
-.workboard-round h4 {
+.workboard-round h4,
+.workboard-detail__changes .workboard-round h3 {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -3789,6 +3791,98 @@ workboard-inline-text {
 
 .workboard-round__bar-deleted {
   background: var(--danger);
+}
+
+/* A changed file opens to its diff; the summary keeps the round's file row grid. */
+/* Long diff lines scroll inside the diff; no grid item may widen to fit them. */
+.workboard-detail__changes > .workboard-round,
+.workboard-detail__changes .workboard-round__files li,
+.workboard-change {
+  min-width: 0;
+}
+
+.workboard-detail__changes .workboard-round__files li {
+  display: block;
+}
+
+.workboard-change summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 56px 20px;
+  align-items: center;
+  gap: 2px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.workboard-change summary::-webkit-details-marker {
+  display: none;
+}
+
+.workboard-change[open] summary code {
+  font-weight: 600;
+}
+
+.workboard-change__github,
+.workboard-change__compare {
+  color: var(--accent);
+}
+
+.workboard-change__github {
+  display: inline-flex;
+  justify-content: center;
+}
+
+.workboard-change__github svg {
+  width: 14px;
+  height: 14px;
+}
+
+.workboard-change__compare {
+  margin-left: auto;
+  font-size: 0.78rem;
+  font-weight: 400;
+  text-decoration: none;
+}
+
+.workboard-change__compare:hover {
+  text-decoration: underline;
+}
+
+.workboard-change__diff {
+  max-block-size: 480px;
+  margin: 6px 0 4px;
+  padding: 8px 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.workboard-change__diff > span {
+  display: block;
+  min-inline-size: max-content;
+  padding: 0 8px;
+  white-space: pre;
+}
+
+.workboard-change__added {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+
+.workboard-change__deleted {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.workboard-change__hunk {
+  color: var(--muted);
+}
+
+.workboard-change__note {
+  margin: 4px 0;
+  color: var(--muted);
+  font-size: 0.74rem;
 }
 
 .workboard-round__renamed,

@@ -179,24 +179,29 @@ describe("redactOperatorCard", () => {
     expect(redactOperatorCard(nodeCard("review", { handoff: imported }))).not.toHaveProperty(
       "pullRequestUrl",
     );
+    const pullRequest = (card: WorkboardCard) => {
+      const { pullRequestUrl: url, publishedRound } = redactOperatorCard(card);
+      return { url, publishedRound };
+    };
     expect(
-      redactOperatorCard(
+      pullRequest(
         nodeCard("done", {
           handoff: { ...imported, phase: "published", publishedAt: 20, pullRequestUrl },
         }),
-      ).pullRequestUrl,
-    ).toBe(pullRequestUrl);
+      ),
+    ).toEqual({ url: pullRequestUrl, publishedRound: 0 });
+    // A running rework round builds on the round before it, which is on the PR branch.
     expect(
-      redactOperatorCard(
+      pullRequest(
         nodeCard("running", {
           rework: { round: 1, pullRequestUrl, acceptedAt: 20, outsideCommits: 0 },
         }),
-      ).pullRequestUrl,
-    ).toBe(pullRequestUrl);
+      ),
+    ).toEqual({ url: pullRequestUrl, publishedRound: 0 });
     // The old PR was closed, so the rework round's publish opened a new one.
     const reopenedUrl = "https://github.com/acme/app/pull/97";
     expect(
-      redactOperatorCard(
+      pullRequest(
         nodeCard("done", {
           handoff: {
             ...imported,
@@ -206,8 +211,8 @@ describe("redactOperatorCard", () => {
           },
           rework: { round: 1, pullRequestUrl, acceptedAt: 20, outsideCommits: 0 },
         }),
-      ).pullRequestUrl,
-    ).toBe(reopenedUrl);
+      ),
+    ).toEqual({ url: reopenedUrl, publishedRound: 1 });
   });
 
   it("shows the real verdict once the round is decided, and leaves a verdict from before the import", () => {
