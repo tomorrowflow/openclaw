@@ -193,6 +193,21 @@ describe("redactOperatorCard", () => {
         }),
       ).pullRequestUrl,
     ).toBe(pullRequestUrl);
+    // The old PR was closed, so the rework round's publish opened a new one.
+    const reopenedUrl = "https://github.com/acme/app/pull/97";
+    expect(
+      redactOperatorCard(
+        nodeCard("done", {
+          handoff: {
+            ...imported,
+            phase: "published",
+            publishedAt: 30,
+            pullRequestUrl: reopenedUrl,
+          },
+          rework: { round: 1, pullRequestUrl, acceptedAt: 20, outsideCommits: 0 },
+        }),
+      ).pullRequestUrl,
+    ).toBe(reopenedUrl);
   });
 
   it("shows the real verdict once the round is decided, and leaves a verdict from before the import", () => {
