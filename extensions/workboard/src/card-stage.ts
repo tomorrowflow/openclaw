@@ -12,6 +12,28 @@ function since(at: number | undefined): { since?: number } {
   return at === undefined ? {} : { since: at };
 }
 
+function nodeClaudeTarget(card: WorkboardCard) {
+  // Not nodeTicketTarget: importing node-ticket.ts would pull this module into
+  // the store's import cycle.
+  const target = card.metadata?.automation?.target;
+  return target?.kind === "node-claude" ? target : undefined;
+}
+
+/**
+ * A node ticket's draft PR, from its first publish on: the published round's
+ * PR, else the PR a rework round builds on. A publish can open a new PR when
+ * the old one was closed, so the published URL wins over the rework record.
+ */
+export function workboardCardPullRequestUrl(card: WorkboardCard): string | undefined {
+  if (card.metadata?.archivedAt) {
+    return undefined;
+  }
+  const worktree = nodeClaudeTarget(card)?.worktree;
+  return worktree?.handoff?.phase === "published"
+    ? worktree.handoff.pullRequestUrl
+    : worktree?.rework?.pullRequestUrl;
+}
+
 /**
  * The stage an operator sees for a card, from its status, its queued start,
  * and its node ticket handoff. Pure, so list reads and the board overview
@@ -22,10 +44,7 @@ export function workboardCardStage(card: WorkboardCard): WorkboardCardStage | un
   if (card.metadata?.archivedAt) {
     return undefined;
   }
-  // Not nodeTicketTarget: importing node-ticket.ts would pull this module into
-  // the store's import cycle.
-  const automationTarget = card.metadata?.automation?.target;
-  const target = automationTarget?.kind === "node-claude" ? automationTarget : undefined;
+  const target = nodeClaudeTarget(card);
   const worktree = target?.worktree;
   const handoff = worktree?.handoff;
   const startRequest = card.metadata?.automation?.startRequest;

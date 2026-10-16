@@ -3,7 +3,7 @@ import type {
   WorkboardComment,
   WorkboardOperatorCard,
 } from "@openclaw/workboard-contract";
-import { workboardCardStage } from "./card-stage.js";
+import { workboardCardPullRequestUrl, workboardCardStage } from "./card-stage.js";
 import { nodeTicketTarget, reviewVerdictOf } from "./node-ticket.js";
 import type { WorkboardDispatchResult } from "./store-inputs.js";
 
@@ -41,8 +41,14 @@ export function redactClaimToken(card: WorkboardCard): WorkboardCard {
 export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
   const stage = workboardCardStage(card);
   const rounds = nodeTicketTarget(card)?.worktree?.rounds;
+  const pullRequestUrl = workboardCardPullRequestUrl(card);
   const redacted = hidePendingVerdicts(redactClaimToken(card), card);
-  return { ...redacted, ...(stage ? { stage } : {}), ...(rounds ? { rounds } : {}) };
+  return {
+    ...redacted,
+    ...(stage ? { stage } : {}),
+    ...(rounds ? { rounds } : {}),
+    ...(pullRequestUrl ? { pullRequestUrl } : {}),
+  };
 }
 
 function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): WorkboardCard {

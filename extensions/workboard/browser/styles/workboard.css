@@ -2248,6 +2248,27 @@
   color: var(--warn);
 }
 
+.workboard-card__pull-request {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: start;
+  width: fit-content;
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1.4;
+  text-decoration: none;
+}
+
+.workboard-card__pull-request:hover {
+  text-decoration: underline;
+}
+
+.workboard-card__pull-request svg {
+  width: 14px;
+  height: 14px;
+}
+
 .workboard-detail__summary {
   display: grid;
   gap: 8px;

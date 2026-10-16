@@ -104,6 +104,28 @@ function stageText(stage: WorkboardCardStage): string {
   return t(STAGE_LABEL_KEYS[stage.kind]);
 }
 
+/** The node ticket's draft PR, named by its number when the URL carries one. */
+export function renderCardPullRequest(card: WorkboardCard) {
+  const url = card.pullRequestUrl;
+  if (!url) {
+    return nothing;
+  }
+  const number = url.match(/\/pull\/(\d+)\/?$/)?.[1];
+  return html`<a
+    class="workboard-card__pull-request"
+    href=${url}
+    target="_blank"
+    rel="noopener noreferrer"
+    title=${url}
+    draggable="false"
+    >${icons.gitPullRequest}<span
+      >${
+        number ? t("workboard.cardPullRequest", { number }) : t("workboard.overviewPullRequest")
+      }</span
+    ></a
+  >`;
+}
+
 /** One line on where the card stands, so the operator need not read its activity. */
 export function renderCardStage(stage: WorkboardCardStage | undefined, now: number) {
   if (!stage) {

@@ -1,8 +1,9 @@
 import "../../test/dom.setup.ts";
 import { render } from "lit";
 import { afterEach, expect, it, vi } from "vitest";
+import { normalizeCardsPayload } from "../../lib/workboard/normalization.ts";
 import { createWorkboardCard } from "../../lib/workboard/test/index-helpers.ts";
-import { renderCardMeta } from "./view-card-content.ts";
+import { renderCardMeta, renderCardPullRequest } from "./view-card-content.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -94,4 +95,25 @@ it("shows a queued card's chip in the tile meta, which is visible without hover"
 
   expect(meta()).toBeNull();
   expect(meta({ requestedAt: 1 })?.textContent?.trim()).toBe("Queued");
+});
+
+it("links a card's draft PR by its number, and renders nothing before a PR exists", () => {
+  const container = document.createElement("div");
+  // Through the board's own normalization, which every card read passes.
+  const pullRequestLink = (pullRequestUrl?: string) => {
+    const [card] = normalizeCardsPayload({
+      cards: [{ ...createWorkboardCard(), ...(pullRequestUrl ? { pullRequestUrl } : {}) }],
+    }).cards;
+    render(renderCardPullRequest(card!), container);
+    return container.querySelector<HTMLAnchorElement>("a.workboard-card__pull-request");
+  };
+  expect(pullRequestLink()).toBeNull();
+  expect(pullRequestLink("javascript:alert(1)")).toBeNull();
+  expect(pullRequestLink("http://github.com/acme/app/pull/96")).toBeNull();
+
+  const url = "https://github.com/acme/app/pull/96";
+  const link = pullRequestLink(url)!;
+  expect(link.href).toBe(url);
+  expect(link.target).toBe("_blank");
+  expect(link.textContent?.trim()).toBe("PR #96");
 });

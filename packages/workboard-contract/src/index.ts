@@ -664,6 +664,8 @@ export type WorkboardCardStage =
 export type WorkboardOperatorCard = WorkboardCard & {
   stage?: WorkboardCardStage;
   rounds?: WorkboardNodeRound[];
+  /** A node ticket's draft PR, from its publish on; kept while rework rounds run. */
+  pullRequestUrl?: string;
 };
 
 export type WorkboardListResult = {

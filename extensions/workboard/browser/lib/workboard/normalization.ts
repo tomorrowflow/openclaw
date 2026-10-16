@@ -183,6 +183,9 @@ function normalizeCard(value: unknown): WorkboardCard | null {
     ...(metadata ? { metadata } : {}),
     ...(stage ? { stage } : {}),
     ...(rounds.length > 0 ? { rounds } : {}),
+    ...(typeof value.pullRequestUrl === "string" && value.pullRequestUrl.startsWith("https://")
+      ? { pullRequestUrl: value.pullRequestUrl }
+      : {}),
   };
 }
 

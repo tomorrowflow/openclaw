@@ -28,6 +28,7 @@ import {
 } from "./view-card-actions.ts";
 import {
   renderCardAlert,
+  renderCardPullRequest,
   renderCardStage,
   renderCardUpdatedTime,
   renderCardPriority,
@@ -347,7 +348,7 @@ function renderCard(props: WorkboardProps, card: WorkboardCard, surface: Workboa
                     </div>`
                   : nothing
               }
-              ${renderCardStage(card.stage, now)}
+              ${renderCardStage(card.stage, now)} ${renderCardPullRequest(card)}
               ${renderCardSession(props, card, lifecycle, sessionStatus)}
               ${renderCardMeta(card, archived)} ${renderCardAlert(alerts, alertDescriptionId)}
               ${renderCardCounts(card)}
