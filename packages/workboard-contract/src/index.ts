@@ -677,7 +677,12 @@ export type WorkboardOperatorCard = WorkboardCard & {
   rounds?: WorkboardNodeRound[];
   /** A node ticket's draft PR, from its publish on; kept while rework rounds run. */
   pullRequestUrl?: string;
+  /** The newest round pushed to `pullRequestUrl`'s branch; it and earlier rounds are on GitHub. */
+  publishedRound?: number;
 };
+
+/** One file's diff in one node ticket round, read from the host clone. */
+export type WorkboardChangeDiffResult = { diff: string; truncated: boolean };
 
 export type WorkboardListResult = {
   cards: WorkboardCard[];

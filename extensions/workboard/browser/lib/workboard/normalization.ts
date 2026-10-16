@@ -186,6 +186,9 @@ function normalizeCard(value: unknown): WorkboardCard | null {
     ...(typeof value.pullRequestUrl === "string" && value.pullRequestUrl.startsWith("https://")
       ? { pullRequestUrl: value.pullRequestUrl }
       : {}),
+    ...(typeof value.publishedRound === "number" && Number.isInteger(value.publishedRound)
+      ? { publishedRound: value.publishedRound }
+      : {}),
   };
 }
 

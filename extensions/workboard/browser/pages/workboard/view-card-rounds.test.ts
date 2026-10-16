@@ -11,7 +11,7 @@ import {
 import { workboardTestHost } from "../../test/host.setup.ts";
 import { renderCardDetailsPanel } from "./view-card-details.ts";
 
-it("shows each round's changed files and decisions in the activity tab, newest round first", () => {
+it("shows each round's decisions in the activity tab, newest round first, without its files", () => {
   const changes = (path: string, added: number, deleted: number) => ({
     from: "a".repeat(40),
     to: "b".repeat(40),
@@ -88,12 +88,7 @@ it("shows each round's changed files and decisions in the activity tab, newest r
     "First run",
   ]);
   const [rework] = rounds;
-  expect(text(rework?.querySelector(".workboard-round__totals"))).toBe("4 files, +5 −4");
-  expect([...(rework?.querySelectorAll(".workboard-round__files li") ?? [])].map(text)).toEqual([
-    "flags.py +4 −4",
-    "assets/logo.png binary",
-    "src/new.ts +1 −0 from src/old.ts",
-  ]);
+  expect(container.querySelector(".workboard-round__files")).toBeNull();
   expect([...(rework?.querySelectorAll(".workboard-round__decisions li") ?? [])].map(text)).toEqual(
     ["fix Rename the flag to --strict review asked for it flags.py:1 done 10:02"],
   );

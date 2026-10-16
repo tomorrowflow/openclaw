@@ -37,6 +37,7 @@ import {
   renderBoardModal,
   type BoardDraft,
 } from "./view-board-modal.ts";
+import { createCardChanges, type CardChanges } from "./view-card-changes.ts";
 import { getVisibleDetailCard, openCardDetails } from "./view-card-details.ts";
 import { createCardScreenshots, type CardScreenshots } from "./view-card-screenshots.ts";
 import {
@@ -78,6 +79,7 @@ export function createWorkboardPage(
     const automations = new Map<string, BoardAutomationState>();
     let trust: BoardTrustState | undefined;
     let screenshots: CardScreenshots | undefined;
+    let changes: CardChanges | undefined;
     let queued = false;
     let connected = false;
     let refreshActive = false;
@@ -152,6 +154,8 @@ export function createWorkboardPage(
       connected = nextConnected;
       screenshots?.dispose();
       screenshots = connected ? createCardScreenshots(client, requestUpdate) : undefined;
+      changes?.dispose();
+      changes = connected ? createCardChanges(client, requestUpdate) : undefined;
       metadataGeneration += 1;
       metadataLoad = null;
       if (connected) {
@@ -414,6 +418,7 @@ export function createWorkboardPage(
             presented: context.presented,
             detailBoardAutomation: detailJobId ? automations.get(detailJobId) : undefined,
             detailScreenshots: screenshots,
+            detailChanges: changes,
             host: workboard,
             client: connected ? client : null,
             connected,
@@ -432,6 +437,7 @@ export function createWorkboardPage(
               automations.clear();
               trust = undefined;
               screenshots?.refresh();
+              changes?.refresh();
               void refreshMetadata();
               sessionResolver.refresh();
               void refreshWorkboard({
@@ -544,6 +550,7 @@ export function createWorkboardPage(
         sessionsBoard.dispose();
         sessionResolver.dispose();
         screenshots?.dispose();
+        changes?.dispose();
         document.removeEventListener("visibilitychange", onVisibilityChange);
         stop();
         render(nothing, container);

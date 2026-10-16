@@ -14,6 +14,7 @@ import {
   WorkboardUploadsDisabledError,
   type GatewayMethodContext,
 } from "./gateway-helpers.js";
+import { readNodeTicketChangeDiff } from "./node-ticket-changes.js";
 import { listNodeTicketScreenshots, readNodeTicketScreenshot } from "./node-ticket-screenshots.js";
 import type { WorkboardSessionsBoardService } from "./sessions-board.js";
 import { resolveWorkboardSqliteWorkerModuleUrl } from "./sqlite-store-paths.js";
@@ -421,6 +422,13 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.screenshots.list", READ_SCOPE, async ({ params: input }) =>
     listNodeTicketScreenshots(await requireCard(readId(input))),
   );
+  register("workboard.cards.changes.diff", READ_SCOPE, async ({ params: input }) => {
+    const { round, path } = input;
+    if (typeof round !== "number" || typeof path !== "string" || !path) {
+      throw new Error("round and path are required.");
+    }
+    return readNodeTicketChangeDiff(await requireCard(readId(input)), round, path);
+  });
   register("workboard.cards.screenshots.get", READ_SCOPE, async ({ params: input }) => {
     const { round, path } = input;
     if (typeof round !== "number" || typeof path !== "string" || !path) {

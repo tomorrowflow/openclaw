@@ -34,6 +34,7 @@ import {
   renderStartExecutionButton,
   renderStopCardAction,
 } from "./view-card-actions.ts";
+import { hasCardChanges, renderChangesPanel } from "./view-card-changes.ts";
 import { renderCardPullRequest, renderCardStage } from "./view-card-content.ts";
 import {
   type DetailNavigation,
@@ -218,6 +219,9 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
   const tabs = [
     { id: "overview", label: t("workboard.detailTabOverview") },
     { id: "activity", label: t("workboard.detailTabActivity") },
+    ...(props.detailChanges && hasCardChanges(card)
+      ? [{ id: "changes", label: t("workboard.detailTabChanges") } as const]
+      : []),
     ...(screenshots
       ? [{ id: "screenshots", label: t("workboard.detailTabScreenshots") } as const]
       : []),
@@ -630,6 +634,11 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
                 }
               </section>
             </section>
+            ${
+              props.detailChanges && hasCardChanges(card)
+                ? renderChangesPanel(props.detailChanges, card, activeTab === "changes")
+                : nothing
+            }
             ${
               props.detailScreenshots && screenshots
                 ? renderScreenshotsPanel(

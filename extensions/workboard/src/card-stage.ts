@@ -23,15 +23,23 @@ function nodeClaudeTarget(card: WorkboardCard) {
  * A node ticket's draft PR, from its first publish on: the published round's
  * PR, else the PR a rework round builds on. A publish can open a new PR when
  * the old one was closed, so the published URL wins over the rework record.
+ * `publishedRound` is the newest round on the PR branch: the current round
+ * once published, else the round before a rework, which only starts from a
+ * publish.
  */
-export function workboardCardPullRequestUrl(card: WorkboardCard): string | undefined {
+export function workboardCardPullRequest(
+  card: WorkboardCard,
+): { url: string; publishedRound: number } | undefined {
   if (card.metadata?.archivedAt) {
     return undefined;
   }
   const worktree = nodeClaudeTarget(card)?.worktree;
-  return worktree?.handoff?.phase === "published"
-    ? worktree.handoff.pullRequestUrl
-    : worktree?.rework?.pullRequestUrl;
+  if (worktree?.handoff?.phase === "published") {
+    return { url: worktree.handoff.pullRequestUrl, publishedRound: worktree.rework?.round ?? 0 };
+  }
+  return worktree?.rework
+    ? { url: worktree.rework.pullRequestUrl, publishedRound: worktree.rework.round - 1 }
+    : undefined;
 }
 
 /**
