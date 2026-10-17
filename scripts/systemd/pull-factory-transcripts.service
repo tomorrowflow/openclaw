@@ -1,0 +1,8 @@
+[Unit]
+Description=Pull factory node Claude transcripts into ~/factory-transcripts
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Assumes the Gateway host checkout at ~/openclaw, like sync-and-deploy.sh.
+ExecStart=%h/openclaw/scripts/pull-factory-transcripts.sh
