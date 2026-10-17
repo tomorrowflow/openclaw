@@ -1,0 +1,8 @@
+[Unit]
+Description=Build the agentplay factory digest for the dev agent's gardener
+After=pull-factory-transcripts.service
+
+[Service]
+Type=oneshot
+# Assumes the Gateway host checkout at ~/openclaw, like sync-and-deploy.sh.
+ExecStart=%h/openclaw/scripts/factory-digest.sh
