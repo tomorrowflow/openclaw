@@ -1,0 +1,9 @@
+[Unit]
+Description=Build the factory digest nightly, after the 02:30 pull and before the 03:30 gardener
+
+[Timer]
+OnCalendar=*-*-* 03:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
