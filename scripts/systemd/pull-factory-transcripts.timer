@@ -1,0 +1,9 @@
+[Unit]
+Description=Pull factory transcripts nightly, before the 03:30 gardener
+
+[Timer]
+OnCalendar=*-*-* 02:30
+Persistent=true
+
+[Install]
+WantedBy=timers.target
