@@ -378,4 +378,77 @@ describe("Workboard rung b", () => {
       expect.objectContaining({ taskClass: "docs", rung: "b", accepted: 2, agentAccepts: 1 }),
     ]);
   });
+
+  it("marks the draft PR an earlier round opened ready when an agent accepts, an operator's stays a draft", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "workboard-rung-b-"));
+    roots.push(root);
+    const repos = createNodeRepos(root);
+    git(repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
+    const github = createFakeGitHub(repos.origin);
+    github.tokens.set("acme/app", "token-app");
+    const store = createWorkboardSqliteTestStore();
+    // A rework verdict published an earlier round as a draft; this round reuses that PR.
+    const publishOnDraft = async (
+      pullRequestUrl: string,
+      decide: (card: WorkboardCard) => Promise<unknown>,
+    ) => {
+      github.openPulls.splice(0, github.openPulls.length, pullRequestUrl);
+      github.draftPulls.add(pullRequestUrl);
+      const head = git(repos.hostRepo, "rev-parse", "HEAD");
+      const card = await importedDocsTicket(store, {
+        classRungs: { docs: { rung: "b", sampleEvery: 1 } },
+        target: { ...NODE_TARGET, hostRepoPath: repos.hostRepo },
+        headCommit: head,
+      });
+      git(repos.hostRepo, "branch", `factory/${card.id}`, head);
+      await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
+      await decide(card);
+      const item = expectDefined(
+        publishCandidate(expectDefined(await store.get(card.id), "card")),
+        "publish candidate",
+      );
+      await publishNodeTicket({ store, github: github.access, item, now: Date.now });
+      return expectDefined(await store.get(card.id), "card");
+    };
+
+    const agentPull = "https://github.com/acme/app/pull/102";
+    const accepted = await publishOnDraft(
+      agentPull,
+      async (card) =>
+        await agentTools(store)("workboard_move").execute("accept", {
+          id: card.id,
+          status: "done",
+        }),
+    );
+    expect(github.draftPulls.has(agentPull)).toBe(false);
+    expect(nodeTicketTarget(accepted)?.worktree?.handoff).toMatchObject({ phase: "published" });
+
+    const operatorPull = "https://github.com/acme/app/pull/103";
+    await publishOnDraft(
+      operatorPull,
+      async (card) => await store.move(card.id, "done", undefined),
+    );
+    expect(github.draftPulls.has(operatorPull)).toBe(true);
+    expect(github.requests.filter((request) => request.url.endsWith("/graphql"))).toHaveLength(1);
+
+    // GitHub refusing the ready mark leaves the agent's accept published, with a notice.
+    github.failReady.value = true;
+    const refusedPull = "https://github.com/acme/app/pull/104";
+    const refused = await publishOnDraft(
+      refusedPull,
+      async (card) =>
+        await agentTools(store)("workboard_move").execute("accept", {
+          id: card.id,
+          status: "done",
+        }),
+    );
+    expect(github.draftPulls.has(refusedPull)).toBe(true);
+    expect(refused.status).toBe("done");
+    expect(nodeTicketTarget(refused)?.worktree?.reviews).toEqual([
+      expect.objectContaining({ verdict: "accept", decidedBy: "agent", sampled: true }),
+    ]);
+    expect(refused.metadata?.comments?.at(-1)?.body).toContain(
+      `${refusedPull}, but that PR is still a draft`,
+    );
+  });
 });

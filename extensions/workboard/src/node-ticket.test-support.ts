@@ -200,7 +200,10 @@ export function settledSession(key: string) {
 export function createFakeGitHub(remote: string) {
   const tokens = new Map<string, string>();
   const openPulls: string[] = [];
+  // Open PRs still in draft; the GraphQL ready mutation removes one by its node id.
+  const draftPulls = new Set<string>();
   const failComments = { value: false };
+  const failReady = { value: false };
   const requests: Array<{ method: string; url: string; auth?: string; body?: unknown }> = [];
   const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
@@ -210,8 +213,29 @@ export function createFakeGitHub(remote: string) {
     if (url.endsWith("/comments") && failComments.value) {
       return new Response(JSON.stringify({ message: "Resource not accessible" }), { status: 403 });
     }
+    if (url.endsWith("/graphql")) {
+      const ready = failReady.value
+        ? undefined
+        : openPulls.find((html_url) => `PR_${html_url}` === body?.variables?.id);
+      if (ready) {
+        draftPulls.delete(ready);
+      }
+      return new Response(
+        JSON.stringify(
+          ready
+            ? { data: { markPullRequestReadyForReview: { pullRequest: { isDraft: false } } } }
+            : { errors: [{ message: "Could not resolve to a node" }] },
+        ),
+        { status: 200 },
+      );
+    }
     const reply = url.includes("/pulls?")
-      ? openPulls.map((html_url) => ({ html_url, number: Number(html_url.split("/").at(-1)) }))
+      ? openPulls.map((html_url) => ({
+          html_url,
+          number: Number(html_url.split("/").at(-1)),
+          node_id: `PR_${html_url}`,
+          draft: draftPulls.has(html_url),
+        }))
       : method === "POST"
         ? { html_url: "https://github.com/acme/app/pull/7" }
         : { default_branch: "main" };
@@ -220,7 +244,9 @@ export function createFakeGitHub(remote: string) {
   return {
     tokens,
     openPulls,
+    draftPulls,
     failComments,
+    failReady,
     requests,
     access: {
       token: (repo: string) => tokens.get(repo),

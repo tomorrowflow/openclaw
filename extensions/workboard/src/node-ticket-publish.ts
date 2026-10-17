@@ -173,11 +173,36 @@ function htmlUrl(value: unknown): string | undefined {
   return isRecord(value) && typeof value.html_url === "string" ? value.html_url : undefined;
 }
 
-/** The PR the branch was pushed to; `reused` carries what commenting on an already open one needs. */
+/**
+ * The PR the branch was pushed to; `reused` carries what commenting on an
+ * already open one needs, and `draftId` its GraphQL id while it is a draft.
+ */
 type DraftPullRequest = {
   url: string;
-  reused?: { repo: string; token: string; number: number };
+  reused?: { repo: string; token: string; number: number; draftId?: string };
 };
+
+/**
+ * REST cannot take a PR out of draft; only the GraphQL mutation can. GraphQL
+ * answers 200 with `errors` on failure, so they are checked here.
+ */
+async function markReadyForReview(
+  access: WorkboardGitHubAccess,
+  token: string,
+  pullRequestId: string,
+): Promise<void> {
+  const reply = await githubApi(access, token, "POST", "/graphql", {
+    query:
+      "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { pullRequest { isDraft } } }",
+    variables: { id: pullRequestId },
+  });
+  const errors = isRecord(reply) && Array.isArray(reply.errors) ? reply.errors : [];
+  if (errors.length > 0) {
+    throw new Error(
+      `GitHub could not mark the PR ready for review: ${JSON.stringify(errors[0]).slice(0, 300)}`,
+    );
+  }
+}
 
 /**
  * Pushes the imported commit and returns the open PR for it, creating one
@@ -240,9 +265,15 @@ async function pushAndOpenDraft(
   const existing = htmlUrl(first);
   if (existing) {
     const number = isRecord(first) ? first.number : undefined;
+    const draftId =
+      isRecord(first) && first.draft === true && typeof first.node_id === "string"
+        ? first.node_id
+        : undefined;
     return {
       url: existing,
-      ...(typeof number === "number" ? { reused: { repo, token, number } } : {}),
+      ...(typeof number === "number"
+        ? { reused: { repo, token, number, ...(draftId ? { draftId } : {}) } }
+        : {}),
     };
   }
   const repository = await githubApi(access, token, "GET", `/repos/${repo}`);
@@ -378,6 +409,24 @@ export async function publishNodeTicket(params: {
   // Posting after the published record keeps it to one comment per round: a
   // published handoff is never a publish candidate again.
   const { reused } = pullRequest;
+  // An agent's accept after its own rework reuses the draft that round opened.
+  // Marking it ready after the published record keeps a GitHub failure from
+  // blocking the card, whose operator retry would replace the agent's decision.
+  if (reused?.draftId && item.sampled !== undefined) {
+    try {
+      await markReadyForReview(params.github, reused.token, reused.draftId);
+    } catch (error) {
+      await store.addNodeTicketNotice(
+        card.id,
+        {
+          worktreePath: item.worktreePath,
+          body: `The accepted round was pushed to ${pullRequestUrl}, but that PR is still a draft: ${formatErrorMessage(error)}. Mark it ready for review on GitHub.`,
+          applies: () => true,
+        },
+        scope,
+      );
+    }
+  }
   if (!item.rework || !reused) {
     return;
   }
