@@ -225,6 +225,9 @@ describe("node ticket grilling handoff", () => {
     );
     expect(params?.message).toContain(HANDOFF);
     expect(params?.message).toContain("Interview the operator one question at a time");
+    expect(params?.message).toMatch(
+      /The repository is checked out at `[^`]+`; the ticket's own commits are on branch `[^`]+` on the node/,
+    );
     expect(params?.message).toContain("Do not build anything");
     expect(params?.message).toContain("Call `workboard_grill_done`");
 

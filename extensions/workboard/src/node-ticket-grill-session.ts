@@ -18,8 +18,14 @@ import type { WorkboardStore } from "./store.js";
 const GRILL_HISTORY_LIMIT = 20;
 
 function grillSessionMessage(card: WorkboardCard, handoff: string): string {
+  const target = nodeTicketTarget(card);
   return [
     `Grill the operator on this Workboard ticket: ${card.title} (card \`${card.id}\`)`,
+    ...(target?.hostRepoPath
+      ? [
+          `The repository is checked out at \`${target.hostRepoPath}\`; the ticket's own commits are on branch \`${target.worktree?.branch ?? "its ticket branch"}\` on the node, not in this checkout.`,
+        ]
+      : []),
     "",
     "The ticket's session researched it and handed the grilling off to this session. Its handoff:",
     "",
