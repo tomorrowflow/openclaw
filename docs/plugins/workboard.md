@@ -722,6 +722,9 @@ report, address the findings, and report them (see **Report** below).
    what to build (specification, scope, domain terms), the session ends a
    turn with `{"outcome": "grill", "question": "…", "summary": "…"}`: its
    first question with its recommended answer, and what is settled so far.
+   The session writes both as the readable text of that reply too, and asks
+   every later question as a plain chat reply without a report block, so
+   the session chat reads as a conversation.
    The session decides when to grill; no card setting turns it on. The
    question is appended to the card's `grilling.md` attachment (one log per
    card, rewritten in place and capped at 256 KiB: an entry that would pass
