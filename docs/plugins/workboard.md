@@ -315,6 +315,7 @@ that stage:
 | `queued`          | A [queued start](#queued-starts) waits for a node ticket slot.             | `since`                                     |
 | `running`         | The card is `running`.                                                     | `since`, `nodeId`, `reworkRound`, `attempt` |
 | `questions`       | A node ticket waits with open questions; `escalatedAt` once passed to you. | `since`, `escalatedAt`                      |
+| `grilling`        | A node ticket waits on your answer to its grilling question `round`.       | `since`, `round`                            |
 | `awaiting_review` | A node ticket's branch is imported and waits for the operator's decision.  | `since`                                     |
 | `published`       | A node ticket's draft PR is open.                                          | `since`, `pullRequestUrl`, `reworkRound`    |
 | `blocked`         | The card is `blocked`.                                                     | `since`                                     |
@@ -668,7 +669,8 @@ report, address the findings, and report them (see **Report** below).
    replaces the card's [summary](#card-fields) in the same write; the longer
    `summary` is posted as a comment. A report without a headline leaves the
    summary unchanged. A `needs_input` report waits for an answer (see
-   **Questions**). Anything else blocks the card,
+   **Questions**), and a `grill` report waits for yours (see **Grilling**).
+   Anything else blocks the card,
    including a `done` report with any `failed` proof entry. The brief tells the
    session to record red-first evidence (a test that failed before the fix) in
    the note of its passing entry. A rung b round's report also carries
@@ -715,6 +717,36 @@ report, address the findings, and report them (see **Report** below).
    questions round starts without it. The trust KPIs count answered question rounds. A round an
    operator answered (a comment from the Control UI or the Gateway) is a human
    touch; a round an agent answered with `workboard_comment` is not.
+   **Grilling:** when a ticket needs a back-and-forth with you to align on
+   what to build (specification, scope, domain terms), the session ends a
+   turn with `{"outcome": "grill", "question": "…", "summary": "…"}`: exactly
+   one question with its recommended answer, and what is settled so far. The
+   session decides when to grill; no card setting turns it on. Each question
+   is appended to the card's `grilling.md` attachment (one log per card,
+   rewritten in place and capped at 256 KiB: an entry that would pass the cap
+   is cut with a note), a short `Grilling question N` comment points to it,
+   and the card moves to `review` with stage `grilling`. Only you answer: the
+   board's automation job is not woken for a grilling round, and comments are
+   not answers. The card's **Grilling** tab shows the log and, while the card
+   waits, an answer box; it opens on that tab, and the session chip reads
+   "Grilling — answer on card" and opens the card. Sending calls
+   `workboard.cards.grill.answer {id, answer}` (at most 4,000 characters),
+   which logs the answer, keeps it for the next round, and moves the card to
+   `todo`; the same session resumes in the same worktree with the answer under
+   `## Grilling answer`, and a retried start still carries it. The answer is
+   refused unless the card waits on a grilling answer, and when the log has
+   no room left for it. The card records only when you answered; the next
+   round's brief reads the answer from the log, and says so plainly if it
+   cannot. A move to `todo` without an answer goes back to `review` with a
+   comment naming the Grilling tab. A move to `done` while the card waits
+   ends the grilling: the log gets an `## Outcome` entry saying you ended it,
+   and the card goes back to `review` waiting with open questions (already
+   escalated to you), so a comment and a move to `todo` resume the session. A
+   `done`, `blocked`, or `needs_input` report closes the grill with an
+   `## Outcome` entry naming what the card got, so a `done` report the import
+   refuses for its proof closes it `blocked`. The log stays on the card: the
+   metadata budget and the 20-attachment cap drop other attachments first,
+   and deleting `grilling.md` is refused.
 3. **Import:** the node bundles the branch to `<worktreesRoot>/wb-<cardId>.bundle`
    and the Gateway fetches it with File Transfer, so the node's
    `allowReadPaths` must cover `<worktreesRoot>/*.bundle`. The host clone
@@ -1078,12 +1110,12 @@ The template id is stored as card metadata.
 **Workboard → Overview** shows the whole factory on one page for an operator
 who does not follow each step. Four bands list the cards across every board:
 
-| Band              | Shows                                                                                                                                                                                                                                                                                                                                                    |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Needs you         | Cards waiting on you, oldest first: a review only you may accept (rung a, a plain card in `review`, or a rung b round whose class was demoted since or whose board has no automation job), a PR an agent accepted into the human review sample, [questions](#node-tickets) escalated to you or with no automation job to answer them, and blocked cards. |
-| In flight         | Queued and running cards, and node tickets waiting on an agent (a rung b review or questions the board's automation job takes, or a draft an agent published with a rework verdict before it reopens the ticket), with the node, rework round, and the last run's turn-end context.                                                                      |
-| Shipped this week | Node tickets published and other cards done in the last 7 days, newest first: the PR, review rounds, who accepted it, whether it is in the review sample, and the agent's shadow verdict on a round you accepted.                                                                                                                                        |
-| Insights          | Backlog cards labeled `gardener` or `architecture`, newest first.                                                                                                                                                                                                                                                                                        |
+| Band              | Shows                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Needs you         | Cards waiting on you, oldest first: a review only you may accept (rung a, a plain card in `review`, or a rung b round whose class was demoted since or whose board has no automation job), a PR an agent accepted into the human review sample, [questions](#node-tickets) escalated to you or with no automation job to answer them, grilling questions, and blocked cards. |
+| In flight         | Queued and running cards, and node tickets waiting on an agent (a rung b review or questions the board's automation job takes, or a draft an agent published with a rework verdict before it reopens the ticket), with the node, rework round, and the last run's turn-end context.                                                                                          |
+| Shipped this week | Node tickets published and other cards done in the last 7 days, newest first: the PR, review rounds, who accepted it, whether it is in the review sample, and the agent's shadow verdict on a round you accepted.                                                                                                                                                            |
+| Insights          | Backlog cards labeled `gardener` or `architecture`, newest first.                                                                                                                                                                                                                                                                                                            |
 
 Each row shows the title, the [summary](#card-fields), the
 [status line](#card-stage) with its age, and a reason, label, or details line.
