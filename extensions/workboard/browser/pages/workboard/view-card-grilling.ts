@@ -3,7 +3,11 @@ import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { renderMarkdown } from "../../components/host-components.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
-import { endWorkboardGrill, type WorkboardCard } from "../../lib/workboard/index.ts";
+import {
+  endWorkboardGrill,
+  workboardGrillSessionName,
+  type WorkboardCard,
+} from "../../lib/workboard/index.ts";
 import { getCardActionState } from "./view-card-actions.ts";
 import { workboardMutationContext, type WorkboardProps } from "./view-helpers.ts";
 
@@ -95,10 +99,9 @@ function renderLog(state: LogState | undefined) {
 }
 
 /**
- * The Grilling tab: the log of the grilling, and while it is live, the way to
- * the card's session chat where it happens and End grilling. End grilling
- * waits while the session replies, so the resumed round's start does not
- * race that reply.
+ * The Grilling tab: the log of each handoff and result, and while the
+ * grilling waits on the operator, the way into its grill session and End
+ * grilling, which the server refuses while the grill session replies.
  */
 export function renderGrillingPanel(
   props: WorkboardProps,
@@ -106,8 +109,9 @@ export function renderGrillingPanel(
   card: WorkboardCard,
   active: boolean,
 ) {
-  const { busy, live, sessionTarget, writable } = getCardActionState(props, card);
+  const { busy, writable } = getCardActionState(props, card);
   const waiting = card.stage?.kind === "grilling";
+  const sessionKey = card.grill?.sessionKey;
   return html`<section
     class="workboard-detail__tabpanel workboard-grilling"
     id="workboard-detail-panel-grilling"
@@ -119,7 +123,13 @@ export function renderGrillingPanel(
     ${active ? renderLog(grilling.log(card)) : nothing}
     ${
       active && waiting
-        ? html`<p class="workboard-grilling__note">${t("workboard.grillingChatNote")}</p>
+        ? html`<p class="workboard-grilling__note">
+              ${
+                sessionKey
+                  ? t("workboard.grillingSessionNote", { name: workboardGrillSessionName(card) })
+                  : t("workboard.grillingStarting")
+              }
+            </p>
             <div class="workboard-grilling__actions">
               ${
                 writable
@@ -127,8 +137,8 @@ export function renderGrillingPanel(
                       class="btn"
                       type="button"
                       data-grilling-action="end"
-                      title=${live ? t("workboard.grillingEndReplying") : t("workboard.grillingEndTitle")}
-                      ?disabled=${busy || live}
+                      title=${t("workboard.grillingEndTitle")}
+                      ?disabled=${busy}
                       @click=${() =>
                         void endWorkboardGrill({
                           ...workboardMutationContext(props),
@@ -140,14 +150,14 @@ export function renderGrillingPanel(
                   : nothing
               }
               ${
-                sessionTarget
+                sessionKey
                   ? html`<button
                       class="btn primary"
                       type="button"
-                      data-grilling-action="chat"
-                      @click=${() => props.onOpenSession(sessionTarget)}
+                      data-grilling-action="session"
+                      @click=${() => props.onOpenSession({ sessionKey })}
                     >
-                      ${t("workboard.grillingOpenChat")}
+                      ${t("workboard.grillingOpenSession")}
                     </button>`
                   : nothing
               }

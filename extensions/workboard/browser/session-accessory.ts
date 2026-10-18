@@ -4,7 +4,7 @@ import { icons } from "./components/icons.ts";
 import { t } from "./i18n/index.ts";
 import { workboardCardBoardId } from "./lib/workboard/board-filter.ts";
 import type { WorkboardCapability } from "./lib/workboard/capability.ts";
-import { isActiveWorkboardCard } from "./lib/workboard/card-state.ts";
+import { isActiveWorkboardCard, workboardGrillSessionName } from "./lib/workboard/card-state.ts";
 import { isWorkboardNodeTicket } from "./lib/workboard/execution.ts";
 import { findWorkboardSessionCard } from "./lib/workboard/session-links.ts";
 import { matchesAgentScope } from "./pages/workboard/agent-filter.ts";
@@ -23,10 +23,11 @@ export function createWorkboardSessionAccessory(
           ? findWorkboardSessionCard(workboard.state.cards, context.props.sessionKey)
           : null;
       const target = card ? workboardPageTarget(workboardCardBoardId(card)) : null;
-      const grilling = card?.stage?.kind === "grilling";
+      // While the card waits on its grilling, the chip leads to the grill session.
+      const grillSessionKey = card?.stage?.kind === "grilling" ? card.grill?.sessionKey : undefined;
       const statusLabel = card
-        ? grilling
-          ? t("workboard.sessionChipGrilling")
+        ? grillSessionKey
+          ? t("workboard.sessionChipGrilling", { name: workboardGrillSessionName(card) })
           : t(`workboard.status.${card.status}`)
         : "";
       render(
@@ -64,8 +65,9 @@ export function createWorkboardSessionAccessory(
                   ) {
                     host.agents.setScope(null);
                   }
-                  if (grilling) {
-                    workboard.state.revealCardId = card.id;
+                  if (grillSessionKey) {
+                    host.sessions.open({ sessionKey: grillSessionKey });
+                    return;
                   }
                   host.navigation.openPage(target);
                 }}

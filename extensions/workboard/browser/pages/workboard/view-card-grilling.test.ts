@@ -15,8 +15,8 @@ import { createCardGrilling } from "./view-card-grilling.ts";
 const text = (element: Element | null | undefined) =>
   element?.textContent?.replace(/\s+/g, " ").trim();
 
-const LOG = "## Question 1\n\nShould empty input return `[]`?\n";
-const LOG_TEXT = "## Question 1 Should empty input return `[]`?";
+const LOG = "## Handoff 1\n\nShould empty input return `[]`?\n";
+const LOG_TEXT = "## Handoff 1 Should empty input return `[]`?";
 
 function grillingCard(overrides: Record<string, unknown> = {}) {
   const [card] = normalizeCardsPayload({
@@ -45,9 +45,16 @@ function grillingCard(overrides: Record<string, unknown> = {}) {
 }
 
 const SESSION_KEY = "agent:dev:subagent:workboard-default-card-1";
+const GRILL_SESSION_KEY = "agent:dev:grill-card-1-1";
+const OPEN_GRILL = {
+  status: "open",
+  rounds: 1,
+  attachmentId: "log-1",
+  sessionKey: GRILL_SESSION_KEY,
+};
 
-it("opens a waiting card on its Grilling tab, shows the log, and leads to the session chat", async () => {
-  const card = grillingCard({ sessionKey: SESSION_KEY });
+it("opens a waiting card on its Grilling tab, shows the log, and leads to the grill session", async () => {
+  const card = grillingCard({ sessionKey: SESSION_KEY, grill: OPEN_GRILL });
   const client = createWorkboardTestClient({
     "workboard.cards.attachments.get": { contentBase64: Buffer.from(LOG).toString("base64") },
   });
@@ -93,25 +100,69 @@ it("opens a waiting card on its Grilling tab, shows the log, and leads to the se
   );
   expect(client.request).toHaveBeenCalledWith("workboard.cards.attachments.get", { id: "log-1" });
   expect(text(panel.querySelector(".workboard-grilling__note"))).toBe(
-    "The grilling happens in the card's session chat: answer the agent's questions there. It ends when the agent replies with what is settled, or when you end it here.",
+    "The grilling runs in its own session, Grill Build board: answer the agent's questions there. It ends when the agent hands the result back, or when you end it here, which takes the agent's last reply as the result.",
   );
   expect(panel.querySelector("textarea")).toBeNull();
+  expect(panel.querySelector("[data-grilling-action=chat]")).toBeNull();
 
   expectDefined(
-    panel.querySelector<HTMLButtonElement>("[data-grilling-action=chat]"),
-    "chat button",
+    panel.querySelector<HTMLButtonElement>("[data-grilling-action=session]"),
+    "grill session button",
   ).click();
 
-  expect(onOpenSession).toHaveBeenCalledWith({ sessionKey: SESSION_KEY });
+  expect(onOpenSession).toHaveBeenCalledWith({ sessionKey: GRILL_SESSION_KEY });
 });
 
-it("ends a waiting grilling, but not while the session is replying", async () => {
+it("says the grill session is starting until Workboard recorded it", async () => {
   const card = grillingCard({ sessionKey: SESSION_KEY });
+  const client = createWorkboardTestClient({
+    "workboard.cards.attachments.get": { contentBase64: Buffer.from(LOG).toString("base64") },
+  });
+  const host = {};
+  const state = getWorkboardState(host);
+  state.loaded = true;
+  state.cards = [card];
+  state.detailCardId = card.id;
+  state.detailTab = "grilling";
+  const container = document.createElement("div");
+  document.body.append(container);
+  onTestFinished(() => {
+    render(nothing, container);
+    container.remove();
+  });
+  const grilling = createCardGrilling(client, () => undefined);
+  render(
+    renderCardDetailsPanel({
+      host,
+      client,
+      connected: true,
+      canWrite: true,
+      agentsList: null,
+      sessions: [],
+      onOpenSession: vi.fn(),
+      detailGrilling: grilling,
+    }),
+    container,
+  );
+
+  const panel = expectDefined(
+    container.querySelector("#workboard-detail-panel-grilling"),
+    "grilling panel",
+  );
+  expect(text([...panel.querySelectorAll(".workboard-grilling__note")].at(-1))).toBe(
+    "The grill session is starting…",
+  );
+  expect(panel.querySelector("[data-grilling-action=session]")).toBeNull();
+  expect(panel.querySelector("[data-grilling-action=end]")).not.toBeNull();
+});
+
+it("ends a waiting grilling from the Grilling tab", async () => {
+  const card = grillingCard({ sessionKey: SESSION_KEY, grill: OPEN_GRILL });
   const ended = grillingCard({
     sessionKey: SESSION_KEY,
     status: "todo",
     stage: undefined,
-    grill: { status: "closed", rounds: 1, attachmentId: "log-1" },
+    grill: { ...OPEN_GRILL, status: "closed" },
   });
   const client = createWorkboardTestClient({
     "workboard.cards.attachments.get": { contentBase64: Buffer.from(LOG).toString("base64") },
@@ -129,7 +180,6 @@ it("ends a waiting grilling, but not while the session is replying", async () =>
     render(nothing, container);
     container.remove();
   });
-  let sessions = [{ key: SESSION_KEY, kind: "direct", updatedAt: 1, hasActiveRun: true }];
   const renderPanel = () =>
     render(
       renderCardDetailsPanel({
@@ -138,7 +188,7 @@ it("ends a waiting grilling, but not while the session is replying", async () =>
         connected: true,
         canWrite: true,
         agentsList: null,
-        sessions: sessions as never,
+        sessions: [],
         onOpenSession: vi.fn(),
         onRequestUpdate: () => renderPanel(),
         detailGrilling: grilling,
@@ -152,18 +202,14 @@ it("ends a waiting grilling, but not while the session is replying", async () =>
     container.querySelector("#workboard-detail-panel-grilling"),
     "grilling panel",
   );
-  const end = () =>
-    expectDefined(
-      panel.querySelector<HTMLButtonElement>("[data-grilling-action=end]"),
-      "end button",
-    );
-  expect(end().disabled, "the session is replying").toBe(true);
-  expect(end().title).toBe("The session is replying; end the grilling once the reply is in.");
-
-  sessions = [{ key: SESSION_KEY, kind: "direct", updatedAt: 2, hasActiveRun: false }];
-  renderPanel();
-  expect(end().disabled).toBe(false);
-  end().click();
+  const end = expectDefined(
+    panel.querySelector<HTMLButtonElement>("[data-grilling-action=end]"),
+    "end button",
+  );
+  expect(end.title).toBe(
+    "End the grilling; the agent's last reply in the grill session becomes the result, and the ticket continues with it.",
+  );
+  end.click();
 
   await waitForFast(() =>
     expect(client.request).toHaveBeenCalledWith("workboard.cards.grill.end", { id: card.id }),
