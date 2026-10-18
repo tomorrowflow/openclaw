@@ -74,7 +74,6 @@ async function startNodeGrillSession(
     {
       key,
       ...(card.agentId ? { agentId: card.agentId } : {}),
-      idempotencyKey: `workboard:${card.id}:grill:${round}`,
       displayName: grillSessionName(card),
       message: grillSessionMessage(card, handoff),
     },

@@ -216,7 +216,6 @@ describe("node ticket grilling handoff", () => {
     expect(params).toEqual({
       key,
       agentId: "dev",
-      idempotencyKey: `workboard:${card.id}:grill:1`,
       displayName: "Grill Fix the parser",
       message: expect.any(String),
     });
