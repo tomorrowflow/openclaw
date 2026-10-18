@@ -10,7 +10,7 @@ import {
 
 type CliExitFailoverErrorParams = {
   context: Pick<FailoverError, "provider" | "model" | "sessionId" | "lane">;
-  // Spawn supplies stderr/stdout windows; live stdout is already structured, so it supplies stderr.
+  // Unstructured output supplies stderr/stdout windows; streamed output supplies stderr plus the parser's error text.
   candidates: readonly string[];
   fallbackMessage: string;
   retryEmptyFailure: boolean;
