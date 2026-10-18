@@ -423,7 +423,7 @@ export function registerWorkboardGatewayMethods(params: {
     return card;
   };
   register("workboard.cards.screenshots.list", READ_SCOPE, async ({ params: input }) =>
-    listNodeTicketScreenshots(await requireCard(readId(input))),
+    listNodeTicketScreenshots(api.runtime.gateway, await requireCard(readId(input))),
   );
   register("workboard.cards.changes.diff", READ_SCOPE, async ({ params: input }) => {
     const { round, path } = input;
@@ -433,11 +433,18 @@ export function registerWorkboardGatewayMethods(params: {
     return readNodeTicketChangeDiff(await requireCard(readId(input)), round, path);
   });
   register("workboard.cards.screenshots.get", READ_SCOPE, async ({ params: input }) => {
-    const { round, path } = input;
-    if (typeof round !== "number" || typeof path !== "string" || !path) {
-      throw new Error("round and path are required.");
+    const { round, live, path } = input;
+    const source =
+      live === true ? { live: true as const } : typeof round === "number" ? { round } : undefined;
+    if (!source || typeof path !== "string" || !path) {
+      throw new Error("path and either round or live: true are required.");
     }
-    return readNodeTicketScreenshot(await requireCard(readId(input)), round, path);
+    return readNodeTicketScreenshot(
+      api.runtime.gateway,
+      await requireCard(readId(input)),
+      source,
+      path,
+    );
   });
   register("workboard.cards.attachments.add", WRITE_SCOPE, ({ params: input, client }) =>
     redactCardResult(

@@ -26,12 +26,25 @@ function changes(to: string) {
   return { from: "a".repeat(40), to, files: [], totals: { files: 1, added: 0, deleted: 0 } };
 }
 
+const NODE_TARGET = {
+  kind: "node-claude",
+  nodeId: "mac-factory",
+  repoPath: "/repo",
+  worktreesRoot: "/wt",
+  hostRepoPath: "/host",
+} as const;
+
 function nodeCard(commits: string[], id = "card-1") {
   return createWorkboardCard({
     id,
     status: "review",
+    metadata: { automation: { target: NODE_TARGET } },
     rounds: commits.map((commit, round) => ({ round, changes: changes(commit) })),
   });
+}
+
+function listed(rounds: Array<{ round: number; commit: string; paths: string[] }>) {
+  return { committed: { state: "available", rounds }, live: { state: "none" } };
 }
 
 function deferred<T>() {
@@ -49,7 +62,7 @@ function image(params: Record<string, unknown>) {
 }
 
 function roundOf(paths: string[], commit = "b".repeat(40)) {
-  return { rounds: [{ round: 0, commit, paths }] };
+  return listed([{ round: 0, commit, paths }]);
 }
 
 type Handler = (params: Record<string, unknown>) => unknown;
@@ -130,12 +143,12 @@ it("reads no image until the Screenshots tab is opened", async () => {
 });
 
 it("keeps the tab hidden when no round committed an image", async () => {
-  const listed = deferred<unknown>();
-  const page = screenshotsPage({ list: () => listed.promise, get: image });
+  const listing = deferred<unknown>();
+  const page = screenshotsPage({ list: () => listing.promise, get: image });
   await vi.waitFor(() => expect(page.calls(LIST)).toHaveLength(1));
   const settled = expectDefined(page.request.mock.results.at(-1), "listing").value;
 
-  listed.resolve({ rounds: [] });
+  listing.resolve(listed([]));
   // The view's reaction to the listing was registered before this await.
   await settled;
   page.workboard.notify();
@@ -229,12 +242,12 @@ it("keeps the Screenshots tab open while a new round's import reloads the list",
   expect(page.tab()?.getAttribute("aria-selected")).toBe("true");
   expect(page.images()).toBe(1);
 
-  relisted.resolve({
-    rounds: [
+  relisted.resolve(
+    listed([
       { round: 0, commit: first, paths: ["docs/a.png"] },
       { round: 1, commit: second, paths: ["docs/b.png"] },
-    ],
-  });
+    ]),
+  );
   await vi.waitFor(() => expect(page.images()).toBe(2));
   expect(page.calls(GET)).toHaveLength(2);
 });

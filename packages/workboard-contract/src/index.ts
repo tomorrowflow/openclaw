@@ -404,7 +404,32 @@ export type WorkboardScreenshotRound = {
   paths: string[];
 };
 
-export type WorkboardScreenshotListResult = { rounds: WorkboardScreenshotRound[] };
+/** The committed screenshots, or why the host clone could not list them. */
+export type WorkboardCommittedScreenshots =
+  | { state: "available"; rounds: WorkboardScreenshotRound[] }
+  | { state: "unavailable"; reason: string };
+
+/** An image the running agent wrote under one of its target's screenshot dirs, newest first. */
+export type WorkboardLiveScreenshot = { path: string; bytes: number; mtimeMs: number };
+
+/**
+ * The images in the card's node worktree right now. `none`: the card has no
+ * worktree on its node (not started yet, or its round was imported and the
+ * worktree removed).
+ */
+export type WorkboardLiveScreenshots =
+  | { state: "available"; listedAt: number; shots: WorkboardLiveScreenshot[] }
+  | { state: "unavailable"; reason: string }
+  | { state: "none" };
+
+/** Each source fails on its own, so a node outage still shows the committed rounds. */
+export type WorkboardScreenshotListResult = {
+  committed: WorkboardCommittedScreenshots;
+  live: WorkboardLiveScreenshots;
+};
+
+/** One image: a round's committed file, or a live file in the node worktree. */
+export type WorkboardScreenshotSource = { round: number } | { live: true };
 
 export type WorkboardScreenshotResult = { mimeType: string; contentBase64: string };
 
@@ -467,6 +492,11 @@ export type WorkboardExecutionTarget = {
   hostRepoPath: string;
   baseRef?: string;
   model?: string;
+  /**
+   * Worktree-relative dirs the agent writes screenshots into, listed live
+   * while it runs. Absent means `docs/screenshots`.
+   */
+  screenshotDirs?: string[];
   worktree?: WorkboardNodeWorktree;
 };
 

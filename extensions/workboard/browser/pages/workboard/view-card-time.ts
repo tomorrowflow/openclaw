@@ -110,6 +110,14 @@ class StageAgeDirective extends RelativeTimeDirective {
   }
 }
 
+class ListedTimeDirective extends RelativeTimeDirective {
+  protected override formatTime(timestamp: number, now: number) {
+    const time = formatElapsed(timestamp, now);
+    return time ? t("workboard.screensListedAgo", { time }) : t("workboard.screensListedNow");
+  }
+}
+
 export const cardRelativeTime = directive(RelativeTimeDirective);
+export const listedTime = directive(ListedTimeDirective);
 export const stageAge = directive(StageAgeDirective);
 export const automationNextRunTime = directive(AutomationNextRunTimeDirective);

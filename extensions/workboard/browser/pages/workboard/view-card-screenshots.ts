@@ -1,20 +1,41 @@
 import type {
+  WorkboardCommittedScreenshots,
+  WorkboardLiveScreenshot,
+  WorkboardLiveScreenshots,
   WorkboardScreenshotListResult,
   WorkboardScreenshotResult,
   WorkboardScreenshotRound,
 } from "@openclaw/workboard-contract";
 import { html, nothing } from "lit";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
+import { icons } from "../../components/icons.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
+import { isWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
 import type { WorkboardCard } from "../../lib/workboard/index.ts";
+import { listedTime } from "./view-card-time.ts";
 
 type ListState =
   | { status: "loading" }
-  | { status: "loaded"; rounds: WorkboardScreenshotRound[] }
+  | { status: "loaded"; result: WorkboardScreenshotListResult }
   | { status: "unavailable"; error: string };
 
 type SettledList = Exclude<ListState, { status: "loading" }>;
+
+/** One image to show: a round's committed file or a live file in the node worktree. */
+type ScreenshotRef =
+  | { round: WorkboardScreenshotRound; path: string }
+  | { live: WorkboardLiveScreenshot };
+
+function imageKey(ref: ScreenshotRef): string {
+  return "live" in ref
+    ? `live:${ref.live.mtimeMs}:${ref.live.bytes}:${ref.live.path}`
+    : `${ref.round.commit}:${ref.path}`;
+}
+
+function refPath(ref: ScreenshotRef): string {
+  return "live" in ref ? ref.live.path : ref.path;
+}
 
 type ImageState = { status: "loading" } | { status: "loaded"; url: string } | { status: "failed" };
 
@@ -22,22 +43,27 @@ type ImageState = { status: "loading" } | { status: "loaded"; url: string } | { 
 // the Gateway's 50 MB send buffer, past which it closes a slow client.
 const MAX_IMAGE_READS = 3;
 
-/** The drawer card's screenshots on one Gateway connection. */
+/** One node ticket's screenshots on one Gateway connection: the drawer's tab or a session's Screens panel. */
 export type CardScreenshots = {
   /** Lists the shown card's screenshots; another card or none drops the rest. */
   show(card: WorkboardCard | undefined): void;
-  /** Lists the shown card again, keeping its rounds meanwhile, and retries failed images. */
+  /** Lists the shown card again, keeping its last list meanwhile, and retries failed images. */
   refresh(): void;
-  /** Undefined hides the tab: another card, still listing, or no round committed an image. */
+  /** Undefined for another card or while the first list is pending. */
   list(cardId: string): SettledList | undefined;
   /** The image's state, queueing its read on first use. */
-  image(cardId: string, round: WorkboardScreenshotRound, path: string): ImageState;
+  image(cardId: string, ref: ScreenshotRef): ImageState;
   dispose(): void;
 };
 
+/** Node tickets only; a new round's import lists again. */
 function listKey(card: WorkboardCard): string | undefined {
-  const commits = (card.rounds ?? []).flatMap((round) => (round.changes ? [round.changes.to] : []));
-  return commits.length > 0 ? commits.join(",") : undefined;
+  if (!isWorkboardNodeTicket(card)) {
+    return undefined;
+  }
+  return (card.rounds ?? [])
+    .flatMap((round) => (round.changes ? [round.changes.to] : []))
+    .join(",");
 }
 
 function objectUrl(result: WorkboardScreenshotResult): string {
@@ -55,13 +81,7 @@ export function createCardScreenshots(
 ): CardScreenshots {
   let shown: { cardId: string; key: string; list: ListState; previous?: SettledList } | undefined;
   const images = new Map<string, ImageState>();
-  const queue: Array<{
-    key: string;
-    cardId: string;
-    round: number;
-    path: string;
-    pending: ImageState;
-  }> = [];
+  const queue: Array<{ key: string; cardId: string; ref: ScreenshotRef; pending: ImageState }> = [];
   let reading = 0;
 
   const forget = () => {
@@ -76,16 +96,17 @@ export function createCardScreenshots(
 
   const read = () => {
     for (let next; reading < MAX_IMAGE_READS && (next = queue.shift());) {
-      const { key, cardId, round, path, pending } = next;
+      const { key, cardId, ref, pending } = next;
       reading += 1;
       // Started inside the chain so a throwing request still releases its slot.
       void Promise.resolve()
         .then(() =>
-          client.request<WorkboardScreenshotResult>("workboard.cards.screenshots.get", {
-            id: cardId,
-            round,
-            path,
-          }),
+          client.request<WorkboardScreenshotResult>(
+            "workboard.cards.screenshots.get",
+            "live" in ref
+              ? { id: cardId, live: true, path: ref.live.path }
+              : { id: cardId, round: ref.round.round, path: ref.path },
+          ),
         )
         .then((result): ImageState => ({ status: "loaded", url: objectUrl(result) }))
         .catch((): ImageState => ({ status: "failed" }))
@@ -103,6 +124,21 @@ export function createCardScreenshots(
     }
   };
 
+  /** A live file rewritten or removed since the last list will not be shown again. */
+  const forgetStaleLive = (live: WorkboardLiveScreenshots) => {
+    const current = new Set(
+      live.state === "available" ? live.shots.map((shot) => imageKey({ live: shot })) : [],
+    );
+    for (const [key, image] of images) {
+      if (key.startsWith("live:") && !current.has(key)) {
+        if (image.status === "loaded") {
+          URL.revokeObjectURL(image.url);
+        }
+        images.delete(key);
+      }
+    }
+  };
+
   const relist = (cardId: string, key: string, previous: SettledList | undefined) => {
     const listing: NonNullable<typeof shown> = {
       cardId,
@@ -114,11 +150,14 @@ export function createCardScreenshots(
     void client
       .request<WorkboardScreenshotListResult>("workboard.cards.screenshots.list", { id: cardId })
       .then(
-        (result): SettledList => ({ status: "loaded", rounds: result.rounds }),
+        (result): SettledList => ({ status: "loaded", result }),
         (error: unknown): SettledList => ({ status: "unavailable", error: formatUiError(error) }),
       )
       .then((settled) => {
         if (shown === listing) {
+          if (settled.status === "loaded") {
+            forgetStaleLive(settled.result.live);
+          }
           listing.list = settled;
           delete listing.previous;
           requestUpdate();
@@ -132,7 +171,7 @@ export function createCardScreenshots(
   return {
     show(card) {
       const key = card ? listKey(card) : undefined;
-      if (!card || !key) {
+      if (!card || key === undefined) {
         shown = undefined;
         forget();
         return;
@@ -160,21 +199,17 @@ export function createCardScreenshots(
       relist(shown.cardId, shown.key, settledList());
     },
     list(cardId) {
-      if (shown?.cardId !== cardId) {
-        return undefined;
-      }
-      const list = settledList();
-      return list?.status === "loaded" && list.rounds.length === 0 ? undefined : list;
+      return shown?.cardId === cardId ? settledList() : undefined;
     },
-    image(cardId, round, path) {
-      const key = `${round.commit}:${path}`;
+    image(cardId, ref) {
+      const key = imageKey(ref);
       const known = images.get(key);
       if (known) {
         return known;
       }
       const pending: ImageState = { status: "loading" };
       images.set(key, pending);
-      queue.push({ key, cardId, round: round.round, path, pending });
+      queue.push({ key, cardId, ref, pending });
       read();
       return pending;
     },
@@ -188,15 +223,20 @@ export function createCardScreenshots(
 const VARIANT = /-(light|dark)(\.[a-z]+)$/i;
 
 /** Light and dark captures of one state share a figure, light first. */
-function groupVariants(paths: readonly string[]): Array<{ name: string; paths: string[] }> {
-  const groups = new Map<string, string[]>();
-  for (const path of paths) {
-    const name = path.replace(VARIANT, "$2");
-    groups.set(name, [...(groups.get(name) ?? []), path]);
+function groupVariants(
+  refs: readonly ScreenshotRef[],
+): Array<{ name: string; refs: ScreenshotRef[] }> {
+  const groups = new Map<string, ScreenshotRef[]>();
+  for (const ref of refs) {
+    const name = refPath(ref).replace(VARIANT, "$2");
+    groups.set(name, [...(groups.get(name) ?? []), ref]);
   }
   return [...groups].map(([name, grouped]) => ({
     name,
-    paths: grouped.length === 2 ? grouped.toSorted().toReversed() : grouped,
+    refs:
+      grouped.length === 2
+        ? grouped.toSorted((left, right) => (refPath(left) < refPath(right) ? 1 : -1))
+        : grouped,
   }));
 }
 
@@ -207,11 +247,11 @@ function fileName(path: string): string {
 function renderImage(
   screenshots: CardScreenshots,
   cardId: string,
-  round: WorkboardScreenshotRound,
-  path: string,
+  ref: ScreenshotRef,
   paired: boolean,
 ) {
-  const image = screenshots.image(cardId, round, path);
+  const path = refPath(ref);
+  const image = screenshots.image(cardId, ref);
   const variant = paired ? VARIANT.exec(path)?.[1]?.toLowerCase() : undefined;
   const label =
     variant === "light" ? t("workboard.screenshotLight") : t("workboard.screenshotDark");
@@ -233,7 +273,106 @@ function renderImage(
   </div>`;
 }
 
-/** The Screenshots tab: each round's committed images, newest round first. */
+function renderFigures(
+  screenshots: CardScreenshots,
+  cardId: string,
+  refs: readonly ScreenshotRef[],
+) {
+  return html`<div class="workboard-screenshots">
+    ${groupVariants(refs).map(
+      (group) => html`<figure class="workboard-screenshot">
+        <div class="workboard-screenshot__variants">
+          ${group.refs.map((ref) => renderImage(screenshots, cardId, ref, group.refs.length === 2))}
+        </div>
+        <figcaption title=${group.name}>${fileName(group.name)}</figcaption>
+      </figure>`,
+    )}
+  </div>`;
+}
+
+/** Whether the drawer offers its Screenshots tab: a round committed an image, or listing failed. */
+export function hasCommittedScreenshots(state: SettledList): boolean {
+  return (
+    state.status === "unavailable" ||
+    state.result.committed.state === "unavailable" ||
+    state.result.committed.rounds.length > 0
+  );
+}
+
+/** Each round's committed images, newest round first. */
+export function renderScreenshotRounds(
+  screenshots: CardScreenshots,
+  cardId: string,
+  committed: WorkboardCommittedScreenshots,
+) {
+  return committed.state === "unavailable"
+    ? html`<p class="workboard-detail__empty">
+        ${t("workboard.screenshotsUnavailable", { error: committed.reason })}
+      </p>`
+    : committed.rounds.toReversed().map(
+        (round) => html`<section class="workboard-detail__section">
+          <h3>
+            ${
+              round.round === 0
+                ? t("workboard.roundFirst")
+                : t("workboard.roundRework", { number: String(round.round) })
+            }
+          </h3>
+          ${renderFigures(
+            screenshots,
+            cardId,
+            round.paths.map((path) => ({ round, path })),
+          )}
+        </section>`,
+      );
+}
+
+/** The images in the node worktree right now, with when they were listed and a refresh. */
+export function renderLiveScreenshots(
+  screenshots: CardScreenshots,
+  cardId: string,
+  live: WorkboardLiveScreenshots,
+  onRefresh: () => void,
+) {
+  const status =
+    live.state === "available"
+      ? html`<span class="workboard-screens__listed"
+          >${listedTime(live.listedAt, Date.now())}</span
+        >`
+      : live.state === "unavailable"
+        ? html`<span class="workboard-screens__unavailable" role="status"
+            >${t("workboard.screensLiveUnavailable", { reason: live.reason })}</span
+          >`
+        : html`<span class="workboard-screens__listed">${t("workboard.screensLiveNone")}</span>`;
+  return html`<section class="workboard-detail__section workboard-screens__live">
+    <div class="workboard-screens__live-header">
+      <h3>${t("workboard.screensLive")}</h3>
+      ${status}
+      <button
+        type="button"
+        class="btn btn--icon btn--ghost workboard-screens__refresh"
+        aria-label=${t("workboard.screensRefresh")}
+        title=${t("workboard.screensRefresh")}
+        @click=${onRefresh}
+      >
+        ${icons.refresh}
+      </button>
+    </div>
+    ${
+      live.state !== "available"
+        ? nothing
+        : live.shots.length === 0
+          ? html`<p class="workboard-detail__empty">${t("workboard.screensLiveEmpty")}</p>`
+          : renderFigures(
+              screenshots,
+              cardId,
+              live.shots.map((shot) => ({ live: shot })),
+            )
+    }
+  </section>`;
+}
+
+/** The drawer's Screenshots tab: each round's committed images. */
 export function renderScreenshotsPanel(
   screenshots: CardScreenshots,
   cardId: string,
@@ -254,29 +393,7 @@ export function renderScreenshotsPanel(
             ${t("workboard.screenshotsUnavailable", { error: state.error })}
           </p>`
         : active
-          ? state.rounds.toReversed().map(
-              (round) => html`<section class="workboard-detail__section">
-                <h3>
-                  ${
-                    round.round === 0
-                      ? t("workboard.roundFirst")
-                      : t("workboard.roundRework", { number: String(round.round) })
-                  }
-                </h3>
-                <div class="workboard-screenshots">
-                  ${groupVariants(round.paths).map(
-                    (group) => html`<figure class="workboard-screenshot">
-                      <div class="workboard-screenshot__variants">
-                        ${group.paths.map((path) =>
-                          renderImage(screenshots, cardId, round, path, group.paths.length === 2),
-                        )}
-                      </div>
-                      <figcaption title=${group.name}>${fileName(group.name)}</figcaption>
-                    </figure>`,
-                  )}
-                </div>
-              </section>`,
-            )
+          ? renderScreenshotRounds(screenshots, cardId, state.result.committed)
           : nothing
     }
   </section>`;

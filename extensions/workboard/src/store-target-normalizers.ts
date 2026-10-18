@@ -221,6 +221,38 @@ export function withNodeHandoff(
   return { ...worktree, handoff: input.handoff, ...(reviews ? { reviews } : {}) };
 }
 
+const MAX_SCREENSHOT_DIRS = 8;
+const MAX_SCREENSHOT_DIR_LENGTH = 200;
+
+/** Worktree-relative dirs only: live reads must stay inside the card's worktree. */
+function normalizeScreenshotDirs(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_SCREENSHOT_DIRS) {
+    throw new Error(
+      `target screenshotDirs must be an array of 1 to ${MAX_SCREENSHOT_DIRS} worktree-relative dirs.`,
+    );
+  }
+  const dirs = new Set<string>();
+  for (const entry of value) {
+    const dir = typeof entry === "string" ? entry.trim().replace(/\/+$/, "") : "";
+    const segments = dir.split("/");
+    if (
+      !dir ||
+      dir.length > MAX_SCREENSHOT_DIR_LENGTH ||
+      segments.some((segment) => !segment || segment === "." || segment === "..") ||
+      dir.includes("\\")
+    ) {
+      throw new Error(
+        `target screenshotDirs entry ${JSON.stringify(entry)} must be a relative path inside the worktree, without "." or ".." segments.`,
+      );
+    }
+    dirs.add(dir);
+  }
+  return [...dirs];
+}
+
 /** The recorded worktree is dispatcher state; raw input can only keep it for the same target. */
 export function normalizeExecutionTarget(
   value: unknown,
@@ -262,6 +294,7 @@ export function normalizeExecutionTarget(
   }
   const baseRef = normalizeBoundedString(value.baseRef, undefined, 160, "target base ref");
   const model = normalizeBoundedString(value.model, undefined, 160, "target model");
+  const screenshotDirs = normalizeScreenshotDirs(value.screenshotDirs);
   const sameTarget =
     fallback?.nodeId === nodeId &&
     fallback.repoPath === repoPath &&
@@ -279,6 +312,7 @@ export function normalizeExecutionTarget(
     hostRepoPath,
     ...(baseRef ? { baseRef } : {}),
     ...(model ? { model } : {}),
+    ...(screenshotDirs ? { screenshotDirs } : {}),
     ...(worktree ? { worktree } : {}),
   };
 }
