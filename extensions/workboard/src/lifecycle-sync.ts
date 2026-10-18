@@ -10,6 +10,7 @@ import {
   isWorkboardWorktreeCleanupCandidate,
   type WorkboardWorktreeCleanupRuntime,
 } from "./dispatcher-workspace.js";
+import { takeNodeGrillChatTurn } from "./node-ticket-grill.js";
 import type { WorkboardNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import { applyNodeTicketReport, nodeTicketIdleVerdict, nodeTicketTarget } from "./node-ticket.js";
 import {
@@ -244,6 +245,10 @@ export async function syncWorkboardAgentEnded(params: {
   let nodeTicket = false;
   const reported: WorkboardCard[] = [];
   for (const card of linked) {
+    const chat = { card, startedAt: runStartedAt, messages: params.event.messages ?? [] };
+    if (await takeNodeGrillChatTurn(params.store, chat, terminal || params.event.success)) {
+      continue;
+    }
     if (card.status === "running" && nodeTicketTarget(card)) {
       nodeTicket = true;
       if (terminal || params.event.success) {

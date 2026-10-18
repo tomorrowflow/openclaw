@@ -57,7 +57,7 @@ export function nodeTicketTarget(card: WorkboardCard): NodeTicketTarget | undefi
  * questions moved to todo. It starts its next rework round, or resumes with
  * the answer, once a card comment newer than the publish or the questions
  * (and Workboard's own notices since) says what should change. A grilling
- * ticket resumes once the operator answered its question.
+ * ticket resumes once its grilling ended.
  */
 export type NodeTicketReopen = {
   kind: "rework" | "answer" | "grill";
@@ -244,13 +244,11 @@ export function nodeTicketReopen(card: WorkboardCard, now: number): NodeTicketRe
 }
 
 /** What a reopened round resumes with, as its notices name it. */
-export function nodeTicketReopenSubject(card: WorkboardCard, reopen: NodeTicketReopen): string {
+export function nodeTicketReopenSubject(reopen: NodeTicketReopen): string {
   if (reopen.kind === "rework") {
     return `Rework round ${reopen.round}`;
   }
-  return reopen.kind === "grill" && nodeTicketTarget(card)?.worktree?.grill?.status === "closed"
-    ? "The grilling result"
-    : "The answer";
+  return reopen.kind === "grill" ? "The grilling result" : "The answer";
 }
 
 /** Queues a start on a full slot; the card when the request was recorded. */
@@ -276,7 +274,7 @@ export function nodeTicketSlotWaitNotice(
   now: number,
 ): string {
   const reopen = nodeTicketReopen(card, now);
-  const what = reopen ? nodeTicketReopenSubject(card, reopen) : "This ticket";
+  const what = reopen ? nodeTicketReopenSubject(reopen) : "This ticket";
   if (!route) {
     return `${what} waits for a node-ticket slot; it starts when a running node ticket reaches review.`;
   }
@@ -573,10 +571,11 @@ function blockReason(report: NodeTicketStopReport): string {
  * moves the card to review, and its headline replaces the card summary. A
  * needs_input report posts the questions and waits in review for an answer;
  * the agent_end nudge wakes the board's automation so `dev` can answer. A
- * grill report logs its question and waits in review for the operator's
- * answer or End grilling; any other report closes an open grill with the
+ * grill report logs its question and waits in review while the operator
+ * chats with the session; any other report closes an open grill with the
  * outcome the card gets, so a refused done closes it blocked, and clears the
- * pending end of a grill the operator ended.
+ * pending end of a grill that ended. A grill_done report outside a live
+ * grilling blocks.
  * Every other ending blocks the card so `dev` sees the reason. Proof that
  * did not pass also blocks, and so does a rung b round's done report without
  * its standards review.
@@ -670,6 +669,12 @@ export async function applyNodeTicketReport(params: {
       scope,
     );
     await store.releaseClaim(card.id, { ...scope, status: "review" });
+    return;
+  }
+  if (report.outcome === "grill_done") {
+    await blockReport(
+      `Reported grill_done, but no grilling was live in the session chat: ${report.summary || "no summary given"}\nMove the card to todo to resume the session; the next run reuses the worktree.`,
+    );
     return;
   }
   if (report.outcome !== "done") {

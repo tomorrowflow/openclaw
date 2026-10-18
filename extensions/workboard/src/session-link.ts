@@ -1,4 +1,5 @@
 import type { WorkboardCard } from "@openclaw/workboard-contract";
+import { nodeGrillTakesChatTurn } from "./node-ticket-grill.js";
 import { nodeTicketReportOwnsRound, nodeTicketTarget } from "./node-ticket.js";
 import { cardBoardId, cardRunId, cardSessionKey } from "./store-card-helpers.js";
 
@@ -52,8 +53,10 @@ export function workboardCardMatchesLifecycleLink(
  * run ends in the same session under a new run id, which the link fence
  * rejects; it reports for the card's current round when it started after the
  * round's claim, which a re-dispatch renews, and no report of the round owns
- * the card yet. A run of an earlier round started before this claim. Without
- * the run's start (an `agent_end` without `durationMs`) it stays fenced.
+ * the card yet. A run of an earlier round started before this claim. A chat
+ * turn the operator started in the session of a live grilling ends under its
+ * own run id too, and reports for the grilling. Without the run's start (an
+ * `agent_end` without `durationMs`) either stays fenced.
  */
 export function workboardCardTakesEndedRunReport(
   card: WorkboardCard,
@@ -65,6 +68,13 @@ export function workboardCardTakesEndedRunReport(
   }
   const worktree = nodeTicketTarget(card)?.worktree;
   const claim = card.metadata?.claim;
+  if (
+    worktree &&
+    runStartedAt !== undefined &&
+    nodeGrillTakesChatTurn(card, worktree, runStartedAt)
+  ) {
+    return workboardCardMatchesLifecycleLink(card, { sessionKey: source.sessionKey });
+  }
   return (
     card.status === "running" &&
     worktree !== undefined &&

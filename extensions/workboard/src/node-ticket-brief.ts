@@ -3,61 +3,34 @@ import type {
   WorkboardNodeGrill,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
-import { grillAnswerFromLog, grillClosingNoteFromLog } from "./node-ticket-grill.js";
+import { grillClosingNoteFromLog } from "./node-ticket-grill.js";
 import { REPORT_FENCE } from "./node-ticket-report.js";
 import { nodeTicketReviewComments, nodeTicketTarget } from "./node-ticket.js";
 
 // Comments are capped at 2000 chars on write, so this bounds the brief's feedback section.
 const REWORK_FEEDBACK_MAX_ENTRIES = 5;
 
-/**
- * What the operator gave a resumed grilling round: an answer, the end of the
- * grilling, or an answer and then the end when a move to done ended it.
- */
+/** The end of the grilling a resumed round carries out, with its closing note. */
 function grillSection(grill: WorkboardNodeGrill, log: string | undefined): string[] {
   const pending = grill.pending;
-  if (!pending) {
+  if (!pending || grill.status !== "closed") {
     return [];
   }
-  const answer =
-    pending.kind === "answer" && log !== undefined
-      ? grillAnswerFromLog(log, pending.at)
-      : undefined;
-  const note =
-    pending.kind !== "end"
-      ? ""
-      : log === undefined
-        ? undefined
-        : grillClosingNoteFromLog(log, pending.at);
+  const note = log === undefined ? undefined : grillClosingNoteFromLog(log, pending.at);
   return [
-    ...(pending.kind === "answer"
-      ? [
-          "## Grilling answer",
-          ...(answer
-            ? ["The operator answered your grilling question:", "", answer]
-            : [
-                `The operator answered your grilling question, but the answer could not be read from the card's grilling log (\`grilling.md\`).${grill.status === "open" ? " Ask the question again with a `grill` report." : ""}`,
-              ]),
-          "",
-        ]
-      : []),
-    ...(grill.status === "closed"
-      ? [
-          "## Grilling ended",
-          "The operator ended the grilling. What you settled together is in this session and in the card's grilling log (`grilling.md`).",
-          ...(note
-            ? ["", "The operator's closing note:", "", note]
-            : note === undefined
-              ? [
-                  "",
-                  "If the operator left a closing note, it could not be read from the grilling log.",
-                ]
-              : []),
-          "",
-          "Now carry out the ticket with that result and end with `done`, `blocked`, or `needs_input`. Do not start another grilling unless something new and blocking comes up.",
-          "",
-        ]
-      : []),
+    "## Grilling ended",
+    "The grilling ended. What you settled together is in this session and in the card's grilling log (`grilling.md`).",
+    ...(note
+      ? ["", "Closing note:", "", note]
+      : note === undefined
+        ? [
+            "",
+            "If the grilling ended with a closing note, it could not be read from the grilling log.",
+          ]
+        : []),
+    "",
+    "Now carry out the ticket with that result and end with `done`, `blocked`, or `needs_input`. Do not start another grilling unless something new and blocking comes up.",
+    "",
   ];
 }
 
@@ -66,7 +39,7 @@ export function buildNodeTicketMessage(params: {
   card: WorkboardCard;
   worktree: WorkboardNodeWorktree;
   context: string;
-  /** The grilling log while an answer or an end is pending; undefined when it is gone. */
+  /** The grilling log while an end is pending; undefined when it is gone. */
   grillLog: string | undefined;
 }): string {
   const round = params.worktree.feedback;
@@ -135,11 +108,11 @@ export function buildNodeTicketMessage(params: {
     "- End your final message with exactly one report block:",
     "",
     "```" + REPORT_FENCE,
-    `{"outcome":"done|blocked|needs_input|grill","headline":"1-3 plain sentences for the operator","summary":"what changed and why","question":"…","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${reviewed ? '"review":{"items":[{"path":"…","line":1,"rule":"…","body":"…","fixed":true}],"note":"…"},' : ""}"questions":["…"],"decisions":[{"ts":"…","phase":"…","decision":"…","why":"…","evidence":"…","result":"…"}]}`,
+    `{"outcome":"done|blocked|needs_input|grill|grill_done","headline":"1-3 plain sentences for the operator","summary":"what changed and why","question":"…","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${reviewed ? '"review":{"items":[{"path":"…","line":1,"rule":"…","body":"…","fixed":true}],"note":"…"},' : ""}"questions":["…"],"decisions":[{"ts":"…","phase":"…","decision":"…","why":"…","evidence":"…","result":"…"}]}`,
     "```",
     "",
     "Its text fields are Markdown. The `headline` of a `done` report replaces the card's summary on the board: say what changed and why in plain words. Use `done` only when the work is committed and its proof passed. Use `needs_input` for one or two open questions a comment can answer, each with your proposed default; the answers come back as the next turn of this session. Use `blocked` for anything else that stops you.",
-    "Use `grill` when the ticket needs a back-and-forth with the operator to align on what to build (specification, scope, domain terms): put exactly one question with your recommended answer in `question`, and what is settled so far in `summary`. The answer comes back as the next turn of this session. Keep grilling until you and the operator share an understanding, then continue the ticket in this session and end with `done`, `blocked`, or `needs_input`.",
+    "Use `grill` to start a live grilling when the ticket needs a back-and-forth with the operator to align on what to build (specification, scope, domain terms): put your first question with your recommended answer in `question`, and what is settled so far in `summary`. The operator then chats with you in this session. Ask one question at a time with your recommended answer, in plain replies; they need no report block. Do not do the ticket's work while grilling. When you share an understanding, end your reply with a `grill_done` report whose `summary` says what was settled; the next turn then asks you to carry out the ticket. Any other report in a grilling reply also ends the grilling, and nothing it reports is imported.",
     'The `summary` of a `done` report is posted as a card comment, so write it as sections the operator can scan: `**What:**` then a `- ` list of the changes, `**Why:**` in a sentence or two, and `**Notes:**` only for follow-ups or anything left open. The proof is recorded from `proof`; don\'t repeat it. Each question is one line, `**Q<n> – <title>:** <question> ➡️ <your proposed default>`, worded so "yes" accepts the default. Use inline code for paths, commands, and identifiers; no headings.',
     "`decisions` is your decision trail for this turn, so the operator sees what you decided without reading the session: one row per decision point or checkpoint (a fork you chose, a unit you verified, a pivot or revert, a blocker), at most 30, not one per step. Each cell is one short line of plain words, not Markdown; `ts` is the time, `phase` a word like plan, build, verify, or fix; `evidence` is a pointer (a commit SHA, `file:line`, or a command), never a paragraph.",
     "Proof entries describe the final state. Any `failed` entry blocks a `done` report, so a test you ran red before the fix goes in the note of its passing entry, not in an entry of its own.",

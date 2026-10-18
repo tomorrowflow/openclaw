@@ -281,9 +281,9 @@ export type WorkboardWorkspaceAccess =
  * notices since, as on a published ticket. `escalatedAt` records that an
  * agent passed this round's questions to the operator; a new round starts
  * without it. `grilling` is set by a grill report: the card waits in review
- * on the operator's answer to one grilling question, which only
- * `workboard.cards.grill.answer` gives (comments are not answers), or on
- * `workboard.cards.grill.end`, which ends the grilling.
+ * while the operator chats with the card's session (comments are not
+ * answers), until a reply ends it with a `grill_done` report or
+ * `workboard.cards.grill.end` does.
  */
 export type WorkboardNodeHandoff =
   | { phase: "pending"; reportedAt: number }
@@ -360,21 +360,20 @@ export type WorkboardNodeFeedback = {
 };
 
 /**
- * A node ticket's grilling: the session asks the operator one question per
- * round until both share an understanding of what to build. `attachmentId` is
- * the card's `grilling.md` log of every question, answer, and the outcome.
- * `pending` marks what the operator gave the next round's brief: an `answer`
- * (its text is the log's answer entry at `at`), or the `end` of the grilling
- * (its closing note is the log's outcome entry at `at`). A closed grill with a
- * pending answer was ended by a move to done after the answer, so the brief
- * gets both. The round's report clears it, so a retried launch still carries
- * it. A done, blocked, or needs_input report closes an open grill.
+ * A node ticket's grilling: the session asks the operator one question at a
+ * time in the card's session chat until both share an understanding of what
+ * to build. `rounds` counts the questions its reports asked. `attachmentId` is
+ * the card's `grilling.md` log of every question, chat message, and the
+ * outcome. `pending` marks the `end` of the grilling for the next round's
+ * brief (its closing note is the log's outcome entry at `at`). The round's
+ * report clears it, so a retried launch still carries it. A done, blocked, or
+ * needs_input report closes an open grill.
  */
 export type WorkboardNodeGrill = {
   status: "open" | "closed";
   rounds: number;
   attachmentId: string;
-  pending?: { kind: "answer" | "end"; at: number };
+  pending?: { kind: "end"; at: number };
 };
 
 /**
@@ -763,7 +762,7 @@ export type WorkboardOperatorCard = WorkboardCard & {
   pullRequestUrl?: string;
   /** The newest round pushed to `pullRequestUrl`'s branch; it and earlier rounds are on GitHub. */
   publishedRound?: number;
-  /** A node ticket's grilling, from its first question on; the answer itself stays in the log. */
+  /** A node ticket's grilling, from its first question on; the chat itself stays in the log. */
   grill?: Pick<WorkboardNodeGrill, "status" | "rounds" | "attachmentId">;
 };
 

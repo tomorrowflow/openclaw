@@ -171,7 +171,7 @@ function normalizeNodeGrill(value: unknown): WorkboardNodeGrill | undefined {
     status: value.status,
     rounds,
     attachmentId,
-    ...((kind === "answer" || kind === "end") && at !== undefined ? { pending: { kind, at } } : {}),
+    ...(kind === "end" && at !== undefined ? { pending: { kind, at } } : {}),
   };
 }
 

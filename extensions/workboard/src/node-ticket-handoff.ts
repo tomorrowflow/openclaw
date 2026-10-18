@@ -407,7 +407,7 @@ async function reopenNodeTicket(params: {
       body: rework
         ? `Reopened without a review comment; add what should change and move it to todo again to start rework round ${round}.`
         : reopen.kind === "grill"
-          ? "Moved to todo without an answer; answer the grilling question in the card's Grilling tab to resume the session, or choose End grilling there to let the agent continue with what is settled."
+          ? "Moved to todo while grilling; keep answering in the card's session chat, or choose End grilling on the card to let the agent continue with what is settled."
           : "Moved to todo without an answer; answer the questions in a comment and move it to todo again to resume the session.",
       applies: (current) => nodeTicketReopen(current, params.now())?.reviewed === false,
     });
@@ -421,7 +421,7 @@ async function reopenNodeTicket(params: {
   if (!failure || !current || !nodeTicketReopen(current, params.now())?.reviewed) {
     return;
   }
-  const what = nodeTicketReopenSubject(current, reopen);
+  const what = nodeTicketReopenSubject(reopen);
   await store.block(
     card.id,
     {
