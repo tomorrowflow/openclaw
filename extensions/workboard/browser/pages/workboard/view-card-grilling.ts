@@ -3,11 +3,15 @@ import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { renderMarkdown } from "../../components/host-components.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
-import { answerWorkboardGrill, type WorkboardCard } from "../../lib/workboard/index.ts";
+import {
+  answerWorkboardGrill,
+  endWorkboardGrill,
+  type WorkboardCard,
+} from "../../lib/workboard/index.ts";
 import { getCardActionState } from "./view-card-actions.ts";
 import { workboardMutationContext, type WorkboardProps } from "./view-helpers.ts";
 
-// The server's cap on one answer; the textarea stops there.
+// The server's cap on one answer or closing note; the textarea stops there.
 const MAX_GRILL_ANSWER_CHARS = 4000;
 
 type LogState =
@@ -109,7 +113,8 @@ function renderLog(state: LogState | undefined) {
 
 /**
  * The Grilling tab: the question-and-answer log, and while the session waits
- * on the operator, the answer box that resumes it.
+ * on the operator, the answer box that resumes it and End grilling, which
+ * sends the box's text along as a closing note.
  */
 export function renderGrillingPanel(
   props: WorkboardProps,
@@ -120,13 +125,9 @@ export function renderGrillingPanel(
   const { busy, writable } = getCardActionState(props, card);
   const waiting = card.stage?.kind === "grilling";
   const draft = grilling.draft(card.id);
-  const send = async () => {
-    const answered = await answerWorkboardGrill({
-      ...workboardMutationContext(props),
-      cardId: card.id,
-      answer: draft,
-    });
-    if (answered && grilling.draft(card.id) === draft) {
+  const mutation = { ...workboardMutationContext(props), cardId: card.id };
+  const clearDraft = (sent: boolean) => {
+    if (sent && grilling.draft(card.id) === draft) {
       grilling.setDraft(card.id, "");
       props.onRequestUpdate?.();
     }
@@ -163,14 +164,28 @@ export function renderGrillingPanel(
                 ? nothing
                 : html`<p class="workboard-grilling__note">${t("workboard.grillingWorking")}</p>`
             }
-            <button
-              class="btn primary"
-              type="button"
-              ?disabled=${busy || !waiting || !draft.trim()}
-              @click=${send}
-            >
-              ${t("workboard.grillingSend")}
-            </button>
+            <div class="workboard-grilling__actions">
+              <button
+                class="btn"
+                type="button"
+                data-grilling-action="end"
+                title=${t("workboard.grillingEndTitle")}
+                ?disabled=${busy || !waiting}
+                @click=${async () => clearDraft(await endWorkboardGrill({ ...mutation, note: draft }))}
+              >
+                ${t("workboard.grillingEnd")}
+              </button>
+              <button
+                class="btn primary"
+                type="button"
+                data-grilling-action="send"
+                ?disabled=${busy || !waiting || !draft.trim()}
+                @click=${async () =>
+                  clearDraft(await answerWorkboardGrill({ ...mutation, answer: draft }))}
+              >
+                ${t("workboard.grillingSend")}
+              </button>
+            </div>
           </div>`
         : nothing
     }

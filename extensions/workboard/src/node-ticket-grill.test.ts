@@ -1,6 +1,6 @@
 // Workboard tests cover a node ticket grilling the operator one question per round.
 import type { WorkboardCard } from "@openclaw/workboard-contract";
-import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createWorkboardAutomationNudgeService } from "./automation-nudge.js";
 import { redactOperatorCard } from "./card-redaction.js";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
@@ -58,6 +58,10 @@ async function grillingTicket() {
     });
     return respond.mock.calls[0] as [boolean, unknown, { message?: string }?];
   };
+  const end = async (note?: unknown) => {
+    const respond = await capture.invoke("workboard.cards.grill.end", { id: card.id, note });
+    return respond.mock.calls[0] as [boolean, unknown, { message?: string }?];
+  };
   const warn = vi.fn();
   const handoffs = createNodeTicketHandoffs({
     store,
@@ -80,7 +84,7 @@ async function grillingTicket() {
   const launches = () =>
     gateway.respond.mock.calls.filter(([method]) => method === "sessions.create");
   const brief = () => String(launches().at(-1)?.[1]?.message).split("## Turn contract")[0];
-  return { store, gateway, card, sessionKey, answer, handoffs, warn, log, launches, brief };
+  return { store, gateway, card, sessionKey, answer, end, handoffs, warn, log, launches, brief };
 }
 
 const worktreeOf = (card: WorkboardCard | undefined) =>
@@ -120,8 +124,9 @@ describe("node ticket grilling", () => {
     expect(ok).toBe(true);
     expect(result).toMatchObject({ card: { status: "todo" } });
     const answered = await store.get(card.id);
-    expect(answered?.metadata?.automation?.target?.worktree?.grill?.pendingAnswer).toEqual({
-      answeredAt: expect.any(Number),
+    expect(answered?.metadata?.automation?.target?.worktree?.grill?.pending).toEqual({
+      kind: "answer",
+      at: expect.any(Number),
     });
     expect(JSON.stringify(answered?.metadata)).not.toContain("Yes, return [].");
     expect(await ticket.log()).toMatch(/\n\*\*Answer\*\* \(\d{4}-.+\)\n\nYes, return \[\]\.\n$/);
@@ -160,7 +165,7 @@ describe("node ticket grilling", () => {
       handoff: { phase: "pending" },
       grill: { status: "closed", rounds: 1 },
     });
-    expect(done?.metadata?.automation?.target?.worktree?.grill?.pendingAnswer).toBeUndefined();
+    expect(done?.metadata?.automation?.target?.worktree?.grill?.pending).toBeUndefined();
     expect(await ticket.log()).toBe(
       `${answeredLog}\n## Outcome\n\n**done:** Empty input returns [].\n`,
     );
@@ -194,7 +199,7 @@ describe("node ticket grilling", () => {
       (comment) => comment.body.startsWith("Moved to todo"),
     );
     expect(notices.map((comment) => comment.body)).toEqual([
-      "Moved to todo without an answer; answer the grilling question in the card's Grilling tab to resume the session.",
+      "Moved to todo without an answer; answer the grilling question in the card's Grilling tab to resume the session, or choose End grilling there to let the agent continue with what is settled.",
     ]);
     expect(ticket.launches()).toHaveLength(1);
   });
@@ -352,9 +357,7 @@ describe("grilling log ownership", () => {
     );
 
     expect((await ticket.answer("No."))[2]?.message).toContain("The grilling log is full");
-    expect(
-      worktreeOf(await ticket.store.get(ticket.card.id))?.grill?.pendingAnswer,
-    ).toBeUndefined();
+    expect(worktreeOf(await ticket.store.get(ticket.card.id))?.grill?.pending).toBeUndefined();
   });
 
   it("refuses to delete the grilling log", async () => {
@@ -376,37 +379,175 @@ describe("grilling log ownership", () => {
 });
 
 describe("grilling endings", () => {
-  it("ends the grilling when the operator moves the card to done, and a comment resumes it", async () => {
+  it("ends the grilling with the operator's note and resumes the same session to carry out the ticket", async () => {
+    const ticket = await grillingTicket();
+    const { store, card } = ticket;
+
+    const [ok, result] = await ticket.end("Ship the parser only; skip the CLI.");
+    expect(ok).toBe(true);
+    expect(result).toMatchObject({ card: { status: "todo" } });
+    const ended = await store.get(card.id);
+    expect(worktreeOf(ended)?.grill).toEqual({
+      status: "closed",
+      rounds: 1,
+      attachmentId: expect.any(String),
+      pending: { kind: "end", at: expect.any(Number) },
+    });
+    expect(await ticket.log()).toMatch(
+      /\n## Outcome\n\n\*\*ended by the operator\*\* \(\d{4}-\d\d-\d\dT[\d:.]+Z\): Ship the parser only; skip the CLI\.\n$/,
+    );
+
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect(ticket.warn).not.toHaveBeenCalled();
+    expect((await store.get(card.id))?.status).toBe("running");
+    expect(ticket.launches()).toHaveLength(2);
+    expect(ticket.launches().at(-1)?.[1]).toMatchObject({ key: ticket.sessionKey });
+    expect(ticket.brief()).toContain(
+      "## Grilling ended\nThe operator ended the grilling. What you settled together is in this session and in the card's grilling log (`grilling.md`).\n\nThe operator's closing note:\n\nShip the parser only; skip the CLI.\n\nNow carry out the ticket with that result and end with `done`, `blocked`, or `needs_input`. Do not start another grilling unless something new and blocking comes up.",
+    );
+    expect(ticket.brief()).not.toContain("## Grilling answer");
+
+    await endTurn(
+      store,
+      card.id,
+      reportMessages({
+        outcome: "done",
+        headline: "Parser only.",
+        summary: "Parser returns [].",
+        proof: [{ command: "pytest", status: "passed" }],
+      }),
+    );
+
+    const done = await store.get(card.id);
+    expect(worktreeOf(done)).toMatchObject({
+      handoff: { phase: "pending" },
+      grill: { status: "closed", rounds: 1 },
+    });
+    expect(worktreeOf(done)?.grill?.pending).toBeUndefined();
+    expect(await ticket.log()).toMatch(
+      /\*\*ended by the operator\*\* \(\d{4}-\d\d-\d\dT[\d:.]+Z\): Ship the parser only; skip the CLI\.\n$/,
+    );
+  });
+
+  it("refuses to end a grilling whose answer is still pending, even back in review", async () => {
+    const ticket = await grillingTicket();
+    expect((await ticket.answer("Yes."))[0]).toBe(true);
+    expect((await ticket.end())[2]?.message).toContain(
+      "This card is not waiting on a grilling answer",
+    );
+    await ticket.store.move(ticket.card.id, "review", undefined);
+
+    expect((await ticket.end())[2]?.message).toContain(
+      "This card is not waiting on a grilling answer",
+    );
+    expect(worktreeOf(await ticket.store.get(ticket.card.id))?.grill).toMatchObject({
+      status: "open",
+      pending: { kind: "answer" },
+    });
+  });
+
+  it("ends the grilling without a note when the operator moves the card to done", async () => {
     const ticket = await grillingTicket();
     const { store, card } = ticket;
 
     await store.move(card.id, "done", undefined);
     await ticket.handoffs.resume(ticket.warn);
 
-    const ended = await store.get(card.id);
-    expect(ended?.status).toBe("review");
-    expect(worktreeOf(ended)).toMatchObject({
-      handoff: { phase: "questions", escalatedAt: expect.any(Number) },
-      grill: { status: "closed", rounds: 1 },
+    expect(ticket.warn).not.toHaveBeenCalled();
+    const resumed = await store.get(card.id);
+    expect(resumed?.status, "the same pass resumes the session").toBe("running");
+    expect(worktreeOf(resumed)?.grill).toMatchObject({
+      status: "closed",
+      pending: { kind: "end" },
     });
-    expect(ended?.metadata?.comments?.at(-1)?.body).toMatch(
-      /^Moving this ticket to done ended its grilling, and there is nothing to publish yet\./,
-    );
     expect(await ticket.log()).toMatch(
-      /\n## Outcome\n\n\*\*ended by the operator:\*\* The card was moved to done while it waited on a grilling answer\.\n$/,
+      /\n## Outcome\n\n\*\*ended by the operator\*\* \(\d{4}-\d\d-\d\dT[\d:.]+Z\): no note\n$/,
     );
+    expect(ticket.launches().at(-1)?.[1]).toMatchObject({ key: ticket.sessionKey });
+    expect(ticket.brief()).toContain("## Grilling ended\n");
+    expect(ticket.brief()).not.toContain("closing note");
+  });
 
-    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 1000 });
-    onTestFinished(() => {
-      vi.useRealTimers();
-    });
-    await store.addComment(card.id, { body: "Build the parser only." }, undefined, "operator");
-    await store.move(card.id, "todo", undefined);
+  it("gives the agent the pending answer and the end when the card moves to done before the answer resumes", async () => {
+    const ticket = await grillingTicket();
+    const { store, card } = ticket;
+    await ticket.answer("Yes, return [].");
+
+    await store.move(card.id, "done", undefined);
     await ticket.handoffs.resume(ticket.warn);
 
+    expect(ticket.warn).not.toHaveBeenCalled();
+    const resumed = await store.get(card.id);
+    expect(resumed?.status).toBe("running");
+    expect(worktreeOf(resumed)?.grill).toMatchObject({
+      status: "closed",
+      pending: { kind: "answer" },
+    });
+    expect(ticket.launches().at(-1)?.[1]).toMatchObject({ key: ticket.sessionKey });
+    expect(ticket.brief()).toContain(
+      "## Grilling answer\nThe operator answered your grilling question:\n\nYes, return [].\n\n## Grilling ended\nThe operator ended the grilling.",
+    );
+    expect(ticket.brief()).not.toContain("closing note");
+  });
+
+  it("resumes an ended grilling the operator moved to done before it started", async () => {
+    const ticket = await grillingTicket();
+    const { store, card } = ticket;
+    expect((await ticket.end("Parser only."))[0]).toBe(true);
+
+    await store.move(card.id, "done", undefined);
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect(ticket.warn).not.toHaveBeenCalled();
     expect((await store.get(card.id))?.status).toBe("running");
-    expect(ticket.brief()).toContain("## Answers to your questions");
-    expect(ticket.brief()).toContain("Build the parser only.");
+    expect(ticket.launches().at(-1)?.[1]).toMatchObject({ key: ticket.sessionKey });
+    expect(ticket.brief()).toContain("The operator's closing note:\n\nParser only.\n");
+  });
+
+  it("does not present an earlier closing note when the full log dropped the latest end", async () => {
+    const ticket = await grillingTicket();
+    const { store, card } = ticket;
+    await ticket.end("Old note.");
+    await ticket.handoffs.resume(ticket.warn);
+    await endTurn(
+      store,
+      card.id,
+      reportMessages({ outcome: "grill", question: "q".repeat(300_000) }),
+    );
+
+    expect((await ticket.end("New note."))[0]).toBe(true);
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect(ticket.brief()).toContain(
+      "If the operator left a closing note, it could not be read from the grilling log.",
+    );
+    expect(ticket.brief()).not.toContain("Old note.");
+  });
+
+  it("names the grilling result, not an answer, when its start waits or fails", async () => {
+    const waiting = await grillingTicket();
+    waiting.store.nodeTicketConcurrency = 1;
+    await startNodeCard(waiting.store, waiting.gateway);
+    await waiting.end();
+    await waiting.handoffs.resume(waiting.warn);
+    expect((await waiting.store.get(waiting.card.id))?.metadata?.comments?.at(-1)?.body).toMatch(
+      /^The grilling result waits for a node-ticket slot;/,
+    );
+
+    const failing = await grillingTicket();
+    await failing.end();
+    await createNodeTicketHandoffs({
+      store: failing.store,
+      runtime: failing.gateway,
+      github: { token: () => undefined },
+      start: async () => ({ startFailures: [{ error: "node offline" }] }),
+    }).resume(failing.warn);
+    const blocked = await failing.store.get(failing.card.id);
+    expect(blocked?.status).toBe("blocked");
+    expect(blocked?.metadata?.comments?.at(-1)?.body).toContain(
+      "The grilling result could not start: node offline",
+    );
   });
 
   it("closes the grilling blocked when its done report has no passing proof", async () => {

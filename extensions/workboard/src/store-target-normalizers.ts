@@ -164,14 +164,14 @@ function normalizeNodeGrill(value: unknown): WorkboardNodeGrill | undefined {
   if (rounds === undefined || !attachmentId) {
     return undefined;
   }
-  const answeredAt = isRecord(value.pendingAnswer)
-    ? resolveOptionalIntegerOption(value.pendingAnswer.answeredAt, { min: 0 })
-    : undefined;
+  const pending = isRecord(value.pending) ? value.pending : undefined;
+  const kind = pending?.kind;
+  const at = resolveOptionalIntegerOption(pending?.at, { min: 0 });
   return {
     status: value.status,
     rounds,
     attachmentId,
-    ...(answeredAt === undefined ? {} : { pendingAnswer: { answeredAt } }),
+    ...((kind === "answer" || kind === "end") && at !== undefined ? { pending: { kind, at } } : {}),
   };
 }
 

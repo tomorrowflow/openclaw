@@ -282,7 +282,8 @@ export type WorkboardWorkspaceAccess =
  * agent passed this round's questions to the operator; a new round starts
  * without it. `grilling` is set by a grill report: the card waits in review
  * on the operator's answer to one grilling question, which only
- * `workboard.cards.grill.answer` gives; comments are not answers.
+ * `workboard.cards.grill.answer` gives (comments are not answers), or on
+ * `workboard.cards.grill.end`, which ends the grilling.
  */
 export type WorkboardNodeHandoff =
   | { phase: "pending"; reportedAt: number }
@@ -362,16 +363,18 @@ export type WorkboardNodeFeedback = {
  * A node ticket's grilling: the session asks the operator one question per
  * round until both share an understanding of what to build. `attachmentId` is
  * the card's `grilling.md` log of every question, answer, and the outcome.
- * `pendingAnswer` marks the operator's answer the next round's brief carries;
- * its text is the log's answer entry at `answeredAt`. The round's report
- * clears it, so a retried launch still carries it. A done, blocked, or
- * needs_input report closes an open grill.
+ * `pending` marks what the operator gave the next round's brief: an `answer`
+ * (its text is the log's answer entry at `at`), or the `end` of the grilling
+ * (its closing note is the log's outcome entry at `at`). A closed grill with a
+ * pending answer was ended by a move to done after the answer, so the brief
+ * gets both. The round's report clears it, so a retried launch still carries
+ * it. A done, blocked, or needs_input report closes an open grill.
  */
 export type WorkboardNodeGrill = {
   status: "open" | "closed";
   rounds: number;
   attachmentId: string;
-  pendingAnswer?: { answeredAt: number };
+  pending?: { kind: "answer" | "end"; at: number };
 };
 
 /**

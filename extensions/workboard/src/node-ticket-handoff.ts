@@ -14,6 +14,7 @@ import {
   HandoffSupersededError,
   hostGit,
   nodeTicketReopen,
+  nodeTicketReopenSubject,
   nodeTicketTarget,
   requireHostGit,
   runNodeCommand,
@@ -406,7 +407,7 @@ async function reopenNodeTicket(params: {
       body: rework
         ? `Reopened without a review comment; add what should change and move it to todo again to start rework round ${round}.`
         : reopen.kind === "grill"
-          ? "Moved to todo without an answer; answer the grilling question in the card's Grilling tab to resume the session."
+          ? "Moved to todo without an answer; answer the grilling question in the card's Grilling tab to resume the session, or choose End grilling there to let the agent continue with what is settled."
           : "Moved to todo without an answer; answer the questions in a comment and move it to todo again to resume the session.",
       applies: (current) => nodeTicketReopen(current, params.now())?.reviewed === false,
     });
@@ -420,7 +421,7 @@ async function reopenNodeTicket(params: {
   if (!failure || !current || !nodeTicketReopen(current, params.now())?.reviewed) {
     return;
   }
-  const what = rework ? `Rework round ${round}` : "The answer";
+  const what = nodeTicketReopenSubject(current, reopen);
   await store.block(
     card.id,
     {
@@ -532,7 +533,16 @@ export function createNodeTicketHandoffs(params: {
           } else if (reopen) {
             await reopenNodeTicket({ store: params.store, start: params.start, card, now });
           } else if (unanswered?.phase === "grilling") {
-            await params.store.endNodeGrillByOperator(card.id, unanswered);
+            // The card change this move makes finds the card in flight, so its reopen runs here.
+            const moved = await params.store.endNodeGrillMovedToDone(card.id, unanswered);
+            if (moved) {
+              await reopenNodeTicket({
+                store: params.store,
+                start: params.start,
+                card: moved,
+                now,
+              });
+            }
           } else if (unanswered) {
             const { worktreePath } = unanswered;
             await params.store.addNodeTicketNotice(card.id, {

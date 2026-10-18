@@ -229,7 +229,7 @@ export function nodeTicketReopen(card: WorkboardCard, now: number): NodeTicketRe
       kind: "grill",
       worktreePath: worktree.path,
       round: worktree.grill?.rounds ?? 1,
-      reviewed: worktree.grill?.pendingAnswer !== undefined,
+      reviewed: worktree.grill?.pending !== undefined,
     };
   }
   return {
@@ -241,6 +241,16 @@ export function nodeTicketReopen(card: WorkboardCard, now: number): NodeTicketRe
         : (worktree.questions?.rounds ?? 0) + 1,
     reviewed: nodeTicketReviewComments(card).length > 0,
   };
+}
+
+/** What a reopened round resumes with, as its notices name it. */
+export function nodeTicketReopenSubject(card: WorkboardCard, reopen: NodeTicketReopen): string {
+  if (reopen.kind === "rework") {
+    return `Rework round ${reopen.round}`;
+  }
+  return reopen.kind === "grill" && nodeTicketTarget(card)?.worktree?.grill?.status === "closed"
+    ? "The grilling result"
+    : "The answer";
 }
 
 /** Queues a start on a full slot; the card when the request was recorded. */
@@ -266,11 +276,7 @@ export function nodeTicketSlotWaitNotice(
   now: number,
 ): string {
   const reopen = nodeTicketReopen(card, now);
-  const what = !reopen
-    ? "This ticket"
-    : reopen.kind === "rework"
-      ? `Rework round ${reopen.round}`
-      : "The answer";
+  const what = reopen ? nodeTicketReopenSubject(card, reopen) : "This ticket";
   if (!route) {
     return `${what} waits for a node-ticket slot; it starts when a running node ticket reaches review.`;
   }
@@ -568,8 +574,9 @@ function blockReason(report: NodeTicketStopReport): string {
  * needs_input report posts the questions and waits in review for an answer;
  * the agent_end nudge wakes the board's automation so `dev` can answer. A
  * grill report logs its question and waits in review for the operator's
- * answer, which only the Grilling tab gives; any other report closes an open
- * grill with the outcome the card gets, so a refused done closes it blocked.
+ * answer or End grilling; any other report closes an open grill with the
+ * outcome the card gets, so a refused done closes it blocked, and clears the
+ * pending end of a grill the operator ended.
  * Every other ending blocks the card so `dev` sees the reason. Proof that
  * did not pass also blocks, and so does a rung b round's done report without
  * its standards review.
@@ -606,7 +613,7 @@ export async function applyNodeTicketReport(params: {
   }
   const { report } = parsed;
   const closeGrill = async (outcome: string, summary: string) => {
-    if (worktree?.grill?.status === "open") {
+    if (worktree?.grill?.status === "open" || worktree?.grill?.pending) {
       await store.closeNodeGrill(card.id, { worktreePath: worktree.path, outcome, summary }, scope);
     }
   };

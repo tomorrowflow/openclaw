@@ -3885,8 +3885,10 @@ workboard-inline-text {
   gap: 8px;
 }
 
-.workboard-grilling__compose > .btn {
+.workboard-grilling__actions {
+  display: flex;
   justify-self: end;
+  gap: 8px;
 }
 
 .workboard-grilling__note,

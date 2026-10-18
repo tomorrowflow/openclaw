@@ -33,6 +33,7 @@ export {
   archiveWorkboardCard,
   deleteWorkboardCard,
   dispatchWorkboard,
+  endWorkboardGrill,
   moveWorkboardCard,
   saveWorkboardCardDraft,
 } from "./mutations.ts";

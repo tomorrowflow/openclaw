@@ -303,6 +303,19 @@ export async function answerWorkboardGrill(
   });
 }
 
+/** Ends a node ticket's grilling; the session continues the ticket, with the note if one is given. */
+export async function endWorkboardGrill(params: WorkboardCardMutationParams & { note: string }) {
+  const note = params.note.trim();
+  return runWorkboardCardMutation(params, async (state, client) => {
+    const payload = await client.request("workboard.cards.grill.end", {
+      id: params.cardId,
+      ...(note ? { note } : {}),
+    });
+    replaceCard(state, normalizeCardPayload(payload));
+    return true;
+  });
+}
+
 export async function updateWorkboardCardProperties(
   params: WorkboardClientContext & {
     card: WorkboardCard;

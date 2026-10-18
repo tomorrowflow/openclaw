@@ -254,8 +254,12 @@ export default {
     grillingMissing: "The grilling log is missing.",
     grillingLoadFailed: "The grilling log is missing or unreadable: {error}",
     grillingAnswerLabel: "Your answer",
-    grillingAnswerPlaceholder: "Answer the question; the session continues with it.",
+    grillingAnswerPlaceholder:
+      "Answer the question, or end the grilling with an optional closing note; the session continues with it.",
     grillingSend: "Send answer",
+    grillingEnd: "End grilling",
+    grillingEndTitle:
+      "End the grilling; the agent carries out the ticket with what is settled and any text above as a closing note.",
     grillingWorking: "The agent is working on your last answer.",
     sessionChipGrilling: "Grilling — answer on card",
     detailTemplate: "Template",

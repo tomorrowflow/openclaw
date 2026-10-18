@@ -93,7 +93,10 @@ it("opens a waiting card on its Grilling tab, shows the log, and sends the answe
   expect(client.request).toHaveBeenCalledWith("workboard.cards.attachments.get", { id: "log-1" });
 
   const answer = expectDefined(panel.querySelector("textarea"), "answer box");
-  const send = expectDefined(panel.querySelector<HTMLButtonElement>("button"), "send button");
+  const send = expectDefined(
+    panel.querySelector<HTMLButtonElement>("[data-grilling-action=send]"),
+    "send button",
+  );
   expect(send.disabled).toBe(true);
   answer.value = "Yes, return [].";
   answer.dispatchEvent(new InputEvent("input"));
@@ -113,6 +116,78 @@ it("opens a waiting card on its Grilling tab, shows the log, and sends the answe
   );
   expect(panel.querySelector("textarea")?.disabled).toBe(true);
   expect(panel.querySelector("textarea")?.value).toBe("");
+  expect(
+    panel.querySelector<HTMLButtonElement>("[data-grilling-action=end]")?.disabled,
+    "nothing to end while the agent works on the answer",
+  ).toBe(true);
+});
+
+it("ends a waiting grilling with the answer box's text as its closing note", async () => {
+  const card = grillingCard();
+  const ended = grillingCard({
+    status: "todo",
+    stage: undefined,
+    grill: { status: "closed", rounds: 1, attachmentId: "log-1" },
+  });
+  const client = createWorkboardTestClient({
+    "workboard.cards.attachments.get": { contentBase64: Buffer.from(LOG).toString("base64") },
+    "workboard.cards.grill.end": { card: ended },
+  });
+  const host = {};
+  const state = getWorkboardState(host);
+  state.loaded = true;
+  state.cards = [card];
+  state.detailCardId = card.id;
+  state.detailTab = "grilling";
+  const container = document.createElement("div");
+  document.body.append(container);
+  onTestFinished(() => {
+    render(nothing, container);
+    container.remove();
+  });
+  const renderPanel = () =>
+    render(
+      renderCardDetailsPanel({
+        host,
+        client,
+        connected: true,
+        canWrite: true,
+        agentsList: null,
+        sessions: [],
+        onOpenSession: vi.fn(),
+        onRequestUpdate: () => renderPanel(),
+        detailGrilling: grilling,
+      }),
+      container,
+    );
+  const grilling = createCardGrilling(client, () => renderPanel());
+  renderPanel();
+
+  const panel = expectDefined(
+    container.querySelector("#workboard-detail-panel-grilling"),
+    "grilling panel",
+  );
+  const end = expectDefined(
+    panel.querySelector<HTMLButtonElement>("[data-grilling-action=end]"),
+    "end button",
+  );
+  expect(end.disabled, "End needs no text").toBe(false);
+  const note = expectDefined(panel.querySelector("textarea"), "answer box");
+  note.value = "  Ship the parser only.  ";
+  note.dispatchEvent(new InputEvent("input"));
+  end.click();
+
+  await waitForFast(() =>
+    expect(client.request).toHaveBeenCalledWith("workboard.cards.grill.end", {
+      id: card.id,
+      note: "Ship the parser only.",
+    }),
+  );
+  await waitForFast(() => expect(panel.querySelector("textarea")).toBeNull());
+  expect(client.request).not.toHaveBeenCalledWith(
+    "workboard.cards.grill.answer",
+    expect.anything(),
+  );
 });
 
 it("shows a closed grilling's log without an answer box", async () => {

@@ -728,23 +728,33 @@ report, address the findings, and report them (see **Report** below).
    and the card moves to `review` with stage `grilling`. Only you answer: the
    board's automation job is not woken for a grilling round, and comments are
    not answers. The card's **Grilling** tab shows the log and, while the card
-   waits, an answer box; it opens on that tab, and the session chip reads
-   "Grilling — answer on card" and opens the card. Sending calls
-   `workboard.cards.grill.answer {id, answer}` (at most 4,000 characters),
-   which logs the answer, keeps it for the next round, and moves the card to
-   `todo`; the same session resumes in the same worktree with the answer under
-   `## Grilling answer`, and a retried start still carries it. The answer is
-   refused unless the card waits on a grilling answer, and when the log has
-   no room left for it. The card records only when you answered; the next
-   round's brief reads the answer from the log, and says so plainly if it
-   cannot. A move to `todo` without an answer goes back to `review` with a
-   comment naming the Grilling tab. A move to `done` while the card waits
-   ends the grilling: the log gets an `## Outcome` entry saying you ended it,
-   and the card goes back to `review` waiting with open questions (already
-   escalated to you), so a comment and a move to `todo` resume the session. A
-   `done`, `blocked`, or `needs_input` report closes the grill with an
-   `## Outcome` entry naming what the card got, so a `done` report the import
-   refuses for its proof closes it `blocked`. The log stays on the card: the
+   waits, an answer box with **Send answer** and **End grilling**; it opens on
+   that tab, and the session chip reads "Grilling — answer on card" and opens
+   the card. Sending calls `workboard.cards.grill.answer {id, answer}` (at
+   most 4,000 characters), which logs the answer, keeps it for the next round,
+   and moves the card to `todo`; the same session resumes in the same worktree
+   with the answer under `## Grilling answer`, and a retried start still
+   carries it. The answer is refused unless the card waits on a grilling
+   answer, and when the log has no room left for it. The card records only
+   when you answered; the next round's brief reads the answer from the log,
+   and says so plainly if it cannot. **End grilling** calls
+   `workboard.cards.grill.end {id, note?}` with the answer box's text, if any,
+   as a closing note (same limit and refusals, except a full log cuts the note
+   instead of refusing). It closes the grill with an `## Outcome` entry
+   `**ended by the operator** (<time>):` followed by the note or `no note`, and moves
+   the card to `todo`: the same session resumes under `## Grilling ended`,
+   with the note read from the log, to carry out the ticket with what is
+   settled and end with `done`, `blocked`, or `needs_input` rather than grill
+   again. A move to `done` while the card waits on the grilling, answered or
+   not, does the same as End grilling without a note, since there is nothing
+   to publish yet; a pending answer stays in the brief ahead of
+   `## Grilling ended`, and an ended grilling moved to `done` before it
+   resumed goes back to `todo` the same way. A move to `todo`
+   without an answer goes back to `review` with a comment naming the Grilling
+   tab and End grilling. A `done`, `blocked`, or `needs_input` report closes
+   the grill with an `## Outcome` entry naming what the card got, so a `done`
+   report the import refuses for its proof closes it `blocked`; after End
+   grilling it only clears what is pending. The log stays on the card: the
    metadata budget and the 20-attachment cap drop other attachments first,
    and deleting `grilling.md` is refused.
 3. **Import:** the node bundles the branch to `<worktreesRoot>/wb-<cardId>.bundle`

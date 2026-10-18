@@ -60,18 +60,51 @@ export function grillAnswerEntry(answer: string, answeredAt: number): string {
   return `${grillAnswerHeading(answeredAt)}${answer}`;
 }
 
+/** The heading every operator end starts with; its entry ends the log until the next question. */
+const OPERATOR_END_PREFIX = "## Outcome\n\n**ended by the operator** (";
+const NO_CLOSING_NOTE = "no note";
+
+function grillOperatorEndHeading(endedAt: number): string {
+  return `${OPERATOR_END_PREFIX}${new Date(endedAt).toISOString()}): `;
+}
+
 /**
  * The answer logged at `answeredAt`. It is the log's last entry until the
- * round it resumes reports, so the rest of the log is the answer.
+ * round it resumes reports, except for the operator end a move to done
+ * appends after it, so the rest of the log up to that end is the answer.
  */
 export function grillAnswerFromLog(log: string, answeredAt: number): string | undefined {
   const heading = grillAnswerHeading(answeredAt);
   const at = log.lastIndexOf(heading);
-  return at < 0 ? undefined : log.slice(at + heading.length).trim() || undefined;
+  if (at < 0) {
+    return undefined;
+  }
+  const rest = log.slice(at + heading.length);
+  const end = rest.lastIndexOf(OPERATOR_END_PREFIX);
+  return (end < 0 ? rest : rest.slice(0, end)).trim() || undefined;
 }
 
 export function grillOutcomeEntry(outcome: string, summary: string): string {
   return `## Outcome\n\n**${outcome}:** ${summary || "no summary given"}`;
+}
+
+export function grillOperatorEndEntry(note: string, endedAt: number): string {
+  return `${grillOperatorEndHeading(endedAt)}${note || NO_CLOSING_NOTE}`;
+}
+
+/**
+ * The closing note of the operator end logged at `endedAt`: "" when they left
+ * none, undefined when that entry is not in the log. It is the log's last
+ * entry until the grilling's next question, so the rest of the log is the note.
+ */
+export function grillClosingNoteFromLog(log: string, endedAt: number): string | undefined {
+  const heading = grillOperatorEndHeading(endedAt);
+  const at = log.lastIndexOf(heading);
+  if (at < 0) {
+    return undefined;
+  }
+  const note = log.slice(at + heading.length).trim();
+  return note === NO_CLOSING_NOTE ? "" : note;
 }
 
 /** The card comment that says a grilling question waits: its first line, and where to answer. */

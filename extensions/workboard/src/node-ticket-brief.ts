@@ -1,27 +1,78 @@
-import type { WorkboardCard, WorkboardNodeWorktree } from "@openclaw/workboard-contract";
-import { grillAnswerFromLog } from "./node-ticket-grill.js";
+import type {
+  WorkboardCard,
+  WorkboardNodeGrill,
+  WorkboardNodeWorktree,
+} from "@openclaw/workboard-contract";
+import { grillAnswerFromLog, grillClosingNoteFromLog } from "./node-ticket-grill.js";
 import { REPORT_FENCE } from "./node-ticket-report.js";
 import { nodeTicketReviewComments, nodeTicketTarget } from "./node-ticket.js";
 
 // Comments are capped at 2000 chars on write, so this bounds the brief's feedback section.
 const REWORK_FEEDBACK_MAX_ENTRIES = 5;
 
+/**
+ * What the operator gave a resumed grilling round: an answer, the end of the
+ * grilling, or an answer and then the end when a move to done ended it.
+ */
+function grillSection(grill: WorkboardNodeGrill, log: string | undefined): string[] {
+  const pending = grill.pending;
+  if (!pending) {
+    return [];
+  }
+  const answer =
+    pending.kind === "answer" && log !== undefined
+      ? grillAnswerFromLog(log, pending.at)
+      : undefined;
+  const note =
+    pending.kind !== "end"
+      ? ""
+      : log === undefined
+        ? undefined
+        : grillClosingNoteFromLog(log, pending.at);
+  return [
+    ...(pending.kind === "answer"
+      ? [
+          "## Grilling answer",
+          ...(answer
+            ? ["The operator answered your grilling question:", "", answer]
+            : [
+                `The operator answered your grilling question, but the answer could not be read from the card's grilling log (\`grilling.md\`).${grill.status === "open" ? " Ask the question again with a `grill` report." : ""}`,
+              ]),
+          "",
+        ]
+      : []),
+    ...(grill.status === "closed"
+      ? [
+          "## Grilling ended",
+          "The operator ended the grilling. What you settled together is in this session and in the card's grilling log (`grilling.md`).",
+          ...(note
+            ? ["", "The operator's closing note:", "", note]
+            : note === undefined
+              ? [
+                  "",
+                  "If the operator left a closing note, it could not be read from the grilling log.",
+                ]
+              : []),
+          "",
+          "Now carry out the ticket with that result and end with `done`, `blocked`, or `needs_input`. Do not start another grilling unless something new and blocking comes up.",
+          "",
+        ]
+      : []),
+  ];
+}
+
 /** The message that starts or resumes a node ticket session: the round's input and the turn contract. */
 export function buildNodeTicketMessage(params: {
   card: WorkboardCard;
   worktree: WorkboardNodeWorktree;
   context: string;
-  /** The grilling log while an answer is pending; undefined when it is gone. */
+  /** The grilling log while an answer or an end is pending; undefined when it is gone. */
   grillLog: string | undefined;
 }): string {
   const round = params.worktree.feedback;
   const answering = round?.kind === "answer";
   // Kept until this round's report is imported, so a retried launch carries it too.
-  const pendingAnswer = round?.kind === "grill" ? params.worktree.grill?.pendingAnswer : undefined;
-  const grillAnswer =
-    pendingAnswer && params.grillLog !== undefined
-      ? grillAnswerFromLog(params.grillLog, pendingAnswer.answeredAt)
-      : undefined;
+  const grill = round?.kind === "grill" ? params.worktree.grill : undefined;
   const rework = answering || round?.kind === "grill" ? undefined : params.worktree.rework;
   // The card still carries its published or questions record when the round
   // starts. A retried launch lost that record, so it reads the comments after
@@ -43,17 +94,7 @@ export function buildNodeTicketMessage(params: {
   return [
     `Work on this ticket: ${params.card.title}`,
     "",
-    ...(pendingAnswer
-      ? [
-          "## Grilling answer",
-          ...(grillAnswer
-            ? ["The operator answered your grilling question:", "", grillAnswer]
-            : [
-                "The operator answered your grilling question, but the answer could not be read from the card's grilling log (`grilling.md`). Ask the question again with a `grill` report.",
-              ]),
-          "",
-        ]
-      : []),
+    ...(grill ? grillSection(grill, params.grillLog) : []),
     ...(answering
       ? [
           "## Answers to your questions",
