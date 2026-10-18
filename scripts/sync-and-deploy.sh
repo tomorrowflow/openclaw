@@ -75,9 +75,11 @@ mkdir -p "$LOG_DIR"
 # ── Single-instance guard ──────────────────────────────────────────────────
 # A hung build must not let the next cron run overlap (two concurrent merges
 # into one checkout would corrupt it). Done before the log+trap
-# setup so a skipped run leaves no empty log and triggers no alert.
+# setup so a skipped run leaves no empty log and triggers no alert. The short
+# wait covers a child of a finished run still releasing fd 9; a real overlap
+# lasts minutes.
 exec 9>"$LOG_DIR/.sync.lock"
-if ! flock -n 9; then
+if ! flock -w 60 9; then
   echo "[sync] another run holds the lock — exiting"
   exit 0
 fi
@@ -96,8 +98,10 @@ OC_SYSTEMCTL="sudo -u openclaw XDG_RUNTIME_DIR=/run/user/$OC_UID systemctl --use
 # fails EACCES, so `openclaw doctor` reported "systemctl is-enabled unavailable"
 # and left the service verdict "unknown" — which is exactly what made it refuse
 # maintenance during cutover, leaving schema migrations unapplied.
+# fd 9 is the single-instance lock; CLI workers that outlive the call must not
+# inherit it, or the next run finds the lock held.
 oc_openclaw() {
-  (cd /tmp && sudo -u openclaw XDG_RUNTIME_DIR="/run/user/$OC_UID" openclaw "$@")
+  (cd /tmp && sudo -u openclaw XDG_RUNTIME_DIR="/run/user/$OC_UID" openclaw "$@" 9>&-)
 }
 
 # Tracks the current phase so the failure alert can say where it broke.
@@ -332,6 +336,12 @@ SATELLITES_SRC_PID=$!
 # lockfile is the authority, and a mismatch stops here, before anything is built.
 STAGE="deploy: install dependencies (gateway still up)"
 CI=true corepack pnpm install --frozen-lockfile
+
+# An interrupted earlier build leaves its dist artifact lock behind, and the
+# build refuses a lock whose owner died. Release it when nothing runs in the
+# checkout; stop here, naming the processes, when something does.
+STAGE="deploy: stale build lock (gateway still up)"
+node scripts/release-stale-dist-lock.mjs
 
 STAGE="deploy: build (gateway still up)"
 OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 CI=true corepack pnpm build
