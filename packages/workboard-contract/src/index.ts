@@ -445,14 +445,39 @@ export type WorkboardNodeChanges = {
 };
 
 /**
+ * One finding of a rung b round's standards reviewer. `line` is 1-based in the
+ * round's final commit when `fixed` is false, and in the tree the reviewer saw
+ * when true. `rule` names the CODING_STANDARDS.md rule.
+ */
+export type WorkboardNodeFinding = {
+  path: string;
+  line: number;
+  body: string;
+  rule?: string;
+  fixed: boolean;
+};
+
+/**
+ * A rung b round's standards review. The counts cover every finding; `items`
+ * is capped and absent when the report gave only counts.
+ */
+export type WorkboardNodeReview = {
+  findings: number;
+  fixed: number;
+  note?: string;
+  items?: WorkboardNodeFinding[];
+};
+
+/**
  * What one round of a node ticket decided and changed. `round` is the rework
- * round (0 for the first run); its reports append `decisions`, its import
- * records `changes`.
+ * round (0 for the first run); its reports append `decisions` and record
+ * `review`, its import records `changes`.
  */
 export type WorkboardNodeRound = {
   round: number;
   decisions?: WorkboardNodeDecision[];
   changes?: WorkboardNodeChanges;
+  review?: WorkboardNodeReview;
 };
 
 /** A ticket worktree the dispatcher created on a paired node. */

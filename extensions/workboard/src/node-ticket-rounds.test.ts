@@ -70,8 +70,14 @@ describe("node ticket decision trail", () => {
     const answered = withNodeRound(first, {
       decisions: [{ phase: "build", decision: "return []" }],
     });
+    const review = { findings: 1, fixed: 0, note: "Left one" };
+    const reviewed = withNodeRound(answered, {
+      review: { findings: 2, fixed: 2 },
+    });
+    // A retried turn's done report replaces the round's review.
+    const reviewedAgain = withNodeRound(reviewed, { review });
     const changes = parseNumstat("1\t0\tparser.py\0", "a".repeat(40), "b".repeat(40));
-    const imported = withNodeRound(answered, { changes });
+    const imported = withNodeRound(reviewedAgain, { changes });
     const rework = withNodeRound(
       {
         ...imported,
@@ -93,6 +99,7 @@ describe("node ticket decision trail", () => {
           { phase: "build", decision: "return []" },
         ],
         changes,
+        review,
       },
       { round: 1, decisions: [{ phase: "fix", decision: "rename the flag" }] },
     ]);

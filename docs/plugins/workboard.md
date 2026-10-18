@@ -672,9 +672,18 @@ report, address the findings, and report them (see **Report** below).
    including a `done` report with any `failed` proof entry. The brief tells the
    session to record red-first evidence (a test that failed before the fix) in
    the note of its passing entry. A rung b round's report also carries
-   `"review": {"findings": n, "fixed": n, "note": "…"}`, recorded as a passed
-   `standards review` proof entry whose note gives the counts; a `done` report
-   without it blocks the card. Fewer fixed than found is recorded, not blocked.
+   `"review": {"items": [{"path": "…", "line": 1, "rule": "…", "body": "…", "fixed": true}], "note": "…"}`,
+   one item per reviewer finding: a repo-relative `path`, a 1-based `line`
+   (for an open finding, its line in the round's final commit), the
+   `CODING_STANDARDS.md` rule, and a one-line `body`. The counts derive from
+   the items; items without a path, a positive integer line, or a body are
+   dropped. A session resumed under an older brief may send
+   `{"findings": n, "fixed": n, "note": "…"}` instead, which is still accepted.
+   The review is recorded as a passed `standards review` proof entry whose
+   note gives the counts, and on the round as `review` (see `rounds` in
+   `workboard show --json`), keeping at most 12 items, open findings first,
+   with cells cut to a short length. A `done` report without it blocks the
+   card. Fewer fixed than found is recorded, not blocked.
    **Decision trail:** any report may carry an optional `decisions` array,
    one row per decision point or checkpoint of the turn (a fork chosen, a
    unit verified, a pivot or revert, a blocker):

@@ -115,6 +115,14 @@ describe("redactOperatorCard", () => {
           files: [{ path: "parser.py", added: 3, deleted: 1 }],
           totals: { files: 1, added: 3, deleted: 1 },
         },
+        review: {
+          findings: 2,
+          fixed: 1,
+          items: [
+            { path: "parser.py", line: 4, rule: "Name the why", body: "Bare except", fixed: false },
+            { path: "parser.py", line: 9, body: "Unused import", fixed: true },
+          ],
+        },
       },
     ];
     const card: WorkboardCard = {

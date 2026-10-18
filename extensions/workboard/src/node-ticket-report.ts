@@ -1,8 +1,11 @@
-import type { WorkboardNodeDecision } from "@openclaw/workboard-contract";
-import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
+import type { WorkboardNodeDecision, WorkboardNodeReview } from "@openclaw/workboard-contract";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
-import { normalizeNodeDecisions } from "./node-ticket-rounds.js";
+import {
+  normalizeNodeDecisions,
+  normalizeNodeFindings,
+  normalizeNodeReview,
+} from "./node-ticket-rounds.js";
 import {
   MAX_COMMENT_BODY_CHARS,
   MAX_PROOF_COMMAND_CHARS,
@@ -35,16 +38,13 @@ export type NodeTicketStopReport = {
   decisions: WorkboardNodeDecision[];
 };
 
-/** The rung b standards review the session ran before its done report. */
-type NodeTicketReview = { findings: number; fixed: number; note?: string };
-
 type NodeTicketReport =
   | {
       outcome: "done";
       headline?: string;
       summary: string;
       proof: NodeTicketProof[];
-      review?: NodeTicketReview;
+      review?: WorkboardNodeReview;
       decisions: WorkboardNodeDecision[];
     }
   | NodeTicketStopReport;
@@ -124,16 +124,19 @@ export function reportComments(
   return [...trimmed.slice(0, -1), [...trimmed.slice(-1), ...ending].join("\n\n")];
 }
 
-function parseReview(value: unknown): NodeTicketReview | undefined {
-  if (!isRecord(value)) {
-    return undefined;
+/** The rung b standards review; its counts cover every valid finding, before the items cap. */
+function parseReview(value: unknown): WorkboardNodeReview | undefined {
+  if (!isRecord(value) || !Array.isArray(value.items)) {
+    // A session resumed under a brief from before itemized findings still reports counts only.
+    return normalizeNodeReview(value);
   }
-  const findings = resolveOptionalIntegerOption(value.findings, { min: 0 });
-  const fixed = resolveOptionalIntegerOption(value.fixed, { min: 0 });
-  const note = optionalText(value.note);
-  return findings === undefined || fixed === undefined
-    ? undefined
-    : { findings, fixed, ...(note ? { note } : {}) };
+  const items = normalizeNodeFindings(value.items);
+  return normalizeNodeReview({
+    note: value.note,
+    findings: items.length,
+    fixed: items.filter((item) => item.fixed).length,
+    items,
+  });
 }
 
 /** Reads the last report block of the final assistant message; anything else is a contract miss. */
