@@ -188,6 +188,8 @@ export default {
     overviewDecidedAgent: "Accepted by an agent",
     overviewDecidedOperator: "Accepted by you",
     overviewSampled: "In the review sample",
+    overviewMarkRead: "Mark read",
+    overviewMarkReadFailed: "Marking the PR read failed: {error}",
     overviewNotSampled: "Not sampled",
     overviewShadowVerdict: "Agent's verdict: {verdict}",
     overviewPullRequest: "Pull request",

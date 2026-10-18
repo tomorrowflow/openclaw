@@ -364,7 +364,8 @@ export type WorkboardNodeFeedback = {
  * is the rework round the publish closed (0 for the first publish); the
  * operator reworked it when the ticket later reached rework round `round + 1`.
  * `importedAt` and `publishedAt` bound the round's wait for the operator;
- * entries recorded before they existed lack them.
+ * entries recorded before they existed lack them. `readAt` is when the
+ * operator marked a sampled round's PR as read; Workboard never sees the merge.
  */
 export type WorkboardNodeReviewVerdict = {
   round: number;
@@ -373,6 +374,7 @@ export type WorkboardNodeReviewVerdict = {
   publishedAt?: number;
   decidedBy?: "agent";
   sampled?: boolean;
+  readAt?: number;
 };
 
 /**

@@ -98,6 +98,10 @@ export function createOverviewPage(workboard: WorkboardCapability): ControlUiVie
     let disposed = false;
     let inFlight = false;
     let stale = true;
+    // Cards with a sample read in flight; the change event that follows reloads the overview.
+    const marking = new Set<string>();
+    // A failed read stays on screen while its card still waits in Needs you.
+    let markError: { cardId: string; message: string } | undefined;
 
     const live = () => !disposed && context.presented && host.connection.connected;
     // One read at a time; changes during a read queue one more, so bursts cost two reads.
@@ -113,6 +117,9 @@ export function createOverviewPage(workboard: WorkboardCapability): ControlUiVie
           (loaded) => {
             result = loaded;
             error = undefined;
+            if (!loaded.needsYou.some((row) => row.cardId === markError?.cardId)) {
+              markError = undefined;
+            }
           },
           (failure: unknown) => {
             error = formatUiError(failure);
@@ -135,6 +142,45 @@ export function createOverviewPage(workboard: WorkboardCapability): ControlUiVie
       workboard.state.revealCardId = row.cardId;
       host.navigation.openPage(workboardPageTarget(row.boardId));
     };
+
+    const markRead = (row: WorkboardOverviewWaiting) => {
+      marking.add(row.cardId);
+      markError = undefined;
+      draw();
+      void host
+        .request("workboard.cards.sampleRead", { id: row.cardId })
+        .then(
+          () => {
+            // The change event usually reloads already; this read covers a missed one.
+            stale = true;
+            load();
+          },
+          (failure: unknown) => {
+            markError = {
+              cardId: row.cardId,
+              message: t("workboard.overviewMarkReadFailed", { error: formatUiError(failure) }),
+            };
+          },
+        )
+        .finally(() => {
+          marking.delete(row.cardId);
+          draw();
+        });
+    };
+
+    const waitingMeta = (row: WorkboardOverviewWaiting) =>
+      row.reason === "sampled" && host.connection.connected && host.connection.canWrite
+        ? html`<p class="workboard-overview__actions">
+            <button
+              class="btn btn--sm"
+              type="button"
+              ?disabled=${marking.has(row.cardId)}
+              @click=${() => markRead(row)}
+            >
+              ${t("workboard.overviewMarkRead")}
+            </button>
+          </p>`
+        : nothing;
 
     const renderRow = (
       row: WorkboardOverviewCard,
@@ -217,7 +263,7 @@ export function createOverviewPage(workboard: WorkboardCapability): ControlUiVie
             t("workboard.overviewNeedsYouEmpty"),
             loaded.needsYou,
             (row: WorkboardOverviewWaiting) =>
-              renderRow(row, now, t(`workboard.overviewReasons.${row.reason}`), nothing),
+              renderRow(row, now, t(`workboard.overviewReasons.${row.reason}`), waitingMeta(row)),
           )}
           ${renderBand(
             "in-flight",
@@ -268,6 +314,7 @@ export function createOverviewPage(workboard: WorkboardCapability): ControlUiVie
                 </p>`
               : nothing
           }
+          ${markError ? html`<p class="workboard-overview__empty" role="status">${markError.message}</p>` : nothing}
           ${
             result
               ? renderResult(result)
