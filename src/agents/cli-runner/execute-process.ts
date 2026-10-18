@@ -14,8 +14,12 @@ import { appendCapturedOutput, createCapturedOutputBuffers } from "../../process
 import type { RunExit } from "../../process/supervisor/types.js";
 import { resolveSessionAgentId } from "../agent-scope.js";
 import type { CliOutput, CliTerminalInterruption } from "../cli-output-contracts.js";
+import { supportsCliJsonlToolEvents } from "../cli-output-records.js";
 import { transformCliResultText } from "../cli-output-results.js";
-import { createCliJsonlStreamingParser } from "../cli-output-stream.js";
+import {
+  CLI_STREAM_JSON_MISSING_RESULT_ERROR,
+  createCliJsonlStreamingParser,
+} from "../cli-output-stream.js";
 import { parseCliOutput } from "../cli-output.js";
 import type { FailoverError } from "../failover-error.js";
 import { CLI_PARTIAL_OUTPUT_REJECTED_ERROR_CODE } from "../failover/error.js";
@@ -572,9 +576,27 @@ export async function executeCliProcess(params: {
     }
     const retryEmptyFailure = result.reason === "exit" && !params.events.hasObservedCliActivity();
     const stderr = Buffer.concat(stderrCapture.chunks, stderrCapture.bytes).toString("utf8").trim();
+    // A streamed turn's stdout is model traffic (tool results, permission
+    // denials, rate-limit events), not the CLI's failure; only the parser's
+    // error text is used from it. Dialects whose parser does not own error
+    // records keep the stdout windows. The missing-result marker describes
+    // any interrupted stream, so stderr names the cause ahead of it.
+    const streamedError =
+      streamingParser &&
+      supportsCliJsonlToolEvents({
+        backend: params.backend,
+        providerId: context.backendResolved.id,
+      })
+        ? (streamedJsonlOutput?.errorText ?? "")
+        : undefined;
     throw createCliExitFailoverError({
       context: failoverContext,
-      candidates: [stderr, readStdout(), stderrDiagnostic, stdoutDiagnostic],
+      candidates:
+        streamedError === undefined
+          ? [stderr, readStdout(), stderrDiagnostic, stdoutDiagnostic]
+          : streamedError === CLI_STREAM_JSON_MISSING_RESULT_ERROR
+            ? [stderr, stderrDiagnostic, streamedError]
+            : [streamedError, stderr, stderrDiagnostic],
       fallbackMessage: "CLI failed.",
       retryEmptyFailure,
       resumeAtArg: retryEmptyFailure ? resumeAtArg : undefined,
