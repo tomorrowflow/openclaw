@@ -75,11 +75,20 @@ const STAGE_LABEL_KEYS = {
   done: "workboard.stageDone",
 } as const;
 
+// Unnamed nodes report their 64-hex device id, which overflows the card.
+const NODE_ID_DISPLAY_LENGTH = 16;
+
+function nodeLabel(nodeId: string): string {
+  return nodeId.length > NODE_ID_DISPLAY_LENGTH
+    ? `${nodeId.slice(0, NODE_ID_DISPLAY_LENGTH)}…`
+    : nodeId;
+}
+
 function stageText(stage: WorkboardCardStage): string {
   if (stage.kind === "running") {
     return [
       stage.nodeId
-        ? t("workboard.stageRunningOn", { node: stage.nodeId })
+        ? t("workboard.stageRunningOn", { node: nodeLabel(stage.nodeId) })
         : t("workboard.stageRunning"),
       ...(stage.reworkRound
         ? [t("workboard.stageReworkRound", { round: String(stage.reworkRound) })]
@@ -135,7 +144,9 @@ export function renderCardStage(stage: WorkboardCardStage | undefined, now: numb
     return nothing;
   }
   return html`<p class="workboard-card__stage workboard-card__stage--${stage.kind}">
-    <span>${stageText(stage)}</span>
+    <span title=${stage.kind === "running" && stage.nodeId ? stage.nodeId : nothing}
+      >${stageText(stage)}</span
+    >
     ${
       stage.since === undefined
         ? nothing
