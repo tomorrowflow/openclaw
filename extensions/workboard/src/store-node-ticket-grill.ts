@@ -21,6 +21,7 @@ import {
 } from "./node-ticket-grill.js";
 import { cutReportText } from "./node-ticket-report.js";
 import { appendComment, assertCanMutateClaimedCard } from "./store-card-helpers.js";
+import { WorkboardCardConflictError } from "./store-core.js";
 import type { WorkboardMutationScope } from "./store-inputs.js";
 import { WorkboardNodeTicketSampleStore } from "./store-node-ticket-sample.js";
 
@@ -37,25 +38,31 @@ type GrillStep = {
   status?: "todo";
 };
 
-/** One chat turn in the card's session: what the operator sent and what the agent replied. */
+/**
+ * One chat turn in the card's session: what the operator sent and what the
+ * agent replied. A turn without its start is dated when it ended.
+ */
 type GrillChatTurn = {
   worktreePath: string;
-  startedAt: number;
+  startedAt?: number;
+  runId?: string;
   prompt: string;
   reply: string;
 };
 
 function chatTurnIsLive(card: WorkboardCard, worktree: WorkboardNodeWorktree, turn: GrillChatTurn) {
-  return (
-    worktree.path === turn.worktreePath && nodeGrillTakesChatTurn(card, worktree, turn.startedAt)
-  );
+  return worktree.path === turn.worktreePath && nodeGrillTakesChatTurn(card, worktree, turn);
 }
 
-function chatTurnEntries(turn: GrillChatTurn, now: number): string[] {
+function chatTurnEntries(turn: GrillChatTurn, now: number, note?: string): string[] {
   return [
-    grillChatEntry("Operator", turn.prompt, turn.startedAt),
-    grillChatEntry("Agent", turn.reply, now),
+    grillChatEntry("Operator", turn.prompt, turn.startedAt ?? now),
+    grillChatEntry("Agent", note ? `${turn.reply}\n\n${note}`.trim() : turn.reply, now),
   ];
+}
+
+function unreadableReportComment(reason: string): string {
+  return `The agent's last reply in the session chat ended with a report the board could not read, so the grilling goes on: ${reason} Tell the agent in the session chat.`;
 }
 
 /**
@@ -80,6 +87,12 @@ function endGrillStep(
     status: "todo",
   };
 }
+
+type GrillPlan = (
+  card: WorkboardCard,
+  worktree: WorkboardNodeWorktree,
+  now: number,
+) => GrillStep | undefined;
 
 export class WorkboardNodeTicketGrillStore extends WorkboardNodeTicketSampleStore {
   /**
@@ -113,7 +126,13 @@ export class WorkboardNodeTicketGrillStore extends WorkboardNodeTicketSampleStor
    */
   async recordNodeGrillChatTurn(
     id: string,
-    turn: GrillChatTurn & { question?: { text: string; summary: string } },
+    turn: GrillChatTurn & {
+      question?: { text: string; summary: string };
+      /** Why the reply's report block could not be read; the card says so too. */
+      unreadable?: string;
+      /** A line the agent's entry ends with, such as a failed reply's. */
+      note?: string;
+    },
   ): Promise<WorkboardCard | undefined> {
     return await this.updateNodeGrill(id, undefined, (card, worktree, now) => {
       const grill = worktree.grill;
@@ -121,14 +140,18 @@ export class WorkboardNodeTicketGrillStore extends WorkboardNodeTicketSampleStor
         return undefined;
       }
       const rounds = grill.rounds + (turn.question ? 1 : 0);
+      const note = turn.unreadable
+        ? `The reply's report could not be read: ${turn.unreadable}`
+        : turn.note;
       return {
         entries: [
-          ...chatTurnEntries(turn, now),
+          ...chatTurnEntries(turn, now, note),
           ...(turn.question
             ? [grillQuestionEntry(rounds, turn.question.text, turn.question.summary)]
             : []),
         ],
         grill: { status: "open", rounds },
+        ...(turn.unreadable ? { comment: unreadableReportComment(turn.unreadable) } : {}),
       };
     });
   }
@@ -238,69 +261,81 @@ export class WorkboardNodeTicketGrillStore extends WorkboardNodeTicketSampleStor
 
   /**
    * Writes the log blob, then the card that points at it, in the mutation
-   * queue. A refused card write puts the previous log back. A step without
-   * entries leaves the log as it is.
+   * queue. A refused card write puts the previous log back; a conflict plans
+   * the step once more on the newer card. A step without entries leaves the
+   * log as it is.
    */
   private async updateNodeGrill(
     id: string,
     scope: WorkboardMutationScope | undefined,
-    plan: (
-      card: WorkboardCard,
-      worktree: WorkboardNodeWorktree,
-      now: number,
-    ) => GrillStep | undefined,
+    plan: GrillPlan,
   ): Promise<WorkboardCard | undefined> {
     return await this.enqueueMutation(async () => {
-      const card = await this.requireCard(id);
-      assertCanMutateClaimedCard(card, scope);
-      const automation = card.metadata?.automation;
-      const target = automation?.target;
-      const worktree = target?.worktree;
-      const now = Date.now();
-      const step = worktree ? plan(card, worktree, now) : undefined;
-      if (!target || !worktree || !step) {
-        return undefined;
-      }
-      const attachments = card.metadata?.attachments ?? [];
-      const logged = attachments.find((entry) => entry.id === worktree.grill?.attachmentId);
-      const written = step.entries?.length
-        ? await this.writeGrillLog(card, logged, step.entries, now)
-        : undefined;
-      const attachment = written?.attachment ?? logged;
-      if (!attachment) {
-        return undefined;
-      }
       try {
-        return await this.updateCard(
-          card,
-          {
-            ...(step.status ? { status: step.status } : {}),
-            metadata: {
-              ...card.metadata,
-              comments: appendComment(card.metadata?.comments, step.comment, now),
-              attachments: logged
-                ? attachments.map((entry) => (entry.id === logged.id ? attachment : entry))
-                : [...attachments, attachment],
-              automation: {
-                ...automation,
-                target: {
-                  ...target,
-                  worktree: {
-                    ...worktree,
-                    ...(step.handoff ? { handoff: step.handoff } : {}),
-                    grill: { ...step.grill, attachmentId: attachment.id },
-                  },
+        return await this.writeNodeGrill(id, scope, plan);
+      } catch (error) {
+        if (!(error instanceof WorkboardCardConflictError)) {
+          throw error;
+        }
+        return await this.writeNodeGrill(id, scope, plan);
+      }
+    });
+  }
+
+  private async writeNodeGrill(
+    id: string,
+    scope: WorkboardMutationScope | undefined,
+    plan: GrillPlan,
+  ): Promise<WorkboardCard | undefined> {
+    const card = await this.requireCard(id);
+    assertCanMutateClaimedCard(card, scope);
+    const automation = card.metadata?.automation;
+    const target = automation?.target;
+    const worktree = target?.worktree;
+    const now = Date.now();
+    const step = worktree ? plan(card, worktree, now) : undefined;
+    if (!target || !worktree || !step) {
+      return undefined;
+    }
+    const attachments = card.metadata?.attachments ?? [];
+    const logged = attachments.find((entry) => entry.id === worktree.grill?.attachmentId);
+    const written = step.entries?.length
+      ? await this.writeGrillLog(card, logged, step.entries, now)
+      : undefined;
+    const attachment = written?.attachment ?? logged;
+    if (!attachment) {
+      return undefined;
+    }
+    try {
+      return await this.updateCard(
+        card,
+        {
+          ...(step.status ? { status: step.status } : {}),
+          metadata: {
+            ...card.metadata,
+            comments: appendComment(card.metadata?.comments, step.comment, now),
+            attachments: logged
+              ? attachments.map((entry) => (entry.id === logged.id ? attachment : entry))
+              : [...attachments, attachment],
+            automation: {
+              ...automation,
+              target: {
+                ...target,
+                worktree: {
+                  ...worktree,
+                  ...(step.handoff ? { handoff: step.handoff } : {}),
+                  grill: { ...step.grill, attachmentId: attachment.id },
                 },
               },
             },
           },
-          { expectedUpdatedAt: card.updatedAt, allowAutomationLaunch: true },
-        );
-      } catch (error) {
-        await written?.restore();
-        throw error;
-      }
-    });
+        },
+        { expectedUpdatedAt: card.updatedAt, allowAutomationLaunch: true },
+      );
+    } catch (error) {
+      await written?.restore();
+      throw error;
+    }
   }
 
   /** Appends entries to the card's log blob; `restore` puts the previous log back. */

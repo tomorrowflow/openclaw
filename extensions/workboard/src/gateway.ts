@@ -14,8 +14,10 @@ import {
   WorkboardUploadsDisabledError,
   type GatewayMethodContext,
 } from "./gateway-helpers.js";
+import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import { readNodeTicketChangeDiff } from "./node-ticket-changes.js";
 import { listNodeTicketScreenshots, readNodeTicketScreenshot } from "./node-ticket-screenshots.js";
+import { workboardCardSessionHasActiveRun } from "./session-link.js";
 import type { WorkboardSessionsBoardService } from "./sessions-board.js";
 import { resolveWorkboardSqliteWorkerModuleUrl } from "./sqlite-store-paths.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
@@ -113,6 +115,7 @@ export function registerWorkboardGatewayMethods(params: {
   api: OpenClawPluginApi;
   store?: WorkboardStore;
   sessionsBoard?: Pick<WorkboardSessionsBoardService, "read" | "update" | "move">;
+  readSessions?: WorkboardLifecycleSessionReader;
 }) {
   const { api } = params;
   const assertUploadsAllowed = (client: GatewayMethodContext["client"]) => {
@@ -242,9 +245,20 @@ export function registerWorkboardGatewayMethods(params: {
     redactCardResult(store.readNodeTicketSample(readId(input))),
   );
   // The move to todo an end makes wakes the node handoff owner, which resumes the session.
-  register("workboard.cards.grill.end", WRITE_SCOPE, ({ params: input }) =>
-    redactCardResult(store.endNodeGrill(readId(input))),
-  );
+  register("workboard.cards.grill.end", WRITE_SCOPE, async ({ params: input }) => {
+    const id = readId(input);
+    const card = await store.get(id);
+    if (
+      card &&
+      params.readSessions &&
+      (await workboardCardSessionHasActiveRun(params.readSessions, card))
+    ) {
+      throw new Error(
+        "The agent is still replying in the session chat; end the grilling when it has answered.",
+      );
+    }
+    return await redactCardResult(store.endNodeGrill(id));
+  });
   register("workboard.cards.move", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(
       store.move(readId(input), input.status, input.position, undefined, {

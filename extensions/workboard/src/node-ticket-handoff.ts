@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { WorkboardCard, WorkboardNodeWorktree } from "@openclaw/workboard-contract";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import { fetchNodeFile } from "./node-files.js";
 import {
   publishCandidate,
@@ -20,6 +21,7 @@ import {
   runNodeCommand,
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
+import { workboardCardSessionHasActiveRun } from "./session-link.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
 import { MAX_BLOCK_REASON_CHARS, MAX_PROOF_NOTE_CHARS } from "./store-constants.js";
 import { capText } from "./store-normalizers.js";
@@ -491,6 +493,8 @@ export function createNodeTicketHandoffs(params: {
   start: WorkboardNodeTicketStart;
   /** Wakes the board automation once an import moved the card to review. */
   onReview?: (card: WorkboardCard) => Promise<void>;
+  /** The session owner's view, which says whether a grilling chat turn is still replying. */
+  readSessions?: WorkboardLifecycleSessionReader;
   now?: () => number;
 }) {
   const inFlight = new Set<string>();
@@ -533,6 +537,14 @@ export function createNodeTicketHandoffs(params: {
           } else if (reopen) {
             await reopenNodeTicket({ store: params.store, start: params.start, card, now });
           } else if (unanswered?.phase === "grilling") {
+            // A chat turn still replying keeps the grilling live; the pass
+            // after its agent_end, or the sweep, ends it.
+            if (
+              params.readSessions &&
+              (await workboardCardSessionHasActiveRun(params.readSessions, card))
+            ) {
+              continue;
+            }
             // The card change this move makes finds the card in flight, so its reopen runs here.
             const moved = await params.store.endNodeGrillMovedToDone(card.id, unanswered);
             if (moved) {

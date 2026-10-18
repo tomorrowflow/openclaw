@@ -11,6 +11,7 @@ import {
   readWorkboardLifecycleSessions,
   syncWorkboardAgentEnded,
   syncWorkboardSubagentEnded,
+  type WorkboardLifecycleSessionReader,
 } from "./src/lifecycle-sync.js";
 import { createNodeTicketHandoffs } from "./src/node-ticket-handoff.js";
 import { createWorkboardSessionsBoardService } from "./src/sessions-board.js";
@@ -54,9 +55,12 @@ export default definePluginEntry({
       gateway: api.runtime.gateway,
     });
     resourceServices.push(sessionsBoard);
+    const readSessions: WorkboardLifecycleSessionReader = async (options) =>
+      await readWorkboardLifecycleSessions(api.runtime.gateway, options);
     const nodeHandoffs = createNodeTicketHandoffs({
       store,
       runtime: api.runtime.gateway,
+      readSessions,
       github: {
         token: (repo) =>
           getPreparedPluginSecretInput("workboard", `github.repos[${JSON.stringify(repo)}].token`)
@@ -80,8 +84,7 @@ export default definePluginEntry({
       store,
       worktrees: api.runtime.worktrees,
       nodeHandoffs,
-      readSessions: async (options) =>
-        await readWorkboardLifecycleSessions(api.runtime.gateway, options),
+      readSessions,
       onMatched: automationNudge.nudge,
     });
     resourceServices.push(lifecycleSync);
@@ -112,7 +115,7 @@ export default definePluginEntry({
       label: "Workboard summary",
       requiredScopes: ["operator.read"],
     });
-    registerWorkboardGatewayMethods({ api, store, sessionsBoard });
+    registerWorkboardGatewayMethods({ api, store, sessionsBoard, readSessions });
     registerWorkboardCommand({ api, store });
     api.registerService(changeEvents);
     api.registerService(automationNudge);
@@ -138,6 +141,7 @@ export default definePluginEntry({
           context,
           readSessions: lifecycleSync.readSessions,
           onMatched: automationNudge.nudge,
+          warn: (message) => api.logger.warn(message),
         });
         // Bundling and fetching outlast the agent_end hook budget; the sweep
         // resumes the handoff if the scheduled run dies with the Gateway.

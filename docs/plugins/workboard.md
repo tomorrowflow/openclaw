@@ -740,7 +740,13 @@ report, address the findings, and report them (see **Report** below).
    Each turn you send there that started after the question is logged with
    the agent's reply (each message cut at 8,000 characters), and the card
    stays in `review`; a reply may end with another `grill` report, which
-   logs its question as the next round. The session asks one question at a
+   logs its question as the next round. A turn whose `agent_end` gives no
+   duration counts when it ran under another run id than the round that
+   asked. A reply whose report block cannot be read is logged with the line
+   `The reply's report could not be read: <reason>`
+   and a card comment says so, so you can tell the agent in the chat; the
+   card keeps grilling. A turn that fails before it settles is logged with a
+   line saying so. The session asks one question at a
    time with its recommendation, in plain replies, and does none of the
    ticket's work. When you share an understanding, its reply ends with
    `{"outcome": "grill_done", "summary": "what was settled"}`: the log gets
@@ -757,12 +763,19 @@ report, address the findings, and report them (see **Report** below).
    grilling card opens on that tab. End grilling calls
    `workboard.cards.grill.end {id}`: it logs `**ended by the operator**
 (<time>): no note` and resumes the session the same way. It is disabled
-   while the Control UI shows the session replying, since the resumed round's
-   start would race that reply; it is refused unless the card is grilling. A move to `done`
-   while the card is grilling does the same as End grilling, since there is
-   nothing to publish yet, and an ended grilling moved to `done` before it
-   resumed goes back to `todo` the same way. A move to `todo` while grilling
-   goes back to `review` with a comment naming the session chat and End
+   while the Control UI shows the session replying, and the Gateway refuses
+   it while the session owner reports a run in progress ("The agent is still
+   replying in the session chat; end the grilling when it has answered."),
+   since the resumed round's start would race that reply; it is refused
+   unless the card is grilling. A move to `done` while the card is grilling
+   does the same as End grilling, since there is nothing to publish yet, once
+   no chat turn is replying: until then the card waits in `done` with the
+   grilling live, the reply is logged, and the handoff pass after that turn
+   or the next sweep ends it. An ended grilling moved to `done` before it
+   resumed goes back to `todo` the same way. A run that started before a
+   round's claim never reports for that round, so a chat reply that finishes
+   after the resumed round claimed the card cannot settle it. A move to
+   `todo` while grilling goes back to `review` with a comment naming the session chat and End
    grilling. A `done`, `blocked`, or `needs_input` report of a claimed round
    closes an open grill with an `## Outcome` entry naming what the card got,
    so a `done` report the import refuses for its proof closes it `blocked`;

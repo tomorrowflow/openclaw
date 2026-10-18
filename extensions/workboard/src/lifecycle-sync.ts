@@ -77,7 +77,7 @@ type WorkboardLifecycleSessionReadOptions = {
   sessionKey?: string;
 };
 
-type WorkboardLifecycleSessionReader = (
+export type WorkboardLifecycleSessionReader = (
   options: WorkboardLifecycleSessionReadOptions,
 ) => Promise<WorkboardLifecycleSessionSnapshot>;
 
@@ -124,7 +124,7 @@ const LIFECYCLE_TARGETS = {
 
 async function syncWorkboardLifecycleEvent(params: {
   store: WorkboardStore;
-  source: { sessionKey?: string; runId?: string };
+  source: { sessionKey?: string; runId?: string; startedAt?: number };
   observation: WorkboardLifecycleObservation;
   now: number;
   onMatched?: WorkboardLifecycleMatchHandler;
@@ -210,11 +210,16 @@ export async function syncWorkboardAgentEnded(params: {
     options: WorkboardLifecycleSessionReadOptions,
   ) => Promise<WorkboardLifecycleSessionSnapshot>;
   onMatched?: WorkboardLifecycleMatchHandler;
+  warn?: (message: string) => void;
 }): Promise<number> {
   const now = params.now ?? Date.now();
+  // The run's start fences it from rounds claimed after it began.
+  const runStartedAt =
+    params.event.durationMs === undefined ? undefined : now - params.event.durationMs;
   const source = {
     sessionKey: params.context.sessionKey,
     runId: params.event.runId ?? params.context.runId,
+    ...(runStartedAt === undefined ? {} : { startedAt: runStartedAt }),
   };
   // An attempt can finish before fallback settles, even with success=true.
   // Only the session owner can establish the run's terminal outcome.
@@ -230,11 +235,8 @@ export async function syncWorkboardAgentEnded(params: {
   // A node ticket's stalled-turn retry reports under a new run id. Only the
   // report reads it; the lifecycle writes below keep the run-id fence, so the
   // card stays linked to the round's launch run.
-  const runStartedAt =
-    params.event.durationMs === undefined ? undefined : now - params.event.durationMs;
   const linked = (await params.store.list()).filter(
-    (card) =>
-      !card.metadata?.archivedAt && workboardCardTakesEndedRunReport(card, source, runStartedAt),
+    (card) => !card.metadata?.archivedAt && workboardCardTakesEndedRunReport(card, source),
   );
   // Node tickets report through their final message, not Workboard tools: a
   // block holds, and a done report leaves the card running with a pending
@@ -245,8 +247,9 @@ export async function syncWorkboardAgentEnded(params: {
   let nodeTicket = false;
   const reported: WorkboardCard[] = [];
   for (const card of linked) {
-    const chat = { card, startedAt: runStartedAt, messages: params.event.messages ?? [] };
-    if (await takeNodeGrillChatTurn(params.store, chat, terminal || params.event.success)) {
+    const chat = { ...source, card, messages: params.event.messages ?? [] };
+    const settled = terminal || params.event.success;
+    if (await takeNodeGrillChatTurn(params.store, chat, settled, params.warn)) {
       continue;
     }
     if (card.status === "running" && nodeTicketTarget(card)) {

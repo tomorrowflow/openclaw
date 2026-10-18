@@ -189,11 +189,15 @@ function parseReview(value: unknown): WorkboardNodeReview | undefined {
 /** Reads the last report block of the final assistant message; anything else is a contract miss. */
 export function parseNodeTicketReport(
   messages: readonly unknown[],
-): { ok: true; report: NodeTicketReport } | { ok: false; reason: string } {
+): { ok: true; report: NodeTicketReport } | { ok: false; reason: string; missing?: true } {
   const text = lastAssistantText(messages);
   const block = text ? [...text.matchAll(REPORT_PATTERN)].at(-1)?.[1] : undefined;
   if (!block) {
-    return { ok: false, reason: "The ticket session ended without a workboard-report block." };
+    return {
+      ok: false,
+      reason: "The ticket session ended without a workboard-report block.",
+      missing: true,
+    };
   }
   let value: unknown;
   try {

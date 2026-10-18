@@ -3,8 +3,10 @@ import type {
   WorkboardMetadata,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
+import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { lastTurnText, parseNodeTicketReport } from "./node-ticket-report.js";
+import { cardRunId } from "./store-card-helpers.js";
 import { MAX_ATTACHMENT_BYTES } from "./store-constants.js";
 import type { WorkboardStore } from "./store.js";
 
@@ -124,11 +126,12 @@ export function grillQuestionComment(round: number, question: string): string {
 
 /**
  * The grilling is live in the card's session chat: the card waits in review
- * on an open grill that nothing has ended yet.
+ * on an open grill that nothing has ended yet. A move to done ends it only
+ * once no chat turn is replying, so it stays live in done until then.
  */
 export function nodeGrillIsLive(card: WorkboardCard, worktree: WorkboardNodeWorktree): boolean {
   return (
-    card.status === "review" &&
+    (card.status === "review" || card.status === "done") &&
     !card.metadata?.archivedAt &&
     worktree.handoff?.phase === "grilling" &&
     worktree.grill?.status === "open" &&
@@ -136,58 +139,83 @@ export function nodeGrillIsLive(card: WorkboardCard, worktree: WorkboardNodeWork
   );
 }
 
+/** A turn that ended on the card's session: its run id and, when known, when it started. */
+type EndedTurn = { startedAt?: number; runId?: string };
+
 /**
  * A turn on the card's session belongs to the live grilling when it started
  * after the round that asked the first question ended. Turns of that round
- * and of earlier ones started before.
+ * and of earlier ones started before. An `agent_end` without `durationMs`
+ * gives no start; then a run other than the card's linked one, the round
+ * that asked, is a chat turn, since no round runs while the grilling is live.
  */
 export function nodeGrillTakesChatTurn(
   card: WorkboardCard,
   worktree: WorkboardNodeWorktree,
-  startedAt: number,
+  turn: EndedTurn,
 ): boolean {
-  return (
-    nodeGrillIsLive(card, worktree) &&
-    worktree.handoff?.phase === "grilling" &&
-    startedAt >= worktree.handoff.askedAt
-  );
+  if (!nodeGrillIsLive(card, worktree) || worktree.handoff?.phase !== "grilling") {
+    return false;
+  }
+  return turn.startedAt !== undefined
+    ? turn.startedAt >= worktree.handoff.askedAt
+    : turn.runId !== undefined && turn.runId !== cardRunId(card);
 }
+
+const CHAT_TURN_UNSETTLED =
+  "The reply failed before it settled; a retry may follow in the session chat.";
 
 /**
  * Takes a turn that ended on a card's session when it is a chat turn of the
- * live grilling; the card stays in review and wakes no automation. Once the
- * turn `settled`, a plain reply, or one asking its next question with a grill
- * report, is logged and the card keeps waiting. Any other report ends the
- * grilling, so work is never imported outside a claimed round: the session
- * resumes to carry out the ticket.
+ * live grilling; the card stays in review and wakes no automation. Every
+ * such turn is logged: a plain reply, one asking its next question with a
+ * grill report, one whose report block cannot be read (the card says so, so
+ * the operator can tell the agent), and one that failed before it settled.
+ * Any other report ends the grilling, so work is never imported outside a
+ * claimed round: the session resumes to carry out the ticket. A write that
+ * fails is warned about, never thrown out of the turn's end.
  */
 export async function takeNodeGrillChatTurn(
   store: WorkboardStore,
-  turn: { card: WorkboardCard; startedAt: number | undefined; messages: readonly unknown[] },
+  turn: EndedTurn & { card: WorkboardCard; messages: readonly unknown[] },
   settled: boolean,
+  warn?: (message: string) => void,
 ): Promise<boolean> {
-  const { card, startedAt } = turn;
+  const { card } = turn;
   const worktree = card.metadata?.automation?.target?.worktree;
-  if (!worktree || startedAt === undefined || !nodeGrillTakesChatTurn(card, worktree, startedAt)) {
+  if (!worktree || !nodeGrillTakesChatTurn(card, worktree, turn)) {
     return false;
   }
-  if (!settled) {
-    return true;
+  const chat = {
+    worktreePath: worktree.path,
+    ...(turn.startedAt === undefined ? {} : { startedAt: turn.startedAt }),
+    ...(turn.runId === undefined ? {} : { runId: turn.runId }),
+    ...lastTurnText(turn.messages),
+  };
+  const parsed = settled ? parseNodeTicketReport(turn.messages) : undefined;
+  const report = parsed?.ok ? parsed.report : undefined;
+  try {
+    if (!report || report.outcome === "grill") {
+      await store.recordNodeGrillChatTurn(card.id, {
+        ...chat,
+        ...(report ? { question: { text: report.question, summary: report.summary } } : {}),
+        ...(!parsed
+          ? { note: CHAT_TURN_UNSETTLED }
+          : !parsed.ok && !parsed.missing
+            ? { unreadable: parsed.reason }
+            : {}),
+      });
+    } else {
+      await store.endNodeGrillFromChat(card.id, {
+        ...chat,
+        outcome: report.outcome,
+        summary: report.outcome === "done" ? (report.headline ?? report.summary) : report.summary,
+      });
+    }
+  } catch (error) {
+    warn?.(
+      `workboard could not record a grilling chat turn on card ${card.id}: ${formatErrorMessage(error)}`,
+    );
   }
-  const chat = { worktreePath: worktree.path, startedAt, ...lastTurnText(turn.messages) };
-  const parsed = parseNodeTicketReport(turn.messages);
-  const report = parsed.ok ? parsed.report : undefined;
-  if (!report || report.outcome === "grill") {
-    await store.recordNodeGrillChatTurn(card.id, {
-      ...chat,
-      ...(report ? { question: { text: report.question, summary: report.summary } } : {}),
-    });
-    return true;
-  }
-  await store.endNodeGrillFromChat(card.id, {
-    ...chat,
-    outcome: report.outcome,
-    summary: report.outcome === "done" ? (report.headline ?? report.summary) : report.summary,
-  });
   return true;
 }

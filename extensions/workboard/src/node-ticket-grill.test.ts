@@ -1,5 +1,6 @@
 // Workboard tests cover a node ticket grilling the operator live in its session chat.
 import type { WorkboardCard } from "@openclaw/workboard-contract";
+import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { describe, expect, it, vi } from "vitest";
 import { createWorkboardAutomationNudgeService } from "./automation-nudge.js";
 import { redactOperatorCard } from "./card-redaction.js";
@@ -13,7 +14,10 @@ import { createNodeGateway, endedSession, startNodeCard } from "./node-ticket.te
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
 import type { WorkboardStore } from "./store.js";
 import { createGatewayMethodCapture } from "./test/gateway-methods.js";
-import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
+import {
+  createWorkboardSqliteTestHarness,
+  createWorkboardSqliteTestStore,
+} from "./test/sqlite-store.js";
 
 function reportMessages(report: Record<string, unknown>) {
   return [
@@ -51,18 +55,23 @@ async function chatTurn(
   reply: string,
   options: {
     prompt?: string;
-    startedAgoMs?: number;
+    /** null: the turn's end carries no start. */
+    startedAgoMs?: number | null;
+    /** The attempt failed while the session still runs, as before a fallback. */
+    failed?: boolean;
     onMatched?: Parameters<typeof syncWorkboardAgentEnded>[0]["onMatched"];
+    warn?: (message: string) => void;
   } = {},
 ) {
   const card = await store.get(cardId);
   const now = Date.now() + 1000;
+  const startedAgoMs = options.startedAgoMs === undefined ? 500 : options.startedAgoMs;
   await syncWorkboardAgentEnded({
     store,
     event: {
       runId: `chat-${now}`,
-      success: true,
-      durationMs: options.startedAgoMs ?? 500,
+      success: !options.failed,
+      ...(startedAgoMs === null ? {} : { durationMs: startedAgoMs }),
       messages: [
         { role: "user", content: "Earlier round prompt" },
         { role: "assistant", content: "Earlier round reply" },
@@ -72,21 +81,44 @@ async function chatTurn(
     },
     context: { runId: `chat-${now}`, sessionKey: card ? cardSessionKey(card) : undefined },
     now,
-    readSessions: endedSession(),
+    readSessions: options.failed
+      ? async ({ sessionKey }) => ({
+          sessions: sessionKey ? [{ key: sessionKey, status: "running", hasActiveRun: true }] : [],
+          complete: false,
+        })
+      : endedSession(),
     ...(options.onMatched ? { onMatched: options.onMatched } : {}),
+    ...(options.warn ? { warn: options.warn } : {}),
   });
 }
 
 const reportBlock = (report: Record<string, unknown>) =>
   `\n\n\`\`\`workboard-report\n${JSON.stringify(report)}\n\`\`\``;
 
-async function grillingTicket() {
-  const store = createWorkboardSqliteTestStore();
+async function grillingTicket(store = createWorkboardSqliteTestStore()) {
   const gateway = createNodeGateway();
   const { card, sessionKey } = await startNodeCard(store, gateway);
   await endTurn(store, card.id, grillReport);
+  // Whether a chat turn is replying in the card's session, as the session owner reports it.
+  let replying = false;
+  const readSessions = async (options: { sessionKey?: string }) => ({
+    sessions: options.sessionKey
+      ? [
+          {
+            key: options.sessionKey,
+            hasActiveRun: replying,
+            status: replying ? ("running" as const) : ("done" as const),
+            updatedAt: Date.now(),
+          },
+        ]
+      : [],
+    complete: false,
+  });
+  const setReplying = (value: boolean) => {
+    replying = value;
+  };
   const capture = createGatewayMethodCapture();
-  registerWorkboardGatewayMethods({ api: capture.api, store });
+  registerWorkboardGatewayMethods({ api: capture.api, store, readSessions });
   const end = async () => {
     const respond = await capture.invoke("workboard.cards.grill.end", { id: card.id });
     return respond.mock.calls[0] as [boolean, unknown, { message?: string }?];
@@ -96,6 +128,7 @@ async function grillingTicket() {
     store,
     runtime: gateway,
     github: { token: () => undefined },
+    readSessions,
     start: async (cardId, queue) =>
       await dispatchAndStartWorkboardCards({
         store,
@@ -115,7 +148,20 @@ async function grillingTicket() {
   const brief = () => String(launches().at(-1)?.[1]?.message).split("## Turn contract")[0];
   const chat = async (reply: string, options?: Parameters<typeof chatTurn>[3]) =>
     await chatTurn(store, card.id, reply, options);
-  return { store, gateway, card, sessionKey, chat, end, handoffs, warn, log, launches, brief };
+  return {
+    store,
+    gateway,
+    card,
+    sessionKey,
+    chat,
+    end,
+    handoffs,
+    warn,
+    log,
+    launches,
+    brief,
+    setReplying,
+  };
 }
 
 const worktreeOf = (card: WorkboardCard | undefined) =>
@@ -526,6 +572,164 @@ describe("grilling endings", () => {
     expect(blocked?.metadata?.comments?.at(-1)?.body).toContain(
       "Asked a grilling question, but the card's node worktree changed before it could be recorded",
     );
+  });
+});
+
+describe("grilling while a chat turn replies", () => {
+  it("refuses End grilling until the agent answered in the session chat", async () => {
+    const ticket = await grillingTicket();
+    ticket.setReplying(true);
+
+    const [ok, , error] = await ticket.end();
+
+    expect(ok).toBe(false);
+    expect(error?.message).toBe(
+      "The agent is still replying in the session chat; end the grilling when it has answered.",
+    );
+    const waiting = await ticket.store.get(ticket.card.id);
+    expect(waiting?.status).toBe("review");
+    expect(worktreeOf(waiting)?.grill).toMatchObject({ status: "open" });
+
+    ticket.setReplying(false);
+    expect((await ticket.end())[0]).toBe(true);
+  });
+
+  it("ends a grilling moved to done once the chat turn in flight answered", async () => {
+    const ticket = await grillingTicket();
+    const { store, card } = ticket;
+    ticket.setReplying(true);
+
+    await store.move(card.id, "done", undefined);
+    await ticket.handoffs.resume(ticket.warn);
+
+    const moved = await store.get(card.id);
+    expect(moved?.status).toBe("done");
+    expect(worktreeOf(moved)?.grill).toMatchObject({ status: "open" });
+    expect(ticket.launches()).toHaveLength(1);
+
+    await ticket.chat("Noted, empty input returns [].");
+    ticket.setReplying(false);
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect(ticket.warn).not.toHaveBeenCalled();
+    const resumed = await store.get(card.id);
+    expect(resumed?.status).toBe("running");
+    expect(worktreeOf(resumed)?.grill).toMatchObject({
+      status: "closed",
+      pending: { kind: "end" },
+    });
+    expect(untimed(await ticket.log())).toMatch(
+      /\n\*\*Agent\*\* \(<t>\)\n\nNoted, empty input returns \[\]\.\n\n## Outcome\n\n\*\*ended by the operator\*\* \(<t>\): no note\n$/,
+    );
+    expect(ticket.launches()).toHaveLength(2);
+  });
+
+  it("never takes a chat turn that started before the relaunch as the relaunched round's report", async () => {
+    const ticket = await grillingTicket();
+    const { store, card, gateway } = ticket;
+    expect((await ticket.end())[0]).toBe(true);
+    // The relaunch waits in sessions.create while the earlier chat turn ends.
+    const answer = gateway.respond.getMockImplementation()!;
+    const relaunching = createDeferred<void>();
+    const released = createDeferred<void>();
+    gateway.respond.mockImplementation((method, params) =>
+      method === "sessions.create"
+        ? (async () => {
+            relaunching.resolve();
+            await released.promise;
+            return answer(method, params);
+          })()
+        : answer(method, params),
+    );
+
+    const resuming = ticket.handoffs.resume(ticket.warn);
+    await relaunching.promise;
+    expect(cardRunId((await store.get(card.id))!)).toMatch(new RegExp(`^workboard:${card.id}:`));
+    await ticket.chat("That settles it.", { startedAgoMs: 60_000 });
+    released.resolve();
+    await resuming;
+
+    expect(ticket.warn).not.toHaveBeenCalled();
+    const relaunched = await store.get(card.id);
+    expect(relaunched?.status).toBe("running");
+    expect(cardRunId(relaunched!), "the chat run is not linked to the round").toMatch(
+      new RegExp(`^workboard:${card.id}:`),
+    );
+  });
+});
+
+describe("grilling chat turns the board cannot drop", () => {
+  it("logs a chat turn whose end carries no start, told apart by its run id", async () => {
+    const ticket = await grillingTicket();
+
+    await ticket.chat("Yes, keep it to the parser.", { startedAgoMs: null });
+
+    expect(untimed(await ticket.log())).toBe(
+      `${QUESTION_LOG}\n**Operator** (<t>)\n\nYes, return [].\n\n**Agent** (<t>)\n\nYes, keep it to the parser.\n`,
+    );
+  });
+
+  it("logs a chat turn whose card another writer changed meanwhile", async () => {
+    let interfere = false;
+    const harness = createWorkboardSqliteTestHarness({
+      beforeCardWrite: async (key) => {
+        if (!interfere) {
+          return;
+        }
+        interfere = false;
+        const entry = (await harness.stores.cards.lookup(key))!;
+        await harness.stores.cards.register(key, {
+          ...entry,
+          card: {
+            ...entry.card,
+            title: "Renamed on another Gateway",
+            updatedAt: entry.card.updatedAt + 1,
+          },
+        });
+      },
+    });
+    const ticket = await grillingTicket(harness.store);
+    const warn = vi.fn();
+
+    interfere = true;
+    await ticket.chat("Good, empty input returns [].", { warn });
+
+    expect(warn).not.toHaveBeenCalled();
+    const card = await ticket.store.get(ticket.card.id);
+    expect(card?.title).toBe("Renamed on another Gateway");
+    expect(await ticket.log()).toContain("Good, empty input returns [].");
+    expect(card?.metadata?.attachments?.[0]?.byteSize).toBe(
+      Buffer.byteLength((await ticket.log())!),
+    );
+  });
+
+  it("logs a reply whose report cannot be read and says so on the card", async () => {
+    const ticket = await grillingTicket();
+
+    await ticket.chat(
+      'Agreed, that settles it.\n\n```workboard-report\n{"outcome": "grill_done",\n```',
+    );
+
+    const card = await ticket.store.get(ticket.card.id);
+    expect(card?.status).toBe("review");
+    expect(worktreeOf(card)?.grill).toMatchObject({ status: "open" });
+    expect(await ticket.log()).toMatch(
+      /\*\*Agent\*\* \([^)]+\)\n\nAgreed, that settles it\.\n\nThe reply's report could not be read: The ticket session's workboard-report block is not valid JSON\.\n$/,
+    );
+    expect(card?.metadata?.comments?.at(-1)?.body).toBe(
+      "The agent's last reply in the session chat ended with a report the board could not read, so the grilling goes on: The ticket session's workboard-report block is not valid JSON. Tell the agent in the session chat.",
+    );
+  });
+
+  it("logs a chat turn that failed before it settled", async () => {
+    const ticket = await grillingTicket();
+
+    await ticket.chat("", { failed: true });
+
+    expect(untimed(await ticket.log())).toBe(
+      `${QUESTION_LOG}\n**Operator** (<t>)\n\nYes, return [].\n\n**Agent** (<t>)\n\nThe reply failed before it settled; a retry may follow in the session chat.\n`,
+    );
+    expect((await ticket.store.get(ticket.card.id))?.status).toBe("review");
   });
 });
 
