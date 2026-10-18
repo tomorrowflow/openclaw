@@ -604,13 +604,13 @@ export function buildNodeTicketMessage(params: {
     "- If something needs a decision you cannot make from the ticket and the repository, stop and ask; propose a default.",
     ...(reviewed
       ? [
-          "- Before a `done` report, run a reviewer subagent over your changes against the repository's CODING_STANDARDS.md, address its findings, and report them in `review`: how many findings it raised, how many you fixed, and a note on any you left. A `done` report without `review` blocks the card.",
+          '- Before a `done` report, run a reviewer subagent over your changes against the repository\'s CODING_STANDARDS.md and have it return each finding as a repo-relative `path`, a 1-based `line`, the `rule` it breaks, and a one-line `body`. Address the findings and report every one in `review.items` with `fixed` true or false, plus a `note` on any you left. A review with no findings sends `"items":[]`. For a finding you left, `line` is its line number in the file at your final commit (HEAD): re-check it after the last commit. A `done` report without `review` blocks the card.',
         ]
       : []),
     "- End your final message with exactly one report block:",
     "",
     "```" + REPORT_FENCE,
-    `{"outcome":"done|blocked|needs_input","headline":"1-3 plain sentences for the operator","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${reviewed ? '"review":{"findings":0,"fixed":0,"note":"…"},' : ""}"questions":["…"],"decisions":[{"ts":"…","phase":"…","decision":"…","why":"…","evidence":"…","result":"…"}]}`,
+    `{"outcome":"done|blocked|needs_input","headline":"1-3 plain sentences for the operator","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${reviewed ? '"review":{"items":[{"path":"…","line":1,"rule":"…","body":"…","fixed":true}],"note":"…"},' : ""}"questions":["…"],"decisions":[{"ts":"…","phase":"…","decision":"…","why":"…","evidence":"…","result":"…"}]}`,
     "```",
     "",
     "Its text fields are Markdown. The `headline` of a `done` report replaces the card's summary on the board: say what changed and why in plain words. Use `done` only when the work is committed and its proof passed. Use `needs_input` for open questions, each with your proposed default; the answers come back as the next turn of this session. Use `blocked` for anything else that stops you.",
@@ -669,10 +669,11 @@ export async function applyNodeTicketReport(params: {
     return;
   }
   const { report } = parsed;
-  if (worktree && report.decisions.length > 0) {
+  const review = report.outcome === "done" ? report.review : undefined;
+  if (worktree && (report.decisions.length > 0 || review)) {
     await store.recordNodeRound(
       card.id,
-      { worktreePath: worktree.path, decisions: report.decisions },
+      { worktreePath: worktree.path, decisions: report.decisions, ...(review ? { review } : {}) },
       scope,
     );
   }

@@ -463,7 +463,8 @@ describe("Workboard node ticket lifecycle", () => {
       "Reported done without the standards review its rung b brief asked for: Docs page updated\nRe-run the card; the next run reuses the node worktree, and its brief asks for the reviewer against CODING_STANDARDS.md and a `review` in the report.",
     );
 
-    // Fewer fixed than found is recorded for the reviewer, not blocked.
+    // Fewer fixed than found is recorded for the reviewer, not blocked. Counts
+    // without items are the brief before itemized findings; a resumed session still sends them.
     const reviewed = await end(done({ findings: 3, fixed: 2, note: "Kept the long table" }));
     expect(reviewed?.status).toBe("running");
     expect(
@@ -476,9 +477,53 @@ describe("Workboard node ticket lifecycle", () => {
         note: "3 findings, 2 fixed. Kept the long table",
       },
     ]);
-    expect(
-      nodeTicketTarget(expectDefined(reviewed, "reviewed card"))?.worktree?.handoff?.phase,
-    ).toBe("pending");
+    const worktree = nodeTicketTarget(expectDefined(reviewed, "reviewed card"))?.worktree;
+    expect(worktree?.handoff?.phase).toBe("pending");
+    expect(worktree?.rounds).toEqual([
+      { round: 0, review: { findings: 3, fixed: 2, note: "Kept the long table" } },
+    ]);
+
+    // Items carry the counts: invalid ones are dropped, the open ones kept first under the cap.
+    const finding = (index: number, fixed: boolean) => ({
+      path: `src/file-${index}.ts`,
+      line: index + 1,
+      rule: "Name the why",
+      body: `Finding ${index}`,
+      fixed,
+    });
+    const items = [
+      ...Array.from({ length: 10 }, (_, index) => finding(index, true)),
+      ...Array.from({ length: 4 }, (_, index) => finding(10 + index, false)),
+      { path: "src/a.ts", line: 0, body: "No line" },
+      { path: "src/a.ts", line: 2.5, body: "Fractional line" },
+      { line: 3, body: "No path" },
+      { path: "src/a.ts", line: 3, body: "  " },
+      { path: `${"d/".repeat(81)}a.ts`, line: 3, body: "Path too long to trace" },
+      { path: "/repo/src/a.ts", line: 3, body: "Absolute path" },
+      { path: "src/../../a.ts", line: 3, body: "Outside the repo" },
+    ];
+    const itemized = await end(done({ items, note: "Left four" }));
+    expect(itemized?.status).toBe("running");
+    expect(itemized?.metadata?.proof?.at(-1)?.note).toBe(
+      "14 findings, 10 fixed. Left four (7 malformed findings dropped)",
+    );
+    const review = nodeTicketTarget(expectDefined(itemized, "itemized card"))?.worktree?.rounds?.[0]
+      ?.review;
+    expect(review).toEqual({
+      findings: 14,
+      fixed: 10,
+      note: "Left four (7 malformed findings dropped)",
+      items: [...items.slice(10, 14), ...items.slice(0, 8)],
+    });
+
+    // A clean review sends no items; one whose items were all malformed must not read as clean.
+    const clean = await end(done({ items: [] }));
+    expect(clean?.metadata?.proof?.at(-1)?.note).toBe("0 findings, 0 fixed");
+    const unreadable = await end(done({ items: [{ path: "../a.ts", line: 1, body: "Outside" }] }));
+    expect(unreadable?.status).toBe("running");
+    expect(unreadable?.metadata?.proof?.at(-1)?.note).toBe(
+      "0 findings, 0 fixed. (1 malformed finding dropped)",
+    );
   });
 
   it("records an operator stop of a node ticket as stopped, not failed", async () => {

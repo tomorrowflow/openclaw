@@ -26,6 +26,7 @@ import {
   type WorkboardLink,
   type WorkboardLinkType,
   type WorkboardMetadata,
+  type WorkboardNodeRound,
   type WorkboardNotification,
   type WorkboardNotificationKind,
   type WorkboardNotificationSubscription,
@@ -1061,14 +1062,31 @@ export function appendLinkPreservingDependencies(
   return next.filter((_, index) => index !== dropIndex);
 }
 
-/** A node ticket's round facts go before anything else, oldest first; they only inform. */
-function withoutOldestNodeRound(metadata: WorkboardMetadata): WorkboardMetadata | undefined {
+/** Sheds a round's decisions, then its review items; the counts and changes stay. */
+function degradedNodeRound(round: WorkboardNodeRound): WorkboardNodeRound | undefined {
+  if (round.decisions) {
+    const { decisions: _decisions, ...rest } = round;
+    return rest;
+  }
+  if (round.review?.items) {
+    const { items: _items, ...review } = round.review;
+    return { ...round, review };
+  }
+  return undefined;
+}
+
+/**
+ * A node ticket's round facts go before anything else, oldest round first; they only inform.
+ * The oldest round degrades before it goes, so its review findings outlast its decision trail.
+ */
+function withOldestNodeRoundTrimmed(metadata: WorkboardMetadata): WorkboardMetadata | undefined {
   const target = metadata.automation?.target;
-  const rounds = target?.worktree?.rounds;
-  if (!target?.worktree || !rounds?.length) {
+  const [oldest, ...newer] = target?.worktree?.rounds ?? [];
+  if (!target?.worktree || !oldest) {
     return undefined;
   }
-  const worktree = { ...target.worktree, rounds: rounds.slice(1) };
+  const degraded = degradedNodeRound(oldest);
+  const worktree = { ...target.worktree, rounds: degraded ? [degraded, ...newer] : newer };
   return { ...metadata, automation: { ...metadata.automation, target: { ...target, worktree } } };
 }
 
@@ -1079,9 +1097,9 @@ export function trimMetadataToBudget(
   let next = removeUndefinedMetadataFields(metadata);
   while (metadataByteSize(next) > MAX_CARD_METADATA_BYTES) {
     const currentSize = metadataByteSize(next);
-    const withoutOldRound = withoutOldestNodeRound(next);
-    if (withoutOldRound) {
-      next = withoutOldRound;
+    const withTrimmedRound = withOldestNodeRoundTrimmed(next);
+    if (withTrimmedRound) {
+      next = withTrimmedRound;
       continue;
     }
     for (const key of [

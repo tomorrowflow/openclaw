@@ -49,6 +49,29 @@ it("refuses screenshot dirs that could leave the worktree or are unbounded", () 
   }
 });
 
+it("keeps a recorded round's standards review and its findings", () => {
+  const review = {
+    findings: 2,
+    fixed: 1,
+    note: "Left the bare except",
+    items: [
+      { path: "src/parser.ts", line: 4, rule: "Name the why", body: "Bare except", fixed: false },
+      { path: "src/parser.ts", line: 9, body: "Unused import", fixed: true },
+    ],
+  };
+  const worktree = {
+    path: "/Users/factory/worktrees/c1",
+    branch: "factory/c1",
+    baseCommit: "a".repeat(40),
+    rounds: [{ round: 0, review }],
+  };
+
+  expect(
+    normalizeExecutionTarget({ ...NODE_TARGET, worktree }, undefined, { allowLaunchState: true })
+      ?.worktree?.rounds,
+  ).toEqual([{ round: 0, review }]);
+});
+
 it("drops the recorded worktree when the target moves to another node", () => {
   const worktree = {
     path: "/Users/factory/worktrees/c1",
