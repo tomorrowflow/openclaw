@@ -10,7 +10,6 @@ import {
   isWorkboardWorktreeCleanupCandidate,
   type WorkboardWorktreeCleanupRuntime,
 } from "./dispatcher-workspace.js";
-import { takeNodeGrillChatTurn } from "./node-ticket-grill.js";
 import type { WorkboardNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import { applyNodeTicketReport, nodeTicketIdleVerdict, nodeTicketTarget } from "./node-ticket.js";
 import {
@@ -210,7 +209,6 @@ export async function syncWorkboardAgentEnded(params: {
     options: WorkboardLifecycleSessionReadOptions,
   ) => Promise<WorkboardLifecycleSessionSnapshot>;
   onMatched?: WorkboardLifecycleMatchHandler;
-  warn?: (message: string) => void;
 }): Promise<number> {
   const now = params.now ?? Date.now();
   // The run's start fences it from rounds claimed after it began.
@@ -247,11 +245,6 @@ export async function syncWorkboardAgentEnded(params: {
   let nodeTicket = false;
   const reported: WorkboardCard[] = [];
   for (const card of linked) {
-    const chat = { ...source, card, messages: params.event.messages ?? [] };
-    const settled = terminal || params.event.success;
-    if (await takeNodeGrillChatTurn(params.store, chat, settled, params.warn)) {
-      continue;
-    }
     if (card.status === "running" && nodeTicketTarget(card)) {
       nodeTicket = true;
       if (terminal || params.event.success) {

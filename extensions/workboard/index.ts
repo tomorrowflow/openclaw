@@ -141,7 +141,6 @@ export default definePluginEntry({
           context,
           readSessions: lifecycleSync.readSessions,
           onMatched: automationNudge.nudge,
-          warn: (message) => api.logger.warn(message),
         });
         // Bundling and fetching outlast the agent_end hook budget; the sweep
         // resumes the handoff if the scheduled run dies with the Gateway.

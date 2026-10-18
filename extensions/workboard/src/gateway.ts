@@ -16,8 +16,8 @@ import {
 } from "./gateway-helpers.js";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import { readNodeTicketChangeDiff } from "./node-ticket-changes.js";
+import { readNodeGrillResult } from "./node-ticket-grill-session.js";
 import { listNodeTicketScreenshots, readNodeTicketScreenshot } from "./node-ticket-screenshots.js";
-import { workboardCardSessionHasActiveRun } from "./session-link.js";
 import type { WorkboardSessionsBoardService } from "./sessions-board.js";
 import { resolveWorkboardSqliteWorkerModuleUrl } from "./sqlite-store-paths.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
@@ -248,23 +248,21 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.grill.end", WRITE_SCOPE, async ({ params: input }) => {
     const id = readId(input);
     const card = await store.get(id);
-    const replying =
-      card && params.readSessions
-        ? await workboardCardSessionHasActiveRun(params.readSessions, card).catch(
-            (error: unknown) => {
-              throw new Error(
-                "Could not check whether the agent is still replying in the session chat; try End grilling again.",
-                { cause: error },
-              );
-            },
-          )
-        : false;
-    if (replying) {
+    const read = await readNodeGrillResult(
+      api.runtime.gateway,
+      params.readSessions,
+      card?.metadata?.automation?.target?.worktree?.grill?.sessionKey,
+    ).catch((error: unknown) => {
+      throw new Error("Could not read the grill session; try End grilling again.", {
+        cause: error,
+      });
+    });
+    if (read.replying) {
       throw new Error(
-        "The agent is still replying in the session chat; end the grilling when it has answered.",
+        "The agent is still replying in the grill session; end the grilling when it has answered.",
       );
     }
-    return await redactCardResult(store.endNodeGrill(id));
+    return await redactCardResult(store.endNodeGrill(id, read.result));
   });
   register("workboard.cards.move", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(

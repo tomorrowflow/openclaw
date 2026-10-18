@@ -39,24 +39,15 @@ export type NodeTicketStopReport = {
   decisions: WorkboardNodeDecision[];
 };
 
-/** One grilling question with the session's recommended answer, and what is settled so far. */
+/** A handoff of the grilling to a new session: what was researched and settled, and the first question. */
 type NodeTicketGrillReport = {
   outcome: "grill";
-  question: string;
-  summary: string;
-  decisions: WorkboardNodeDecision[];
-};
-
-/** The grilling in the session chat reached a shared understanding; `summary` says what was settled. */
-type NodeTicketGrillDoneReport = {
-  outcome: "grill_done";
-  summary: string;
+  handoff: string;
   decisions: WorkboardNodeDecision[];
 };
 
 export type NodeTicketReport =
   | NodeTicketGrillReport
-  | NodeTicketGrillDoneReport
   | {
       outcome: "done";
       headline?: string;
@@ -92,21 +83,16 @@ function lastAssistantText(messages: readonly unknown[]): string | undefined {
   return undefined;
 }
 
-/**
- * The prompt and reply of the turn that ended: agent_end messages carry the
- * session's earlier history, then the turn's prompt and its last assistant
- * message. The reply drops its report block, which the report itself carries.
- */
-export function lastTurnText(messages: readonly unknown[]): { prompt: string; reply: string } {
-  const promptAt = messages.findLastIndex(
-    (message) => isRecord(message) && message.role === "user",
-  );
-  const prompt = isRecord(messages[promptAt]) ? messageText(messages[promptAt]) : undefined;
-  const reply = lastAssistantText(messages.slice(promptAt + 1));
-  return {
-    prompt: prompt?.trim() ?? "",
-    reply: reply?.replace(REPORT_PATTERN, "").trim() ?? "",
-  };
+/** The text of the last assistant message that has any, such as a session's last reply in its history. */
+export function lastAssistantReply(messages: readonly unknown[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const text = isRecord(message) && message.role === "assistant" ? messageText(message) : "";
+    if (text?.trim()) {
+      return text.trim();
+    }
+  }
+  return "";
 }
 
 function optionalText(value: unknown): string | undefined {
@@ -245,14 +231,13 @@ export function parseNodeTicketReport(
     };
   }
   if (value.outcome === "grill") {
-    const question = optionalText(value.question);
-    if (!question) {
-      return { ok: false, reason: "The ticket session's grill report has no question." };
+    if (!summary) {
+      return {
+        ok: false,
+        reason: "The ticket session's grill report has no handoff in `summary`.",
+      };
     }
-    return { ok: true, report: { outcome: "grill", question, summary, decisions } };
-  }
-  if (value.outcome === "grill_done") {
-    return { ok: true, report: { outcome: "grill_done", summary, decisions } };
+    return { ok: true, report: { outcome: "grill", handoff: summary, decisions } };
   }
   if (value.outcome === "blocked" || value.outcome === "needs_input") {
     const questions = (Array.isArray(value.questions) ? value.questions : []).flatMap((entry) => {

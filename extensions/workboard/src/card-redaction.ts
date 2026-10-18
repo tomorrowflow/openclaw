@@ -50,7 +50,14 @@ export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
     ...(stage ? { stage } : {}),
     ...(rounds ? { rounds } : {}),
     ...(grill
-      ? { grill: { status: grill.status, rounds: grill.rounds, attachmentId: grill.attachmentId } }
+      ? {
+          grill: {
+            status: grill.status,
+            rounds: grill.rounds,
+            attachmentId: grill.attachmentId,
+            ...(grill.sessionKey ? { sessionKey: grill.sessionKey } : {}),
+          },
+        }
       : {}),
     ...(pullRequest
       ? { pullRequestUrl: pullRequest.url, publishedRound: pullRequest.publishedRound }
