@@ -143,6 +143,14 @@ export default defineControlUiPlugin({
         icon: "layoutDashboard",
         order: 11,
       }),
+      host.ui.registerPanel({
+        id: "screens",
+        label: t("workboard.screens"),
+        mount: createLazyWorkboardPage(async () => {
+          const { createScreensPanel } = await import("./pages/screens/screens-panel.ts");
+          return createScreensPanel(workboard);
+        }),
+      }),
       host.ui.registerAccessory({
         id: "linked-card",
         placement: "session-header",

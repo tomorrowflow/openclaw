@@ -137,3 +137,44 @@ it("renders shared card updates and retires navigation while hidden or disposed"
   expect(fixture.listeners.size).toBe(0);
   workboard.dispose();
 });
+
+it("offers a node ticket's session its Screens panel, and no other session", async () => {
+  const { host, connection } = workboardTestHost();
+  connection.connected = true;
+  const workboard = createWorkboardCapability();
+  const nodeTicket = createWorkboardCard({
+    sessionKey: "agent:dev:workboard:node",
+    metadata: {
+      automation: {
+        target: {
+          kind: "node-claude",
+          nodeId: "mac-factory",
+          repoPath: "/repo",
+          worktreesRoot: "/wt",
+          hostRepoPath: "/host",
+        },
+      },
+    },
+  });
+  const plain = createWorkboardCard({ id: "card-2", sessionKey: "agent:dev:workboard:plain" });
+  workboard.state.cards = [nodeTicket, plain];
+  const container = document.createElement("div");
+  const mount = (sessionKey: string) =>
+    createWorkboardSessionAccessory(workboard)(container, createViewContext(host, { sessionKey }));
+
+  const plainChip = mount("agent:dev:workboard:plain");
+  expect(container.querySelector(".workboard-session-chip")).not.toBeNull();
+  expect(container.querySelector(".workboard-session-screens")).toBeNull();
+  plainChip?.dispose?.();
+
+  const nodeChip = mount("agent:dev:workboard:node");
+  try {
+    container.querySelector<HTMLButtonElement>(".workboard-session-screens")!.click();
+    expect(host.ui.openPanel).toHaveBeenCalledExactlyOnceWith("screens", {
+      sessionKey: "agent:dev:workboard:node",
+    });
+  } finally {
+    nodeChip?.dispose?.();
+    workboard.dispose();
+  }
+});

@@ -256,6 +256,25 @@ Once the node is paired:
    Restart the node afterwards: the Gateway re-evaluates withheld commands only
    when a node reconnects. `file.fetch` is capped at 16 MiB per bundle.
 
+   For live screenshots in the session **Screens** panel, also allow
+   `dir.list` and grant each target screenshot dir, both the directory itself
+   and its contents (`**` does not match the directory):
+
+   ```json5 validate=false
+   {
+     gateway: { nodes: { commands: { allow: ["file.fetch", "file.stat", "dir.list"] } } },
+     // plugins.entries.file-transfer.config.nodes.<nodeId>.allowReadPaths:
+     allowReadPaths: [
+       "/home/factory/factory/worktrees/*.bundle",
+       "/home/factory/factory/worktrees/wb-*/docs/screenshots",
+       "/home/factory/factory/worktrees/wb-*/docs/screenshots/**",
+     ],
+   }
+   ```
+
+   Keep `ask: "off"`: with `ask: "on-miss"` every 20-second panel refresh of an
+   ungranted path would prompt for approval.
+
 2. Point a board at the node with `orchestration.defaultTarget` through
    `workboard.boards.upsert`:
 
@@ -284,14 +303,15 @@ Once the node is paired:
 
 ## Troubleshooting
 
-| Symptom                                               | Fix                                                                                                       |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Session report says a command "requires approval"     | Add the command to the build user's `~/.claude/settings.json` allowlist.                                  |
-| Session can't write files or `cd … && git` is blocked | The session didn't start in the ticket worktree; check `worktreesRoot` and `additionalDirectories`.       |
-| Import fails fetching `wb-<cardId>.bundle`            | Add `<worktreesRoot>/*.bundle` to the node's `allowReadPaths`, allow `file.fetch`, then restart the node. |
-| macOS daemon exits 78 with an empty log               | Make the wrapper executable (`chmod 700`).                                                                |
-| Claude says it is not logged in from the service      | Export `CLAUDE_CODE_OAUTH_TOKEN` in the service environment; `/login` doesn't reach a service.            |
-| Linux node stops when you log out                     | Enable lingering: `sudo loginctl enable-linger <user>`.                                                   |
+| Symptom                                               | Fix                                                                                                                   |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Session report says a command "requires approval"     | Add the command to the build user's `~/.claude/settings.json` allowlist.                                              |
+| Session can't write files or `cd … && git` is blocked | The session didn't start in the ticket worktree; check `worktreesRoot` and `additionalDirectories`.                   |
+| Import fails fetching `wb-<cardId>.bundle`            | Add `<worktreesRoot>/*.bundle` to the node's `allowReadPaths`, allow `file.fetch`, then restart the node.             |
+| Screens panel says live screenshots are unavailable   | Allow `dir.list` and `file.fetch`, grant `<worktreesRoot>/wb-*/<dir>` and `/**` per screenshot dir, restart the node. |
+| macOS daemon exits 78 with an empty log               | Make the wrapper executable (`chmod 700`).                                                                            |
+| Claude says it is not logged in from the service      | Export `CLAUDE_CODE_OAUTH_TOKEN` in the service environment; `/login` doesn't reach a service.                        |
+| Linux node stops when you log out                     | Enable lingering: `sudo loginctl enable-linger <user>`.                                                               |
 
 ## Related
 
