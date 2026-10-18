@@ -8,7 +8,11 @@ import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import { grillHandoffFromLog, grillSessionName, nodeGrillIsLive } from "./node-ticket-grill.js";
 import { lastAssistantReply } from "./node-ticket-report.js";
-import { nodeTicketTarget, type WorkboardNodeTicketRuntime } from "./node-ticket.js";
+import {
+  nodeTicketTarget,
+  sessionCreateRunError,
+  type WorkboardNodeTicketRuntime,
+} from "./node-ticket.js";
 import { sanitizeSessionSegment, workboardSessionHasActiveRun } from "./session-link.js";
 import { MAX_BLOCK_REASON_CHARS } from "./store-constants.js";
 import { capText } from "./store-normalizers.js";
@@ -81,7 +85,7 @@ async function startNodeGrillSession(
   );
   const record = isRecord(result) ? result : {};
   if (record.runStarted === false) {
-    throw new Error(typeof record.runError === "string" ? record.runError : "no run was started");
+    throw new Error(sessionCreateRunError(record));
   }
   return typeof record.key === "string" && record.key ? record.key : key;
 }

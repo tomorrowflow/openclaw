@@ -70,7 +70,7 @@ async function cardSessionTurn(store: WorkboardStore, cardId: string, reply: str
 /**
  * A node ticket that handed its grilling off; `open` runs the handoff pass
  * that creates the grill session. The fake Gateway answers `chat.history`
- * with `history`, and fails grill session creates while `failCreate` is set.
+ * with `history`, and starts no run in a grill session create while `failCreate` is set.
  */
 async function grillingTicket(store = createWorkboardSqliteTestStore(), open = true) {
   const gateway = createNodeGateway();
@@ -82,7 +82,12 @@ async function grillingTicket(store = createWorkboardSqliteTestStore(), open = t
       return { messages: history };
     }
     if (method === "sessions.create" && String(params?.key).includes(":grill-") && failCreate) {
-      throw new Error(failCreate);
+      return {
+        ok: true,
+        key: params?.key,
+        runStarted: false,
+        runError: { code: "UNAVAILABLE", message: failCreate },
+      };
     }
     return answer(method, params);
   });

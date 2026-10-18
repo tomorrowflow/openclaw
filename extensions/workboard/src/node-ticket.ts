@@ -509,6 +509,14 @@ export async function createNodeTicketWorktree(params: {
   return { path: worktreePath, branch, baseCommit, ...kept };
 }
 
+/** Why a `sessions.create` reply started no run; its `runError` is a Gateway error shape. */
+export function sessionCreateRunError(record: Record<string, unknown>): string {
+  const error = record.runError;
+  return isRecord(error) && typeof error.message === "string" && error.message
+    ? error.message
+    : "no run was started";
+}
+
 /** Starts a fresh Claude Code session on the node, in the worktree, under the card's session key. */
 export async function startNodeTicketSession(params: {
   runtime: WorkboardNodeTicketRuntime;
@@ -539,8 +547,7 @@ export async function startNodeTicketSession(params: {
   );
   const record = isRecord(result) ? result : {};
   if (record.runStarted === false || typeof record.runId !== "string" || !record.runId) {
-    const reason = typeof record.runError === "string" ? record.runError : "no run was started";
-    throw new Error(`node ticket session did not start: ${reason}`);
+    throw new Error(`node ticket session did not start: ${sessionCreateRunError(record)}`);
   }
   const resolved = isRecord(record.resolved) ? record.resolved : {};
   return {
