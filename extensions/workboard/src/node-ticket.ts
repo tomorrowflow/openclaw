@@ -604,7 +604,7 @@ export function buildNodeTicketMessage(params: {
     "- If something needs a decision you cannot make from the ticket and the repository, stop and ask; propose a default.",
     ...(reviewed
       ? [
-          "- Before a `done` report, run a reviewer subagent over your changes against the repository's CODING_STANDARDS.md and have it return each finding as a repo-relative `path`, a 1-based `line`, the `rule` it breaks, and a one-line `body`. Address the findings and report every one in `review.items` with `fixed` true or false, plus a `note` on any you left. For a finding you left, `line` is its line in your final commit: re-check it after the last commit. A `done` report without `review` blocks the card.",
+          '- Before a `done` report, run a reviewer subagent over your changes against the repository\'s CODING_STANDARDS.md and have it return each finding as a repo-relative `path`, a 1-based `line`, the `rule` it breaks, and a one-line `body`. Address the findings and report every one in `review.items` with `fixed` true or false, plus a `note` on any you left. A review with no findings sends `"items":[]`. For a finding you left, `line` is its line number in the file at your final commit (HEAD): re-check it after the last commit. A `done` report without `review` blocks the card.',
         ]
       : []),
     "- End your final message with exactly one report block:",

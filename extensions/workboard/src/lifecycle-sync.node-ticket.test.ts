@@ -499,18 +499,31 @@ describe("Workboard node ticket lifecycle", () => {
       { line: 3, body: "No path" },
       { path: "src/a.ts", line: 3, body: "  " },
       { path: `${"d/".repeat(81)}a.ts`, line: 3, body: "Path too long to trace" },
+      { path: "/repo/src/a.ts", line: 3, body: "Absolute path" },
+      { path: "src/../../a.ts", line: 3, body: "Outside the repo" },
     ];
     const itemized = await end(done({ items, note: "Left four" }));
     expect(itemized?.status).toBe("running");
-    expect(itemized?.metadata?.proof?.at(-1)?.note).toBe("14 findings, 10 fixed. Left four");
+    expect(itemized?.metadata?.proof?.at(-1)?.note).toBe(
+      "14 findings, 10 fixed. Left four (7 malformed findings dropped)",
+    );
     const review = nodeTicketTarget(expectDefined(itemized, "itemized card"))?.worktree?.rounds?.[0]
       ?.review;
     expect(review).toEqual({
       findings: 14,
       fixed: 10,
-      note: "Left four",
+      note: "Left four (7 malformed findings dropped)",
       items: [...items.slice(10, 14), ...items.slice(0, 8)],
     });
+
+    // A clean review sends no items; one whose items were all malformed must not read as clean.
+    const clean = await end(done({ items: [] }));
+    expect(clean?.metadata?.proof?.at(-1)?.note).toBe("0 findings, 0 fixed");
+    const unreadable = await end(done({ items: [{ path: "../a.ts", line: 1, body: "Outside" }] }));
+    expect(unreadable?.status).toBe("running");
+    expect(unreadable?.metadata?.proof?.at(-1)?.note).toBe(
+      "0 findings, 0 fixed. (1 malformed finding dropped)",
+    );
   });
 
   it("records an operator stop of a node ticket as stopped, not failed", async () => {

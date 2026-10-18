@@ -13,10 +13,12 @@ import {
 } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
+import { isAbsoluteWorkspacePath } from "./workspace-path.js";
 
 // Round facts ride in the card's metadata, which has a 24 KiB budget shared
-// with comments and proof. A full round serializes to about 6 KiB; the budget
-// trim drops rounds before anything else.
+// with comments and proof. A full round serializes to about 11 KiB (decisions
+// 4.9, review 3.1, changes 2.8); the budget trim sheds the oldest round's
+// decisions, then its review items, then the round, before anything else.
 const MAX_NODE_ROUNDS = 5;
 const MAX_DECISIONS = 30;
 const MAX_DECISION_TRAIL_CHARS = 3000;
@@ -36,7 +38,7 @@ const MAX_FINDINGS_CHARS = 2400;
 // Findings are traced to edits by path and line, so a longer path is dropped, not cut.
 const MAX_FINDING_PATH_CHARS = 160;
 const FINDING_CELL_CHARS = { body: 200, rule: 80 } as const;
-const MAX_REVIEW_NOTE_CHARS = 400;
+export const MAX_REVIEW_NOTE_CHARS = 400;
 
 function cell(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") {
@@ -188,21 +190,43 @@ export function parseNumstat(output: string, from: string, to: string): Workboar
   return { from, to, files: capFiles(files), totals };
 }
 
+function hasControlCharacter(value: string): boolean {
+  return [...value].some((char) => {
+    const code = char.charCodeAt(0);
+    return code < 0x20 || code === 0x7f;
+  });
+}
+
+/** A repo-relative path without `./`; one that is absolute or climbs out with `..` is refused. */
+function findingPath(value: unknown): string | undefined {
+  const path = typeof value === "string" ? value.trim().replace(/^\.\//, "") : "";
+  if (
+    !path ||
+    path.length > MAX_FINDING_PATH_CHARS ||
+    isAbsoluteWorkspacePath(path) ||
+    path.split(/[\\/]/).includes("..") ||
+    hasControlCharacter(path)
+  ) {
+    return undefined;
+  }
+  return path;
+}
+
 function normalizeFinding(entry: unknown): WorkboardNodeFinding | undefined {
   if (!isRecord(entry)) {
     return undefined;
   }
-  const path = typeof entry.path === "string" ? entry.path.trim() : "";
+  const path = findingPath(entry.path);
   const line = parseStrictPositiveInteger(entry.line);
   const body = cell(entry.body, FINDING_CELL_CHARS.body);
-  if (!path || path.length > MAX_FINDING_PATH_CHARS || line === undefined || !body) {
+  if (!path || line === undefined || !body) {
     return undefined;
   }
   const rule = cell(entry.rule, FINDING_CELL_CHARS.rule);
   return { path, line, body, ...(rule ? { rule } : {}), fixed: entry.fixed === true };
 }
 
-/** Session-written findings; one without a path, a 1-based line, or a body is dropped. */
+/** Session-written findings; one without a repo-relative path, a 1-based line, or a body is dropped. */
 export function normalizeNodeFindings(value: unknown): WorkboardNodeFinding[] {
   return (Array.isArray(value) ? value : []).flatMap((entry) => {
     const finding = normalizeFinding(entry);

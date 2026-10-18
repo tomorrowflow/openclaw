@@ -674,10 +674,16 @@ report, address the findings, and report them (see **Report** below).
    the note of its passing entry. A rung b round's report also carries
    `"review": {"items": [{"path": "…", "line": 1, "rule": "…", "body": "…", "fixed": true}], "note": "…"}`,
    one item per reviewer finding: a repo-relative `path`, a 1-based `line`
-   (for an open finding, its line in the round's final commit), the
-   `CODING_STANDARDS.md` rule, and a one-line `body`. The counts derive from
-   the items; items without a path, a positive integer line, or a body are
-   dropped. A session resumed under an older brief may send
+   (for an open finding, its line number in the file at the round's final
+   commit), the `CODING_STANDARDS.md` rule, and a one-line `body`. A review
+   with no findings sends `"items": []`. The counts derive from the items.
+   An item is dropped when it has no `path`, a `path` over 160 characters,
+   or a `path` that is not repo-relative (absolute, with a `..` segment, or
+   with a control character), or when it has no positive integer `line` or
+   no `body`. A leading `./` is removed from the path. When items are
+   dropped, the review note ends with `(N malformed findings dropped)`, so
+   a review whose items were all malformed does not read as clean. A
+   session resumed under an older brief may send
    `{"findings": n, "fixed": n, "note": "…"}` instead, which is still accepted.
    The review is recorded as a passed `standards review` proof entry whose
    note gives the counts, and on the round as `review` (see `rounds` in
@@ -727,7 +733,9 @@ report, address the findings, and report them (see **Report** below).
    diff fails, the import still completes and the Gateway logs a warning. A
    card keeps the facts of its last five rounds; when the card's metadata
    outgrows its 24 KiB budget, round facts are dropped first, oldest round
-   first, before comments or proof. When the board has an
+   first, before comments or proof. The oldest round loses its decision
+   trail, then its review items, and goes only after that, so its review
+   findings outlast its decision trail. When the board has an
    automation job, reaching `review` nudges it, so the assignee agent can
    give a shadow verdict (see [Trust KPIs](#trust-kpis)).
 4. **Accept:** moving the card from `review` to `done` pushes the imported

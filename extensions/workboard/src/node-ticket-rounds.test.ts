@@ -1,7 +1,17 @@
-// Workboard tests cover a node ticket round's decision trail and import diffstat.
-import type { WorkboardNodeWorktree } from "@openclaw/workboard-contract";
+// Workboard tests cover a node ticket round's decision trail, review findings, budget trim, and import diffstat.
+import type {
+  WorkboardComment,
+  WorkboardNodeRound,
+  WorkboardNodeWorktree,
+} from "@openclaw/workboard-contract";
 import { describe, expect, it } from "vitest";
-import { normalizeNodeDecisions, parseNumstat, withNodeRound } from "./node-ticket-rounds.js";
+import {
+  normalizeNodeDecisions,
+  normalizeNodeFindings,
+  normalizeNodeReview,
+  parseNumstat,
+  withNodeRound,
+} from "./node-ticket-rounds.js";
 import { trimMetadataToBudget } from "./store-normalizers.js";
 
 const worktree: WorkboardNodeWorktree = {
@@ -106,20 +116,84 @@ describe("node ticket decision trail", () => {
   });
 });
 
-it("drops older rounds before comments when card metadata outgrows its budget", () => {
-  const decisions = Array.from({ length: 30 }, (_, index) => ({
-    phase: "build",
-    decision: `${index} ${"d".repeat(150)}`,
-    why: "w".repeat(400),
-  }));
-  const rounds = [0, 1, 2].map((round) => ({ round, decisions }));
-  const comments = Array.from({ length: 5 }, (_, index) => ({
-    id: `comment-${index}`,
-    body: `note ${index}`,
-    createdAt: index,
-  }));
+describe("node ticket review findings", () => {
+  it("keeps repo-relative paths and refuses ones that could leave the repo", () => {
+    const finding = (path: string) => ({ path, line: 3, body: `At ${path}` });
 
-  const trimmed = trimMetadataToBudget({
+    expect(
+      normalizeNodeFindings([
+        finding("./src/a.ts"),
+        finding("src/..cache/b.ts"),
+        finding("/repo/src/a.ts"),
+        finding("C:\\repo\\a.ts"),
+        finding("src/../../etc/passwd"),
+        finding("src\\..\\a.ts"),
+        finding("src/a\u0007.ts"),
+        finding("src/a\u007f.ts"),
+      ]).map((item) => item.path),
+    ).toEqual(["src/a.ts", "src/..cache/b.ts"]);
+  });
+
+  it("marks a finding fixed only when the report says true", () => {
+    const finding = (fixed: unknown) => ({ path: "src/a.ts", line: 1, body: "Bare except", fixed });
+
+    expect(
+      normalizeNodeFindings([finding(true), finding("true"), finding(1), finding(undefined)]).map(
+        (item) => item.fixed,
+      ),
+    ).toEqual([true, false, false, false]);
+  });
+
+  it("keeps open findings first within the character cap", () => {
+    // Each finding counts 300 characters (path, rule, body), so 8 fit the 2400 cap.
+    const items = Array.from({ length: 12 }, (_, index) => ({
+      path: `src/${index}`.padEnd(20, "p"),
+      line: index + 1,
+      rule: "r".repeat(80),
+      body: "b".repeat(200),
+      fixed: index < 6,
+    }));
+
+    const review = normalizeNodeReview({ findings: 12, fixed: 6, items });
+    expect(review?.items?.map((item) => item.line)).toEqual([7, 8, 9, 10, 11, 12, 1, 2]);
+  });
+});
+
+/** A round at every cap: 30 decision rows, 12 findings, 30 changed files. */
+function fullRound(round: number): WorkboardNodeRound {
+  const decisions = normalizeNodeDecisions(
+    Array.from({ length: 30 }, (_, index) => ({
+      ts: `${index}`.padEnd(16, "t"),
+      phase: "p".repeat(16),
+      decision: "d".repeat(16),
+      why: "w".repeat(16),
+      evidence: "e".repeat(16),
+      result: "r".repeat(16),
+    })),
+  );
+  const review = normalizeNodeReview({
+    findings: 12,
+    fixed: 0,
+    items: Array.from({ length: 12 }, (_, index) => ({
+      path: `src/${index}`.padEnd(20, "p"),
+      line: 1000 + index,
+      rule: "r".repeat(80),
+      body: "b".repeat(100),
+    })),
+  });
+  const changes = parseNumstat(
+    Array.from(
+      { length: 30 },
+      (_, index) => `1000\t1000\t${`src/${index}`.padEnd(50, "f")}\0`,
+    ).join(""),
+    "a".repeat(40),
+    "b".repeat(40),
+  );
+  return { round, decisions, changes, ...(review ? { review } : {}) };
+}
+
+function trimRounds(rounds: WorkboardNodeRound[], comments: WorkboardComment[]) {
+  return trimMetadataToBudget({
     comments,
     automation: {
       target: {
@@ -132,9 +206,37 @@ it("drops older rounds before comments when card metadata outgrows its budget", 
       },
     },
   });
+}
 
-  expect(trimmed.automation?.target?.worktree?.rounds?.map((entry) => entry.round)).toEqual([2]);
-  expect(trimmed.comments).toEqual(comments);
+it("sheds an older round's decisions, then its findings, then the round, before comments", () => {
+  const comments = Array.from({ length: 5 }, (_, index) => ({
+    id: `comment-${index}`,
+    body: `note ${index} ${"c".repeat(600)}`,
+    createdAt: index,
+  }));
+  const round0 = fullRound(0);
+  const round1 = fullRound(1);
+  const round2 = fullRound(2);
+  const withoutDecisions = (round: WorkboardNodeRound) => ({
+    round: round.round,
+    changes: round.changes,
+    review: round.review,
+  });
+  expect(round0.review?.items).toHaveLength(12);
+
+  const twoRounds = trimRounds([round0, round1], comments);
+  expect(twoRounds.automation?.target?.worktree?.rounds).toEqual([
+    withoutDecisions(round0),
+    round1,
+  ]);
+  expect(twoRounds.comments).toEqual(comments);
+
+  const threeRounds = trimRounds([round0, round1, round2], comments);
+  expect(threeRounds.automation?.target?.worktree?.rounds).toEqual([
+    withoutDecisions(round1),
+    round2,
+  ]);
+  expect(threeRounds.comments).toEqual(comments);
 });
 
 describe("node ticket import diffstat", () => {

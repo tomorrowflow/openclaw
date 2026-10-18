@@ -202,7 +202,7 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
       "run a reviewer subagent over your changes against the repository's CODING_STANDARDS.md",
     );
     expect(briefs()[0]).toContain(
-      "For a finding you left, `line` is its line in your final commit: re-check it after the last commit.",
+      'A review with no findings sends `"items":[]`. For a finding you left, `line` is its line number in the file at your final commit (HEAD): re-check it after the last commit.',
     );
     expect(briefs()[0]).toContain(
       '"review":{"items":[{"path":"…","line":1,"rule":"…","body":"…","fixed":true}],"note":"…"}',

@@ -2,6 +2,7 @@ import type { WorkboardNodeDecision, WorkboardNodeReview } from "@openclaw/workb
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import {
+  MAX_REVIEW_NOTE_CHARS,
   normalizeNodeDecisions,
   normalizeNodeFindings,
   normalizeNodeReview,
@@ -131,8 +132,13 @@ function parseReview(value: unknown): WorkboardNodeReview | undefined {
     return normalizeNodeReview(value);
   }
   const items = normalizeNodeFindings(value.items);
+  // A review whose items were all malformed must not read as a clean one.
+  const dropped = value.items.length - items.length;
+  const droppedNote =
+    dropped > 0 ? `(${dropped} malformed finding${dropped === 1 ? "" : "s"} dropped)` : "";
+  const note = capText(optionalText(value.note), MAX_REVIEW_NOTE_CHARS - droppedNote.length - 1);
   return normalizeNodeReview({
-    note: value.note,
+    note: [note, droppedNote].filter(Boolean).join(" "),
     findings: items.length,
     fixed: items.filter((item) => item.fixed).length,
     items,
