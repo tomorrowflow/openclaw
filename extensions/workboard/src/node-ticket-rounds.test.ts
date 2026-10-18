@@ -12,7 +12,7 @@ import {
   parseNumstat,
   withNodeRound,
 } from "./node-ticket-rounds.js";
-import { trimMetadataToBudget } from "./store-normalizers.js";
+import { trimMetadataToBudget } from "./store-metadata-budget.js";
 
 const worktree: WorkboardNodeWorktree = {
   path: "/wt/wb-card-1",

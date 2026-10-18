@@ -88,6 +88,11 @@ export function workboardCardStage(card: WorkboardCard): WorkboardCardStage | un
         since: handoff.askedAt,
         ...(handoff.escalatedAt === undefined ? {} : { escalatedAt: handoff.escalatedAt }),
       };
+    case "grilling":
+      if (card.status === "done") {
+        break;
+      }
+      return { kind: "grilling", since: handoff.askedAt, round: worktree?.grill?.rounds ?? 1 };
     case "imported":
       if (card.status !== "done") {
         return { kind: "awaiting_review", since: handoff.importedAt };

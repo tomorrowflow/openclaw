@@ -2,6 +2,7 @@ import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { resolveGlobalSingleton } from "openclaw/plugin-sdk/global-singleton";
 import { isCronSessionKey } from "openclaw/plugin-sdk/routing";
 import type { OpenClawPluginService } from "../api.js";
+import { workboardCardStage } from "./card-stage.js";
 import { cardBoardId } from "./store-card-helpers.js";
 import { MAX_CARDS } from "./store-constants.js";
 import type { WorkboardStore } from "./store.js";
@@ -189,10 +190,12 @@ export function createWorkboardAutomationNudgeService(params: {
     async nudge(input) {
       const state = getWorkboardAutomationNudgeState();
       const owner = state.owner;
-      if (!owner || isCronOriginSession(input.sessionKey) || input.cards.length === 0) {
+      // Only the operator answers a grilling question, so it gives the automation nothing to do.
+      const cards = input.cards.filter((card) => workboardCardStage(card)?.kind !== "grilling");
+      if (!owner || isCronOriginSession(input.sessionKey) || cards.length === 0) {
         return;
       }
-      await nudgeBoards(new Set(input.cards.map((card) => cardBoardId(card))), owner, 0);
+      await nudgeBoards(new Set(cards.map((card) => cardBoardId(card))), owner, 0);
     },
   };
 }

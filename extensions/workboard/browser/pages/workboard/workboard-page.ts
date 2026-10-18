@@ -42,6 +42,7 @@ import {
 } from "./view-board-modal.ts";
 import { createCardChanges, type CardChanges } from "./view-card-changes.ts";
 import { getVisibleDetailCard, openCardDetails } from "./view-card-details.ts";
+import { createCardGrilling, type CardGrilling } from "./view-card-grilling.ts";
 import { createCardScreenshots, type CardScreenshots } from "./view-card-screenshots.ts";
 import {
   workboardErrorMessage,
@@ -83,6 +84,7 @@ export function createWorkboardPage(
     let trust: BoardTrustState | undefined;
     let screenshots: CardScreenshots | undefined;
     let changes: CardChanges | undefined;
+    let grilling: CardGrilling | undefined;
     let queued = false;
     let connected = false;
     let refreshActive = false;
@@ -162,6 +164,8 @@ export function createWorkboardPage(
         : undefined;
       changes?.dispose();
       changes = connected ? createCardChanges(client, requestUpdate) : undefined;
+      grilling?.dispose();
+      grilling = connected ? createCardGrilling(client, requestUpdate) : undefined;
       metadataGeneration += 1;
       metadataLoad = null;
       if (connected) {
@@ -432,6 +436,7 @@ export function createWorkboardPage(
             detailBoardAutomation: detailJobId ? automations.get(detailJobId) : undefined,
             detailScreenshots: screenshots,
             detailChanges: changes,
+            detailGrilling: grilling,
             host: workboard,
             client: connected ? client : null,
             connected,
@@ -566,6 +571,7 @@ export function createWorkboardPage(
         runningSessionResolvers.dispose();
         screenshots?.dispose();
         changes?.dispose();
+        grilling?.dispose();
         document.removeEventListener("visibilitychange", onVisibilityChange);
         stop();
         render(nothing, container);

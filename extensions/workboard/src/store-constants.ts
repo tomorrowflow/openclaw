@@ -37,6 +37,9 @@ export const MAX_BLOCK_REASON_CHARS = 2000;
 export const MAX_COMMENT_BODY_CHARS = 2000;
 export const MAX_PROOF_COMMAND_CHARS = 1000;
 export const MAX_PROOF_NOTE_CHARS = 2000;
+// The pending answer rides in the card's 24 KiB metadata until the next report;
+// the grilling log attachment keeps every answer for good.
+export const MAX_GRILL_ANSWER_CHARS = 4000;
 export const DEFAULT_CLAIM_TTL_MS = 30 * 60 * 1000;
 export const DEFAULT_WORKBOARD_DISPATCH_OWNER = "workboard-dispatcher";
 export const READY_STRANDED_MS = 60 * 60 * 1000;

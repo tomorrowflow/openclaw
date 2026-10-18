@@ -7,6 +7,7 @@ import type {
   WorkboardNotification,
   WorkboardProof,
 } from "@openclaw/workboard-contract";
+import { grillLogAttachmentId } from "./node-ticket-grill.js";
 import type { PersistedWorkboardAttachment } from "./persistence-types.js";
 import {
   assertCanMutateClaimedCard,
@@ -16,7 +17,6 @@ import {
 } from "./store-card-helpers.js";
 import {
   MAX_CARD_ARTIFACTS,
-  MAX_CARD_ATTACHMENTS,
   MAX_CARD_NOTIFICATIONS,
   MAX_CARD_PROOF,
   MAX_CARD_WORKER_LOGS,
@@ -171,9 +171,7 @@ export class WorkboardEnrichmentStore extends WorkboardCoreStore {
             this.updateCard(await this.requireCard(id), {
               metadata: {
                 ...clearDiagnostics(existing.metadata, ["missing_proof"]),
-                attachments: [...(existing.metadata?.attachments ?? []), attachment].slice(
-                  -MAX_CARD_ATTACHMENTS,
-                ),
+                attachments: [...(existing.metadata?.attachments ?? []), attachment],
               },
             }),
           assertCurrent,
@@ -214,6 +212,11 @@ export class WorkboardEnrichmentStore extends WorkboardCoreStore {
       const attachments = existing.metadata?.attachments ?? [];
       if (!attachments.some((attachment) => attachment.id === attachmentId)) {
         throw new Error(`attachment not found: ${attachmentId}`);
+      }
+      if (attachmentId === grillLogAttachmentId(existing.metadata)) {
+        throw new Error(
+          "grilling.md is this card's grilling log and cannot be deleted; it stays with the card.",
+        );
       }
       await this.attachmentStore.delete(attachmentId);
       return await this.updateCard(await this.requireCard(cardId), {

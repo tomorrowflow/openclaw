@@ -26,7 +26,6 @@ import {
   type WorkboardLink,
   type WorkboardLinkType,
   type WorkboardMetadata,
-  type WorkboardNodeRound,
   type WorkboardNotification,
   type WorkboardNotificationKind,
   type WorkboardNotificationSubscription,
@@ -45,16 +44,15 @@ import {
 } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
+import { grillLogAttachmentId } from "./node-ticket-grill.js";
 import {
   MAX_ATTACHMENT_BYTES,
   MAX_CARD_ARTIFACTS,
-  MAX_CARD_ATTACHMENTS,
   MAX_CARD_ATTEMPTS,
   MAX_CARD_COMMENTS,
   MAX_CARD_DIAGNOSTICS,
   MAX_CARD_EVENTS,
   MAX_CARD_LINKS,
-  MAX_CARD_METADATA_BYTES,
   MAX_CARD_NOTIFICATIONS,
   MAX_CARD_PROOF,
   MAX_CARD_WORKER_LOGS,
@@ -70,6 +68,7 @@ import type {
   WorkboardWorkerLogInput,
 } from "./store-inputs.js";
 import { normalizeLaunchState, normalizeStartRequest } from "./store-launch-normalizers.js";
+import { capAttachments, isDependencyLink, trimMetadataToBudget } from "./store-metadata-budget.js";
 import { normalizeExecutionTarget } from "./store-target-normalizers.js";
 import { normalizeBoundedString, normalizeCommentSource } from "./store-value-normalizers.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
@@ -492,10 +491,6 @@ function normalizeLink(record: unknown): WorkboardLink | null {
   };
 }
 
-function isDependencyLink(link: WorkboardLink): boolean {
-  return link.type === "parent" || link.type === "child";
-}
-
 function normalizeProof(record: Record<string, unknown>): WorkboardProof | null {
   const id = normalizeOptionalString(record.id);
   const createdAt = normalizeTimestamp(record.createdAt, 0);
@@ -860,6 +855,17 @@ export function normalizeMetadata(
             ];
           })()
         : links.slice(-MAX_CARD_LINKS);
+  const automation = normalizeAutomation(
+    Object.hasOwn(record, "automation") ? record.automation : {},
+    fallback.automation,
+    { allowLaunchState: options.allowAutomationLaunch },
+  );
+  const attachments = normalizeList(
+    record.attachments,
+    normalizeAttachment,
+    Number.POSITIVE_INFINITY,
+    fallback.attachments,
+  );
   const normalized = {
     attempts: normalizeList(
       record.attempts,
@@ -881,12 +887,7 @@ export function normalizeMetadata(
       MAX_CARD_ARTIFACTS,
       fallback.artifacts,
     ),
-    attachments: normalizeList(
-      record.attachments,
-      normalizeAttachment,
-      MAX_CARD_ATTACHMENTS,
-      fallback.attachments,
-    ),
+    attachments: attachments && capAttachments(attachments, grillLogAttachmentId({ automation })),
     workerLogs: normalizeList(
       record.workerLogs,
       normalizeWorkerLog,
@@ -896,11 +897,7 @@ export function normalizeMetadata(
     workerProtocol: Object.hasOwn(record, "workerProtocol")
       ? normalizeWorkerProtocol(record.workerProtocol, fallback.workerProtocol)
       : fallback.workerProtocol,
-    automation: normalizeAutomation(
-      Object.hasOwn(record, "automation") ? record.automation : {},
-      fallback.automation,
-      { allowLaunchState: options.allowAutomationLaunch },
-    ),
+    automation,
     claim: Object.hasOwn(record, "claim")
       ? record.claim
         ? normalizeClaim(record.claim, fallback.claim)
@@ -993,39 +990,6 @@ export function syncExecutionSessionKey(
   return next;
 }
 
-export function removeUndefinedMetadataFields(metadata: WorkboardMetadata): WorkboardMetadata {
-  const next = { ...metadata };
-  for (const key of [
-    "attempts",
-    "comments",
-    "links",
-    "proof",
-    "artifacts",
-    "attachments",
-    "workerLogs",
-    "workerProtocol",
-    "automation",
-    "claim",
-    "diagnostics",
-    "notifications",
-    "templateId",
-    "archivedAt",
-    "stale",
-    "lifecycleStatusSourceUpdatedAt",
-    "failureCount",
-  ] as const) {
-    const value = next[key];
-    if (
-      value === undefined ||
-      (Array.isArray(value) && value.length === 0) ||
-      (typeof value === "number" && value === 0 && key === "failureCount")
-    ) {
-      delete next[key];
-    }
-  }
-  return next;
-}
-
 export function clearDiagnostics(
   metadata: WorkboardMetadata | undefined,
   kinds: readonly WorkboardDiagnosticKind[],
@@ -1043,10 +1007,6 @@ export function metadataIsEmpty(metadata: WorkboardMetadata | undefined): boolea
   return !metadata || Object.keys(metadata).length === 0;
 }
 
-function metadataByteSize(metadata: WorkboardMetadata): number {
-  return Buffer.byteLength(JSON.stringify(metadata), "utf8");
-}
-
 export function appendLinkPreservingDependencies(
   links: readonly WorkboardLink[],
   link: WorkboardLink,
@@ -1062,88 +1022,4 @@ export function appendLinkPreservingDependencies(
   return next.filter((_, index) => index !== dropIndex);
 }
 
-/** Sheds a round's decisions, then its review items; the counts and changes stay. */
-function degradedNodeRound(round: WorkboardNodeRound): WorkboardNodeRound | undefined {
-  if (round.decisions) {
-    const { decisions: _decisions, ...rest } = round;
-    return rest;
-  }
-  if (round.review?.items) {
-    const { items: _items, ...review } = round.review;
-    return { ...round, review };
-  }
-  return undefined;
-}
-
-/**
- * A node ticket's round facts go before anything else, oldest round first; they only inform.
- * The oldest round degrades before it goes, so its review findings outlast its decision trail.
- */
-function withOldestNodeRoundTrimmed(metadata: WorkboardMetadata): WorkboardMetadata | undefined {
-  const target = metadata.automation?.target;
-  const [oldest, ...newer] = target?.worktree?.rounds ?? [];
-  if (!target?.worktree || !oldest) {
-    return undefined;
-  }
-  const degraded = degradedNodeRound(oldest);
-  const worktree = { ...target.worktree, rounds: degraded ? [degraded, ...newer] : newer };
-  return { ...metadata, automation: { ...metadata.automation, target: { ...target, worktree } } };
-}
-
-export function trimMetadataToBudget(
-  metadata: WorkboardMetadata,
-  options: { preserveProofId?: string } = {},
-): WorkboardMetadata {
-  let next = removeUndefinedMetadataFields(metadata);
-  while (metadataByteSize(next) > MAX_CARD_METADATA_BYTES) {
-    const currentSize = metadataByteSize(next);
-    const withTrimmedRound = withOldestNodeRoundTrimmed(next);
-    if (withTrimmedRound) {
-      next = withTrimmedRound;
-      continue;
-    }
-    for (const key of [
-      "attempts",
-      "diagnostics",
-      "notifications",
-      "proof",
-      "artifacts",
-      "attachments",
-      "workerLogs",
-      "links",
-      "comments",
-    ] as const) {
-      const entries = next[key];
-      if (!entries?.length) {
-        continue;
-      }
-      const index =
-        key === "proof"
-          ? (next.proof?.findIndex(
-              (proof) => !options.preserveProofId || proof.id !== options.preserveProofId,
-            ) ?? -1)
-          : key === "links"
-            ? (next.links?.findIndex((link) => !isDependencyLink(link)) ?? -1)
-            : 0;
-      if (index < 0) {
-        continue;
-      }
-      next = removeUndefinedMetadataFields({
-        ...next,
-        [key]:
-          key === "proof" || key === "links"
-            ? entries.filter((_, entryIndex) => entryIndex !== index)
-            : entries.slice(1),
-      });
-      break;
-    }
-    if (metadataByteSize(next) >= currentSize) {
-      if (options.preserveProofId) {
-        throw new Error(`card metadata cannot retain proof: ${options.preserveProofId}`);
-      }
-      break;
-    }
-  }
-  return next;
-}
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

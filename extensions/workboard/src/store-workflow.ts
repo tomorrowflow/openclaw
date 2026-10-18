@@ -406,12 +406,14 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
           if (
             !target?.worktree ||
             target.worktree.path !== input.worktreePath ||
-            (handoff?.phase !== "published" && handoff?.phase !== "questions") ||
+            (handoff?.phase !== "published" &&
+              handoff?.phase !== "questions" &&
+              handoff?.phase !== "grilling") ||
             !input.applies(card)
           ) {
             return undefined;
           }
-          const roundStart = handoff.phase === "questions" ? handoff.askedAt : handoff.publishedAt;
+          const roundStart = handoff.phase === "published" ? handoff.publishedAt : handoff.askedAt;
           const posted = card.metadata?.comments?.some(
             (comment) => comment.createdAt > roundStart && comment.body === input.body,
           );
@@ -435,7 +437,9 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
                   ...target,
                   worktree: {
                     ...target.worktree,
-                    handoff: { ...handoff, reviewFrom: now },
+                    // Comments never answer a grilling question, so it keeps no cutoff.
+                    handoff:
+                      handoff.phase === "grilling" ? handoff : { ...handoff, reviewFrom: now },
                   },
                 },
               },

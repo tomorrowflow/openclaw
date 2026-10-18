@@ -280,10 +280,14 @@ export type WorkboardWorkspaceAccess =
  * with the answer. `reviewFrom` and `slotWaitNotedAt` mark Workboard's own
  * notices since, as on a published ticket. `escalatedAt` records that an
  * agent passed this round's questions to the operator; a new round starts
- * without it.
+ * without it. `grilling` is set by a grill report: the card waits in review
+ * on the operator's answer to one grilling question, which only
+ * `workboard.cards.grill.answer` gives (comments are not answers), or on
+ * `workboard.cards.grill.end`, which ends the grilling.
  */
 export type WorkboardNodeHandoff =
   | { phase: "pending"; reportedAt: number }
+  | { phase: "grilling"; askedAt: number; slotWaitNotedAt?: number }
   | {
       phase: "questions";
       askedAt: number;
@@ -351,8 +355,26 @@ export type WorkboardNodeQuestions = {
  * retried launch reads it from here.
  */
 export type WorkboardNodeFeedback = {
-  kind: "answer" | "rework";
+  kind: "answer" | "rework" | "grill";
   from: number;
+};
+
+/**
+ * A node ticket's grilling: the session asks the operator one question per
+ * round until both share an understanding of what to build. `attachmentId` is
+ * the card's `grilling.md` log of every question, answer, and the outcome.
+ * `pending` marks what the operator gave the next round's brief: an `answer`
+ * (its text is the log's answer entry at `at`), or the `end` of the grilling
+ * (its closing note is the log's outcome entry at `at`). A closed grill with a
+ * pending answer was ended by a move to done after the answer, so the brief
+ * gets both. The round's report clears it, so a retried launch still carries
+ * it. A done, blocked, or needs_input report closes an open grill.
+ */
+export type WorkboardNodeGrill = {
+  status: "open" | "closed";
+  rounds: number;
+  attachmentId: string;
+  pending?: { kind: "answer" | "end"; at: number };
 };
 
 /**
@@ -489,6 +511,7 @@ export type WorkboardNodeWorktree = {
   rework?: WorkboardNodeRework;
   questions?: WorkboardNodeQuestions;
   feedback?: WorkboardNodeFeedback;
+  grill?: WorkboardNodeGrill;
   /** One entry per publish, oldest first; kept across rework rounds. */
   reviews?: WorkboardNodeReviewVerdict[];
   /** Recent rounds, oldest first; kept across rework rounds. */
@@ -721,6 +744,7 @@ export type WorkboardCardStage =
   | { kind: "queued"; since: number }
   | { kind: "running"; since?: number; nodeId?: string; reworkRound?: number; attempt?: number }
   | { kind: "questions"; since: number; escalatedAt?: number }
+  | { kind: "grilling"; since: number; round: number }
   | { kind: "awaiting_review"; since: number }
   | { kind: "published"; since: number; pullRequestUrl: string; reworkRound: number }
   | { kind: "blocked"; since?: number }
@@ -739,6 +763,8 @@ export type WorkboardOperatorCard = WorkboardCard & {
   pullRequestUrl?: string;
   /** The newest round pushed to `pullRequestUrl`'s branch; it and earlier rounds are on GitHub. */
   publishedRound?: number;
+  /** A node ticket's grilling, from its first question on; the answer itself stays in the log. */
+  grill?: Pick<WorkboardNodeGrill, "status" | "rounds" | "attachmentId">;
 };
 
 /** One file's diff in one node ticket round, read from the host clone. */
@@ -849,9 +875,15 @@ export type WorkboardOverviewCard = {
 /**
  * Why a card waits on the operator: a review only the operator may decide, a
  * PR an agent accepted into the human review sample, questions passed to the
- * operator (or with no automation job to answer them), or a block.
+ * operator (or with no automation job to answer them), a grilling question
+ * only the operator answers, or a block.
  */
-export type WorkboardOverviewWaitReason = "decide" | "sampled" | "questions" | "blocked";
+export type WorkboardOverviewWaitReason =
+  | "decide"
+  | "sampled"
+  | "questions"
+  | "grilling"
+  | "blocked";
 
 export type WorkboardOverviewWaiting = WorkboardOverviewCard & {
   reason: WorkboardOverviewWaitReason;

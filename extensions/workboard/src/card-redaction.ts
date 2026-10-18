@@ -27,9 +27,9 @@ export function redactClaimToken(card: WorkboardCard): WorkboardCard {
 }
 
 /**
- * A card as the operator sees it, with its derived `stage` and a node
- * ticket's `rounds`, which hold only the session's reports and the imports,
- * never a verdict. Besides the claim token, dev's shadow verdict on an
+ * A card as the operator sees it, with its derived `stage`, a node ticket's
+ * `grill`, and its `rounds`, which hold only the session's reports and the
+ * imports, never a verdict. Besides the claim token, dev's shadow verdict on an
  * imported review round stays hidden
  * until the operator decides it by moving the card to done (accept, or
  * publish before a rework reopen), so the verdict cannot prime that decision.
@@ -40,13 +40,18 @@ export function redactClaimToken(card: WorkboardCard): WorkboardCard {
  */
 export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
   const stage = workboardCardStage(card);
-  const rounds = nodeTicketTarget(card)?.worktree?.rounds;
+  const worktree = nodeTicketTarget(card)?.worktree;
+  const rounds = worktree?.rounds;
+  const grill = worktree?.grill;
   const pullRequest = workboardCardPullRequest(card);
   const redacted = hidePendingVerdicts(redactClaimToken(card), card);
   return {
     ...redacted,
     ...(stage ? { stage } : {}),
     ...(rounds ? { rounds } : {}),
+    ...(grill
+      ? { grill: { status: grill.status, rounds: grill.rounds, attachmentId: grill.attachmentId } }
+      : {}),
     ...(pullRequest
       ? { pullRequestUrl: pullRequest.url, publishedRound: pullRequest.publishedRound }
       : {}),

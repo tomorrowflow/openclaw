@@ -29,9 +29,11 @@ export {
 export { findWorkboardSession, getWorkboardLifecycle } from "./lifecycle.ts";
 export {
   addWorkboardCardComment,
+  answerWorkboardGrill,
   archiveWorkboardCard,
   deleteWorkboardCard,
   dispatchWorkboard,
+  endWorkboardGrill,
   moveWorkboardCard,
   saveWorkboardCardDraft,
 } from "./mutations.ts";

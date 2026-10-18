@@ -1,6 +1,7 @@
 import type {
   WorkboardExecutionTarget,
   WorkboardNodeFeedback,
+  WorkboardNodeGrill,
   WorkboardNodeHandoff,
   WorkboardNodeQuestions,
   WorkboardNodeReviewVerdict,
@@ -35,6 +36,17 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
           ...(reviewFrom !== undefined ? { reviewFrom } : {}),
           ...(slotWaitNotedAt !== undefined ? { slotWaitNotedAt } : {}),
           ...(escalatedAt !== undefined ? { escalatedAt } : {}),
+        };
+  }
+  if (value.phase === "grilling") {
+    const askedAt = resolveOptionalIntegerOption(value.askedAt, { min: 0 });
+    const slotWaitNotedAt = resolveOptionalIntegerOption(value.slotWaitNotedAt, { min: 0 });
+    return askedAt === undefined
+      ? undefined
+      : {
+          phase: "grilling",
+          askedAt,
+          ...(slotWaitNotedAt !== undefined ? { slotWaitNotedAt } : {}),
         };
   }
   if (value.phase !== "imported" && value.phase !== "published") {
@@ -128,11 +140,39 @@ function normalizeNodeQuestions(value: unknown): WorkboardNodeQuestions | undefi
 }
 
 function normalizeNodeFeedback(value: unknown): WorkboardNodeFeedback | undefined {
-  if (!isRecord(value) || (value.kind !== "answer" && value.kind !== "rework")) {
+  if (
+    !isRecord(value) ||
+    (value.kind !== "answer" && value.kind !== "rework" && value.kind !== "grill")
+  ) {
     return undefined;
   }
   const from = resolveOptionalIntegerOption(value.from, { min: 0 });
   return from === undefined ? undefined : { kind: value.kind, from };
+}
+
+function normalizeNodeGrill(value: unknown): WorkboardNodeGrill | undefined {
+  if (!isRecord(value) || (value.status !== "open" && value.status !== "closed")) {
+    return undefined;
+  }
+  const rounds = resolveOptionalIntegerOption(value.rounds, { min: 1 });
+  const attachmentId = normalizeBoundedString(
+    value.attachmentId,
+    undefined,
+    200,
+    "node grill attachment id",
+  );
+  if (rounds === undefined || !attachmentId) {
+    return undefined;
+  }
+  const pending = isRecord(value.pending) ? value.pending : undefined;
+  const kind = pending?.kind;
+  const at = resolveOptionalIntegerOption(pending?.at, { min: 0 });
+  return {
+    status: value.status,
+    rounds,
+    attachmentId,
+    ...((kind === "answer" || kind === "end") && at !== undefined ? { pending: { kind, at } } : {}),
+  };
 }
 
 function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
@@ -182,6 +222,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
   const rework = normalizeNodeRework(value.rework);
   const questions = normalizeNodeQuestions(value.questions);
   const feedback = normalizeNodeFeedback(value.feedback);
+  const grill = normalizeNodeGrill(value.grill);
   const reviews = normalizeNodeReviews(value.reviews);
   const rounds = normalizeNodeRounds(value.rounds);
   const stopRequestedAt = resolveOptionalIntegerOption(value.stopRequestedAt, { min: 0 });
@@ -194,6 +235,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         ...(rework ? { rework } : {}),
         ...(questions ? { questions } : {}),
         ...(feedback ? { feedback } : {}),
+        ...(grill ? { grill } : {}),
         ...(reviews.length > 0 ? { reviews } : {}),
         ...(rounds.length > 0 ? { rounds } : {}),
         ...(value.rung === "b" ? { rung: "b" as const } : {}),

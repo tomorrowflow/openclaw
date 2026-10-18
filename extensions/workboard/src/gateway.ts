@@ -241,6 +241,13 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.sampleRead", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(store.readNodeTicketSample(readId(input))),
   );
+  // The move to todo an answer or an end makes wakes the node handoff owner, which resumes the session.
+  register("workboard.cards.grill.answer", WRITE_SCOPE, ({ params: input }) =>
+    redactCardResult(store.answerNodeGrill(readId(input), input.answer)),
+  );
+  register("workboard.cards.grill.end", WRITE_SCOPE, ({ params: input }) =>
+    redactCardResult(store.endNodeGrill(readId(input), input.note)),
+  );
   register("workboard.cards.move", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(
       store.move(readId(input), input.status, input.position, undefined, {

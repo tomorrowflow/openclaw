@@ -50,6 +50,7 @@ import type {
   WorkboardMutationScope,
   WorkboardUpdateCardOptions,
 } from "./store-inputs.js";
+import { trimMetadataToBudget } from "./store-metadata-budget.js";
 import {
   appendLinkPreservingDependencies,
   metadataIsEmpty,
@@ -66,7 +67,6 @@ import {
   normalizeTimestamp,
   normalizeTitle,
   syncExecutionSessionKey,
-  trimMetadataToBudget,
 } from "./store-normalizers.js";
 import { readCards } from "./store-read.js";
 import { normalizeCappedStringList } from "./store-string-lists.js";

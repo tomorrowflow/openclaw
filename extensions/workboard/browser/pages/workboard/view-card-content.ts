@@ -96,6 +96,9 @@ function stageText(stage: WorkboardCardStage): string {
         : "workboard.stageQuestionsEscalated",
     );
   }
+  if (stage.kind === "grilling") {
+    return t("workboard.stageGrilling", { round: String(stage.round) });
+  }
   if (stage.kind === "published") {
     return stage.reworkRound
       ? t("workboard.stagePublishedRework", { round: String(stage.reworkRound) })

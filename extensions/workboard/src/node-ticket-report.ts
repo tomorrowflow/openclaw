@@ -39,7 +39,16 @@ export type NodeTicketStopReport = {
   decisions: WorkboardNodeDecision[];
 };
 
+/** One grilling question with the session's recommended answer, and what is settled so far. */
+type NodeTicketGrillReport = {
+  outcome: "grill";
+  question: string;
+  summary: string;
+  decisions: WorkboardNodeDecision[];
+};
+
 type NodeTicketReport =
+  | NodeTicketGrillReport
   | {
       outcome: "done";
       headline?: string;
@@ -198,6 +207,13 @@ export function parseNodeTicketReport(
         decisions,
       },
     };
+  }
+  if (value.outcome === "grill") {
+    const question = optionalText(value.question);
+    if (!question) {
+      return { ok: false, reason: "The ticket session's grill report has no question." };
+    }
+    return { ok: true, report: { outcome: "grill", question, summary, decisions } };
   }
   if (value.outcome === "blocked" || value.outcome === "needs_input") {
     const questions = (Array.isArray(value.questions) ? value.questions : []).flatMap((entry) => {
