@@ -1,0 +1,9 @@
+[Unit]
+Description=Trace factory review findings nightly, after the 02:30 pull and the 03:00 digest
+
+[Timer]
+OnCalendar=*-*-* 03:15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
