@@ -23,13 +23,19 @@ export function createWorkboardSessionAccessory(
           ? findWorkboardSessionCard(workboard.state.cards, context.props.sessionKey)
           : null;
       const target = card ? workboardPageTarget(workboardCardBoardId(card)) : null;
+      const grilling = card?.stage?.kind === "grilling";
+      const statusLabel = card
+        ? grilling
+          ? t("workboard.sessionChipGrilling")
+          : t(`workboard.status.${card.status}`)
+        : "";
       render(
         card && isActiveWorkboardCard(card) && target
           ? html`<div class="workboard-session-chips">
               <a
                 class="workboard-session-chip"
                 href=${host.navigation.pageHref(target)}
-                aria-label=${`${card.title} — ${t(`workboard.status.${card.status}`)}`}
+                aria-label=${`${card.title} — ${statusLabel}`}
                 @click=${(event: MouseEvent) => {
                   if (
                     event.button !== 0 ||
@@ -58,12 +64,13 @@ export function createWorkboardSessionAccessory(
                   ) {
                     host.agents.setScope(null);
                   }
+                  if (grilling) {
+                    workboard.state.revealCardId = card.id;
+                  }
                   host.navigation.openPage(target);
                 }}
                 >${icons.kanban}<span class="workboard-session-chip__title">${card.title}</span
-                ><span class="workboard-session-chip__status"
-                  >${t(`workboard.status.${card.status}`)}</span
-                ></a
+                ><span class="workboard-session-chip__status">${statusLabel}</span></a
               >${
                 isWorkboardNodeTicket(card)
                   ? html`<button

@@ -285,6 +285,24 @@ export async function runWorkboardCardMutation<T>(
   }
 }
 
+/** Sends the operator's answer to a node ticket's waiting grilling question. */
+export async function answerWorkboardGrill(
+  params: WorkboardCardMutationParams & { answer: string },
+) {
+  const answer = params.answer.trim();
+  if (!answer) {
+    return false;
+  }
+  return runWorkboardCardMutation(params, async (state, client) => {
+    const payload = await client.request("workboard.cards.grill.answer", {
+      id: params.cardId,
+      answer,
+    });
+    replaceCard(state, normalizeCardPayload(payload));
+    return true;
+  });
+}
+
 export async function updateWorkboardCardProperties(
   params: WorkboardClientContext & {
     card: WorkboardCard;

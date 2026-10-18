@@ -29,6 +29,7 @@ export {
 export { findWorkboardSession, getWorkboardLifecycle } from "./lifecycle.ts";
 export {
   addWorkboardCardComment,
+  answerWorkboardGrill,
   archiveWorkboardCard,
   deleteWorkboardCard,
   dispatchWorkboard,

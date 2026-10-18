@@ -178,3 +178,39 @@ it("offers a node ticket's session its Screens panel, and no other session", asy
     workboard.dispose();
   }
 });
+
+it("says a grilling card waits on an answer and opens it on the board", async () => {
+  const fixture = workboardTestHost();
+  fixture.connection.connected = true;
+  const sessionKey = "agent:dev:subagent:workboard-platform-card";
+  const card = createWorkboardCard({
+    title: "Spec the parser",
+    status: "review",
+    sessionKey,
+    stage: { kind: "grilling", since: 1, round: 2 },
+    metadata: { automation: { boardId: "platform" } },
+  });
+  const workboard = createWorkboardCapability();
+  workboard.state.cards = [card];
+  const container = document.createElement("div");
+  const mounted = createWorkboardSessionAccessory(workboard)(
+    container,
+    createViewContext(fixture.host, { sessionKey }),
+  );
+  try {
+    await vi.waitFor(() => expect(container.textContent).toContain(card.title));
+    const link = container.querySelector("a")!;
+    expect(link.querySelector(".workboard-session-chip__status")?.textContent).toBe(
+      "Grilling — answer on card",
+    );
+    link.click();
+    expect(workboard.state.revealCardId).toBe(card.id);
+    expect(fixture.host.navigation.openPage).toHaveBeenCalledWith({
+      id: "workboard",
+      path: ["platform"],
+    });
+  } finally {
+    mounted?.dispose?.();
+    workboard.dispose();
+  }
+});

@@ -42,6 +42,8 @@ import {
   renderDetailRow,
   renderTechnicalDetails,
 } from "./view-card-detail-records.ts";
+import { renderDetailTabs } from "./view-card-detail-tabs.ts";
+import { renderGrillingPanel } from "./view-card-grilling.ts";
 import { renderCardDiscardDialog } from "./view-card-modal.ts";
 import { renderNodeRounds } from "./view-card-rounds.ts";
 import { hasCommittedScreenshots, renderScreenshotsPanel } from "./view-card-screenshots.ts";
@@ -78,7 +80,8 @@ const inlineDiscardOpen = new WeakMap<WorkboardUiState, () => void>();
 export function openCardDetails(state: WorkboardUiState, card: WorkboardCard) {
   inlineDiscardOpen.delete(state);
   state.detailCardId = card.id;
-  state.detailTab = "overview";
+  // A card waiting on the operator's grilling answer opens where it is given.
+  state.detailTab = card.stage?.kind === "grilling" ? "grilling" : "overview";
   state.detailCommentBody = state.detailCommentDrafts.get(card.id) ?? "";
 }
 
@@ -219,6 +222,9 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
   const screenshots = listed && hasCommittedScreenshots(listed) ? listed : undefined;
   const tabs = [
     { id: "overview", label: t("workboard.detailTabOverview") },
+    ...(props.detailGrilling && card.grill
+      ? [{ id: "grilling", label: t("workboard.detailTabGrilling") } as const]
+      : []),
     { id: "activity", label: t("workboard.detailTabActivity") },
     ...(props.detailChanges && hasCardChanges(card)
       ? [{ id: "changes", label: t("workboard.detailTabChanges") } as const]
@@ -360,52 +366,7 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
               </button>
             </div>
           </header>
-          <div
-            class="workboard-detail__tabs"
-            role="tablist"
-            aria-label=${t("workboard.detailTitle")}
-            @keydown=${(event: KeyboardEvent) => {
-              const index = tabs.findIndex((tab) => tab.id === activeTab);
-              let next: number;
-              if (event.key === "ArrowRight") {
-                next = (index + 1) % tabs.length;
-              } else if (event.key === "ArrowLeft") {
-                next = (index + tabs.length - 1) % tabs.length;
-              } else if (event.key === "Home") {
-                next = 0;
-              } else if (event.key === "End") {
-                next = tabs.length - 1;
-              } else {
-                return;
-              }
-              const nextTab = tabs[next];
-              if (!nextTab) {
-                return;
-              }
-              event.preventDefault();
-              selectTab(nextTab.id, event.currentTarget);
-              if (event.currentTarget instanceof HTMLElement) {
-                const buttons =
-                  event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=tab]");
-                buttons[next]?.focus();
-              }
-            }}
-          >
-            ${tabs.map(
-              (tab) => html`<button
-                type="button"
-                role="tab"
-                id=${`workboard-detail-tab-${tab.id}`}
-                aria-controls=${`workboard-detail-panel-${tab.id}`}
-                aria-selected=${String(activeTab === tab.id)}
-                tabindex=${activeTab === tab.id ? "0" : "-1"}
-                ?autofocus=${activeTab === tab.id}
-                @click=${(event: MouseEvent) => selectTab(tab.id, event.currentTarget)}
-              >
-                ${tab.label}
-              </button>`,
-            )}
-          </div>
+          ${renderDetailTabs(tabs, activeTab, selectTab)}
           <div class="workboard-detail__body" ${ref(workboardScrollFadeRef())}>
             <section
               class="workboard-detail__tabpanel"
@@ -635,6 +596,11 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
                 }
               </section>
             </section>
+            ${
+              props.detailGrilling && card.grill
+                ? renderGrillingPanel(props, props.detailGrilling, card, activeTab === "grilling")
+                : nothing
+            }
             ${
               props.detailChanges && hasCardChanges(card)
                 ? renderChangesPanel(props.detailChanges, card, activeTab === "changes")

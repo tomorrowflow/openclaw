@@ -111,7 +111,14 @@ export type WorkboardUiState = {
   detailCardId: string | null;
   /** A card another page asked to open; the board page opens it once its card list has it. */
   revealCardId: string | null;
-  detailTab: "overview" | "activity" | "changes" | "screenshots" | "session" | "details";
+  detailTab:
+    | "overview"
+    | "grilling"
+    | "activity"
+    | "changes"
+    | "screenshots"
+    | "session"
+    | "details";
   detailCommentBody: string;
   detailCommentDrafts: Map<string, string>;
   busyCardIds: Set<string>;
