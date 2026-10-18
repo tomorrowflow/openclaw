@@ -371,6 +371,38 @@ it.each([
   },
 );
 
+it("shows a closed running card's live session that the filtered roster omits", async () => {
+  const page = mountPage();
+  const key = "agent:dev:subagent:workboard-default-31d2c498";
+  const session = createGatewaySession({
+    key,
+    agentId: "dev",
+    displayName: "Dev ticket run",
+    status: "running",
+    hasActiveRun: true,
+  });
+  const observe = observeSessions(page, { sessions: [session], hasMore: false });
+  Object.assign(page.fixture.host.sessions, { rows: [] });
+  page.cards([createWorkboardCard({ status: "running", agentId: "dev", sessionKey: key })]);
+  page.fixture.connection.connected = true;
+  page.fixture.notify();
+
+  const card = await vi.waitFor(() =>
+    expectDefined(page.container.querySelector(".workboard-card"), "running card"),
+  );
+  await vi.waitFor(() => expect(card.querySelector(".session-run-spinner")).not.toBeNull());
+  expect(card.querySelector(".workboard-card__session-name")?.textContent?.trim()).toBe(
+    "Dev ticket run",
+  );
+  expect(card.textContent).not.toContain("Unknown");
+  expect(observe).toHaveBeenCalledWith(
+    expect.objectContaining({ search: key, limit: 2 }),
+    expect.any(Function),
+  );
+  expectDefined(openSessionButton(card), "open running session").click();
+  expect(page.fixture.host.sessions.open).toHaveBeenCalledWith({ sessionKey: key, agentId: "dev" });
+});
+
 it.each(["global", "unknown"] as const)(
   "keeps a bare %s link unresolved despite an ambient roster owner",
   async (key) => {
