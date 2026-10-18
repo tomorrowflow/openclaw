@@ -7,14 +7,21 @@
 //
 // Usage: node scripts/release-stale-dist-lock.mjs [checkout]   (default: cwd)
 // Exits 0 when there is no lock, its owner is alive (the build waits for it),
-// or it was released; exits 1 when processes still run in the checkout.
+// or it was released; exits 1 when processes the dead build may have started
+// still run in the checkout.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
 const checkout = fs.realpathSync(process.argv[2] ?? process.cwd());
 const lockDir = path.join(checkout, ".artifacts/dist-artifacts.lock");
-if (!fs.existsSync(lockDir)) {
+const ownerPath = path.join(lockDir, "owner.json");
+// A released lock leaves its directory behind; only the owner record and the
+// child claims hold it.
+const holders = fs.existsSync(lockDir)
+  ? fs.readdirSync(lockDir).filter((name) => name === "owner.json" || /^child-\d+$/.test(name))
+  : [];
+if (holders.length === 0) {
   process.exit(0);
 }
 
@@ -29,32 +36,44 @@ function alive(pid) {
 
 let owner = {};
 try {
-  owner = JSON.parse(fs.readFileSync(path.join(lockDir, "owner.json"), "utf8"));
+  owner = JSON.parse(fs.readFileSync(ownerPath, "utf8"));
 } catch {
   // A missing or torn owner record is no live owner.
 }
-// A process that started after the lock was taken reuses the dead owner's PID.
-function startedBefore(pid, iso) {
-  const lockedAt = Date.parse(iso);
-  if (Number.isNaN(lockedAt)) {
-    return true;
+// When the lock was taken: the owner's record, else the oldest holder file.
+const lockedAt = (() => {
+  const recorded = Date.parse(owner.startedAt);
+  if (!Number.isNaN(recorded)) {
+    return recorded;
   }
+  return Math.min(...holders.map((name) => fs.statSync(path.join(lockDir, name)).mtimeMs));
+})();
+
+// lstart has whole seconds; undefined when the process is gone or unreadable.
+function startOf(pid) {
   try {
     const started = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
       encoding: "utf8",
       env: { ...process.env, LC_ALL: "C" },
     }).trim();
-    // lstart has whole seconds; the owner records its start after it began.
-    return !(Date.parse(started) > lockedAt + 1000);
+    const at = Date.parse(started);
+    return Number.isNaN(at) ? undefined : at;
   } catch {
-    return true;
+    return undefined;
   }
 }
+// The build and everything it starts began after it took the lock. A process
+// older than that is not its work: an idle shell or editor in the checkout, or
+// an unrelated process that reuses the dead owner's PID.
+const startedAfterLock = (pid) => {
+  const started = startOf(pid);
+  return started === undefined || started >= lockedAt - 1000;
+};
 if (
   Number.isSafeInteger(owner.pid) &&
   owner.pid > 1 &&
   alive(owner.pid) &&
-  startedBefore(owner.pid, owner.startedAt)
+  !(startOf(owner.pid) > lockedAt + 1000)
 ) {
   process.exit(0);
 }
@@ -132,9 +151,10 @@ const busy = processes.filter(
   (entry) =>
     !spared.has(entry.pid) &&
     (claims.includes(entry.pid) ||
-      inCheckout(cwdOf(entry.pid)) ||
-      ` ${entry.command} `.includes(` ${checkout} `) ||
-      entry.command.includes(`${checkout}/`)),
+      ((inCheckout(cwdOf(entry.pid)) ||
+        ` ${entry.command} `.includes(` ${checkout} `) ||
+        entry.command.includes(`${checkout}/`)) &&
+        startedAfterLock(entry.pid))),
 );
 if (busy.length > 0 || claims.length > 0) {
   console.error(
