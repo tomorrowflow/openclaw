@@ -25,7 +25,7 @@ import type { WorkboardStore } from "./store.js";
 // The grill session's last messages hold its last reply; earlier ones are not read.
 const GRILL_HISTORY_LIMIT = 20;
 
-function grillSessionMessage(card: WorkboardCard, handoff: string): string {
+function grillSessionMessage(card: WorkboardCard, handoff: string | undefined): string {
   const target = nodeTicketTarget(card);
   return [
     `Grill the operator on this Workboard ticket: ${card.title} (card \`${card.id}\`)`,
@@ -35,9 +35,15 @@ function grillSessionMessage(card: WorkboardCard, handoff: string): string {
         ]
       : []),
     "",
-    "The ticket's session researched it and handed the grilling off to this session. Its handoff:",
-    "",
-    handoff,
+    ...(handoff
+      ? [
+          "The ticket's session researched it and handed the grilling off to this session. Its handoff:",
+          "",
+          handoff,
+        ]
+      : [
+          "The ticket's session researched it and handed the grilling off to this session, but the card's grilling log (`grilling.md`) reached its size limit, which cut the handoff. Read the card with `workboard_read` and the grilling log for what the ticket session found, and ask about what they leave open.",
+        ]),
     "",
     "## How to grill",
     "- Interview the operator one question at a time until you share an understanding of what to build. Give your recommended answer with each question, and start with the handoff's first question.",
@@ -70,7 +76,7 @@ async function startNodeGrillSession(
   runtime: WorkboardNodeTicketRuntime,
   card: WorkboardCard,
   key: string,
-  handoff: string,
+  handoff: string | undefined,
 ): Promise<string> {
   const result = await runtime.request(
     "sessions.create",
@@ -120,11 +126,9 @@ export async function openNodeGrillSession(params: {
     if (existing && sessionProvesPreparedAcceptance(existing)) {
       sessionKey = existing.key;
     } else {
+      // A handoff the full log cut still opens the session, which reads the card instead.
       const log = await store.readNodeGrillLog(worktree);
       const handoff = log === undefined ? undefined : grillHandoffFromLog(log, round);
-      if (!handoff) {
-        throw new Error("its handoff could not be read from grilling.md");
-      }
       sessionKey = await startNodeGrillSession(params.runtime, card, key, handoff);
     }
   } catch (error) {

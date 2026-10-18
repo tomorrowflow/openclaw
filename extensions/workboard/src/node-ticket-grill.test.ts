@@ -301,6 +301,34 @@ describe("node ticket grilling handoff", () => {
     expect((await ticket.store.get(ticket.card.id))?.status).toBe("review");
   });
 
+  it("opens the grill session on the card when the full log dropped its handoff", async () => {
+    const ticket = await grillingTicket();
+    const { store, card } = ticket;
+    await ticket.grillDone(await ticket.grillSessionKey(), { handoff: RESULT });
+    await ticket.handoffs.resume(ticket.warn);
+    await endTurn(
+      store,
+      card.id,
+      reportMessages({ outcome: "grill", summary: "h".repeat(300_000) }),
+    );
+    await ticket.handoffs.resume(ticket.warn);
+    await ticket.grillDone(await ticket.grillSessionKey(), { handoff: RESULT });
+    await ticket.handoffs.resume(ticket.warn);
+    await endTurn(store, card.id, grillReport);
+    expect(await ticket.log(), "the full log dropped handoff 3").not.toContain("## Handoff 3");
+
+    await ticket.handoffs.resume(ticket.warn);
+
+    const opened = await store.get(card.id);
+    expect(opened?.status).toBe("review");
+    expect(await ticket.grillSessionKey()).toBe(`agent:dev:grill-${card.id.slice(0, 8)}-3`);
+    const message = String(ticket.grillCreates().at(-1)?.[1]?.message);
+    expect(message).toContain(
+      "but the card's grilling log (`grilling.md`) reached its size limit, which cut the handoff. Read the card with `workboard_read` and the grilling log",
+    );
+    expect(message).not.toContain(HANDOFF);
+  });
+
   it("blocks a grill report without a handoff", async () => {
     const store = createWorkboardSqliteTestStore();
     const { card } = await startNodeCard(store, createNodeGateway());

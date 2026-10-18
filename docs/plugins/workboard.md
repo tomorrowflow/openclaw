@@ -741,8 +741,12 @@ report, address the findings, and report them (see **Report** below).
    decisions, agreed terms, open risks, what the ticket session should do
    next) and call `workboard_grill_done` with it. Workboard records the key
    on the card's grill (`grill.sessionKey`) and posts a comment naming the
-   session. If the session cannot start, the card is blocked with the reason;
-   a move to `todo` brings it back to `review` and the next pass tries again.
+   session. When the full log cut the handoff, the first message says so and
+   points the session at the card (`workboard_read`) and the log instead. A
+   pass that finds the round's session already ran a turn records it without
+   sending the handoff again. If the session cannot start, the card is
+   blocked with the reason; a move to `todo` brings it back to `review` and
+   the next pass tries again.
    You grill in that session like in any other chat. The card's **Grilling**
    tab shows the log, **Open grill session**, and **End grilling**, and a
    grilling card opens on that tab. On the card's own session the session
