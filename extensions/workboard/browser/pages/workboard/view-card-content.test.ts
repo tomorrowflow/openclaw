@@ -3,7 +3,7 @@ import { render } from "lit";
 import { afterEach, expect, it, vi } from "vitest";
 import { normalizeCardsPayload } from "../../lib/workboard/normalization.ts";
 import { createWorkboardCard } from "../../lib/workboard/test/index-helpers.ts";
-import { renderCardMeta, renderCardPullRequest } from "./view-card-content.ts";
+import { renderCardMeta, renderCardPullRequest, renderCardStage } from "./view-card-content.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -116,4 +116,18 @@ it("links a card's draft PR by its number, and renders nothing before a PR exist
   expect(link.href).toBe(url);
   expect(link.target).toBe("_blank");
   expect(link.textContent?.trim()).toBe("PR #96");
+});
+
+it("shortens a device-id node on the stage line and keeps the full id on hover", () => {
+  const nodeId = "7ab5c2865e49b8cdc3d890d00d9a19767cfc0057936c87c86ebeef0cc70f5e03";
+  const container = document.createElement("div");
+  render(renderCardStage({ kind: "running", nodeId, attempt: 3 }, 0), container);
+  const label = container.querySelector(".workboard-card__stage > span");
+  expect(label?.textContent).toBe("Running on 7ab5c2865e49b8cd… · attempt 3");
+  expect(label?.getAttribute("title")).toBe(nodeId);
+
+  render(renderCardStage({ kind: "running", nodeId: "mac-factory" }, 0), container);
+  expect(container.querySelector(".workboard-card__stage > span")?.textContent).toBe(
+    "Running on mac-factory",
+  );
 });
