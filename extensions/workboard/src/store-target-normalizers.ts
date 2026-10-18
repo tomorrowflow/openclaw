@@ -150,6 +150,7 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
       }
       const importedAt = resolveOptionalIntegerOption(entry.importedAt, { min: 0 });
       const publishedAt = resolveOptionalIntegerOption(entry.publishedAt, { min: 0 });
+      const readAt = resolveOptionalIntegerOption(entry.readAt, { min: 0 });
       return [
         {
           round,
@@ -158,6 +159,7 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
           ...(publishedAt === undefined ? {} : { publishedAt }),
           ...(entry.decidedBy === "agent" ? { decidedBy: "agent" as const } : {}),
           ...(typeof entry.sampled === "boolean" ? { sampled: entry.sampled } : {}),
+          ...(readAt === undefined ? {} : { readAt }),
         },
       ];
     })

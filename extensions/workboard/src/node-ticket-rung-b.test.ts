@@ -22,6 +22,7 @@ import {
   startNodeCard,
 } from "./node-ticket.test-support.js";
 import type { WorkboardStore } from "./store.js";
+import { createGatewayMethodCapture } from "./test/gateway-methods.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 import { createWorkboardTools } from "./tools.js";
 
@@ -449,6 +450,81 @@ describe("Workboard rung b", () => {
     ]);
     expect(refused.metadata?.comments?.at(-1)?.body).toContain(
       `${refusedPull}, but that PR is still a draft`,
+    );
+  });
+
+  it("takes a sampled PR off Needs you once the operator marks it read, keeping the first read", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "workboard-rung-b-"));
+    roots.push(root);
+    const repos = createNodeRepos(root);
+    git(repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
+    const github = createFakeGitHub(repos.origin);
+    github.tokens.set("acme/app", "token-app");
+    const store = createWorkboardSqliteTestStore();
+    const { api, invoke } = createGatewayMethodCapture();
+    registerWorkboardGatewayMethods({ api, store });
+    const head = git(repos.hostRepo, "rev-parse", "HEAD");
+    const card = await importedDocsTicket(store, {
+      classRungs: { docs: { rung: "b", sampleEvery: 1 } },
+      target: { ...NODE_TARGET, hostRepoPath: repos.hostRepo },
+      headCommit: head,
+    });
+    git(repos.hostRepo, "branch", `factory/${card.id}`, head);
+    await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
+    await agentTools(store)("workboard_move").execute("accept", { id: card.id, status: "done" });
+    const item = expectDefined(
+      publishCandidate(expectDefined(await store.get(card.id), "card")),
+      "publish candidate",
+    );
+    await publishNodeTicket({ store, github: github.access, item, now: Date.now });
+    const latestReview = async () =>
+      nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree?.reviews?.at(-1);
+    expect((await store.overview(undefined)).needsYou).toEqual([
+      expect.objectContaining({ cardId: card.id, reason: "sampled" }),
+    ]);
+
+    const read = await invoke("workboard.cards.sampleRead", { id: card.id });
+    expect(read.mock.calls[0]?.[0]).toBe(true);
+    const first = await latestReview();
+    expect(first).toMatchObject({ sampled: true, readAt: expect.any(Number) });
+    const overview = await store.overview(undefined);
+    expect(overview.needsYou).toEqual([]);
+    expect(overview.shipped).toEqual([expect.objectContaining({ cardId: card.id, sampled: true })]);
+
+    // A later read must keep the first stamp, so give it a later clock.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 60_000);
+    await invoke("workboard.cards.sampleRead", { id: card.id });
+    vi.restoreAllMocks();
+    expect(await latestReview()).toEqual(first);
+
+    // The next publish appends its round unread, so a reworked PR waits for its own read.
+    const worktree = expectDefined(
+      nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree,
+      "worktree",
+    );
+    await store.setNodeHandoff(card.id, {
+      worktreePath: worktree.path,
+      handoff: {
+        phase: "published",
+        headCommit: head,
+        importedAt: Date.now(),
+        publishedAt: Date.now(),
+        pullRequestUrl: "https://github.com/acme/app/pull/2",
+      },
+      review: { round: 1, verdict: "accept", decidedBy: "agent", sampled: true },
+    });
+    expect(
+      nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree?.reviews,
+    ).toEqual([first, expect.not.objectContaining({ readAt: expect.anything() })]);
+    expect((await store.overview(undefined)).needsYou).toEqual([
+      expect.objectContaining({ cardId: card.id, reason: "sampled" }),
+    ]);
+
+    const unpublished = await importedDocsTicket(store);
+    const refused = await invoke("workboard.cards.sampleRead", { id: unpublished.id });
+    expect(refused.mock.calls[0]?.[0]).toBe(false);
+    expect(JSON.stringify(refused.mock.calls[0])).toContain(
+      "only a published node ticket an agent accepted into the review sample can be marked read",
     );
   });
 });

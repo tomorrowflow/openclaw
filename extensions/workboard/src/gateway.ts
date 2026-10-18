@@ -238,6 +238,9 @@ export function registerWorkboardGatewayMethods(params: {
     }
     return { card: redactOperatorCard(card) };
   });
+  register("workboard.cards.sampleRead", WRITE_SCOPE, ({ params: input }) =>
+    redactCardResult(store.readNodeTicketSample(readId(input))),
+  );
   register("workboard.cards.move", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(
       store.move(readId(input), input.status, input.position, undefined, {

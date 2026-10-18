@@ -148,7 +148,7 @@ describe("projectWorkboardOverview", () => {
     }
   });
 
-  it("shows a sampled agent-accepted PR as waiting for a read, and an unsampled one only as shipped", () => {
+  it("shows a sampled agent-accepted PR as waiting for a read until marked read, and an unsampled one only as shipped", () => {
     const accept = { round: 0, verdict: "accept" as const, decidedBy: "agent" as const };
     const result = overview([
       card("sampled", {
@@ -158,6 +158,10 @@ describe("projectWorkboardOverview", () => {
       card("unsampled", {
         status: "done",
         worktree: published(NOW - 2 * DAY, { ...accept, sampled: false }),
+      }),
+      card("read", {
+        status: "done",
+        worktree: published(NOW - 3 * DAY, { ...accept, sampled: true, readAt: NOW - HOUR }),
       }),
     ]);
 
@@ -173,6 +177,7 @@ describe("projectWorkboardOverview", () => {
         sampled: true,
       }),
       expect.objectContaining({ cardId: "unsampled", decidedBy: "agent", sampled: false }),
+      expect.objectContaining({ cardId: "read", sampled: true }),
     ]);
     expect(result.shipped[0]).not.toHaveProperty("shadowVerdict");
   });

@@ -122,6 +122,10 @@
   gap: 0;
 }
 
+.workboard-overview__actions {
+  margin: 0;
+}
+
 .workboard-overview__meta > span + span::before {
   content: "·";
   margin-inline: 4px;

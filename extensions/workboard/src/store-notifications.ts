@@ -14,11 +14,11 @@ import type {
   WorkboardNotificationListOptions,
   WorkboardNotificationSubscribeInput,
 } from "./store-inputs.js";
-import { WorkboardNodeTicketEscalationStore } from "./store-node-ticket-escalation.js";
+import { WorkboardNodeTicketSampleStore } from "./store-node-ticket-sample.js";
 import { normalizeBoardId, normalizeNotificationSubscription } from "./store-normalizers.js";
 import { normalizeBoundedString } from "./store-value-normalizers.js";
 
-export class WorkboardNotificationStore extends WorkboardNodeTicketEscalationStore {
+export class WorkboardNotificationStore extends WorkboardNodeTicketSampleStore {
   async subscribeNotifications(
     input: WorkboardNotificationSubscribeInput,
   ): Promise<WorkboardNotificationSubscription> {

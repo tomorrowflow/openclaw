@@ -1062,7 +1062,12 @@ does. Rows and the status counts leave out archived cards and cards on archived
 boards, and an agent's pending verdict never shows. Whether you agreed with a
 shadow verdict shows in the trust KPIs once a later rework round does or does
 not follow. Workboard does not see a PR merge, so a sampled PR stays in
-**Needs you** for 7 days after its publish, read or not.
+**Needs you** until you press **Mark read** on its row, or for 7 days after its
+publish. **Mark read** calls `workboard.cards.sampleRead {id}`
+(`operator.write`), which records `readAt` on the round's entry in `reviews`;
+the first read of a round stands, and a rework round's next publish waits for
+its own read. The method refuses a card whose latest published round is not an
+agent accept in the sample.
 
 The page reads `workboard.overview {boardId?}` (`operator.read`) and reloads on
 each `plugin.workboard.changed` event. The method projects the same cached
@@ -1108,12 +1113,12 @@ Diagnostics are computed from local card metadata. Built-in checks flag:
 Gateway RPC methods live under `workboard.*`. Sessions board methods use the same
 read/write scopes as boards:
 
-| Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `overview`                                                                                                                                                                                                                                 |
-| `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                    |
-| `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
-| `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                            |
+| Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `overview`                                                                                                                                                                                                                                                     |
+| `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.sampleRead`, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
+| `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                                                |
 
 `workboard.cards.update`, `workboard.cards.move`, `workboard.cards.archive`, and
 `workboard.cards.delete` accept an optional `expectedUpdatedAt` request field.

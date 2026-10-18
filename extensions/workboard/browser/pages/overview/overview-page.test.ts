@@ -65,12 +65,20 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function mountOverview(load: () => Promise<WorkboardOverviewResult>) {
+function mountOverview(
+  load: () => Promise<WorkboardOverviewResult>,
+  sampleRead: (params: unknown) => Promise<unknown> = async () => {
+    throw new Error("unexpected workboard.cards.sampleRead");
+  },
+) {
   const fixture = workboardTestHost();
   fixture.connection.connected = true;
-  const request = vi.fn(async (method: string) => {
+  const request = vi.fn(async (method: string, params?: unknown) => {
     if (method === "workboard.overview") {
       return await load();
+    }
+    if (method === "workboard.cards.sampleRead") {
+      return await sampleRead(params);
     }
     throw new Error(`unexpected ${method}`);
   });
@@ -86,6 +94,19 @@ function mountOverview(load: () => Promise<WorkboardOverviewResult>) {
 
 function bandText(container: HTMLElement, id: string) {
   return container.querySelector(`[aria-labelledby="workboard-overview-${id}"]`)?.textContent;
+}
+
+const SAMPLED_ROW = {
+  cardId: "card-sampled",
+  boardId: "app",
+  title: "Upload queue",
+  stage: { kind: "published" as const, since: NOW, pullRequestUrl: PR, reworkRound: 0 },
+  reason: "sampled" as const,
+  waitingSince: NOW,
+};
+
+function markReadButtons(container: HTMLElement) {
+  return container.querySelectorAll<HTMLButtonElement>(".workboard-overview__actions button");
 }
 
 describe("Factory overview page", () => {
@@ -178,5 +199,54 @@ describe("Factory overview page", () => {
     await waitForFast(() => expect(container.textContent).toContain("gateway restarting"));
     expect(reads()).toHaveLength(2);
     expect(bandText(container, "needs-you")).toContain("Parser crash");
+  });
+
+  it("disables Mark read while it runs and rereads the overview once it succeeds", async () => {
+    let read = false;
+    let finish: () => void = () => undefined;
+    const sampleRead = vi.fn(
+      () =>
+        new Promise<unknown>((resolve) => {
+          finish = () => {
+            read = true;
+            resolve({ card: {} });
+          };
+        }),
+    );
+    const { container, reads } = mountOverview(
+      async () => overview({ needsYou: read ? [] : [SAMPLED_ROW] }),
+      sampleRead,
+    );
+    await waitForFast(() => expect(markReadButtons(container)).toHaveLength(1));
+
+    markReadButtons(container)[0]!.click();
+    expect(sampleRead).toHaveBeenCalledWith({ id: "card-sampled" });
+    expect(markReadButtons(container)[0]!.disabled).toBe(true);
+    finish();
+
+    await waitForFast(() =>
+      expect(bandText(container, "needs-you")).toContain("Nothing waits on you."),
+    );
+    expect(reads()).toHaveLength(2);
+  });
+
+  it("keeps a sampled PR waiting and says why when Mark read fails", async () => {
+    const sampleRead = vi.fn(async () => {
+      throw new Error("card changed");
+    });
+    const { container } = mountOverview(
+      async () => overview({ needsYou: [overview().needsYou[0]!, SAMPLED_ROW] }),
+      sampleRead,
+    );
+    await waitForFast(() => expect(bandText(container, "needs-you")).toContain("Upload queue"));
+
+    expect(markReadButtons(container)).toHaveLength(1);
+    markReadButtons(container)[0]!.click();
+
+    expect(sampleRead).toHaveBeenCalledWith({ id: "card-sampled" });
+    await waitForFast(() =>
+      expect(container.textContent).toContain("Marking the PR read failed: card changed"),
+    );
+    expect(bandText(container, "needs-you")).toContain("Upload queue");
   });
 });
