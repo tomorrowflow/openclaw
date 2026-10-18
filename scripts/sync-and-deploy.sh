@@ -327,7 +327,9 @@ check_running_node_tickets "$0 --deploy-only"
 
 # Source satellites (macOS) build this commit themselves, in parallel with ours.
 SATELLITES_SRC_LOG="$LOG_DIR/satellites-prepare-source-$(date +%Y%m%d-%H%M%S).log"
-"$REPO_DIR/scripts/deploy-satellites.sh" prepare-source >"$SATELLITES_SRC_LOG" 2>&1 &
+# Closing fd 9: a deploy that fails before joining this job leaves it running,
+# and it must not hold the single-instance lock against the next run.
+"$REPO_DIR/scripts/deploy-satellites.sh" prepare-source >"$SATELLITES_SRC_LOG" 2>&1 9>&- &
 SATELLITES_SRC_PID=$!
 
 # Dependencies before the build. A sync with nothing to merge never starts the
@@ -363,7 +365,7 @@ CI=true corepack pnpm deploy:globally
 # Factory node satellites stage this build in the background while the
 # preflights and cutover run; they switch to it only after the smoke below.
 SATELLITES_PREP_LOG="$LOG_DIR/satellites-prepare-$(date +%Y%m%d-%H%M%S).log"
-"$REPO_DIR/scripts/deploy-satellites.sh" prepare >"$SATELLITES_PREP_LOG" 2>&1 &
+"$REPO_DIR/scripts/deploy-satellites.sh" prepare >"$SATELLITES_PREP_LOG" 2>&1 9>&- &
 SATELLITES_PREP_PID=$!
 
 # Sanity checks — timestamps must match the fresh build. Chunk names and
