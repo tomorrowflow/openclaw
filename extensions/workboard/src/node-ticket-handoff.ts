@@ -413,7 +413,7 @@ async function reopenNodeTicket(params: {
       body: rework
         ? `Reopened without a review comment; add what should change and move it to todo again to start rework round ${round}.`
         : reopen.kind === "grill"
-          ? "Moved to todo while grilling; the grilling goes on in its grill session. Finish it there, or choose End grilling on the card to let the agent continue with the grill session's last reply."
+          ? "Moved to todo while grilling; the grilling goes on in its grill session, which the card names once it is open. Finish it there, or choose End grilling on the card to let the agent continue with the grill session's last reply, if it has one."
           : "Moved to todo without an answer; answer the questions in a comment and move it to todo again to resume the session.",
       applies: (current) => nodeTicketReopen(current, params.now())?.reviewed === false,
     });

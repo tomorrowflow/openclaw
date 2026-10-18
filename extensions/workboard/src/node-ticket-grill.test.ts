@@ -389,7 +389,7 @@ describe("node ticket grilling handoff", () => {
       (comment) => comment.body.startsWith("Moved to todo"),
     );
     expect(notices.map((comment) => comment.body)).toEqual([
-      "Moved to todo while grilling; the grilling goes on in its grill session. Finish it there, or choose End grilling on the card to let the agent continue with the grill session's last reply.",
+      "Moved to todo while grilling; the grilling goes on in its grill session, which the card names once it is open. Finish it there, or choose End grilling on the card to let the agent continue with the grill session's last reply, if it has one.",
     ]);
     expect(ticket.ticketLaunches()).toHaveLength(1);
     expect(ticket.grillCreates()).toHaveLength(1);
