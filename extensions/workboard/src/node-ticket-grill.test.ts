@@ -533,7 +533,9 @@ describe("grilling ended by the operator", () => {
     expect(ticket.warn).not.toHaveBeenCalled();
     expect((await store.get(card.id))?.status).toBe("running");
     expect(ticket.ticketLaunches().at(-1)?.[1]).toMatchObject({ key: ticket.sessionKey });
-    expect(ticket.brief()).toContain(`Result:\n\n${RESULT}\n`);
+    expect(ticket.brief()).toContain(
+      `The operator ended the grilling, so the result is the grill session's last reply. It may be an open question rather than a decision; do not treat a question in it as settled. Carry out what it decides, and end with \`needs_input\` for a question that blocks the ticket.\n\nResult:\n\n${RESULT}\n`,
+    );
   });
 
   it("ends without a result when the grill session has not replied", async () => {

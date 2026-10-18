@@ -3,7 +3,7 @@ import type {
   WorkboardNodeGrill,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
-import { grillResultFromLog } from "./node-ticket-grill.js";
+import { grillEndFromLog } from "./node-ticket-grill.js";
 import { REPORT_FENCE } from "./node-ticket-report.js";
 import { nodeTicketReviewComments, nodeTicketTarget } from "./node-ticket.js";
 
@@ -16,16 +16,24 @@ function grillSection(grill: WorkboardNodeGrill, log: string | undefined): strin
   if (!pending || grill.status !== "closed") {
     return [];
   }
-  const result = log === undefined ? undefined : grillResultFromLog(log, pending.at);
+  const end = log === undefined ? undefined : grillEndFromLog(log, pending.at);
   return [
     "## Grilling ended",
     "The grilling you handed off ended. Its result is below and in the card's grilling log (`grilling.md`).",
     "",
-    ...(result
-      ? ["Result:", "", result]
-      : result === undefined
-        ? ["The result could not be read from the grilling log."]
-        : ["The grilling ended without a result; carry out the ticket with what you know."]),
+    ...(!end
+      ? ["The result could not be read from the grilling log."]
+      : !end.result
+        ? ["The grilling ended without a result; carry out the ticket with what you know."]
+        : end.by === "ended by the operator"
+          ? [
+              "The operator ended the grilling, so the result is the grill session's last reply. It may be an open question rather than a decision; do not treat a question in it as settled. Carry out what it decides, and end with `needs_input` for a question that blocks the ticket.",
+              "",
+              "Result:",
+              "",
+              end.result,
+            ]
+          : ["Result:", "", end.result]),
     "",
     "Now carry out the ticket with that result and end with `done`, `blocked`, or `needs_input`. Do not start another grilling unless something new and blocking comes up.",
     "",

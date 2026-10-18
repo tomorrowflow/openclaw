@@ -82,19 +82,27 @@ export function grillEndEntry(by: GrillEndedBy, result: string, endedAt: number)
 }
 
 /**
- * The result of the grilling end logged at `endedAt`: "" when it has none,
- * undefined when that entry is not in the log. It is the log's last entry
- * until the grilling's next handoff, so the rest of the log is the result.
+ * The grilling end logged at `endedAt`: who ended it and its result, "" when
+ * it has none; undefined when that entry is not in the log. It is the log's
+ * last entry until the grilling's next handoff, so the rest of the log is the
+ * result.
  */
-export function grillResultFromLog(log: string, endedAt: number): string | undefined {
+export function grillEndFromLog(
+  log: string,
+  endedAt: number,
+): { by: GrillEndedBy; result: string } | undefined {
   const stamp = endStamp(endedAt);
   const entry = log.lastIndexOf(END_PREFIX);
   const at = entry < 0 ? -1 : log.indexOf(stamp, entry + END_PREFIX.length);
   if (at < 0) {
     return undefined;
   }
+  const by: GrillEndedBy =
+    log.slice(entry + END_PREFIX.length, at) === "ended by the operator"
+      ? "ended by the operator"
+      : "settled in the grill session";
   const result = log.slice(at + stamp.length).trim();
-  return result === NO_RESULT ? "" : result;
+  return { by, result: result === NO_RESULT ? "" : result };
 }
 
 /**

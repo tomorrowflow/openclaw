@@ -764,7 +764,9 @@ report, address the findings, and report them (see **Report** below).
    grill session's last assistant reply with `chat.history` and ends the
    grilling the same way with that reply as the result
    (`**ended by the operator**`, or "No result was handed back." when the
-   session has not replied). The Gateway refuses it while the grill session
+   session has not replied); the resumed brief says that result is the grill
+   session's last reply and may be an open question rather than a decision.
+   The Gateway refuses it while the grill session
    runs a turn ("The agent is still replying in the grill session; end the
    grilling when it has answered."), and unless the card is grilling. A move
    to `done` while the card is grilling does the same as End grilling, since
