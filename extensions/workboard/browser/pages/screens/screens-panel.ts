@@ -36,7 +36,7 @@ export function createScreensPanel(workboard: WorkboardCapability): ControlUiVie
       if (connected !== host.connection.connected) {
         connected = host.connection.connected;
         screenshots?.dispose();
-        screenshots = connected ? createCardScreenshots(host, draw) : undefined;
+        screenshots = connected ? createCardScreenshots(host, draw, { live: true }) : undefined;
       }
       const sessionCard =
         context.presented && screenshots
@@ -65,9 +65,17 @@ export function createScreensPanel(workboard: WorkboardCapability): ControlUiVie
                       ? html`<p class="workboard-detail__empty">
                           ${t("workboard.screenshotsUnavailable", { error: list.error })}
                         </p>`
-                      : html`${renderLiveScreenshots(screenshots, card.id, list.result.live, () =>
-                            screenshots?.refresh(),
-                          )}
+                      : html`${
+                            list.result.live
+                              ? renderLiveScreenshots(
+                                  screenshots,
+                                  card.id,
+                                  list.result.live,
+                                  list.listedAt,
+                                  () => screenshots?.refresh(),
+                                )
+                              : nothing
+                          }
                           <h3 class="workboard-screens__heading">
                             ${t("workboard.screensCommitted")}
                           </h3>

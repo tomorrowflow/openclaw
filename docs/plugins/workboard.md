@@ -524,7 +524,10 @@ absolute paths). A node ticket's session header shows a **Screens** button
 that opens a session panel with the images under those directories in the
 node worktree right now (two levels deep, newest first) and each round's
 committed images. The panel lists again every 20 seconds while it is open and
-the card is running. Live listing uses File Transfer's `dir.list` and
+the card is running, skipping a tick while the previous list is still loading;
+a node walk that takes over 30 seconds shows as unavailable. The card drawer's
+**Screenshots** tab shows only committed rounds and never walks the node. Live
+listing uses File Transfer's `dir.list` and
 `file.fetch`, so it needs the grants in
 [Workboard node setup](/plugins/workboard-node-setup#gateway-side); without
 them the panel names the denial and still shows the committed rounds.

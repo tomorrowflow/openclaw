@@ -17,7 +17,8 @@ import { listedTime } from "./view-card-time.ts";
 
 type ListState =
   | { status: "loading" }
-  | { status: "loaded"; result: WorkboardScreenshotListResult }
+  // listedAt is this browser's receipt time, so "listed ago" never mixes clocks.
+  | { status: "loaded"; result: WorkboardScreenshotListResult; listedAt: number }
   | { status: "unavailable"; error: string };
 
 type SettledList = Exclude<ListState, { status: "loading" }>;
@@ -47,7 +48,10 @@ const MAX_IMAGE_READS = 3;
 export type CardScreenshots = {
   /** Lists the shown card's screenshots; another card or none drops the rest. */
   show(card: WorkboardCard | undefined): void;
-  /** Lists the shown card again, keeping its last list meanwhile, and retries failed images. */
+  /**
+   * Lists the shown card again, keeping its last list meanwhile, and retries
+   * failed images; a no-op while the current list is loading.
+   */
   refresh(): void;
   /** Undefined for another card or while the first list is pending. */
   list(cardId: string): SettledList | undefined;
@@ -56,14 +60,18 @@ export type CardScreenshots = {
   dispose(): void;
 };
 
-/** Node tickets only; a new round's import lists again. */
-function listKey(card: WorkboardCard): string | undefined {
+/**
+ * Node tickets only; a new round's import lists again. Without live shots, a
+ * card that has imported no round has nothing to list.
+ */
+function listKey(card: WorkboardCard, live: boolean): string | undefined {
   if (!isWorkboardNodeTicket(card)) {
     return undefined;
   }
-  return (card.rounds ?? [])
+  const key = (card.rounds ?? [])
     .flatMap((round) => (round.changes ? [round.changes.to] : []))
     .join(",");
+  return key || live ? key : undefined;
 }
 
 function objectUrl(result: WorkboardScreenshotResult): string {
@@ -78,6 +86,7 @@ function objectUrl(result: WorkboardScreenshotResult): string {
 export function createCardScreenshots(
   client: GatewayBrowserClient,
   requestUpdate: () => void,
+  { live }: { live: boolean },
 ): CardScreenshots {
   let shown: { cardId: string; key: string; list: ListState; previous?: SettledList } | undefined;
   const images = new Map<string, ImageState>();
@@ -125,9 +134,9 @@ export function createCardScreenshots(
   };
 
   /** A live file rewritten or removed since the last list will not be shown again. */
-  const forgetStaleLive = (live: WorkboardLiveScreenshots) => {
+  const forgetStaleLive = (listed: WorkboardLiveScreenshots) => {
     const current = new Set(
-      live.state === "available" ? live.shots.map((shot) => imageKey({ live: shot })) : [],
+      listed.state === "available" ? listed.shots.map((shot) => imageKey({ live: shot })) : [],
     );
     for (const [key, image] of images) {
       if (key.startsWith("live:") && !current.has(key)) {
@@ -148,14 +157,17 @@ export function createCardScreenshots(
     };
     shown = listing;
     void client
-      .request<WorkboardScreenshotListResult>("workboard.cards.screenshots.list", { id: cardId })
+      .request<WorkboardScreenshotListResult>("workboard.cards.screenshots.list", {
+        id: cardId,
+        live,
+      })
       .then(
-        (result): SettledList => ({ status: "loaded", result }),
+        (result): SettledList => ({ status: "loaded", result, listedAt: Date.now() }),
         (error: unknown): SettledList => ({ status: "unavailable", error: formatUiError(error) }),
       )
       .then((settled) => {
         if (shown === listing) {
-          if (settled.status === "loaded") {
+          if (settled.status === "loaded" && settled.result.live) {
             forgetStaleLive(settled.result.live);
           }
           listing.list = settled;
@@ -170,7 +182,7 @@ export function createCardScreenshots(
 
   return {
     show(card) {
-      const key = card ? listKey(card) : undefined;
+      const key = card ? listKey(card, live) : undefined;
       if (!card || key === undefined) {
         shown = undefined;
         forget();
@@ -188,7 +200,7 @@ export function createCardScreenshots(
       relist(card.id, key, settledList());
     },
     refresh() {
-      if (!shown) {
+      if (!shown || shown.list.status === "loading") {
         return;
       }
       for (const [key, image] of images) {
@@ -332,13 +344,12 @@ export function renderLiveScreenshots(
   screenshots: CardScreenshots,
   cardId: string,
   live: WorkboardLiveScreenshots,
+  listedAt: number,
   onRefresh: () => void,
 ) {
   const status =
     live.state === "available"
-      ? html`<span class="workboard-screens__listed"
-          >${listedTime(live.listedAt, Date.now())}</span
-        >`
+      ? html`<span class="workboard-screens__listed">${listedTime(listedAt, Date.now())}</span>`
       : live.state === "unavailable"
         ? html`<span class="workboard-screens__unavailable" role="status"
             >${t("workboard.screensLiveUnavailable", { reason: live.reason })}</span

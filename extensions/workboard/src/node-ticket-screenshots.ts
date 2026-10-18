@@ -37,6 +37,9 @@ const DEFAULT_SCREENSHOT_DIRS = ["docs/screenshots"];
 const LIVE_MAX_DEPTH = 2;
 const LIVE_MAX_LISTINGS = 40;
 const LIVE_LIST_ENTRIES = 500;
+const DIR_LIST_TIMEOUT_MS = 20_000;
+// One walk may make LIVE_MAX_LISTINGS calls; the deadline bounds the whole walk, not each call.
+const LIVE_LIST_DEADLINE_MS = 30_000;
 
 function imageType(path: string): string | undefined {
   const extension = /\.([a-z]+)$/i.exec(path)?.[1]?.toLowerCase();
@@ -47,14 +50,21 @@ function imageType(path: string): string | undefined {
  * A node ticket's screenshots: images its rounds committed, for example under
  * `docs/screenshots/<ID>/`, and images the running agent has written into its
  * node worktree so far. The host clone holds every imported round, so those
- * are listed and read from git rather than copied into card state.
+ * are listed and read from git rather than copied into card state. The node
+ * worktree is walked only when `live` is asked for.
  */
 export async function listNodeTicketScreenshots(
   runtime: WorkboardNodeTicketRuntime,
   card: WorkboardCard,
-  now: () => number = Date.now,
+  options: { live: boolean; now?: () => number },
 ): Promise<WorkboardScreenshotListResult> {
-  const [committed, live] = await Promise.all([listCommitted(card), listLive(runtime, card, now)]);
+  if (!options.live) {
+    return { committed: await listCommitted(card) };
+  }
+  const [committed, live] = await Promise.all([
+    listCommitted(card),
+    listLive(runtime, card, options.now ?? Date.now),
+  ]);
   return { committed, live };
 }
 
@@ -212,18 +222,25 @@ async function listLive(
   const { nodeId, root, dirs } = worktree;
   const shots: WorkboardLiveScreenshot[] = [];
   const pending = dirs.map((dir) => ({ dir, depth: 0 }));
+  const deadline = now() + LIVE_LIST_DEADLINE_MS;
+  const overDeadline = {
+    state: "unavailable",
+    reason: `listing the screenshot dirs under ${root} on node ${nodeId} took over ${LIVE_LIST_DEADLINE_MS / 1000} seconds. Check that the node is responsive and that the screenshot dirs hold few files.`,
+  } as const;
   try {
     for (let listings = 0; listings < LIVE_MAX_LISTINGS; listings += 1) {
       const next = pending.shift();
       if (!next) {
         break;
       }
-      for (const entry of await listNodeDir(
-        runtime,
-        nodeId,
-        posix.join(root, next.dir),
-        LIVE_LIST_ENTRIES,
-      )) {
+      const remaining = deadline - now();
+      if (remaining <= 0) {
+        return overDeadline;
+      }
+      for (const entry of await listNodeDir(runtime, nodeId, posix.join(root, next.dir), {
+        maxEntries: LIVE_LIST_ENTRIES,
+        timeoutMs: Math.min(DIR_LIST_TIMEOUT_MS, remaining),
+      })) {
         const relative = `${next.dir}/${entry.name}`;
         if (entry.isDir && next.depth < LIVE_MAX_DEPTH) {
           pending.push({ dir: relative, depth: next.depth + 1 });
@@ -233,11 +250,12 @@ async function listLive(
       }
     }
   } catch (error) {
-    return { state: "unavailable", reason: liveUnavailableReason(nodeId, root, error) };
+    return now() >= deadline
+      ? overDeadline
+      : { state: "unavailable", reason: liveUnavailableReason(nodeId, root, error) };
   }
   return {
     state: "available",
-    listedAt: now(),
     shots: shots
       .toSorted(
         (left, right) => right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path),

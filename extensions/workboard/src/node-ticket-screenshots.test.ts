@@ -57,6 +57,8 @@ function nodeRuntime(
   };
 }
 
+const COMMITTED = { live: false };
+
 const noNode = nodeRuntime(() => {
   throw new Error("a card without a node worktree must not reach its node");
 });
@@ -68,7 +70,7 @@ const imported: WorkboardNodeWorktree["handoff"] = {
 };
 
 function committed(rounds: WorkboardScreenshotRound[]) {
-  return { committed: { state: "available", rounds }, live: { state: "none" } };
+  return { committed: { state: "available", rounds } };
 }
 
 function nodeCard(
@@ -122,7 +124,7 @@ it("lists each round's committed images and serves their exact bytes, refusing o
     { round: 1, changes: changes(first, rework) },
   ]);
 
-  expect(await listNodeTicketScreenshots(noNode, card)).toEqual(
+  expect(await listNodeTicketScreenshots(noNode, card, COMMITTED)).toEqual(
     committed([
       {
         round: 0,
@@ -168,6 +170,7 @@ it("lists an image the round moved, whatever diff.renames says", async () => {
     await listNodeTicketScreenshots(
       noNode,
       nodeCard([{ round: 0, changes: changes(base, moved) }]),
+      COMMITTED,
     ),
   ).toEqual(committed([{ round: 0, commit: moved, paths: ["docs/screenshots/T-1/card.png"] }]));
 });
@@ -180,13 +183,13 @@ it("lists no rounds, without failing, when the readable rounds committed no imag
     { round: 1, changes: changes(notes, "f".repeat(40)) },
   ]);
 
-  expect(await listNodeTicketScreenshots(noNode, card)).toEqual(committed([]));
+  expect(await listNodeTicketScreenshots(noNode, card, COMMITTED)).toEqual(committed([]));
 });
 
 it("reports the committed screenshots unavailable when every round's commits are gone", async () => {
   const card = nodeCard([{ round: 0, changes: changes("e".repeat(40), "f".repeat(40)) }]);
 
-  expect((await listNodeTicketScreenshots(noNode, card)).committed).toEqual({
+  expect((await listNodeTicketScreenshots(noNode, card, COMMITTED)).committed).toEqual({
     state: "unavailable",
     reason: `no round's commits are left in ${repo}`,
   });
@@ -198,7 +201,7 @@ it("reports a broken host clone instead of skipping its rounds", async () => {
   const card = nodeCard([{ round: 0, changes: changes(base, shot) }]);
   fs.rmSync(path.join(repo, ".git"), { recursive: true });
 
-  expect((await listNodeTicketScreenshots(noNode, card)).committed).toMatchObject({
+  expect((await listNodeTicketScreenshots(noNode, card, COMMITTED)).committed).toMatchObject({
     state: "unavailable",
     reason: expect.stringContaining("host git diff"),
   });
@@ -208,7 +211,9 @@ it("reports a broken host clone instead of skipping its rounds", async () => {
 });
 
 it("lists nothing for a card without imported rounds", async () => {
-  expect(await listNodeTicketScreenshots(noNode, nodeCard([{ round: 0 }]))).toEqual(committed([]));
+  expect(await listNodeTicketScreenshots(noNode, nodeCard([{ round: 0 }]), COMMITTED)).toEqual(
+    committed([]),
+  );
 });
 
 it("lists the remaining rounds when one round's commits are gone from the host clone", async () => {
@@ -219,7 +224,7 @@ it("lists the remaining rounds when one round's commits are gone from the host c
     { round: 1, changes: changes(base, shot) },
   ]);
 
-  expect(await listNodeTicketScreenshots(noNode, card)).toEqual(
+  expect(await listNodeTicketScreenshots(noNode, card, COMMITTED)).toEqual(
     committed([{ round: 1, commit: shot, paths: ["docs/screenshots/T-1/card.png"] }]),
   );
 });
@@ -229,7 +234,7 @@ it("refuses commit ids that are not object names before running git", async () =
   const shot = commit({ "docs/screenshots/T-1/card.png": Buffer.from([1]) });
   const card = nodeCard([{ round: 0, changes: changes("--output=/dev/null", shot) }]);
 
-  expect((await listNodeTicketScreenshots(noNode, card)).committed).toMatchObject({
+  expect((await listNodeTicketScreenshots(noNode, card, COMMITTED)).committed).toMatchObject({
     state: "unavailable",
     reason: expect.stringContaining("are not commit ids"),
   });
@@ -326,11 +331,10 @@ it("lists a running ticket's worktree images newest first, nested runs included,
   });
   const card = nodeCard([], running);
 
-  expect(await listNodeTicketScreenshots(node.runtime, card, () => 42)).toEqual({
+  expect(await listNodeTicketScreenshots(node.runtime, card, { live: true })).toEqual({
     committed: { state: "available", rounds: [] },
     live: {
       state: "available",
-      listedAt: 42,
       shots: [
         { path: "features/evidence/ios-run-3/login.jpg", bytes: 1, mtimeMs: 300 },
         { path: "docs/screenshots/T-1/home.png", bytes: png.length, mtimeMs: 200 },
@@ -351,12 +355,43 @@ it("lists the default docs/screenshots dir, empty until the agent creates it", a
   const node = fakeNode({});
   const card = nodeCard([], { handoff: { phase: "pending", reportedAt: 1 } });
 
-  expect((await listNodeTicketScreenshots(node.runtime, card, () => 7)).live).toEqual({
+  expect((await listNodeTicketScreenshots(node.runtime, card, { live: true })).live).toEqual({
     state: "available",
-    listedAt: 7,
     shots: [],
   });
   expect(node.calls).toEqual([{ command: "dir.list", path: "/wt/card-1/docs/screenshots" }]);
+});
+
+it("walks no node worktree when the list does not ask for live shots", async () => {
+  expect(await listNodeTicketScreenshots(noNode, nodeCard([], running), COMMITTED)).toEqual(
+    committed([]),
+  );
+});
+
+it("bounds the whole live walk by one deadline, shortening the last call's timeout", async () => {
+  const timeouts: unknown[] = [];
+  const runtime = nodeRuntime((_method, params) => {
+    timeouts.push(params.timeoutMs);
+    return {
+      payload: {
+        ok: true,
+        entries: [{ name: "run", isDir: true, isFile: false, size: 0, mtime: 0 }],
+      },
+    };
+  });
+  const clock = [0, 0, 25_000, 30_000];
+  const now = () => clock.shift() ?? 30_000;
+
+  const listed = await listNodeTicketScreenshots(runtime, nodeCard([], running), {
+    live: true,
+    now,
+  });
+
+  expect(timeouts).toEqual([20_000, 5_000]);
+  expect(listed.live).toEqual({
+    state: "unavailable",
+    reason: expect.stringContaining("took over 30 seconds"),
+  });
 });
 
 it("reports live unavailable with the grants to add, keeping the committed rounds", async () => {
@@ -375,7 +410,7 @@ it("reports live unavailable with the grants to add, keeping the committed round
     ],
     [offline, "node factory is not connected"],
   ] as const) {
-    const listed = await listNodeTicketScreenshots(runtime, card);
+    const listed = await listNodeTicketScreenshots(runtime, card, { live: true });
     expect(listed.committed).toEqual({
       state: "available",
       rounds: [{ round: 0, commit: shot, paths: ["docs/screenshots/T-1/card.png"] }],
@@ -401,11 +436,12 @@ it("lists no live screenshots once the round is imported and the worktree remove
     imported,
     { ...imported, phase: "published" as const, publishedAt: 2, pullRequestUrl: "u" },
   ]) {
-    expect((await listNodeTicketScreenshots(node.runtime, nodeCard([], { handoff }))).live).toEqual(
-      {
-        state: "none",
-      },
-    );
+    expect(
+      (await listNodeTicketScreenshots(node.runtime, nodeCard([], { handoff }), { live: true }))
+        .live,
+    ).toEqual({
+      state: "none",
+    });
   }
   expect(node.calls).toEqual([]);
 });

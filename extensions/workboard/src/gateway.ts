@@ -422,8 +422,12 @@ export function registerWorkboardGatewayMethods(params: {
     }
     return card;
   };
+  // operator.read suffices for the node walk: live paths stay inside the dispatcher-owned
+  // worktree.path and normalized screenshotDirs, and the node's allowReadPaths bound them again.
   register("workboard.cards.screenshots.list", READ_SCOPE, async ({ params: input }) =>
-    listNodeTicketScreenshots(api.runtime.gateway, await requireCard(readId(input))),
+    listNodeTicketScreenshots(api.runtime.gateway, await requireCard(readId(input)), {
+      live: input.live === true,
+    }),
   );
   register("workboard.cards.changes.diff", READ_SCOPE, async ({ params: input }) => {
     const { round, path } = input;

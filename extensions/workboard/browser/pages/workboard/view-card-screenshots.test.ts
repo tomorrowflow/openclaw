@@ -44,7 +44,7 @@ function nodeCard(commits: string[], id = "card-1") {
 }
 
 function listed(rounds: Array<{ round: number; commit: string; paths: string[] }>) {
-  return { committed: { state: "available", rounds }, live: { state: "none" } };
+  return { committed: { state: "available", rounds } };
 }
 
 function deferred<T>() {
@@ -131,6 +131,24 @@ it("shows a Screenshots tab with each round's images, pairing light and dark cap
     round: 0,
     path: "docs/screenshots/T-1/spinner.png",
   });
+});
+
+it("lists only committed rounds, and nothing for a node ticket without an imported round", async () => {
+  const page = screenshotsPage({ list: () => roundOf(["docs/a.png"]), get: image }, [
+    nodeCard(["b".repeat(40)]),
+    nodeCard([], "card-2"),
+  ]);
+  await vi.waitFor(() => expect(page.images()).toBe(1));
+  expect(page.calls(LIST).map(([, params]) => params)).toEqual([{ id: "card-1", live: false }]);
+
+  page.workboard.state.detailCardId = "card-2";
+  page.workboard.notify();
+  await vi.waitFor(() =>
+    expect(
+      page.container.querySelector("#workboard-detail-tab-overview")?.getAttribute("aria-selected"),
+    ).toBe("true"),
+  );
+  expect(page.calls(LIST)).toHaveLength(1);
 });
 
 it("reads no image until the Screenshots tab is opened", async () => {

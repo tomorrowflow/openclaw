@@ -5,8 +5,6 @@ import { nodeInvokePayload, type WorkboardNodeTicketRuntime } from "./node-ticke
 // File-transfer's node commands as Workboard calls them. The node's file-transfer
 // policy (allowReadPaths) and gateway.nodes.commands.allow decide what they may read.
 
-const DIR_LIST_TIMEOUT_MS = 20_000;
-
 /** The `code message` a file-transfer node command reports with `ok: false`. */
 function nodeErrorReason(payload: Record<string, unknown>): string {
   const reason = [payload.code, payload.message].filter((part) => typeof part === "string");
@@ -52,7 +50,7 @@ export async function listNodeDir(
   runtime: WorkboardNodeTicketRuntime,
   nodeId: string,
   dirPath: string,
-  maxEntries: number,
+  { maxEntries, timeoutMs }: { maxEntries: number; timeoutMs: number },
 ): Promise<NodeDirEntry[]> {
   const payload = nodeInvokePayload(
     await runtime.request(
@@ -61,7 +59,7 @@ export async function listNodeDir(
         nodeId,
         command: "dir.list",
         params: { path: dirPath, maxEntries },
-        timeoutMs: DIR_LIST_TIMEOUT_MS,
+        timeoutMs,
         idempotencyKey: randomUUID(),
       },
       { scopes: ["operator.admin"] },

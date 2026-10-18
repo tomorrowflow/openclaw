@@ -418,14 +418,17 @@ export type WorkboardLiveScreenshot = { path: string; bytes: number; mtimeMs: nu
  * worktree removed).
  */
 export type WorkboardLiveScreenshots =
-  | { state: "available"; listedAt: number; shots: WorkboardLiveScreenshot[] }
+  | { state: "available"; shots: WorkboardLiveScreenshot[] }
   | { state: "unavailable"; reason: string }
   | { state: "none" };
 
-/** Each source fails on its own, so a node outage still shows the committed rounds. */
+/**
+ * Each source fails on its own, so a node outage still shows the committed
+ * rounds. `live` is present only when the list asked for it with `live: true`.
+ */
 export type WorkboardScreenshotListResult = {
   committed: WorkboardCommittedScreenshots;
-  live: WorkboardLiveScreenshots;
+  live?: WorkboardLiveScreenshots;
 };
 
 /** One image: a round's committed file, or a live file in the node worktree. */

@@ -48,3 +48,20 @@ it("refuses screenshot dirs that could leave the worktree or are unbounded", () 
     );
   }
 });
+
+it("drops the recorded worktree when the target moves to another node", () => {
+  const worktree = {
+    path: "/Users/factory/worktrees/c1",
+    branch: "factory/c1",
+    baseCommit: "",
+    rounds: [],
+  };
+  const recorded = { ...NODE_TARGET, kind: "node-claude" as const, worktree };
+
+  expect(normalizeExecutionTarget({ ...NODE_TARGET, worktree: {} }, recorded)?.worktree).toEqual(
+    worktree,
+  );
+  expect(
+    normalizeExecutionTarget({ ...NODE_TARGET, nodeId: "linux-factory", worktree }, recorded),
+  ).not.toHaveProperty("worktree");
+});
