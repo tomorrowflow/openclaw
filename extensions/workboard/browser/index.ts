@@ -1,6 +1,7 @@
 import { defineControlUiPlugin } from "openclaw/plugin-sdk/control-ui";
 import { WorkboardCatalog } from "./catalog.ts";
 import { deleteWorkboardBoard } from "./delete-board.ts";
+import { createWorkboardGrillingComposer } from "./grilling-composer.ts";
 import { bindWorkboardHost } from "./host.ts";
 import { t } from "./i18n/index.ts";
 import { workboardBoardName } from "./lib/workboard/board-presentation.ts";
@@ -14,6 +15,8 @@ import "./styles/workboard.css";
 import "./styles/overview.css";
 import "./styles/widgets.css";
 import "./styles/session-chip.css";
+
+const GRILLING_COMPOSER_ID = "grilling-chat";
 
 type NavigationBoard = Pick<WorkboardBoardSummary, "id" | "name" | "kind" | "icon" | "color">;
 
@@ -156,6 +159,12 @@ export default defineControlUiPlugin({
         placement: "session-header",
         mount: createWorkboardSessionAccessory(workboard),
       }),
+      host.ui.registerReplacement({
+        id: GRILLING_COMPOSER_ID,
+        label: t("workboard.grillingComposerName"),
+        surface: "composer",
+        mount: createWorkboardGrillingComposer(workboard),
+      }),
       ...(["mini", "card", "board"] as const).map((id) =>
         host.ui.registerWidget({
           id,
@@ -174,6 +183,9 @@ export default defineControlUiPlugin({
         catalog.handleGatewayEvent(WORKBOARD_CHANGED_EVENT, payload),
       ),
     ];
+    // The replacement serves only grilling card sessions and mounts the host's
+    // composer everywhere else, so selecting it changes nothing for other chats.
+    host.ui.selectReplacement("composer", GRILLING_COMPOSER_ID);
     catalog.sync(client, host.connection.connected);
     return () => {
       for (const dispose of registrations.toReversed()) {

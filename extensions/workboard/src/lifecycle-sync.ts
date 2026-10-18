@@ -4,11 +4,13 @@ import { resolveGlobalSingleton } from "openclaw/plugin-sdk/global-singleton";
 import { isIncognitoSessionKey, parseAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawPluginApi, OpenClawPluginService } from "../api.js";
+import { turnEndContextTokens } from "./agent-end-context.js";
 import {
   cleanupWorkboardCardWorktree,
   isWorkboardWorktreeCleanupCandidate,
   type WorkboardWorktreeCleanupRuntime,
 } from "./dispatcher-workspace.js";
+import { takeNodeGrillChatTurn } from "./node-ticket-grill.js";
 import type { WorkboardNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import { applyNodeTicketReport, nodeTicketIdleVerdict, nodeTicketTarget } from "./node-ticket.js";
 import {
@@ -75,7 +77,7 @@ type WorkboardLifecycleSessionReadOptions = {
   sessionKey?: string;
 };
 
-type WorkboardLifecycleSessionReader = (
+export type WorkboardLifecycleSessionReader = (
   options: WorkboardLifecycleSessionReadOptions,
 ) => Promise<WorkboardLifecycleSessionSnapshot>;
 
@@ -122,7 +124,7 @@ const LIFECYCLE_TARGETS = {
 
 async function syncWorkboardLifecycleEvent(params: {
   store: WorkboardStore;
-  source: { sessionKey?: string; runId?: string };
+  source: { sessionKey?: string; runId?: string; startedAt?: number };
   observation: WorkboardLifecycleObservation;
   now: number;
   onMatched?: WorkboardLifecycleMatchHandler;
@@ -208,11 +210,16 @@ export async function syncWorkboardAgentEnded(params: {
     options: WorkboardLifecycleSessionReadOptions,
   ) => Promise<WorkboardLifecycleSessionSnapshot>;
   onMatched?: WorkboardLifecycleMatchHandler;
+  warn?: (message: string) => void;
 }): Promise<number> {
   const now = params.now ?? Date.now();
+  // The run's start fences it from rounds claimed after it began.
+  const runStartedAt =
+    params.event.durationMs === undefined ? undefined : now - params.event.durationMs;
   const source = {
     sessionKey: params.context.sessionKey,
     runId: params.event.runId ?? params.context.runId,
+    ...(runStartedAt === undefined ? {} : { startedAt: runStartedAt }),
   };
   // An attempt can finish before fallback settles, even with success=true.
   // Only the session owner can establish the run's terminal outcome.
@@ -228,11 +235,8 @@ export async function syncWorkboardAgentEnded(params: {
   // A node ticket's stalled-turn retry reports under a new run id. Only the
   // report reads it; the lifecycle writes below keep the run-id fence, so the
   // card stays linked to the round's launch run.
-  const runStartedAt =
-    params.event.durationMs === undefined ? undefined : now - params.event.durationMs;
   const linked = (await params.store.list()).filter(
-    (card) =>
-      !card.metadata?.archivedAt && workboardCardTakesEndedRunReport(card, source, runStartedAt),
+    (card) => !card.metadata?.archivedAt && workboardCardTakesEndedRunReport(card, source),
   );
   // Node tickets report through their final message, not Workboard tools: a
   // block holds, and a done report leaves the card running with a pending
@@ -243,6 +247,11 @@ export async function syncWorkboardAgentEnded(params: {
   let nodeTicket = false;
   const reported: WorkboardCard[] = [];
   for (const card of linked) {
+    const chat = { ...source, card, messages: params.event.messages ?? [] };
+    const settled = terminal || params.event.success;
+    if (await takeNodeGrillChatTurn(params.store, chat, settled, params.warn)) {
+      continue;
+    }
     if (card.status === "running" && nodeTicketTarget(card)) {
       nodeTicket = true;
       if (terminal || params.event.success) {
@@ -295,37 +304,6 @@ export async function syncWorkboardAgentEnded(params: {
     }
   }
   return count;
-}
-
-/**
- * The context the run's last model call carried (draft D16: context use at
- * turn end). agent_end messages include the session's earlier runs, so only
- * the last assistant message after the final user prompt counts; a run that
- * failed before replying has none. A harness that sums usage over the turn's
- * calls (Codex) reports the last call as `contextUsage.promptTokens`;
- * otherwise input plus cache read plus cache write is that call's prompt.
- */
-function turnEndContextTokens(messages: readonly unknown[]): number | undefined {
-  const lastPrompt = messages.findLastIndex(
-    (message) => isRecord(message) && message.role === "user",
-  );
-  const reply = messages
-    .slice(lastPrompt + 1)
-    .findLast((message) => isRecord(message) && message.role === "assistant");
-  const usage = isRecord(reply) ? reply.usage : undefined;
-  if (!isRecord(usage)) {
-    return undefined;
-  }
-  const context = usage.contextUsage;
-  const tokens =
-    isRecord(context) && context.state === "available"
-      ? tokenCount(context.promptTokens)
-      : tokenCount(usage.input) + tokenCount(usage.cacheRead) + tokenCount(usage.cacheWrite);
-  return tokens > 0 ? Math.round(tokens) : undefined;
-}
-
-function tokenCount(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function lifecycleFromSession(

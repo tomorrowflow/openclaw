@@ -304,12 +304,6 @@ export function formatLifecycle(
     : formatted;
 }
 
-export function cardHasUnresolvedStartedRun(card: WorkboardCard): boolean {
-  const sessionKey = card.sessionKey ?? card.execution?.sessionKey;
-  const runId = card.runId ?? card.execution?.runId;
-  return card.status === "running" && Boolean(sessionKey && runId);
-}
-
 export function renderLifecycleIcon(lifecycle: WorkboardLifecycle) {
   if (lifecycle.state === "running") {
     return html`<span class="session-run-spinner" aria-hidden="true"></span>`;

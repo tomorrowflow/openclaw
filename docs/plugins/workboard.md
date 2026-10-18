@@ -310,17 +310,17 @@ never stored. The Control UI shows it as one status line under the summary on
 the card and in the card's overview tab, with the time since the card entered
 that stage:
 
-| `stage.kind`      | When                                                                       | Fields                                      |
-| ----------------- | -------------------------------------------------------------------------- | ------------------------------------------- |
-| `queued`          | A [queued start](#queued-starts) waits for a node ticket slot.             | `since`                                     |
-| `running`         | The card is `running`.                                                     | `since`, `nodeId`, `reworkRound`, `attempt` |
-| `questions`       | A node ticket waits with open questions; `escalatedAt` once passed to you. | `since`, `escalatedAt`                      |
-| `grilling`        | A node ticket waits on your answer to its grilling question `round`.       | `since`, `round`                            |
-| `awaiting_review` | A node ticket's branch is imported and waits for the operator's decision.  | `since`                                     |
-| `published`       | A node ticket's draft PR is open.                                          | `since`, `pullRequestUrl`, `reworkRound`    |
-| `blocked`         | The card is `blocked`.                                                     | `since`                                     |
-| `review`          | Any other card in `review`.                                                | `since`                                     |
-| `done`            | Any other card in `done`.                                                  | `since`                                     |
+| `stage.kind`      | When                                                                         | Fields                                      |
+| ----------------- | ---------------------------------------------------------------------------- | ------------------------------------------- |
+| `queued`          | A [queued start](#queued-starts) waits for a node ticket slot.               | `since`                                     |
+| `running`         | The card is `running`.                                                       | `since`, `nodeId`, `reworkRound`, `attempt` |
+| `questions`       | A node ticket waits with open questions; `escalatedAt` once passed to you.   | `since`, `escalatedAt`                      |
+| `grilling`        | A node ticket is grilling you in its session chat; `round` counts questions. | `since`, `round`                            |
+| `awaiting_review` | A node ticket's branch is imported and waits for the operator's decision.    | `since`                                     |
+| `published`       | A node ticket's draft PR is open.                                            | `since`, `pullRequestUrl`, `reworkRound`    |
+| `blocked`         | The card is `blocked`.                                                       | `since`                                     |
+| `review`          | Any other card in `review`.                                                  | `since`                                     |
+| `done`            | Any other card in `done`.                                                    | `since`                                     |
 
 Idle statuses (`triage`, `backlog`, `todo`, `scheduled`, `ready`) and archived
 cards have no stage. `since` comes from recorded facts: the start request, the
@@ -669,7 +669,8 @@ report, address the findings, and report them (see **Report** below).
    replaces the card's [summary](#card-fields) in the same write; the longer
    `summary` is posted as a comment. A report without a headline leaves the
    summary unchanged. A `needs_input` report waits for an answer (see
-   **Questions**), and a `grill` report waits for yours (see **Grilling**).
+   **Questions**), and a `grill` report starts a grilling in the session chat
+   (see **Grilling**).
    Anything else blocks the card,
    including a `done` report with any `failed` proof entry. The brief tells the
    session to record red-first evidence (a test that failed before the fix) in
@@ -719,44 +720,68 @@ report, address the findings, and report them (see **Report** below).
    touch; a round an agent answered with `workboard_comment` is not.
    **Grilling:** when a ticket needs a back-and-forth with you to align on
    what to build (specification, scope, domain terms), the session ends a
-   turn with `{"outcome": "grill", "question": "…", "summary": "…"}`: exactly
-   one question with its recommended answer, and what is settled so far. The
-   session decides when to grill; no card setting turns it on. Each question
-   is appended to the card's `grilling.md` attachment (one log per card,
-   rewritten in place and capped at 256 KiB: an entry that would pass the cap
-   is cut with a note), a short `Grilling question N` comment points to it,
-   and the card moves to `review` with stage `grilling`. Only you answer: the
-   board's automation job is not woken for a grilling round, and comments are
-   not answers. The card's **Grilling** tab shows the log and, while the card
-   waits, an answer box with **Send answer** and **End grilling**; it opens on
-   that tab, and the session chip reads "Grilling — answer on card" and opens
-   the card. Sending calls `workboard.cards.grill.answer {id, answer}` (at
-   most 4,000 characters), which logs the answer, keeps it for the next round,
-   and moves the card to `todo`; the same session resumes in the same worktree
-   with the answer under `## Grilling answer`, and a retried start still
-   carries it. The answer is refused unless the card waits on a grilling
-   answer, and when the log has no room left for it. The card records only
-   when you answered; the next round's brief reads the answer from the log,
-   and says so plainly if it cannot. **End grilling** calls
-   `workboard.cards.grill.end {id, note?}` with the answer box's text, if any,
-   as a closing note (same limit and refusals, except a full log cuts the note
-   instead of refusing). It closes the grill with an `## Outcome` entry
-   `**ended by the operator** (<time>):` followed by the note or `no note`, and moves
-   the card to `todo`: the same session resumes under `## Grilling ended`,
-   with the note read from the log, to carry out the ticket with what is
-   settled and end with `done`, `blocked`, or `needs_input` rather than grill
-   again. A move to `done` while the card waits on the grilling, answered or
-   not, does the same as End grilling without a note, since there is nothing
-   to publish yet; a pending answer stays in the brief ahead of
-   `## Grilling ended`, and an ended grilling moved to `done` before it
-   resumed goes back to `todo` the same way. A move to `todo`
-   without an answer goes back to `review` with a comment naming the Grilling
-   tab and End grilling. A `done`, `blocked`, or `needs_input` report closes
-   the grill with an `## Outcome` entry naming what the card got, so a `done`
-   report the import refuses for its proof closes it `blocked`; after End
-   grilling it only clears what is pending. The log stays on the card: the
-   metadata budget and the 20-attachment cap drop other attachments first,
-   and deleting `grilling.md` is refused.
+   turn with `{"outcome": "grill", "question": "…", "summary": "…"}`: its
+   first question with its recommended answer, and what is settled so far.
+   The session decides when to grill; no card setting turns it on. The
+   question is appended to the card's `grilling.md` attachment (one log per
+   card, rewritten in place and capped at 256 KiB: an entry that would pass
+   the cap is cut with a note), a short `Grilling question N` comment points
+   to the session chat, and the card moves to `review` with stage `grilling`.
+   The board's automation job is not woken for a grilling, and comments are
+   not answers. You answer in the card's own session: while the card is
+   grilling, Workboard replaces that session's read-only subagent banner with
+   a chat box (Enter sends, Shift+Enter adds a line), and the session chip
+   reads "Grilling — chat with the session". Every other session keeps the
+   standard composer. Workboard selects this composer replacement each time
+   its UI loads, replacing any other plugin's composer selection; choosing
+   the built-in composer in the Control UI settings lasts until the next
+   reload. A Control UI client without the Workboard plugin keeps the
+   read-only banner.
+   Each turn you send there that started after the question is logged with
+   the agent's reply (each message cut at 8,000 characters), and the card
+   stays in `review`; a reply may end with another `grill` report, which
+   logs its question as the next round. A turn whose `agent_end` gives no
+   duration counts when it ran under another run id than the round that
+   asked. A reply whose report block cannot be read is logged with the line
+   `The reply's report could not be read: <reason>`
+   and a card comment says so, so you can tell the agent in the chat; the
+   card keeps grilling. A turn that fails before it settles is logged with a
+   line saying so. The session asks one question at a
+   time with its recommendation, in plain replies, and does none of the
+   ticket's work. When you share an understanding, its reply ends with
+   `{"outcome": "grill_done", "summary": "what was settled"}`: the log gets
+   an `## Outcome` entry `**settled in the session chat** (<time>):` with
+   the summary, the grill closes, and the card moves to `todo`, so the same
+   session resumes in the same worktree under `## Grilling ended` with the
+   summary as its closing note, to carry out the ticket and end with
+   `done`, `blocked`, or `needs_input` rather than grill again. A `done`,
+   `blocked`, or `needs_input` report in a chat reply ends the grilling the
+   same way (`**ended by a done reply in the session chat**`), and nothing it
+   reports is imported: only a claimed round's report is. A `grill_done`
+   report that ends a claimed round blocks the card. The card's **Grilling**
+   tab shows the log, **Open session chat**, and **End grilling**, and a
+   grilling card opens on that tab. End grilling calls
+   `workboard.cards.grill.end {id}`: it logs `**ended by the operator**
+(<time>): no note` and resumes the session the same way. It is disabled
+   while the Control UI shows the session replying, and the Gateway refuses
+   it while the session owner reports a run in progress ("The agent is still
+   replying in the session chat; end the grilling when it has answered."),
+   since the resumed round's start would race that reply; it is refused
+   unless the card is grilling. A move to `done` while the card is grilling
+   does the same as End grilling, since there is nothing to publish yet, once
+   no chat turn is replying: until then the card waits in `done` with the
+   grilling live, the reply is logged, and the handoff pass after that turn
+   or the next sweep ends it. An ended grilling moved to `done` before it
+   resumed goes back to `todo` the same way. A run that started before a
+   round's claim never reports for that round, so a chat reply that finishes
+   after the resumed round claimed the card cannot settle it. A move to
+   `todo` while grilling goes back to `review` with a comment naming the session chat and End
+   grilling. A `done`, `blocked`, or `needs_input` report of a claimed round
+   closes an open grill with an `## Outcome` entry naming what the card got,
+   so a `done` report the import refuses for its proof closes it `blocked`;
+   after the grilling ended it only clears what is pending. The log stays on
+   the card: the metadata budget and the 20-attachment cap drop other
+   attachments first, and deleting `grilling.md` is refused.
 3. **Import:** the node bundles the branch to `<worktreesRoot>/wb-<cardId>.bundle`
    and the Gateway fetches it with File Transfer, so the node's
    `allowReadPaths` must cover `<worktreesRoot>/*.bundle`. The host clone

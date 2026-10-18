@@ -253,15 +253,22 @@ export default {
     grillingLoading: "Loading the grilling log…",
     grillingMissing: "The grilling log is missing.",
     grillingLoadFailed: "The grilling log is missing or unreadable: {error}",
-    grillingAnswerLabel: "Your answer",
-    grillingAnswerPlaceholder:
-      "Answer the question, or end the grilling with an optional closing note; the session continues with it.",
-    grillingSend: "Send answer",
+    grillingChatNote:
+      "The grilling happens in the card's session chat: answer the agent's questions there. It ends when the agent replies with what is settled, or when you end it here.",
+    grillingOpenChat: "Open session chat",
     grillingEnd: "End grilling",
-    grillingEndTitle:
-      "End the grilling; the agent carries out the ticket with what is settled and any text above as a closing note.",
-    grillingWorking: "The agent is working on your last answer.",
-    sessionChipGrilling: "Grilling — answer on card",
+    grillingEndTitle: "End the grilling; the agent carries out the ticket with what is settled.",
+    grillingEndReplying: "The session is replying; end the grilling once the reply is in.",
+    grillingComposerName: "Workboard grilling chat",
+    grillingComposerHint:
+      "Grilling: the agent asks one question at a time. It ends when the agent says what is settled, or with End grilling on the card.",
+    grillingComposerLabel: "Message the grilling session",
+    grillingComposerPlaceholder:
+      "Answer the agent's question (Enter sends, Shift+Enter adds a line)",
+    grillingComposerSend: "Send",
+    grillingComposerReplying: "The agent is replying…",
+    grillingComposerFailed: "The message could not be sent. Try again.",
+    sessionChipGrilling: "Grilling — chat with the session",
     detailTemplate: "Template",
     detailFailures: "Failed attempts",
     detailClaim: "Claim owner",

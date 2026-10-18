@@ -47,8 +47,16 @@ type NodeTicketGrillReport = {
   decisions: WorkboardNodeDecision[];
 };
 
-type NodeTicketReport =
+/** The grilling in the session chat reached a shared understanding; `summary` says what was settled. */
+type NodeTicketGrillDoneReport = {
+  outcome: "grill_done";
+  summary: string;
+  decisions: WorkboardNodeDecision[];
+};
+
+export type NodeTicketReport =
   | NodeTicketGrillReport
+  | NodeTicketGrillDoneReport
   | {
       outcome: "done";
       headline?: string;
@@ -59,22 +67,46 @@ type NodeTicketReport =
     }
   | NodeTicketStopReport;
 
+function messageText(message: Record<string, unknown>): string | undefined {
+  if (typeof message.content === "string") {
+    return message.content;
+  }
+  if (Array.isArray(message.content)) {
+    return message.content
+      .flatMap((part) => (isRecord(part) && typeof part.text === "string" ? [part.text] : []))
+      .join("\n");
+  }
+  return undefined;
+}
+
 function lastAssistantText(messages: readonly unknown[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (!isRecord(message) || message.role !== "assistant") {
-      continue;
-    }
-    if (typeof message.content === "string") {
-      return message.content;
-    }
-    if (Array.isArray(message.content)) {
-      return message.content
-        .flatMap((part) => (isRecord(part) && typeof part.text === "string" ? [part.text] : []))
-        .join("\n");
+    if (isRecord(message) && message.role === "assistant") {
+      const text = messageText(message);
+      if (text !== undefined) {
+        return text;
+      }
     }
   }
   return undefined;
+}
+
+/**
+ * The prompt and reply of the turn that ended: agent_end messages carry the
+ * session's earlier history, then the turn's prompt and its last assistant
+ * message. The reply drops its report block, which the report itself carries.
+ */
+export function lastTurnText(messages: readonly unknown[]): { prompt: string; reply: string } {
+  const promptAt = messages.findLastIndex(
+    (message) => isRecord(message) && message.role === "user",
+  );
+  const prompt = isRecord(messages[promptAt]) ? messageText(messages[promptAt]) : undefined;
+  const reply = lastAssistantText(messages.slice(promptAt + 1));
+  return {
+    prompt: prompt?.trim() ?? "",
+    reply: reply?.replace(REPORT_PATTERN, "").trim() ?? "",
+  };
 }
 
 function optionalText(value: unknown): string | undefined {
@@ -157,11 +189,15 @@ function parseReview(value: unknown): WorkboardNodeReview | undefined {
 /** Reads the last report block of the final assistant message; anything else is a contract miss. */
 export function parseNodeTicketReport(
   messages: readonly unknown[],
-): { ok: true; report: NodeTicketReport } | { ok: false; reason: string } {
+): { ok: true; report: NodeTicketReport } | { ok: false; reason: string; missing?: true } {
   const text = lastAssistantText(messages);
   const block = text ? [...text.matchAll(REPORT_PATTERN)].at(-1)?.[1] : undefined;
   if (!block) {
-    return { ok: false, reason: "The ticket session ended without a workboard-report block." };
+    return {
+      ok: false,
+      reason: "The ticket session ended without a workboard-report block.",
+      missing: true,
+    };
   }
   let value: unknown;
   try {
@@ -214,6 +250,9 @@ export function parseNodeTicketReport(
       return { ok: false, reason: "The ticket session's grill report has no question." };
     }
     return { ok: true, report: { outcome: "grill", question, summary, decisions } };
+  }
+  if (value.outcome === "grill_done") {
+    return { ok: true, report: { outcome: "grill_done", summary, decisions } };
   }
   if (value.outcome === "blocked" || value.outcome === "needs_input") {
     const questions = (Array.isArray(value.questions) ? value.questions : []).flatMap((entry) => {

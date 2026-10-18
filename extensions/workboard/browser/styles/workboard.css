@@ -3880,11 +3880,6 @@ workboard-inline-text {
   color: var(--muted);
 }
 
-.workboard-grilling__compose {
-  display: grid;
-  gap: 8px;
-}
-
 .workboard-grilling__actions {
   display: flex;
   justify-self: end;

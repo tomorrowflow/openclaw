@@ -1,4 +1,6 @@
 import type { WorkboardCard } from "@openclaw/workboard-contract";
+import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
+import { nodeGrillTakesChatTurn } from "./node-ticket-grill.js";
 import { nodeTicketReportOwnsRound, nodeTicketTarget } from "./node-ticket.js";
 import { cardBoardId, cardRunId, cardSessionKey } from "./store-card-helpers.js";
 
@@ -25,9 +27,19 @@ function sessionKeyMatchesCard(candidate: string, cardKey: string): boolean {
   );
 }
 
+/** A run that ended in the card's session: its id and, when known, when it started. */
+type EndedRunSource = { sessionKey?: string; runId?: string; startedAt?: number };
+
+/**
+ * Whether a lifecycle event from `source` is about the card's linked run. A
+ * prepared launch links a provisional run id, so any run in the session
+ * matches until the launch is accepted, except one that started before the
+ * round's claim: a chat turn still replying when the grilling ended and the
+ * relaunch claimed the card belongs to the grilling, never to the new round.
+ */
 export function workboardCardMatchesLifecycleLink(
   card: WorkboardCard,
-  source: { sessionKey?: string; runId?: string },
+  source: EndedRunSource,
 ): boolean {
   const linkedSessionKey = cardSessionKey(card);
   const sessionMatches = Boolean(
@@ -37,6 +49,15 @@ export function workboardCardMatchesLifecycleLink(
       : sessionKeyMatchesCard(source.sessionKey, workboardSessionKeyForCard(card))),
   );
   const linkedRunId = cardRunId(card);
+  const claimedAt = card.metadata?.claim?.claimedAt;
+  if (
+    source.runId !== linkedRunId &&
+    claimedAt !== undefined &&
+    source.startedAt !== undefined &&
+    source.startedAt < claimedAt
+  ) {
+    return false;
+  }
   if (linkedRunId && source.runId) {
     if (source.runId !== linkedRunId && !linkedRunId.startsWith(`workboard:${card.id}:`)) {
       return false;
@@ -52,25 +73,31 @@ export function workboardCardMatchesLifecycleLink(
  * run ends in the same session under a new run id, which the link fence
  * rejects; it reports for the card's current round when it started after the
  * round's claim, which a re-dispatch renews, and no report of the round owns
- * the card yet. A run of an earlier round started before this claim. Without
- * the run's start (an `agent_end` without `durationMs`) it stays fenced.
+ * the card yet. A run of an earlier round started before this claim. A chat
+ * turn the operator started in the session of a live grilling ends under its
+ * own run id too, and reports for the grilling. Without the run's start (an
+ * `agent_end` without `durationMs`) the retry stays fenced; the grilling
+ * tells its chat turns by run id.
  */
 export function workboardCardTakesEndedRunReport(
   card: WorkboardCard,
-  source: { sessionKey?: string; runId?: string },
-  runStartedAt: number | undefined,
+  source: EndedRunSource,
 ): boolean {
   if (workboardCardMatchesLifecycleLink(card, source)) {
     return true;
   }
+  const { startedAt } = source;
   const worktree = nodeTicketTarget(card)?.worktree;
   const claim = card.metadata?.claim;
+  if (worktree && nodeGrillTakesChatTurn(card, worktree, source)) {
+    return workboardCardMatchesLifecycleLink(card, { sessionKey: source.sessionKey });
+  }
   return (
     card.status === "running" &&
     worktree !== undefined &&
     claim !== undefined &&
-    runStartedAt !== undefined &&
-    runStartedAt >= claim.claimedAt &&
+    startedAt !== undefined &&
+    startedAt >= claim.claimedAt &&
     !nodeTicketReportOwnsRound(worktree, claim.claimedAt) &&
     workboardCardMatchesLifecycleLink(card, { sessionKey: source.sessionKey })
   );
@@ -78,4 +105,22 @@ export function workboardCardTakesEndedRunReport(
 
 export function workboardCardSessionLookupKey(card: WorkboardCard): string {
   return cardSessionKey(card) ?? workboardSessionKeyForCard(card);
+}
+
+/** Whether the session owner reports a run in progress in the card's session. */
+export async function workboardCardSessionHasActiveRun(
+  readSessions: WorkboardLifecycleSessionReader,
+  card: WorkboardCard,
+): Promise<boolean> {
+  // An exact read returns at most that session, under its canonical key.
+  const {
+    sessions: [session],
+  } = await readSessions({
+    includeUnknown: false,
+    sessionKey: workboardCardSessionLookupKey(card),
+  });
+  return (
+    session?.hasActiveRun === true ||
+    (session?.hasActiveRun !== false && session?.status === "running")
+  );
 }
