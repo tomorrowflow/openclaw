@@ -732,9 +732,11 @@ report, address the findings, and report them (see **Report** below).
    grilling, Workboard replaces that session's read-only subagent banner with
    a chat box (Enter sends, Shift+Enter adds a line), and the session chip
    reads "Grilling — chat with the session". Every other session keeps the
-   standard composer; Workboard selects this composer replacement when its
-   UI loads, so a Control UI client without the Workboard plugin, or with
-   the built-in composer chosen in its settings, keeps the read-only banner.
+   standard composer. Workboard selects this composer replacement each time
+   its UI loads, replacing any other plugin's composer selection; choosing
+   the built-in composer in the Control UI settings lasts until the next
+   reload. A Control UI client without the Workboard plugin keeps the
+   read-only banner.
    Each turn you send there that started after the question is logged with
    the agent's reply (each message cut at 8,000 characters), and the card
    stays in `review`; a reply may end with another `grill` report, which

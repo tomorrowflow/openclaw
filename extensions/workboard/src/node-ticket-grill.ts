@@ -11,7 +11,7 @@ import type { WorkboardStore } from "./store.js";
 /** The card attachment that records a node ticket's grilling, question by question. */
 export const GRILL_LOG_FILE_NAME = "grilling.md";
 export const GRILL_LOG_MIME_TYPE = "text/markdown";
-// The card comment announces the question; the Grilling tab holds its full text.
+// The card comment announces the question; the grilling log holds its full text.
 const GRILL_COMMENT_QUESTION_CHARS = 300;
 const GRILL_LOG_FULL_NOTE =
   "(The grilling log reached its size limit, so this entry is cut. The full text is in the ticket session.)";

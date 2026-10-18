@@ -33,6 +33,7 @@ export function createWorkboardGrillingComposer(
     container.append(grillingRoot, defaultRoot);
 
     let sending = false;
+    let disposed = false;
     let sendError = "";
 
     const showDefault = () => {
@@ -49,24 +50,34 @@ export function createWorkboardGrillingComposer(
       sending = true;
       sendError = "";
       draw();
-      try {
-        await host.request("chat.send", {
+      const sent = await host
+        .request("chat.send", {
           sessionKey: props.sessionKey,
           ...(props.agentId ? { agentId: props.agentId } : {}),
           message,
           idempotencyKey: crypto.randomUUID(),
-        });
-        const box = grillingRoot.querySelector("textarea");
-        if (box?.value.trim() === message) {
-          box.value = "";
-          context.props.setDraft("");
-        }
-      } catch (error) {
-        sendError = formatUiError(error, t("workboard.grillingComposerFailed"));
-      } finally {
-        sending = false;
-        draw();
+        })
+        .then(
+          () => true,
+          (error: unknown) => {
+            sendError = formatUiError(error, t("workboard.grillingComposerFailed"));
+            return false;
+          },
+        );
+      sending = false;
+      if (disposed) {
+        return;
       }
+      const box = grillingRoot.querySelector("textarea");
+      if (sent && box?.value.trim() === message) {
+        box.value = "";
+        try {
+          context.props.setDraft("");
+        } catch {
+          // The view ended; the next mount reads the host's draft.
+        }
+      }
+      draw();
     };
     const draw = () => {
       try {
@@ -140,6 +151,7 @@ export function createWorkboardGrillingComposer(
         draw();
       },
       dispose() {
+        disposed = true;
         stopHost();
         stopState();
         disposeDefault?.();
