@@ -99,22 +99,28 @@ async function grillingTicket(store = createWorkboardSqliteTestStore()) {
   const gateway = createNodeGateway();
   const { card, sessionKey } = await startNodeCard(store, gateway);
   await endTurn(store, card.id, grillReport);
-  // Whether a chat turn is replying in the card's session, as the session owner reports it.
-  let replying = false;
-  const readSessions = async (options: { sessionKey?: string }) => ({
-    sessions: options.sessionKey
-      ? [
-          {
-            key: options.sessionKey,
-            hasActiveRun: replying,
-            status: replying ? ("running" as const) : ("done" as const),
-            updatedAt: Date.now(),
-          },
-        ]
-      : [],
-    complete: false,
-  });
-  const setReplying = (value: boolean) => {
+  // Whether a chat turn is replying in the card's session, as the session owner reports it;
+  // "unreadable" makes the read fail.
+  let replying: boolean | "unreadable" = false;
+  const readSessions = async (options: { sessionKey?: string }) => {
+    if (replying === "unreadable") {
+      throw new Error("sessions.describe returned an invalid lifecycle snapshot");
+    }
+    return {
+      sessions: options.sessionKey
+        ? [
+            {
+              key: options.sessionKey,
+              hasActiveRun: replying,
+              status: replying ? ("running" as const) : ("done" as const),
+              updatedAt: Date.now(),
+            },
+          ]
+        : [],
+      complete: false,
+    };
+  };
+  const setReplying = (value: typeof replying) => {
     replying = value;
   };
   const capture = createGatewayMethodCapture();
@@ -592,6 +598,21 @@ describe("grilling while a chat turn replies", () => {
 
     ticket.setReplying(false);
     expect((await ticket.end())[0]).toBe(true);
+  });
+
+  it("refuses End grilling with a retry hint when it cannot read the session", async () => {
+    const ticket = await grillingTicket();
+    ticket.setReplying("unreadable");
+
+    const [ok, , error] = await ticket.end();
+
+    expect(ok).toBe(false);
+    expect(error?.message).toBe(
+      "Could not check whether the agent is still replying in the session chat; try End grilling again. | sessions.describe returned an invalid lifecycle snapshot",
+    );
+    expect(worktreeOf(await ticket.store.get(ticket.card.id))?.grill).toMatchObject({
+      status: "open",
+    });
   });
 
   it("ends a grilling moved to done once the chat turn in flight answered", async () => {

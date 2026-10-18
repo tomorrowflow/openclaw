@@ -51,6 +51,7 @@ function mountComposer(cards: WorkboardCard[], sessionKey: string) {
     container.querySelector<HTMLTextAreaElement>(".workboard-grill-composer textarea");
   const hostBox = () => container.querySelector(".host-composer");
   return {
+    fixture,
     request,
     workboard,
     container,
@@ -93,13 +94,48 @@ it("chats with a grilling card's session through chat.send: Enter sends, Shift+E
     box!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
     await vi.waitFor(() => expect(composer.props.setDraft).toHaveBeenLastCalledWith(""));
     expect(composer.request).toHaveBeenCalledOnce();
-    expect(composer.request).toHaveBeenCalledWith("chat.send", {
+    expect(composer.request, "the card key is agent-scoped").toHaveBeenCalledWith("chat.send", {
       sessionKey: GRILLING_KEY,
-      agentId: "dev",
       message: "Yes, return [].",
       idempotencyKey: expect.any(String),
     });
     expect(composer.props.send, "the host's send refuses subagent sessions").not.toHaveBeenCalled();
+  } finally {
+    composer.dispose();
+  }
+});
+
+it("holds the next message while the agent replies to the last one", async () => {
+  const composer = mountComposer([grillingCard()], GRILLING_KEY);
+  try {
+    const setReplying = (hasActiveRun: boolean) => {
+      Object.assign(composer.fixture.host.sessions, {
+        rows: [{ key: GRILLING_KEY, kind: "direct", updatedAt: 1, hasActiveRun }],
+      });
+      composer.fixture.notify();
+    };
+    const sendButton = () =>
+      composer.container.querySelector<HTMLButtonElement>(".workboard-grill-composer button");
+    const box = composer.grillingBox()!;
+    box.value = "And for whitespace-only input?";
+    box.dispatchEvent(new InputEvent("input"));
+    setReplying(true);
+
+    expect(sendButton()?.disabled).toBe(true);
+    expect(composer.container.querySelector('[role="status"]')?.textContent?.trim()).toBe(
+      "The agent is replying…",
+    );
+    expect(composer.grillingBox()?.disabled, "typing stays allowed").toBe(false);
+    composer
+      .grillingBox()!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+    expect(composer.request).not.toHaveBeenCalled();
+
+    setReplying(false);
+    expect(sendButton()?.disabled).toBe(false);
+    expect(composer.container.querySelector('[role="status"]')).toBeNull();
+    sendButton()!.click();
+    await vi.waitFor(() => expect(composer.request).toHaveBeenCalledOnce());
   } finally {
     composer.dispose();
   }

@@ -24,6 +24,27 @@ export function findWorkboardSession(
   );
 }
 
+/**
+ * Whether an agent run is in progress in the card's session: its started run
+ * is unresolved, or the session owner reports one. While it is, the grilling
+ * neither ends nor takes another chat turn.
+ */
+export function workboardCardRunIsLive(
+  card: WorkboardCard,
+  session: GatewaySessionRow | null,
+): boolean {
+  const startedRunUnresolved =
+    card.status === "running" &&
+    Boolean(
+      (card.sessionKey ?? card.execution?.sessionKey) && (card.runId ?? card.execution?.runId),
+    );
+  return (
+    startedRunUnresolved ||
+    session?.hasActiveRun === true ||
+    (session?.hasActiveRun !== false && session?.status === "running")
+  );
+}
+
 export function getWorkboardLifecycle(
   card: WorkboardCard,
   sessions: readonly GatewaySessionRow[],

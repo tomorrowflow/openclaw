@@ -8,7 +8,9 @@ import type {
 import { t } from "./i18n/index.ts";
 import { formatUiError } from "./lib/format-error.ts";
 import type { WorkboardCapability } from "./lib/workboard/capability.ts";
+import { findWorkboardSession, workboardCardRunIsLive } from "./lib/workboard/lifecycle.ts";
 import { findWorkboardSessionCard } from "./lib/workboard/session-links.ts";
+import type { WorkboardCard } from "./lib/workboard/types.ts";
 
 type ComposerContext = ControlUiViewContext<ControlUiSurfaceProps["composer"]>;
 
@@ -40,11 +42,22 @@ export function createWorkboardGrillingComposer(
       render(nothing, grillingRoot);
       disposeDefault ??= context.mountDefault(defaultRoot);
     };
+    const grillingCard = () => {
+      const card = context.presented
+        ? findWorkboardSessionCard(workboard.state.cards, context.props.sessionKey)
+        : null;
+      return card?.stage?.kind === "grilling" ? card : null;
+    };
+    // A turn sent while the agent still answers the last one can find the
+    // grilling ended by that answer, and nothing would record it.
+    const agentReplying = (card: WorkboardCard) =>
+      workboardCardRunIsLive(card, findWorkboardSession(card, context.host.sessions.rows));
     // The box's own text: the host's draft prop lags a keystroke behind it.
     const send = async (text: string | undefined) => {
       const { props, host } = context;
       const message = text?.trim() ?? "";
-      if (sending || !message) {
+      const card = grillingCard();
+      if (sending || !message || !card || agentReplying(card)) {
         return;
       }
       sending = true;
@@ -53,7 +66,6 @@ export function createWorkboardGrillingComposer(
       const sent = await host
         .request("chat.send", {
           sessionKey: props.sessionKey,
-          ...(props.agentId ? { agentId: props.agentId } : {}),
           message,
           idempotencyKey: crypto.randomUUID(),
         })
@@ -81,13 +93,12 @@ export function createWorkboardGrillingComposer(
     };
     const draw = () => {
       try {
-        const card = context.presented
-          ? findWorkboardSessionCard(workboard.state.cards, context.props.sessionKey)
-          : null;
-        if (card?.stage?.kind !== "grilling") {
+        const card = grillingCard();
+        if (!card) {
           showDefault();
           return;
         }
+        const replying = agentReplying(card);
         disposeDefault?.();
         disposeDefault = undefined;
         const { props, host } = context;
@@ -127,12 +138,19 @@ export function createWorkboardGrillingComposer(
               <button
                 class="btn primary"
                 type="button"
-                ?disabled=${!writable || sending || !props.draft.trim()}
+                ?disabled=${!writable || sending || replying || !props.draft.trim()}
                 @click=${() => void send(grillingRoot.querySelector("textarea")?.value)}
               >
                 ${t("workboard.grillingComposerSend")}
               </button>
             </div>
+            ${
+              replying
+                ? html`<p class="workboard-grill-composer__hint" role="status">
+                    ${t("workboard.grillingComposerReplying")}
+                  </p>`
+                : nothing
+            }
             ${sendError ? html`<p class="workboard-grill-composer__error" role="alert">${sendError}</p>` : nothing}
           </div>`,
           grillingRoot,

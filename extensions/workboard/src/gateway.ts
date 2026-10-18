@@ -248,11 +248,18 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.grill.end", WRITE_SCOPE, async ({ params: input }) => {
     const id = readId(input);
     const card = await store.get(id);
-    if (
-      card &&
-      params.readSessions &&
-      (await workboardCardSessionHasActiveRun(params.readSessions, card))
-    ) {
+    const replying =
+      card && params.readSessions
+        ? await workboardCardSessionHasActiveRun(params.readSessions, card).catch(
+            (error: unknown) => {
+              throw new Error(
+                "Could not check whether the agent is still replying in the session chat; try End grilling again.",
+                { cause: error },
+              );
+            },
+          )
+        : false;
+    if (replying) {
       throw new Error(
         "The agent is still replying in the session chat; end the grilling when it has answered.",
       );

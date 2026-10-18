@@ -26,7 +26,11 @@ export {
   handleWorkboardChanged,
   resumeWorkboardLiveRefresh,
 } from "./live-refresh.ts";
-export { findWorkboardSession, getWorkboardLifecycle } from "./lifecycle.ts";
+export {
+  findWorkboardSession,
+  getWorkboardLifecycle,
+  workboardCardRunIsLive,
+} from "./lifecycle.ts";
 export {
   addWorkboardCardComment,
   archiveWorkboardCard,

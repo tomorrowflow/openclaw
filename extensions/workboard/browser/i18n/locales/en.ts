@@ -266,6 +266,7 @@ export default {
     grillingComposerPlaceholder:
       "Answer the agent's question (Enter sends, Shift+Enter adds a line)",
     grillingComposerSend: "Send",
+    grillingComposerReplying: "The agent is replying…",
     grillingComposerFailed: "The message could not be sent. Try again.",
     sessionChipGrilling: "Grilling — chat with the session",
     detailTemplate: "Template",

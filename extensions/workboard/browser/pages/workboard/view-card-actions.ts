@@ -16,6 +16,7 @@ import {
   archiveWorkboardCard,
   deleteWorkboardCard,
   findWorkboardSession,
+  workboardCardRunIsLive,
   getWorkboardState,
   moveWorkboardCard,
   startWorkboardCard,
@@ -29,7 +30,6 @@ import { workboardCardSessionTarget } from "../../lib/workboard/session-resoluti
 import { openEditModal } from "./view-card-modal.ts";
 import {
   canMutate,
-  cardHasUnresolvedStartedRun,
   engineBlockedByRuntime,
   formatStatusLabel,
   workboardMutationContext,
@@ -137,10 +137,7 @@ export function getCardActionState(props: WorkboardProps, card: WorkboardCard) {
   );
   const busy = state.busyCardIds.has(card.id) || state.dispatching;
   const writable = canMutate(props);
-  const live =
-    cardHasUnresolvedStartedRun(card) ||
-    session?.hasActiveRun === true ||
-    (session?.hasActiveRun !== false && session?.status === "running");
+  const live = workboardCardRunIsLive(card, session);
   return {
     state,
     busy,
