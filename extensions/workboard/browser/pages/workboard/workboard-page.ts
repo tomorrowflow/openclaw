@@ -157,7 +157,9 @@ export function createWorkboardPage(
       }
       connected = nextConnected;
       screenshots?.dispose();
-      screenshots = connected ? createCardScreenshots(client, requestUpdate) : undefined;
+      screenshots = connected
+        ? createCardScreenshots(client, requestUpdate, { live: false })
+        : undefined;
       changes?.dispose();
       changes = connected ? createCardChanges(client, requestUpdate) : undefined;
       metadataGeneration += 1;

@@ -3,6 +3,7 @@
   "uiCapabilities": [
     "page",
     "navigation",
+    "panel",
     "accessory",
     "widget"
   ],

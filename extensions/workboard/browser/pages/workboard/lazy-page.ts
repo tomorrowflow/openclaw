@@ -2,11 +2,13 @@ import { html, nothing, render } from "lit";
 import type { ControlUiView } from "openclaw/plugin-sdk/control-ui";
 import { t } from "../../i18n/index.ts";
 
-export function createLazyWorkboardPage(load: () => Promise<ControlUiView>): ControlUiView {
+export function createLazyWorkboardPage<T = Readonly<Record<string, string>>>(
+  load: () => Promise<ControlUiView<T>>,
+): ControlUiView<T> {
   return (container, initialContext) => {
     let context = initialContext;
-    let mount: ControlUiView | undefined;
-    let handle: ReturnType<ControlUiView>;
+    let mount: ControlUiView<T> | undefined;
+    let handle: ReturnType<ControlUiView<T>>;
     let loading = false;
     let mounted = false;
     let disposed = false;

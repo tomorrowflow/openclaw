@@ -5293,3 +5293,55 @@ workboard-inline-text {
 .workboard-screenshot figcaption {
   color: var(--text);
 }
+
+.workboard-screens {
+  display: grid;
+  flex: 1 1 auto;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  overflow-y: auto;
+}
+
+.workboard-screens .workboard-screenshots {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
+}
+
+.workboard-screens__live-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.workboard-screens__heading {
+  margin: 4px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.workboard-screens__listed,
+.workboard-screens__unavailable {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workboard-screens__listed {
+  flex: 1 1 auto;
+}
+
+.workboard-screens__unavailable {
+  flex: 1 0 100%;
+  order: 1;
+  color: var(--warn);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.workboard-screens__refresh {
+  margin-left: auto;
+}

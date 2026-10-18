@@ -28,6 +28,9 @@ export const icons = {
     <line x1="16" x2="8" y1="13" y2="13" />
     <line x1="16" x2="8" y1="17" y2="17" />
     <line x1="10" x2="8" y1="9" y2="9" />`),
+  image: strokeIcon(svg`<rect width="18" height="18" x="3" y="3" rx="2" />
+    <circle cx="9" cy="9" r="2" />
+    <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />`),
   info: strokeIcon(
     svg`<circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" />`,
   ),

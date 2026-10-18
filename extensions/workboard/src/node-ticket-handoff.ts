@@ -1,9 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { WorkboardCard, WorkboardNodeWorktree } from "@openclaw/workboard-contract";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import { fetchNodeFile } from "./node-files.js";
 import {
   publishCandidate,
   publishNodeTicket,
@@ -13,7 +13,6 @@ import { parseNumstat } from "./node-ticket-rounds.js";
 import {
   HandoffSupersededError,
   hostGit,
-  nodeInvokePayload,
   nodeTicketReopen,
   nodeTicketTarget,
   requireHostGit,
@@ -71,37 +70,6 @@ function handoffCard(card: WorkboardCard): HandoffCard | undefined {
   };
 }
 
-async function fetchNodeBundle(
-  runtime: WorkboardNodeTicketRuntime,
-  nodeId: string,
-  bundlePath: string,
-): Promise<Buffer> {
-  const payload = nodeInvokePayload(
-    await runtime.request(
-      "node.invoke",
-      {
-        nodeId,
-        command: "file.fetch",
-        params: { path: bundlePath, maxBytes: BUNDLE_MAX_BYTES },
-        idempotencyKey: randomUUID(),
-      },
-      { scopes: ["operator.admin"] },
-    ),
-  );
-  if (payload.ok === false) {
-    const reason = [payload.code, payload.message].filter((part) => typeof part === "string");
-    throw new Error(`node ${nodeId} could not send ${bundlePath}: ${reason.join(" ") || "error"}`);
-  }
-  if (typeof payload.base64 !== "string" || typeof payload.sha256 !== "string") {
-    throw new Error(`node ${nodeId} returned an invalid file.fetch payload for ${bundlePath}`);
-  }
-  const bundle = Buffer.from(payload.base64, "base64");
-  if (createHash("sha256").update(bundle).digest("hex") !== payload.sha256.toLowerCase()) {
-    throw new Error(`the fetched bundle ${bundlePath} does not match its sha256`);
-  }
-  return bundle;
-}
-
 /** The imported range fails `git diff --check`, a mechanical check review should not have to catch. */
 class ImportCheckError extends Error {
   constructor(
@@ -140,7 +108,7 @@ async function importNodeBundle(
     );
   }
   await git("bundle", "create", bundlePath, `${worktree.baseCommit}..${worktree.branch}`);
-  const bundle = await fetchNodeBundle(runtime, nodeId, bundlePath);
+  const bundle = await fetchNodeFile(runtime, nodeId, bundlePath, BUNDLE_MAX_BYTES);
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "workboard-bundle-"));
   try {
     const localBundle = path.join(tempDir, path.posix.basename(bundlePath));

@@ -514,8 +514,23 @@ A card whose `metadata.automation.target` has `kind: "node-claude"` runs as a
 fresh Claude Code session on a paired node instead of a Gateway subagent. The
 target names the node (`nodeId`), the node's clone (`repoPath`), where ticket
 worktrees go on the node (`worktreesRoot`), the Gateway host's clone
-(`hostRepoPath`), and optionally `baseRef` and `model`. Only full-host
-dispatch starts node tickets, and only operator clients set targets.
+(`hostRepoPath`), and optionally `baseRef`, `model`, and `screenshotDirs`.
+Only full-host dispatch starts node tickets, and only operator clients set
+targets.
+
+`screenshotDirs` lists worktree-relative directories the agent writes
+screenshots into (default `["docs/screenshots"]`; at most 8, no `..` or
+absolute paths). A node ticket's session header shows a **Screens** button
+that opens a session panel with the images under those directories in the
+node worktree right now (two levels deep, newest first) and each round's
+committed images. The panel lists again every 20 seconds while it is open and
+the card is running, skipping a tick while the previous list is still loading;
+a node walk that takes over 30 seconds shows as unavailable. The card drawer's
+**Screenshots** tab shows only committed rounds and never walks the node. Live
+listing uses File Transfer's `dir.list` and
+`file.fetch`, so it needs the grants in
+[Workboard node setup](/plugins/workboard-node-setup#gateway-side); without
+them the panel names the denial and still shows the committed rounds.
 
 A project board can carry the target once as
 `orchestration.defaultTarget` through `workboard.boards.upsert`. New cards on
