@@ -19,8 +19,8 @@ import {
   resolveDispatchWorkspaceAccess,
   type ResolveAgentWorkspaceRuntime,
 } from "./dispatcher-workspace.js";
+import { buildNodeTicketMessage } from "./node-ticket-brief.js";
 import {
-  buildNodeTicketMessage,
   createNodeTicketWorktree,
   nodeTicketReopen,
   queueNodeTicketStart,
@@ -596,6 +596,7 @@ async function runWorkboardDispatch(
                 card: claimed.card,
                 worktree: roundWorktree,
                 context,
+                grillLog: await params.store.readNodeGrillLog(roundWorktree),
               }),
             })
           : await params.subagent.run({

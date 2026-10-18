@@ -25,12 +25,12 @@ import {
   RUNNING_HEARTBEAT_STALE_MS,
 } from "./store-constants.js";
 import type { WorkboardMutationScope } from "./store-inputs.js";
+import { removeUndefinedMetadataFields } from "./store-metadata-budget.js";
 import {
   capText,
   metadataIsEmpty,
   normalizeEvents,
   normalizeTimestamp,
-  removeUndefinedMetadataFields,
 } from "./store-normalizers.js";
 
 export function compareCards(left: WorkboardCard, right: WorkboardCard): number {

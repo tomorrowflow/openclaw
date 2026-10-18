@@ -112,6 +112,10 @@ function normalizeStage(value: unknown): WorkboardCardStage | undefined {
         ? undefined
         : { kind, since, ...(escalatedAt === undefined ? {} : { escalatedAt }) };
     }
+    case "grilling": {
+      const round = finiteNumber(value.round);
+      return since === undefined || round === undefined ? undefined : { kind, since, round };
+    }
     case "published": {
       const reworkRound = finiteNumber(value.reworkRound);
       return since === undefined ||
@@ -140,6 +144,20 @@ function normalizeStage(value: unknown): WorkboardCardStage | undefined {
   }
 }
 
+function normalizeGrill(value: unknown): WorkboardCard["grill"] {
+  if (
+    !isRecord(value) ||
+    (value.status !== "open" && value.status !== "closed") ||
+    typeof value.attachmentId !== "string"
+  ) {
+    return undefined;
+  }
+  const rounds = finiteNumber(value.rounds);
+  return rounds === undefined
+    ? undefined
+    : { status: value.status, rounds, attachmentId: value.attachmentId };
+}
+
 function normalizeCard(value: unknown): WorkboardCard | null {
   if (!isRecord(value)) {
     return null;
@@ -160,6 +178,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
   const metadata = normalizeMetadata(value.metadata);
   const stage = normalizeStage(value.stage);
   const rounds = normalizeNodeRounds(value.rounds);
+  const grill = normalizeGrill(value.grill);
   return {
     id,
     title,
@@ -183,6 +202,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
     ...(metadata ? { metadata } : {}),
     ...(stage ? { stage } : {}),
     ...(rounds.length > 0 ? { rounds } : {}),
+    ...(grill ? { grill } : {}),
     ...(typeof value.pullRequestUrl === "string" && value.pullRequestUrl.startsWith("https://")
       ? { pullRequestUrl: value.pullRequestUrl }
       : {}),

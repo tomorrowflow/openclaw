@@ -36,7 +36,10 @@ export class WorkboardNodeTicketQueueStore extends WorkboardWorkflowStore {
           }
           const worktree = automation.target?.worktree;
           const handoff = worktree?.handoff;
-          const reopened = handoff?.phase === "published" || handoff?.phase === "questions";
+          const reopened =
+            handoff?.phase === "published" ||
+            handoff?.phase === "questions" ||
+            handoff?.phase === "grilling";
           const notice = !reopened || handoff.slotWaitNotedAt === undefined;
           return {
             ...(queued.status !== card.status ? { status: queued.status } : {}),

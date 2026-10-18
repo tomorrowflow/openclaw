@@ -125,6 +125,9 @@ function place(
         result.needsYou.push(waiting(card, "questions", stage.since));
       }
       return;
+    case "grilling":
+      result.needsYou.push(waiting(card, "grilling", stage.since));
+      return;
     case "queued":
     case "running":
       result.inFlight.push(inFlight(card));

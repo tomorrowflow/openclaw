@@ -41,8 +41,8 @@ function handoffCard(card: WorkboardCard): HandoffCard | undefined {
   const target = nodeTicketTarget(card);
   const worktree = target?.worktree;
   // A rework start (D54) or an answered ticket's start claims the card, so it
-  // is running, before it swaps out the published or questions worktree
-  // record. Neither handoff is an import to resume; cleaning up after one
+  // is running, before it swaps out the published, questions, or grilling
+  // worktree record. None is an import to resume; cleaning up after one
   // would delete the worktree the start is about to reuse. A re-run of a card
   // whose import failed claims it after the done report, so that pending
   // record is the failed one, not this start's.
@@ -52,6 +52,7 @@ function handoffCard(card: WorkboardCard): HandoffCard | undefined {
     !worktree?.handoff ||
     worktree.handoff.phase === "published" ||
     worktree.handoff.phase === "questions" ||
+    worktree.handoff.phase === "grilling" ||
     (worktree.handoff.phase === "pending" &&
       claim &&
       claim.claimedAt > worktree.handoff.reportedAt) ||
@@ -404,7 +405,9 @@ async function reopenNodeTicket(params: {
       status: rework ? "backlog" : "review",
       body: rework
         ? `Reopened without a review comment; add what should change and move it to todo again to start rework round ${round}.`
-        : "Moved to todo without an answer; answer the questions in a comment and move it to todo again to resume the session.",
+        : reopen.kind === "grill"
+          ? "Moved to todo without an answer; answer the grilling question in the card's Grilling tab to resume the session."
+          : "Moved to todo without an answer; answer the questions in a comment and move it to todo again to resume the session.",
       applies: (current) => nodeTicketReopen(current, params.now())?.reviewed === false,
     });
     return;
@@ -456,13 +459,20 @@ async function drainStartQueue(params: {
   );
 }
 
-/** A ticket moved to done while it waits with questions has nothing to publish yet. */
-function unansweredDone(card: WorkboardCard): string | undefined {
+/**
+ * A ticket moved to done while it waits with questions or on a grilling
+ * answer has nothing to publish yet.
+ */
+function unansweredDone(
+  card: WorkboardCard,
+): { worktreePath: string; phase: "questions" | "grilling" } | undefined {
   const worktree = nodeTicketTarget(card)?.worktree;
-  return card.status === "done" &&
-    !card.metadata?.archivedAt &&
-    worktree?.handoff?.phase === "questions"
-    ? worktree.path
+  const phase = worktree?.handoff?.phase;
+  if (card.status !== "done" || card.metadata?.archivedAt || !worktree) {
+    return undefined;
+  }
+  return phase === "questions" || phase === "grilling"
+    ? { worktreePath: worktree.path, phase }
     : undefined;
 }
 
@@ -521,12 +531,18 @@ export function createNodeTicketHandoffs(params: {
             });
           } else if (reopen) {
             await reopenNodeTicket({ store: params.store, start: params.start, card, now });
+          } else if (unanswered?.phase === "grilling") {
+            await params.store.endNodeGrillByOperator(card.id, unanswered);
           } else if (unanswered) {
+            const { worktreePath } = unanswered;
             await params.store.addNodeTicketNotice(card.id, {
-              worktreePath: unanswered,
+              worktreePath,
               status: "review",
               body: "This ticket stopped with open questions, so there is nothing to publish yet. Answer them in a comment and move it to todo, or archive the card; its node worktree stays until removed by hand.",
-              applies: (current) => unansweredDone(current) === unanswered,
+              applies: (current) => {
+                const still = unansweredDone(current);
+                return still?.phase === "questions" && still.worktreePath === worktreePath;
+              },
             });
           }
         } catch (error) {
