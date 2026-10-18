@@ -77,9 +77,14 @@ async function grillingTicket(store = createWorkboardSqliteTestStore(), open = t
   const answer = gateway.respond.getMockImplementation()!;
   let history: unknown[] = [];
   let failCreate: string | undefined;
+  // Grill sessions the fake Gateway created, and whether a run started in each.
+  const grillSessions = new Map<string, boolean>();
   gateway.respond.mockImplementation((method, params) => {
     if (method === "chat.history") {
       return { messages: history };
+    }
+    if (method === "sessions.create" && String(params?.key).includes(":grill-")) {
+      grillSessions.set(String(params?.key), !failCreate);
     }
     if (method === "sessions.create" && String(params?.key).includes(":grill-") && failCreate) {
       return {
@@ -99,19 +104,21 @@ async function grillingTicket(store = createWorkboardSqliteTestStore(), open = t
     if (replying === "unreadable") {
       throw new Error("sessions.describe returned an invalid lifecycle snapshot");
     }
-    return {
-      sessions: options.sessionKey
-        ? [
-            {
-              key: options.sessionKey,
+    const key = options.sessionKey;
+    // A grill session exists once created; a create that started no run leaves it idle.
+    const ran = key?.includes(":grill-") ? grillSessions.get(key) : key !== undefined;
+    const session =
+      key === undefined || ran === undefined
+        ? undefined
+        : ran
+          ? {
+              key,
               hasActiveRun: replying,
               status: replying ? ("running" as const) : ("done" as const),
               updatedAt: Date.now(),
-            },
-          ]
-        : [],
-      complete: false,
-    };
+            }
+          : { key, hasActiveRun: false };
+    return { sessions: session ? [session] : [], complete: false };
   };
   const capture = createGatewayMethodCapture();
   (capture.api.runtime as { gateway: unknown }).gateway = gateway;
@@ -273,6 +280,25 @@ describe("node ticket grilling handoff", () => {
     expect(worktreeOf(retried)?.grill?.sessionKey).toBe(
       `agent:dev:grill-${ticket.card.id.slice(0, 8)}-1`,
     );
+  });
+
+  it("adopts a grill session that ran its handoff but was not recorded, without sending the handoff again", async () => {
+    const ticket = await grillingTicket(undefined, false);
+    vi.spyOn(ticket.store, "setNodeGrillSession").mockResolvedValueOnce(undefined);
+
+    await ticket.handoffs.resume(ticket.warn);
+
+    const key = `agent:dev:grill-${ticket.card.id.slice(0, 8)}-1`;
+    expect(ticket.warn).toHaveBeenCalledWith(
+      `workboard: grill session ${key} of card ${ticket.card.id} was not recorded; the card's grilling changed while it was created`,
+    );
+    expect(await ticket.grillSessionKey()).toBeUndefined();
+
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect(ticket.grillCreates()).toHaveLength(1);
+    expect(await ticket.grillSessionKey()).toBe(key);
+    expect((await ticket.store.get(ticket.card.id))?.status).toBe("review");
   });
 
   it("blocks a grill report without a handoff", async () => {

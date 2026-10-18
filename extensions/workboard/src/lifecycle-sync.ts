@@ -13,6 +13,7 @@ import {
 import type { WorkboardNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import { applyNodeTicketReport, nodeTicketIdleVerdict, nodeTicketTarget } from "./node-ticket.js";
 import {
+  sessionProvesPreparedAcceptance,
   workboardCardMatchesLifecycleLink,
   workboardCardSessionLookupKey,
   workboardCardTakesEndedRunReport,
@@ -48,7 +49,7 @@ type WorkboardLifecycleObservation = Partial<
   state: keyof typeof LIFECYCLE_TARGETS;
 };
 
-type WorkboardLifecycleSession = {
+export type WorkboardLifecycleSession = {
   key: string;
   updatedAt?: number;
   status?: "running" | "done" | "failed" | "killed" | "timeout";
@@ -60,16 +61,6 @@ type WorkboardLifecycleSessionSnapshot = {
   sessions: WorkboardLifecycleSession[];
   complete: boolean;
 };
-
-function sessionProvesPreparedAcceptance(session: WorkboardLifecycleSession): boolean {
-  return (
-    session.hasActiveRun === true ||
-    session.status === "done" ||
-    session.status === "failed" ||
-    session.status === "killed" ||
-    session.status === "timeout"
-  );
-}
 
 type WorkboardLifecycleSessionReadOptions = {
   includeUnknown: boolean;

@@ -1,5 +1,8 @@
 import type { WorkboardCard } from "@openclaw/workboard-contract";
-import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
+import type {
+  WorkboardLifecycleSession,
+  WorkboardLifecycleSessionReader,
+} from "./lifecycle-sync.js";
 import { nodeTicketReportOwnsRound, nodeTicketTarget } from "./node-ticket.js";
 import { cardBoardId, cardRunId, cardSessionKey } from "./store-card-helpers.js";
 
@@ -112,5 +115,16 @@ export async function workboardSessionHasActiveRun(
   return (
     session?.hasActiveRun === true ||
     (session?.hasActiveRun !== false && session?.status === "running")
+  );
+}
+
+/** The session ran a turn: the Gateway accepted a run in it. */
+export function sessionProvesPreparedAcceptance(session: WorkboardLifecycleSession): boolean {
+  return (
+    session.hasActiveRun === true ||
+    session.status === "done" ||
+    session.status === "failed" ||
+    session.status === "killed" ||
+    session.status === "timeout"
   );
 }

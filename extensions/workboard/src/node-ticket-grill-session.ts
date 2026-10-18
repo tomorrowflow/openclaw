@@ -13,7 +13,11 @@ import {
   sessionCreateRunError,
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
-import { sanitizeSessionSegment, workboardSessionHasActiveRun } from "./session-link.js";
+import {
+  sanitizeSessionSegment,
+  sessionProvesPreparedAcceptance,
+  workboardSessionHasActiveRun,
+} from "./session-link.js";
 import { MAX_BLOCK_REASON_CHARS } from "./store-constants.js";
 import { capText } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
@@ -60,19 +64,14 @@ export function nodeGrillSessionToOpen(
 
 /**
  * Creates the grill session: a normal session of the card's agent on the
- * Gateway, with its agent's own model, that starts on the handoff. The key
- * names the card and the grilling, so a retried create adopts the session.
+ * Gateway, with its agent's own model, that starts on the handoff.
  */
 async function startNodeGrillSession(
   runtime: WorkboardNodeTicketRuntime,
   card: WorkboardCard,
-  round: number,
+  key: string,
   handoff: string,
 ): Promise<string> {
-  const name = `grill-${sanitizeSessionSegment(card.id.slice(0, 8), "card")}-${round}`;
-  const key = card.agentId
-    ? `agent:${sanitizeSessionSegment(card.agentId, "agent")}:${name}`
-    : name;
   const result = await runtime.request(
     "sessions.create",
     {
@@ -92,25 +91,42 @@ async function startNodeGrillSession(
 
 /**
  * Opens the grill session of a grilling that waits for one and records it on
- * the card, which then names it. A session that cannot start blocks the card;
- * a move to todo brings it back to review, where the next pass tries again.
+ * the card, which then names it. The key names the card and the round, so a
+ * pass after a create whose session was not recorded adopts the session once
+ * it ran its handoff turn, instead of sending the handoff again; a session
+ * whose run never started gets the create again. A session that cannot start
+ * blocks the card; a move to todo brings it back to review, where the next
+ * pass tries again.
  */
 export async function openNodeGrillSession(params: {
   store: WorkboardStore;
   runtime: WorkboardNodeTicketRuntime;
+  readSessions: WorkboardLifecycleSessionReader | undefined;
   card: WorkboardCard;
   worktree: WorkboardNodeWorktree & { grill: WorkboardNodeGrill };
+  warn: (message: string) => void;
 }): Promise<void> {
   const { store, card, worktree } = params;
   const round = worktree.grill.rounds;
+  const name = `grill-${sanitizeSessionSegment(card.id.slice(0, 8), "card")}-${round}`;
+  const key = card.agentId
+    ? `agent:${sanitizeSessionSegment(card.agentId, "agent")}:${name}`
+    : name;
   let sessionKey: string;
   try {
-    const log = await store.readNodeGrillLog(worktree);
-    const handoff = log === undefined ? undefined : grillHandoffFromLog(log, round);
-    if (!handoff) {
-      throw new Error("its handoff could not be read from grilling.md");
+    const existing = params.readSessions
+      ? (await params.readSessions({ includeUnknown: false, sessionKey: key })).sessions[0]
+      : undefined;
+    if (existing && sessionProvesPreparedAcceptance(existing)) {
+      sessionKey = existing.key;
+    } else {
+      const log = await store.readNodeGrillLog(worktree);
+      const handoff = log === undefined ? undefined : grillHandoffFromLog(log, round);
+      if (!handoff) {
+        throw new Error("its handoff could not be read from grilling.md");
+      }
+      sessionKey = await startNodeGrillSession(params.runtime, card, key, handoff);
     }
-    sessionKey = await startNodeGrillSession(params.runtime, card, round, handoff);
   } catch (error) {
     await store.block(
       card.id,
@@ -124,7 +140,16 @@ export async function openNodeGrillSession(params: {
     );
     return;
   }
-  await store.setNodeGrillSession(card.id, { worktreePath: worktree.path, round, sessionKey });
+  const recorded = await store.setNodeGrillSession(card.id, {
+    worktreePath: worktree.path,
+    round,
+    sessionKey,
+  });
+  if (!recorded) {
+    params.warn(
+      `workboard: grill session ${sessionKey} of card ${card.id} was not recorded; the card's grilling changed while it was created`,
+    );
+  }
 }
 
 /**

@@ -546,8 +546,10 @@ export function createNodeTicketHandoffs(params: {
             await openNodeGrillSession({
               store: params.store,
               runtime: params.runtime,
+              readSessions: params.readSessions,
               card,
               worktree: grilling,
+              warn,
             });
           } else if (unanswered?.phase === "grilling") {
             // The grill session's last reply is the result, so a reply still
