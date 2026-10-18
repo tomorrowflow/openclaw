@@ -182,6 +182,9 @@ describe("node ticket grilling", () => {
     const ticket = await grillingTicket();
     const { store, card } = ticket;
     expect(ticket.launches()[0]?.[1]?.message).toContain("Use `grill` to start a live grilling");
+    expect(ticket.launches()[0]?.[1]?.message).toContain(
+      "as the readable text of your reply, above the report block",
+    );
 
     const asked = await store.get(card.id);
     expect(asked?.status).toBe("review");
