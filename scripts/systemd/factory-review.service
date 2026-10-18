@@ -1,0 +1,8 @@
+[Unit]
+Description=Trace published factory cards' review findings to session edits (agentplay review docs)
+After=pull-factory-transcripts.service factory-digest.service
+
+[Service]
+Type=oneshot
+# Assumes the Gateway host checkout at ~/openclaw and the agentplay checkout at ~/agentplay.
+ExecStart=%h/openclaw/scripts/factory-review.sh
