@@ -108,6 +108,8 @@ prepare-source_one() {
     git fetch --quiet --depth 1 $FORK_REMOTE_URL $SHA
     git checkout --quiet --force --detach FETCH_HEAD
     corepack pnpm install --frozen-lockfile --reporter=silent
+    # A killed deploy leaves the build lock behind on this node too.
+    node scripts/release-stale-dist-lock.mjs
     corepack pnpm build >/dev/null
     node scripts/prepare-global-install-package-json.mjs
     trap 'node scripts/prepare-global-install-package-json.mjs --restore' EXIT
