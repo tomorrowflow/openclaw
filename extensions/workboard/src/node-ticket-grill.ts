@@ -122,5 +122,5 @@ export function nodeGrillIsLive(card: WorkboardCard, worktree: WorkboardNodeWork
 
 /** The grill session's name in the session list and on the card. */
 export function grillSessionName(card: WorkboardCard): string {
-  return `Grill ${card.title}`.slice(0, 500);
+  return `Grill ${card.title}`;
 }
