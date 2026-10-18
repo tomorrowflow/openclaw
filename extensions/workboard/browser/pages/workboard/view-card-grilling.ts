@@ -3,16 +3,9 @@ import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { renderMarkdown } from "../../components/host-components.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
-import {
-  answerWorkboardGrill,
-  endWorkboardGrill,
-  type WorkboardCard,
-} from "../../lib/workboard/index.ts";
+import { endWorkboardGrill, type WorkboardCard } from "../../lib/workboard/index.ts";
 import { getCardActionState } from "./view-card-actions.ts";
 import { workboardMutationContext, type WorkboardProps } from "./view-helpers.ts";
-
-// The server's cap on one answer or closing note; the textarea stops there.
-const MAX_GRILL_ANSWER_CHARS = 4000;
 
 type LogState =
   | { status: "missing" }
@@ -20,12 +13,10 @@ type LogState =
   | { status: "loaded"; text: string }
   | { status: "failed"; error: string };
 
-/** The drawer card's grilling log and answer draft on one Gateway connection. */
+/** The drawer card's grilling log on one Gateway connection. */
 export type CardGrilling = {
   /** The card's `grilling.md`; a read starts whenever the log grew. Undefined without a grill. */
   log(card: WorkboardCard): LogState | undefined;
-  draft(cardId: string): string;
-  setDraft(cardId: string, text: string): void;
   dispose(): void;
 };
 
@@ -46,7 +37,6 @@ export function createCardGrilling(
   requestUpdate: () => void,
 ): CardGrilling {
   let loaded: { version: string; state: LogState } | undefined;
-  const drafts = new Map<string, string>();
   return {
     log(card) {
       const attachmentId = card.grill?.attachmentId;
@@ -83,15 +73,8 @@ export function createCardGrilling(
         });
       return pending.state;
     },
-    draft(cardId) {
-      return drafts.get(cardId) ?? "";
-    },
-    setDraft(cardId, text) {
-      drafts.set(cardId, text);
-    },
     dispose() {
       loaded = undefined;
-      drafts.clear();
     },
   };
 }
@@ -112,9 +95,10 @@ function renderLog(state: LogState | undefined) {
 }
 
 /**
- * The Grilling tab: the question-and-answer log, and while the session waits
- * on the operator, the answer box that resumes it and End grilling, which
- * sends the box's text along as a closing note.
+ * The Grilling tab: the log of the grilling, and while it is live, the way to
+ * the card's session chat where it happens and End grilling. End grilling
+ * waits while the session replies, so the resumed round's start does not
+ * race that reply.
  */
 export function renderGrillingPanel(
   props: WorkboardProps,
@@ -122,16 +106,8 @@ export function renderGrillingPanel(
   card: WorkboardCard,
   active: boolean,
 ) {
-  const { busy, writable } = getCardActionState(props, card);
+  const { busy, live, sessionTarget, writable } = getCardActionState(props, card);
   const waiting = card.stage?.kind === "grilling";
-  const draft = grilling.draft(card.id);
-  const mutation = { ...workboardMutationContext(props), cardId: card.id };
-  const clearDraft = (sent: boolean) => {
-    if (sent && grilling.draft(card.id) === draft) {
-      grilling.setDraft(card.id, "");
-      props.onRequestUpdate?.();
-    }
-  };
   return html`<section
     class="workboard-detail__tabpanel workboard-grilling"
     id="workboard-detail-panel-grilling"
@@ -142,51 +118,40 @@ export function renderGrillingPanel(
   >
     ${active ? renderLog(grilling.log(card)) : nothing}
     ${
-      active && writable && card.grill?.status === "open"
-        ? html`<div class="workboard-grilling__compose">
-            <textarea
-              class="settings-input"
-              aria-label=${t("workboard.grillingAnswerLabel")}
-              rows="4"
-              maxlength=${MAX_GRILL_ANSWER_CHARS}
-              placeholder=${t("workboard.grillingAnswerPlaceholder")}
-              .value=${draft}
-              ?disabled=${busy || !waiting}
-              @input=${(event: InputEvent) => {
-                if (event.currentTarget instanceof HTMLTextAreaElement) {
-                  grilling.setDraft(card.id, event.currentTarget.value);
-                  props.onRequestUpdate?.();
-                }
-              }}
-            ></textarea>
-            ${
-              waiting
-                ? nothing
-                : html`<p class="workboard-grilling__note">${t("workboard.grillingWorking")}</p>`
-            }
+      active && waiting
+        ? html`<p class="workboard-grilling__note">${t("workboard.grillingChatNote")}</p>
             <div class="workboard-grilling__actions">
-              <button
-                class="btn"
-                type="button"
-                data-grilling-action="end"
-                title=${t("workboard.grillingEndTitle")}
-                ?disabled=${busy || !waiting}
-                @click=${async () => clearDraft(await endWorkboardGrill({ ...mutation, note: draft }))}
-              >
-                ${t("workboard.grillingEnd")}
-              </button>
-              <button
-                class="btn primary"
-                type="button"
-                data-grilling-action="send"
-                ?disabled=${busy || !waiting || !draft.trim()}
-                @click=${async () =>
-                  clearDraft(await answerWorkboardGrill({ ...mutation, answer: draft }))}
-              >
-                ${t("workboard.grillingSend")}
-              </button>
-            </div>
-          </div>`
+              ${
+                writable
+                  ? html`<button
+                      class="btn"
+                      type="button"
+                      data-grilling-action="end"
+                      title=${live ? t("workboard.grillingEndReplying") : t("workboard.grillingEndTitle")}
+                      ?disabled=${busy || live}
+                      @click=${() =>
+                        void endWorkboardGrill({
+                          ...workboardMutationContext(props),
+                          cardId: card.id,
+                        })}
+                    >
+                      ${t("workboard.grillingEnd")}
+                    </button>`
+                  : nothing
+              }
+              ${
+                sessionTarget
+                  ? html`<button
+                      class="btn primary"
+                      type="button"
+                      data-grilling-action="chat"
+                      @click=${() => props.onOpenSession(sessionTarget)}
+                    >
+                      ${t("workboard.grillingOpenChat")}
+                    </button>`
+                  : nothing
+              }
+            </div>`
         : nothing
     }
   </section>`;

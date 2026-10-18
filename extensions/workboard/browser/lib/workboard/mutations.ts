@@ -285,32 +285,10 @@ export async function runWorkboardCardMutation<T>(
   }
 }
 
-/** Sends the operator's answer to a node ticket's waiting grilling question. */
-export async function answerWorkboardGrill(
-  params: WorkboardCardMutationParams & { answer: string },
-) {
-  const answer = params.answer.trim();
-  if (!answer) {
-    return false;
-  }
+/** Ends a node ticket's grilling; the session continues the ticket with what is settled. */
+export async function endWorkboardGrill(params: WorkboardCardMutationParams) {
   return runWorkboardCardMutation(params, async (state, client) => {
-    const payload = await client.request("workboard.cards.grill.answer", {
-      id: params.cardId,
-      answer,
-    });
-    replaceCard(state, normalizeCardPayload(payload));
-    return true;
-  });
-}
-
-/** Ends a node ticket's grilling; the session continues the ticket, with the note if one is given. */
-export async function endWorkboardGrill(params: WorkboardCardMutationParams & { note: string }) {
-  const note = params.note.trim();
-  return runWorkboardCardMutation(params, async (state, client) => {
-    const payload = await client.request("workboard.cards.grill.end", {
-      id: params.cardId,
-      ...(note ? { note } : {}),
-    });
+    const payload = await client.request("workboard.cards.grill.end", { id: params.cardId });
     replaceCard(state, normalizeCardPayload(payload));
     return true;
   });

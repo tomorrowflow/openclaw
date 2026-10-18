@@ -179,7 +179,7 @@ it("offers a node ticket's session its Screens panel, and no other session", asy
   }
 });
 
-it("says a grilling card waits on an answer and opens it on the board", async () => {
+it("says a grilling card chats with its session and opens it on the board", async () => {
   const fixture = workboardTestHost();
   fixture.connection.connected = true;
   const sessionKey = "agent:dev:subagent:workboard-platform-card";
@@ -201,7 +201,7 @@ it("says a grilling card waits on an answer and opens it on the board", async ()
     await vi.waitFor(() => expect(container.textContent).toContain(card.title));
     const link = container.querySelector("a")!;
     expect(link.querySelector(".workboard-session-chip__status")?.textContent).toBe(
-      "Grilling — answer on card",
+      "Grilling — chat with the session",
     );
     link.click();
     expect(workboard.state.revealCardId).toBe(card.id);

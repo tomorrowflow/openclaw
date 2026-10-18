@@ -80,7 +80,7 @@ const inlineDiscardOpen = new WeakMap<WorkboardUiState, () => void>();
 export function openCardDetails(state: WorkboardUiState, card: WorkboardCard) {
   inlineDiscardOpen.delete(state);
   state.detailCardId = card.id;
-  // A card waiting on the operator's grilling answer opens where it is given.
+  // A grilling card opens on its Grilling tab, which leads to the session chat where it happens.
   state.detailTab = card.stage?.kind === "grilling" ? "grilling" : "overview";
   state.detailCommentBody = state.detailCommentDrafts.get(card.id) ?? "";
 }

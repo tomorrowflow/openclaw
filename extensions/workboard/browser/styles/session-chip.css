@@ -71,3 +71,49 @@
   font: inherit;
   font-size: 11px;
 }
+
+.workboard-grill-composer {
+  display: grid;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 800px;
+  margin: 8px auto 12px;
+  padding-inline: 16px;
+}
+
+.workboard-grill-composer__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.workboard-grill-composer__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.workboard-grill-composer__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 64px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  color: var(--text);
+  background: var(--panel-strong);
+  font: inherit;
+  resize: vertical;
+}
+
+.workboard-grill-composer__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.workboard-grill-composer__error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 11px;
+}
