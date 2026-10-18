@@ -144,3 +144,51 @@ export function createWorkboardSessionResolver(host: ControlUiHost, notify: () =
     },
   };
 }
+
+/**
+ * Running cards each own one bounded lookup: the roster omits workboard
+ * subagent sessions, so a closed running card would otherwise read as unknown.
+ */
+export function createWorkboardSessionResolverPool(host: ControlUiHost, notify: () => void) {
+  const resolvers = new Map<string, ReturnType<typeof createWorkboardSessionResolver>>();
+
+  return {
+    get sessions(): GatewaySessionRow[] {
+      return [...resolvers.values()].flatMap(({ resolution }) =>
+        resolution?.status === "resolved" ? [resolution.session] : [],
+      );
+    },
+    sync(sessionKeys: readonly string[], enabled: boolean) {
+      const keys = new Set(
+        sessionKeys
+          .map((sessionKey) => workboardHost().sessions.normalizeKey(sessionKey))
+          .filter((key) => key && !isReservedSessionKey(key)),
+      );
+      for (const [key, resolver] of resolvers) {
+        if (!keys.has(key)) {
+          resolver.dispose();
+          resolvers.delete(key);
+        }
+      }
+      for (const key of keys) {
+        let resolver = resolvers.get(key);
+        if (!resolver) {
+          resolver = createWorkboardSessionResolver(host, notify);
+          resolvers.set(key, resolver);
+        }
+        resolver.sync(key, enabled);
+      }
+    },
+    refresh() {
+      for (const resolver of resolvers.values()) {
+        resolver.refresh();
+      }
+    },
+    dispose() {
+      for (const resolver of resolvers.values()) {
+        resolver.dispose();
+      }
+      resolvers.clear();
+    },
+  };
+}

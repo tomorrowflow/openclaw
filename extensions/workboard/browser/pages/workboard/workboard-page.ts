@@ -9,7 +9,7 @@ import { formatUiError } from "../../lib/format-error.ts";
 import { workboardCardBoardId } from "../../lib/workboard/board-filter.ts";
 import { workboardBoardName } from "../../lib/workboard/board-presentation.ts";
 import type { WorkboardCapability } from "../../lib/workboard/capability.ts";
-import { workboardCardSessionKey } from "../../lib/workboard/card-state.ts";
+import { isActiveWorkboardCard, workboardCardSessionKey } from "../../lib/workboard/card-state.ts";
 import {
   configureWorkboardLiveRefresh,
   handleWorkboardChanged,
@@ -24,7 +24,10 @@ import {
   WORKBOARD_CHANGED_EVENT,
 } from "../../lib/workboard/index.ts";
 import { invalidateWorkboardLoads } from "../../lib/workboard/runtime.ts";
-import { createWorkboardSessionResolver } from "../../lib/workboard/session-resolution.ts";
+import {
+  createWorkboardSessionResolver,
+  createWorkboardSessionResolverPool,
+} from "../../lib/workboard/session-resolution.ts";
 import type { WorkboardBoardMetadata } from "../../lib/workboard/types.ts";
 import { matchesAgentScope } from "./agent-filter.ts";
 import { matchesBoardFilter, WORKBOARD_ALL_BOARDS_FILTER } from "./board-filter.ts";
@@ -104,6 +107,7 @@ export function createWorkboardPage(
       });
     };
     const sessionResolver = createWorkboardSessionResolver(host, requestUpdate);
+    const runningSessionResolvers = createWorkboardSessionResolverPool(host, requestUpdate);
     const sessionsBoard = createSessionsBoardController(host, requestUpdate);
     const stop = () => {
       // A paused page no longer owns shared loads started by session actions.
@@ -297,8 +301,13 @@ export function createWorkboardPage(
       const focusedCard = state.draftOpen
         ? state.cards.find((card) => card.id === state.editingCardId)
         : getVisibleDetailCard(state);
-      sessionResolver.sync(
-        focusedCard ? workboardCardSessionKey(focusedCard) : undefined,
+      const focusedSessionKey = focusedCard ? workboardCardSessionKey(focusedCard) : undefined;
+      sessionResolver.sync(focusedSessionKey, connected && context.presented);
+      runningSessionResolvers.sync(
+        state.cards
+          .filter((card) => card.status === "running" && isActiveWorkboardCard(card))
+          .map((card) => workboardCardSessionKey(card))
+          .filter((key): key is string => Boolean(key) && key !== focusedSessionKey),
         connected && context.presented,
       );
       const sessionResolution = sessionResolver.resolution;
@@ -313,7 +322,9 @@ export function createWorkboardPage(
           : (sessionResolution?.candidates ?? []);
       const sessions = [
         ...new Map(
-          [...host.sessions.rows, ...candidates].map((session) => [session.key, session]),
+          [...host.sessions.rows, ...runningSessionResolvers.sessions, ...candidates].map(
+            (session) => [session.key, session],
+          ),
         ).values(),
       ];
       const onNewBoard = () => {
@@ -440,6 +451,7 @@ export function createWorkboardPage(
               changes?.refresh();
               void refreshMetadata();
               sessionResolver.refresh();
+              runningSessionResolvers.refresh();
               void refreshWorkboard({
                 host: workboard,
                 client: connected ? client : null,
@@ -549,6 +561,7 @@ export function createWorkboardPage(
         unsubscribeCron();
         sessionsBoard.dispose();
         sessionResolver.dispose();
+        runningSessionResolvers.dispose();
         screenshots?.dispose();
         changes?.dispose();
         document.removeEventListener("visibilitychange", onVisibilityChange);
