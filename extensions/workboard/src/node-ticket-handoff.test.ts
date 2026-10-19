@@ -1018,6 +1018,69 @@ describe("node ticket draft PR", () => {
     expect(gateway.respond).not.toHaveBeenLastCalledWith("sessions.create", expect.anything());
   });
 
+  it("finishes on the merged PR that already holds the accepted commit, without pushing or opening one", async () => {
+    const { store, card, repos, handoffs, warn, github } = await acceptImportedTicket();
+    const branch = `factory/${card.id}`;
+    const head = git(repos.hostRepo, "rev-parse", branch);
+    const mergedUrl = "https://github.com/acme/app/pull/134";
+    github.tokens.set("acme/app", "token-app");
+    github.closedPulls.push({ html_url: mergedUrl, sha: head, merged: true });
+
+    await handoffs.resume(warn);
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("done");
+    expect(github.requests.filter((request) => request.method === "POST")).toEqual([]);
+    expect(stored?.metadata?.automation?.target?.worktree?.handoff).toMatchObject({
+      phase: "published",
+      headCommit: head,
+      pullRequestUrl: mergedUrl,
+    });
+    expect(stored?.metadata?.proof?.at(-1)).toMatchObject({ status: "passed", url: mergedUrl });
+    expect(stored?.metadata?.comments?.at(-1)?.body).toBe(
+      `${mergedUrl} already merged ${head.slice(0, 12)}, so no new PR was opened.`,
+    );
+    // GitHub may have deleted the merged branch; the publish must not revive it.
+    expect(git(repos.origin, "branch", "--list", branch)).toBe("");
+  });
+
+  it("opens a new PR when no merged PR holds the accepted commit", async () => {
+    const { store, card, repos, handoffs, warn, github } = await acceptImportedTicket();
+    const head = git(repos.hostRepo, "rev-parse", `factory/${card.id}`);
+    github.tokens.set("acme/app", "token-app");
+    github.closedPulls.push(
+      { html_url: "https://github.com/acme/app/pull/136", sha: head, merged: false },
+      { html_url: "https://github.com/acme/app/pull/135", sha: "0".repeat(40), merged: true },
+    );
+
+    await handoffs.resume(warn);
+
+    expect(
+      (await store.get(card.id))?.metadata?.automation?.target?.worktree?.handoff,
+    ).toMatchObject({ phase: "published", pullRequestUrl: "https://github.com/acme/app/pull/7" });
+    expect(github.requests.at(-1)).toMatchObject({
+      method: "POST",
+      url: "https://api.github.com/repos/acme/app/pulls",
+    });
+  });
+
+  it("blocks with GitHub's validation errors when the PR cannot be created", async () => {
+    const { store, card, handoffs, warn, github } = await acceptImportedTicket();
+    github.tokens.set("acme/app", "token-app");
+    github.rejectCreate.value = {
+      message: "Validation Failed",
+      errors: [{ message: "No commits between main and factory/x" }],
+    };
+
+    await handoffs.resume(warn);
+
+    const blocked = await store.get(card.id);
+    expect(blocked?.status).toBe("blocked");
+    expect(blocked?.metadata?.comments?.at(-1)?.body).toContain(
+      "returned 422: Validation Failed: No commits between main and factory/x",
+    );
+  });
+
   it("blocks with the config step when the repo has no token, and retries on the next accept", async () => {
     const { store, card, repos, handoffs, warn, github } = await acceptImportedTicket();
     const branch = `factory/${card.id}`;
