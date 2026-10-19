@@ -229,6 +229,7 @@ describe("node ticket grilling handoff", () => {
       key,
       agentId: "dev",
       displayName: "Grill Fix the parser",
+      category: "Grilling",
       message: expect.any(String),
     });
     expect(params?.message).toContain(

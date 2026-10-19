@@ -22,6 +22,8 @@ import { MAX_BLOCK_REASON_CHARS } from "./store-constants.js";
 import { capText } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
 
+const GRILL_SESSION_GROUP = "Grilling";
+
 // The grill session's last messages hold its last reply; earlier ones are not read.
 const GRILL_HISTORY_LIMIT = 20;
 
@@ -84,6 +86,8 @@ async function startNodeGrillSession(
       key,
       ...(card.agentId ? { agentId: card.agentId } : {}),
       displayName: grillSessionName(card),
+      // Groups the grill sessions in the session list, like an operator-made group.
+      category: GRILL_SESSION_GROUP,
       message: grillSessionMessage(card, handoff),
     },
     { scopes: ["operator.admin"] },
