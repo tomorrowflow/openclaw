@@ -12,6 +12,8 @@ export type DetailNavigation = {
   readonly resolveCard: (cardId: string) => WorkboardCard | undefined;
   readonly openCard: (card: WorkboardCard) => void;
   readonly openSession?: () => void;
+  /** Opens the card's page in the transcript viewer; called from the click itself. */
+  readonly openTranscript?: () => void;
 };
 
 export function renderDependencyDetailList(
@@ -95,6 +97,20 @@ function renderSessionRow(label: string, value: string | undefined, openSession?
         @click=${openSession}
       >
         ${text}
+      </button>
+    </div>
+  `;
+}
+
+function renderTranscriptRow(openTranscript: (() => void) | undefined) {
+  if (!openTranscript) {
+    return nothing;
+  }
+  return html`
+    <div class="workboard-detail__row">
+      <span>${t("workboard.fieldTranscript")}</span>
+      <button type="button" class="workboard-detail__card-link" @click=${openTranscript}>
+        ${t("workboard.openTranscript")}
       </button>
     </div>
   `;
@@ -354,6 +370,7 @@ export function renderTechnicalDetails(
     <h3>${t("workboard.detailTechnical")}</h3>
     <div class="workboard-detail__technical-properties">
       ${renderSessionRow(t("workboard.fieldSession"), linkedSessionKey, navigation.openSession)}
+      ${renderTranscriptRow(navigation.openTranscript)}
       ${renderSessionRow(
         t("workboard.detailRun"),
         card.runId ?? card.execution?.runId,

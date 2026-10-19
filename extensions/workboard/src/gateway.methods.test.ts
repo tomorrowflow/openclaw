@@ -50,6 +50,7 @@ describe("workboard gateway method registry", () => {
       "workboard.cards.stats",
       "workboard.cards.trust",
       "workboard.overview",
+      "workboard.transcriptViewer",
       "workboard.cards.runs",
       "workboard.cards.specify",
       "workboard.cards.decompose",
@@ -79,6 +80,7 @@ describe("workboard gateway method registry", () => {
           "cards.export",
           "cards.runs",
           "overview",
+          "transcriptViewer",
           "cards.attachments.get",
           "cards.screenshots.list",
           "cards.changes.diff",
@@ -163,5 +165,16 @@ describe("workboard gateway method registry", () => {
     const eventsRespond = await invoke("workboard.notifications.events", { advance: true });
     expect(eventsRespond.mock.calls[0]?.[0]).toBe(false);
     expect(eventsRespond.mock.calls[0]?.[2]?.message).toContain("workboard.notifications.advance");
+  });
+
+  it.each([
+    [undefined, null],
+    [{ transcriptViewer: { port: 17317 } }, 17317],
+  ])("serves the configured transcript viewer port (%j)", async (config, served) => {
+    const { api, invoke } = createGatewayMethodCapture(config);
+    registerWorkboardGatewayMethods({ api, store: createWorkboardSqliteTestStore() });
+
+    const respond = await invoke("workboard.transcriptViewer", {});
+    expect(respond.mock.calls[0]).toEqual([true, { port: served }]);
   });
 });

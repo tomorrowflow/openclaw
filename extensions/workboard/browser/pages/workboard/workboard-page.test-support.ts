@@ -57,7 +57,11 @@ export function mountPage(
     params.presented ?? true,
   );
   const registerBoardNavigation = vi.fn();
-  const mounted = createWorkboardPage(workboard, registerBoardNavigation)(container, context);
+  const mounted = createWorkboardPage(
+    workboard,
+    registerBoardNavigation,
+    () => null,
+  )(container, context);
   cleanup.push(() => {
     mounted?.dispose?.();
     workboard.dispose();

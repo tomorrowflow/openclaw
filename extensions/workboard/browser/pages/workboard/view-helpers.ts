@@ -43,6 +43,8 @@ export type WorkboardProps = {
   detailChanges?: CardChanges;
   detailGrilling?: CardGrilling;
   detailScreenshots?: CardScreenshots;
+  /** The transcript viewer's loopback port; card details open its `/card/<cardId>` through a portal. */
+  transcriptViewerPort?: number | null;
   host: object;
   client: GatewayBrowserClient | null;
   connected: boolean;

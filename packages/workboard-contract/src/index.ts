@@ -945,3 +945,6 @@ export type WorkboardOverviewResult = {
   /** The current week of the trust KPIs (`workboard.cards.trust`). */
   week: WorkboardTrustWeek;
 };
+
+/** `workboard.transcriptViewer`: the transcript viewer's loopback port on the Gateway host, or null when unset. */
+export type WorkboardTranscriptViewerResult = { port: number | null };

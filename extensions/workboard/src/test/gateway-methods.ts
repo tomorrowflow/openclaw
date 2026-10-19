@@ -1,13 +1,14 @@
 import { vi } from "vitest";
 import type { OpenClawPluginApi } from "../../api.js";
 
-export function createGatewayMethodCapture() {
+export function createGatewayMethodCapture(pluginConfig?: Record<string, unknown>) {
   type RegisteredMethod = {
     handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
     opts: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[2];
   };
   const methods = new Map<string, RegisteredMethod>();
   const api = {
+    pluginConfig,
     runtime: {
       state: {
         openKeyedStore: vi.fn(),
