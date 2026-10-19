@@ -161,7 +161,17 @@ async function githubApi(
   const text = (await readResponseWithLimit(response, GITHUB_API_MAX_BYTES)).toString("utf8");
   const json: unknown = text ? JSON.parse(text) : undefined;
   if (!response.ok) {
-    const message = isRecord(json) && typeof json.message === "string" ? json.message : text;
+    // A 422 says only "Validation Failed"; its errors carry the reason.
+    const details =
+      isRecord(json) && Array.isArray(json.errors)
+        ? json.errors.flatMap((error) =>
+            isRecord(error) && typeof error.message === "string" ? [error.message] : [],
+          )
+        : [];
+    const message = [
+      isRecord(json) && typeof json.message === "string" ? json.message : text,
+      ...details,
+    ].join(": ");
     throw new Error(
       `GitHub ${method} ${path} returned ${response.status}: ${message.slice(0, 300)}`,
     );
@@ -179,6 +189,8 @@ function htmlUrl(value: unknown): string | undefined {
  */
 type DraftPullRequest = {
   url: string;
+  /** The branch's PR already merged this exact commit, so none was opened. */
+  merged?: true;
   reused?: { repo: string; token: string; number: number; draftId?: string };
 };
 
@@ -235,7 +247,37 @@ async function pushAndOpenDraft(
       `${branch} moved from the imported ${headCommit} to ${local} in the host clone`,
     );
   }
+  const owner = repo.split("/")[0];
+  const head = encodeURIComponent(`${owner}:${branch}`);
+  const open = await githubApi(
+    access,
+    token,
+    "GET",
+    `/repos/${repo}/pulls?state=open&head=${head}`,
+  );
+  const first: unknown = Array.isArray(open) ? open[0] : undefined;
+  const existing = htmlUrl(first);
+  // A rework round without new commits leaves the head where a merged PR left
+  // it. GitHub refuses a PR with no commits, so the merged one stands, and the
+  // push is skipped so it never revives a merged branch GitHub deleted.
+  const closed = existing
+    ? undefined
+    : await githubApi(access, token, "GET", `/repos/${repo}/pulls?state=closed&head=${head}`);
+  const merged = htmlUrl(
+    Array.isArray(closed)
+      ? closed.find(
+          (pull) =>
+            isRecord(pull) &&
+            typeof pull.merged_at === "string" &&
+            isRecord(pull.head) &&
+            pull.head.sha === headCommit,
+        )
+      : undefined,
+  );
   await assertCurrent();
+  if (merged) {
+    return { url: merged, merged: true };
+  }
   // The token travels as an environment-only header, never in argv or the clone's config.
   const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
   await requireHostGit(
@@ -254,15 +296,6 @@ async function pushAndOpenDraft(
       GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}`,
     },
   );
-  const owner = repo.split("/")[0];
-  const open = await githubApi(
-    access,
-    token,
-    "GET",
-    `/repos/${repo}/pulls?state=open&head=${encodeURIComponent(`${owner}:${branch}`)}`,
-  );
-  const first: unknown = Array.isArray(open) ? open[0] : undefined;
-  const existing = htmlUrl(first);
   if (existing) {
     const number = isRecord(first) ? first.number : undefined;
     const draftId =
@@ -426,6 +459,18 @@ export async function publishNodeTicket(params: {
         scope,
       );
     }
+  }
+  if (pullRequest.merged) {
+    await store.addNodeTicketNotice(
+      card.id,
+      {
+        worktreePath: item.worktreePath,
+        body: `${pullRequestUrl} already merged ${item.headCommit.slice(0, 12)}, so no new PR was opened.`,
+        applies: () => true,
+      },
+      scope,
+    );
+    return;
   }
   if (!item.rework || !reused) {
     return;

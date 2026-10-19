@@ -807,11 +807,15 @@ report, address the findings, and report them (see **Report** below).
    give a shadow verdict (see [Trust KPIs](#trust-kpis)).
 4. **Accept:** moving the card from `review` to `done` pushes the imported
    commit from the host clone to its GitHub origin and opens a draft PR, or
-   reuses an open one for the branch. The PR URL is recorded as proof. When
+   reuses an open one for the branch. When the branch has no open PR but a
+   merged one whose head is the accepted commit, as after a rework round that
+   made no commits, nothing is pushed and no PR is opened: the card records the merged PR and gets
+   a comment saying so. The PR URL is recorded as proof. When
    the card's `sourceUrl` is a GitHub issue URL, the PR body says
    `Closes <owner>/<repo>#<n>`, so merging the PR closes the issue. A
    failure, such as a missing [token](#configuration), blocks the card with
-   the reason; move it to `done` again to retry. Archive a card instead of
+   the reason, including GitHub's validation errors; move it to `done` again
+   to retry. Archive a card instead of
    moving it to `done` to close it without a PR.
    **Agent acceptance at rung b:** an agent's Workboard tools (every one that
    can set `done`, such as `workboard_move`, `workboard_release` with a

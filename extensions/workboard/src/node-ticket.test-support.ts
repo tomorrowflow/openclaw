@@ -200,6 +200,9 @@ export function settledSession(key: string) {
 export function createFakeGitHub(remote: string) {
   const tokens = new Map<string, string>();
   const openPulls: string[] = [];
+  // Closed PRs on the branch, newest first, by their head commit.
+  const closedPulls: Array<{ html_url: string; sha: string; merged: boolean }> = [];
+  const rejectCreate: { value?: { message: string; errors: Array<{ message: string }> } } = {};
   // Open PRs still in draft; the GraphQL ready mutation removes one by its node id.
   const draftPulls = new Set<string>();
   const failComments = { value: false };
@@ -229,21 +232,33 @@ export function createFakeGitHub(remote: string) {
         { status: 200 },
       );
     }
-    const reply = url.includes("/pulls?")
-      ? openPulls.map((html_url) => ({
+    if (url.endsWith("/pulls") && method === "POST" && rejectCreate.value) {
+      return new Response(JSON.stringify(rejectCreate.value), { status: 422 });
+    }
+    const reply = url.includes("/pulls?state=closed")
+      ? closedPulls.map(({ html_url, sha, merged }) => ({
           html_url,
           number: Number(html_url.split("/").at(-1)),
-          node_id: `PR_${html_url}`,
-          draft: draftPulls.has(html_url),
+          merged_at: merged ? "2026-10-19T14:07:34Z" : null,
+          head: { sha },
         }))
-      : method === "POST"
-        ? { html_url: "https://github.com/acme/app/pull/7" }
-        : { default_branch: "main" };
+      : url.includes("/pulls?")
+        ? openPulls.map((html_url) => ({
+            html_url,
+            number: Number(html_url.split("/").at(-1)),
+            node_id: `PR_${html_url}`,
+            draft: draftPulls.has(html_url),
+          }))
+        : method === "POST"
+          ? { html_url: "https://github.com/acme/app/pull/7" }
+          : { default_branch: "main" };
     return new Response(JSON.stringify(reply), { status: method === "POST" ? 201 : 200 });
   });
   return {
     tokens,
     openPulls,
+    closedPulls,
+    rejectCreate,
     draftPulls,
     failComments,
     failReady,
