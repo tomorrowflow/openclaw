@@ -9,6 +9,7 @@ import {
 import { icons } from "../../components/icons.ts";
 import { renderWorkboardErrorToast } from "../../components/toast.ts";
 import { t } from "../../i18n/index.ts";
+import { openTranscriptViewer } from "../../lib/transcript-viewer.ts";
 import {
   workboardCardBoardId,
   WORKBOARD_ALL_BOARDS_FILTER,
@@ -23,6 +24,7 @@ import {
   type WorkboardCard,
   type WorkboardUiState,
 } from "../../lib/workboard/index.ts";
+import { formatError } from "../../lib/workboard/normalization-utils.ts";
 import { cardAgentLabel } from "./agent-filter.ts";
 import { automationDetailFields, renderBoardAutomation } from "./view-automation.ts";
 import {
@@ -178,6 +180,9 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
   };
   const { busy, live, linkedSessionKey, sessionTarget, writable, showStartControls, archived } =
     getCardActionState(props, card);
+  // Opening a portal needs operator.write, so read-only operators get no control that always fails.
+  const transcriptViewerPort = props.canWrite === false ? null : props.transcriptViewerPort;
+  const { client } = props;
   const selectTab = (tab: WorkboardUiState["detailTab"], target: EventTarget | null) => {
     if (tab !== state.detailTab && target instanceof HTMLElement) {
       const body = target
@@ -210,6 +215,20 @@ export function renderCardDetailsPanel(props: WorkboardProps) {
         props.onRequestUpdate?.();
       }),
     ...(sessionTarget ? { openSession: () => actionProps.onOpenSession(sessionTarget) } : {}),
+    ...(transcriptViewerPort && client && linkedSessionKey
+      ? {
+          openTranscript: () => {
+            openTranscriptViewer(
+              client,
+              transcriptViewerPort,
+              `/card/${encodeURIComponent(card.id)}`,
+            ).catch((error: unknown) => {
+              state.error = formatError(error);
+              props.onRequestUpdate?.();
+            });
+          },
+        }
+      : {}),
   };
   const technicalDetails = renderTechnicalDetails(
     card,

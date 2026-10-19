@@ -15,6 +15,9 @@ export function createWorkboardTestHost() {
   };
   const registrations = new Map<string, unknown>();
   const register = (kind: string) => (entry: { id: string }) => {
+    if (abort.signal.aborted) {
+      throw new Error("This plugin UI activation has ended.");
+    }
     const key = `${kind}/${entry.id}`;
     registrations.set(key, entry);
     return () => {

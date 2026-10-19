@@ -1,3 +1,4 @@
+import type { WorkboardTranscriptViewerResult } from "@openclaw/workboard-contract";
 import { defineControlUiPlugin } from "openclaw/plugin-sdk/control-ui";
 import { WorkboardCatalog } from "./catalog.ts";
 import { deleteWorkboardBoard } from "./delete-board.ts";
@@ -6,6 +7,7 @@ import { t } from "./i18n/index.ts";
 import { workboardBoardName } from "./lib/workboard/board-presentation.ts";
 import { createWorkboardCapability } from "./lib/workboard/capability.ts";
 import { WORKBOARD_CHANGED_EVENT, type WorkboardBoardSummary } from "./lib/workboard/types.ts";
+import { createTranscriptsPage } from "./pages/transcripts/transcripts-page.ts";
 import { createLazyWorkboardPage } from "./pages/workboard/lazy-page.ts";
 import { workboardPageTarget } from "./pages/workboard/page-target.ts";
 import { createWorkboardSessionAccessory } from "./session-accessory.ts";
@@ -104,20 +106,79 @@ export default defineControlUiPlugin({
       }
     };
     const catalog = new WorkboardCatalog(({ boards }) => syncBoardNavigation(boards), workboard);
+    let transcriptViewerPort: number | null = null;
+    let transcriptViewerRequested = false;
+    let disposeTranscriptsPage: (() => void) | null = null;
+    const registerTranscriptsPage = (port: number) => {
+      const disposers = [
+        host.ui.registerPage({
+          id: "transcripts",
+          label: t("workboard.transcriptsTitle"),
+          mount: createTranscriptsPage(host, port),
+        }),
+        host.ui.registerNavigation({
+          id: "transcripts",
+          parent: "workboard",
+          label: t("workboard.transcriptsTitle"),
+          page: { id: "transcripts" },
+          icon: "scrollText",
+          order: 12,
+        }),
+      ];
+      return () => {
+        for (const dispose of disposers.toReversed()) {
+          dispose();
+        }
+      };
+    };
+    // Opening a portal needs operator.write, so read-only operators get no page whose only control fails.
+    const syncTranscriptsPage = () => {
+      const port = host.connection.canWrite ? transcriptViewerPort : null;
+      if ((port === null) === (disposeTranscriptsPage === null)) {
+        return;
+      }
+      disposeTranscriptsPage?.();
+      disposeTranscriptsPage = port === null ? null : registerTranscriptsPage(port);
+      host.ui.invalidate();
+    };
+    // The port is Gateway plugin config, so it can only change with a Gateway restart.
+    const loadTranscriptViewer = () => {
+      if (transcriptViewerRequested || !host.connection.connected) {
+        return;
+      }
+      transcriptViewerRequested = true;
+      void host.request<WorkboardTranscriptViewerResult>("workboard.transcriptViewer", {}).then(
+        ({ port }) => {
+          if (host.signal.aborted) {
+            return;
+          }
+          transcriptViewerPort = port;
+          syncTranscriptsPage();
+        },
+        // The next host change asks again.
+        () => {
+          transcriptViewerRequested = false;
+        },
+      );
+    };
     const registrations = [
       host.ui.registerPage({
         id: "workboard",
         label: "Workboard",
         mount: createLazyWorkboardPage(async () => {
           const { createWorkboardPage } = await import("./pages/workboard/workboard-page.ts");
-          return createWorkboardPage(workboard, (board) => {
-            const boards = [...navigation.values()]
-              .toSorted((left, right) => left.order - right.order)
-              .map((entry) => entry.board);
-            const index = boards.findIndex((entry) => entry.id === board.id);
-            boards[index < 0 ? boards.length : index] = board;
-            syncBoardNavigation(boards);
-          });
+          return createWorkboardPage(
+            workboard,
+            (board) => {
+              const boards = [...navigation.values()]
+                .toSorted((left, right) => left.order - right.order)
+                .map((entry) => entry.board);
+              const index = boards.findIndex((entry) => entry.id === board.id);
+              boards[index < 0 ? boards.length : index] = board;
+              syncBoardNavigation(boards);
+            },
+            () => transcriptViewerPort,
+          );
         }),
       }),
       host.ui.registerNavigation({
@@ -169,12 +230,21 @@ export default defineControlUiPlugin({
         }),
       ),
       workboard.subscribe(host.ui.invalidate),
-      host.subscribe(() => catalog.sync(client, host.connection.connected)),
+      host.subscribe(() => {
+        catalog.sync(client, host.connection.connected);
+        loadTranscriptViewer();
+        syncTranscriptsPage();
+      }),
+      () => {
+        disposeTranscriptsPage?.();
+        disposeTranscriptsPage = null;
+      },
       host.onEvent(WORKBOARD_CHANGED_EVENT, (payload) =>
         catalog.handleGatewayEvent(WORKBOARD_CHANGED_EVENT, payload),
       ),
     ];
     catalog.sync(client, host.connection.connected);
+    loadTranscriptViewer();
     return () => {
       for (const dispose of registrations.toReversed()) {
         dispose();

@@ -74,6 +74,7 @@ function reconcileCardOverlays(state: WorkboardUiState, visible: (card: Workboar
 export function createWorkboardPage(
   workboard: WorkboardCapability,
   registerBoardNavigation: (board: WorkboardBoardMetadata) => void,
+  transcriptViewerPort: () => number | null,
 ): ControlUiView {
   return (container, initialContext) => {
     const host = initialContext.host;
@@ -437,6 +438,7 @@ export function createWorkboardPage(
             detailScreenshots: screenshots,
             detailChanges: changes,
             detailGrilling: grilling,
+            transcriptViewerPort: transcriptViewerPort(),
             host: workboard,
             client: connected ? client : null,
             connected,

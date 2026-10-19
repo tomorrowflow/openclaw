@@ -164,6 +164,14 @@ export default {
     overviewTitle: "Factory overview",
     overviewLoading: "Loading the overview…",
     overviewUnavailable: "The overview could not load: {error}",
+    transcriptsTitle: "Transcripts",
+    transcriptsDescription:
+      "The transcript viewer shows each card's Claude sessions. It opens in a new tab.",
+    openTranscriptViewer: "Open transcript viewer",
+    transcriptPopupBlocked:
+      "The browser blocked the transcript tab. Allow pop-ups for the Control UI and try again.",
+    transcriptPortalUnavailable:
+      "The Gateway did not return a usable portal for the transcript viewer. Check the Portals page and try again.",
     overviewNeedsYou: "Needs you",
     overviewNeedsYouEmpty: "Nothing waits on you. Reviews, questions, and blocks show up here.",
     overviewInFlight: "In flight",
@@ -305,6 +313,7 @@ export default {
     detailNotePlaceholder: "Add a decision, blocker, or proof note...",
     detailAddNote: "Add note",
     openSession: "Open session",
+    openTranscript: "Open transcript",
     defaultAgent: "Default agent",
     allAgents: "All agents",
     agentFilter: "Filter by agent",
@@ -352,6 +361,7 @@ export default {
     fieldPriority: "Priority",
     fieldAgent: "Agent",
     fieldSession: "Session",
+    fieldTranscript: "Transcript",
     fieldLabels: "Labels",
     templatesLabel: "Card templates",
     suggestionsLabel: "Suggestions",

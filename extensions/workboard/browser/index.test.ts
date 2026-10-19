@@ -78,7 +78,10 @@ it("keeps reassigned session cards current through events without polling", asyn
     disposeAccessory = () => mounted?.dispose?.();
     expect(container.textContent).toContain(card.title);
     await vi.advanceTimersByTimeAsync(15 * 60_000);
-    expect(request.mock.calls).toEqual([["workboard.cards.list", {}]]);
+    expect(request.mock.calls).toEqual([
+      ["workboard.cards.list", {}],
+      ["workboard.transcriptViewer", {}],
+    ]);
 
     // The session accessory follows the catalog's refreshed card state.
     currentCard = {
@@ -451,7 +454,7 @@ it("keeps accessories on the same recovered snapshot and retires pending activat
 
     request.mockRejectedValueOnce(new Error("Temporary read failure"));
     fixture.emit("plugin.workboard.changed", {});
-    await vi.waitFor(() => expect(request.mock.settledResults[1]?.type).toBe("rejected"));
+    await vi.waitFor(() => expect(request.mock.settledResults.at(-1)?.type).toBe("rejected"));
     expect(container.textContent).toContain(card.title);
 
     request.mockResolvedValueOnce({ cards: [{ ...card, metadata: { archivedAt: 1 } }], boards });
@@ -485,4 +488,142 @@ it("keeps accessories on the same recovered snapshot and retires pending activat
       dispose?.();
     }
   }
+});
+
+it.each([17317, null])(
+  "adds the Transcripts page only when the Gateway serves a viewer port (%s)",
+  async (port) => {
+    vi.useFakeTimers();
+    const { host, connection, registrations } = workboardTestHost();
+    connection.connected = true;
+    const request = vi.fn(async (method: string) =>
+      method === "workboard.transcriptViewer"
+        ? { port }
+        : method === "portal.open"
+          ? { tokenQuery: "openclaw_portal=token", publicUrl: "https://gateway.example:35535/" }
+          : { cards: [], boards: [] },
+    );
+    host.request = request as typeof host.request;
+    const tab = { opener: window as Window | null, location: { href: "" }, close: vi.fn() };
+    const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
+    const dispose = await workboardPlugin.activate(host);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      if (port === null) {
+        expect(registrations.has("navigation/transcripts")).toBe(false);
+        expect(registrations.has("page/transcripts")).toBe(false);
+        return;
+      }
+      expect(registrations.get("navigation/transcripts")).toMatchObject({
+        parent: "workboard",
+        label: "Transcripts",
+        page: { id: "transcripts" },
+      });
+      const page = registrations.get("page/transcripts") as ControlUiPage;
+      const container = document.createElement("div");
+      page.mount(container, createViewContext(host, {}));
+      expectDefined(container.querySelector("button"), "viewer button").click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(request).toHaveBeenCalledWith("portal.open", { port, title: "Transcripts" });
+      expect(tab.location.href).toBe("https://gateway.example:35535/?openclaw_portal=token");
+    } finally {
+      open.mockRestore();
+      dispose?.();
+    }
+    expect(registrations.has("navigation/transcripts")).toBe(false);
+  },
+);
+
+function transcriptViewerHost(viewer: () => Promise<{ port: number | null }>) {
+  vi.useFakeTimers();
+  const fixture = workboardTestHost();
+  const transcriptViewer = vi.fn(viewer);
+  const request = vi.fn(async (method: string) =>
+    method === "workboard.transcriptViewer" ? transcriptViewer() : { cards: [], boards: [] },
+  );
+  fixture.host.request = request as typeof fixture.host.request;
+  const transcripts = () => [
+    fixture.registrations.has("page/transcripts"),
+    fixture.registrations.has("navigation/transcripts"),
+  ];
+  return { ...fixture, request, transcriptViewer, transcripts };
+}
+
+it("shows the Transcripts page only while the operator can write", async () => {
+  const fixture = transcriptViewerHost(async () => ({ port: 17317 }));
+  fixture.connection.connected = true;
+  fixture.connection.canWrite = false;
+  const dispose = await workboardPlugin.activate(fixture.host);
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fixture.transcriptViewer).toHaveBeenCalledOnce();
+    expect(fixture.transcripts()).toEqual([false, false]);
+
+    fixture.connection.canWrite = true;
+    fixture.notify();
+    expect(fixture.transcripts()).toEqual([true, true]);
+
+    fixture.connection.canWrite = false;
+    fixture.notify();
+    expect(fixture.transcripts()).toEqual([false, false]);
+
+    fixture.connection.canWrite = true;
+    fixture.notify();
+    expect(fixture.transcripts()).toEqual([true, true]);
+    expect(fixture.transcriptViewer).toHaveBeenCalledOnce();
+  } finally {
+    dispose?.();
+  }
+  expect(fixture.transcripts()).toEqual([false, false]);
+});
+
+it("reads the transcript viewer port once the Gateway connects", async () => {
+  const fixture = transcriptViewerHost(async () => ({ port: 17317 }));
+  const dispose = await workboardPlugin.activate(fixture.host);
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fixture.request).not.toHaveBeenCalled();
+    expect(fixture.transcripts()).toEqual([false, false]);
+
+    fixture.connection.connected = true;
+    fixture.notify();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fixture.transcriptViewer).toHaveBeenCalledOnce();
+    expect(fixture.transcripts()).toEqual([true, true]);
+  } finally {
+    dispose?.();
+  }
+});
+
+it("asks for the transcript viewer port again after a failed read", async () => {
+  const fixture = transcriptViewerHost(async () => ({ port: 17317 }));
+  fixture.transcriptViewer.mockRejectedValueOnce(new Error("Temporary read failure"));
+  fixture.connection.connected = true;
+  const dispose = await workboardPlugin.activate(fixture.host);
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fixture.transcriptViewer).toHaveBeenCalledOnce();
+    expect(fixture.transcripts()).toEqual([false, false]);
+
+    fixture.notify();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fixture.transcriptViewer).toHaveBeenCalledTimes(2);
+    expect(fixture.transcripts()).toEqual([true, true]);
+  } finally {
+    dispose?.();
+  }
+});
+
+it("ignores a transcript viewer port that arrives after the activation ends", async () => {
+  const viewer = createDeferred<{ port: number | null }>();
+  const fixture = transcriptViewerHost(() => viewer.promise);
+  fixture.connection.connected = true;
+  const dispose = await workboardPlugin.activate(fixture.host);
+  expect(fixture.transcriptViewer).toHaveBeenCalledOnce();
+  dispose?.();
+  fixture.dispose();
+
+  viewer.resolve({ port: 17317 });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fixture.transcripts()).toEqual([false, false]);
 });

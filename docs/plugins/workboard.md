@@ -50,8 +50,8 @@ it before opening the dashboard. See [Apply changes and inspect](/plugins/manage
 ## Configuration
 
 Enable/disable Workboard with the standard plugin entry. Its plugin-specific
-config covers [node tickets](#node-tickets): how many may run at once, and the
-GitHub token map for their draft PRs:
+config covers [node tickets](#node-tickets) (how many may run at once, and the
+GitHub token map for their draft PRs) and an optional transcript viewer:
 
 ```json5
 {
@@ -62,6 +62,8 @@ GitHub token map for their draft PRs:
         config: {
           // Node tickets running at once across all nodes (default 2).
           nodeTickets: { maxConcurrent: 2 },
+          // Optional transcript viewer listening on this loopback port of the Gateway host.
+          transcriptViewer: { port: 17317 },
           github: {
             repos: {
               // Keyed by the owner/name of the host clone's origin.
@@ -80,6 +82,21 @@ GitHub token map for their draft PRs:
 Each token is a [SecretRef](/gateway/secrets) to a fine-grained token with
 contents and pull request write access to that one repository. Run
 `openclaw secrets reload` after changing a referenced value.
+
+`transcriptViewer.port` is the loopback port of a transcript viewer that runs
+on the Gateway host. It must be an integer from 1 to 65535. Any other value fails
+Workboard's config validation at
+`plugins.entries.workboard.config.transcriptViewer.port`, so the Gateway
+[refuses to start](/gateway/configuration#strict-validation) and a hot reload
+with that value is skipped. When it is set, the Control UI adds a
+**Transcripts** page under Workboard. Card details also show an **Open
+transcript** button under the Session row of a card with a linked session. Each
+click opens an [OpenClaw Portal](/gateway/portals) to the port and shows the
+viewer in a new tab: the Transcripts page opens the viewer's `/`, and a card
+opens its `/card/<cardId>`. Opening a portal needs the `operator.write` scope, so
+operators without it see neither the Transcripts page nor the card button. The portal proxy rewrites
+`Host` to `localhost:<port>`, so the viewer must accept that host. Portals close
+when the Gateway restarts; the next click opens a new one.
 
 ```bash
 openclaw plugins disable workboard
@@ -1218,7 +1235,7 @@ read/write scopes as boards:
 
 | Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `overview`                                                                                                                                                                                                                                                     |
+| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `overview`, `transcriptViewer`                                                                                                                                                                                                                                 |
 | `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.sampleRead`, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
 | `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                                                |
