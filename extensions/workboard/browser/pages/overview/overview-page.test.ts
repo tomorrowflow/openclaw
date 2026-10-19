@@ -6,7 +6,7 @@ import { WORKBOARD_CHANGED_EVENT } from "../../lib/workboard/types.ts";
 import { workboardTestHost } from "../../test/host.setup.ts";
 import { createViewContext } from "../../test/host.ts";
 import { waitForFast } from "../../test/wait-for.ts";
-import { createOverviewPage } from "./overview-page.ts";
+import { createOverviewPage } from "./overview-page.tsx";
 
 const NOW = Date.now();
 const PR = "https://github.com/acme/app/pull/7";
@@ -221,7 +221,7 @@ describe("Factory overview page", () => {
 
     markReadButtons(container)[0]!.click();
     expect(sampleRead).toHaveBeenCalledWith({ id: "card-sampled" });
-    expect(markReadButtons(container)[0]!.disabled).toBe(true);
+    await waitForFast(() => expect(markReadButtons(container)[0]!.disabled).toBe(true));
     finish();
 
     await waitForFast(() =>

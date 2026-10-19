@@ -1,6 +1,7 @@
 import "../../test/dom.setup.ts";
 import { expectDefined } from "@openclaw/normalization-core";
-import { nothing, render, type LitElement } from "lit";
+import { render } from "@solidjs/web";
+import { createComponent, flush } from "solid-js";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { normalizeCardsPayload } from "../../lib/workboard/normalization.ts";
 import { getWorkboardState } from "../../lib/workboard/runtime.ts";
@@ -8,37 +9,53 @@ import {
   createWorkboardCard,
   createWorkboardTestClient,
 } from "../../lib/workboard/test/index-helpers.ts";
-import type { WorkboardCard } from "../../lib/workboard/types.ts";
+import type { WorkboardCard, WorkboardStatus } from "../../lib/workboard/types.ts";
 import { workboardTestHost } from "../../test/host.setup.ts";
 import { waitForFast } from "../../test/wait-for.ts";
-import { renderCardDetailsPanel } from "./view-card-details.ts";
-import { renderColumn } from "./view-card.ts";
+import type { WorkboardCardSurface } from "./view-card.tsx";
+import { WorkboardColumn } from "./view-column.tsx";
+import { createWorkboardView } from "./view.test-support.ts";
 
 function renderDetails(card: WorkboardCard) {
-  const host = {};
-  const state = getWorkboardState(host);
-  state.loaded = true;
-  state.cards = [card];
-  state.detailCardId = card.id;
+  const view = createWorkboardView({ client: createWorkboardTestClient({}), canWrite: true });
+  view.state.cards = [card];
+  view.state.detailCardId = card.id;
+  view.renderView();
+  return view.container;
+}
+
+function renderColumn(
+  host: object,
+  status: WorkboardStatus,
+  cards: WorkboardCard[],
+  surface: WorkboardCardSurface,
+) {
   const container = document.createElement("div");
   document.body.append(container);
-  onTestFinished(() => {
-    render(nothing, container);
-    container.remove();
-  });
   workboardTestHost().connection.connected = true;
-  render(
-    renderCardDetailsPanel({
-      host,
-      client: createWorkboardTestClient({}),
-      connected: true,
-      canWrite: true,
-      agentsList: null,
-      sessions: [],
-      onOpenSession: vi.fn(),
-    }),
+  const dispose = render(
+    () =>
+      createComponent(WorkboardColumn, {
+        workboard: {
+          host,
+          client: createWorkboardTestClient({}),
+          connected: true,
+          canWrite: true,
+          agentsList: null,
+          sessions: [],
+          onOpenSession: vi.fn(),
+        },
+        status,
+        cards,
+        options: { surface },
+      }),
     container,
   );
+  flush();
+  onTestFinished(() => {
+    dispose();
+    container.remove();
+  });
   return container;
 }
 
@@ -54,7 +71,7 @@ it("renders notes and comments as host Markdown and follows note links without e
       "notes trigger",
     ),
   );
-  const owner = expectDefined(trigger.closest<LitElement>("workboard-inline-text"), "editor");
+  const owner = expectDefined(trigger.closest<HTMLElement>("workboard-inline-text"), "editor");
   const mountMarkdown = workboardTestHost().host.components.mountMarkdown;
   expect(mountMarkdown).toHaveBeenCalledWith(expect.any(HTMLElement), { markdown: card.notes });
   expect(mountMarkdown).toHaveBeenCalledWith(expect.any(HTMLElement), {
@@ -64,7 +81,7 @@ it("renders notes and comments as host Markdown and follows note links without e
   link.href = "#spec";
   expectDefined(trigger.querySelector("[data-test-markdown]"), "notes markdown").append(link);
   link.click();
-  await owner.updateComplete;
+  flush();
   expect(owner.querySelector("textarea")).toBeNull();
 
   trigger.click();
@@ -82,23 +99,7 @@ it.each(["page", "widget"] as const)(
     const state = getWorkboardState(host);
     state.loaded = true;
     state.cards = [card];
-    const container = document.createElement("div");
-    document.body.append(container);
-    onTestFinished(() => {
-      render(nothing, container);
-      container.remove();
-    });
-    workboardTestHost().connection.connected = true;
-    const props = {
-      host,
-      client: createWorkboardTestClient({}),
-      connected: true,
-      canWrite: true,
-      agentsList: null,
-      sessions: [],
-      onOpenSession: vi.fn(),
-    };
-    render(renderColumn(props, "ready", [card], { surface }), container);
+    const container = renderColumn(host, "ready", [card], surface);
     const preview = container.querySelector<HTMLElement>(".workboard-card__notes");
     if (surface === "widget") {
       expect(preview).toBeNull();
@@ -132,23 +133,7 @@ it("shows the summary and the stage the Gateway derived on the card face and in 
   const state = getWorkboardState(host);
   state.loaded = true;
   state.cards = [listed];
-  const container = document.createElement("div");
-  document.body.append(container);
-  onTestFinished(() => {
-    render(nothing, container);
-    container.remove();
-  });
-  workboardTestHost().connection.connected = true;
-  const props = {
-    host,
-    client: createWorkboardTestClient({}),
-    connected: true,
-    canWrite: true,
-    agentsList: null,
-    sessions: [],
-    onOpenSession: vi.fn(),
-  };
-  render(renderColumn(props, "review", [listed], { surface: "page" }), container);
+  const container = renderColumn(host, "review", [listed], "page");
 
   const preview = container.querySelector(".workboard-card__notes")?.textContent;
   expect(preview).toContain("Empty input crashes the **parser**.");

@@ -1,6 +1,7 @@
 /**
  * Private runtime facade for memory host storage, indexing, and search primitives.
  */
+export { encodeSqliteStringSet, sqliteStringSetEntries } from "../infra/kysely-sync.js";
 export {
   ensureMemoryEntryOriginsSchema,
   readMemoryEntryOriginsInDatabase,
@@ -39,6 +40,7 @@ export {
   MEMORY_INDEX_VECTOR_TABLE,
   normalizeExtraMemoryPathEntries,
   readMemoryFile,
+  readMemorySearchManagerStatus,
   readCuratedProjectMemoryCandidates,
   readCuratedMemoryTriggerCandidates,
   readMemoryRecallMetadata,
@@ -52,6 +54,10 @@ export {
   stopMemorySqliteWalMaintenance,
   stripMemoryAnnotationCarriers,
 } from "../../packages/memory-host-sdk/src/engine-storage.js";
+/** @deprecated Retained for plugins built against OpenClaw 2026.10.4 and earlier; tracked by `plugin-sdk-private-runtime-shipped-exports`. */
+export { chunkMarkdown } from "../../packages/memory-host-sdk/src/engine-storage.js";
+/** @deprecated Retained for plugins built against OpenClaw 2026.10.4 and earlier; tracked by `plugin-sdk-private-runtime-shipped-exports`. */
+export { ensureDir } from "../../packages/memory-host-sdk/src/engine-storage.js";
 
 export type {
   MemoryWorkspaceFiles,
@@ -75,6 +81,9 @@ export type MemoryEmbeddingProbeResult = {
 };
 
 export type {
+  MemoryCliSearchParams,
+  MemoryCliSearchResult,
+  MemoryCliSearchOutcome,
   MemoryChunk,
   MemoryFileEntry,
   MemoryIndexIdentityDiagnostic,

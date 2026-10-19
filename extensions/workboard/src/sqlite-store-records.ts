@@ -1,4 +1,3 @@
-import type { DatabaseSync } from "node:sqlite";
 import type {
   WorkboardAttachment,
   WorkboardCard,
@@ -17,6 +16,10 @@ import {
   iterateSqliteQuerySync,
   sqliteStringSet,
 } from "openclaw/plugin-sdk/sqlite-worker-runtime";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { definedFields } from "../record-fields.js";
+import type { WorkboardSqlConnection } from "./sqlite-store-schema.js";
+import { normalizeLaunchState } from "./store-launch-normalizers.js";
 import { normalizeCommentSource } from "./store-value-normalizers.js";
 export type Row = Record<string, unknown>;
 
@@ -65,15 +68,6 @@ export function requiredNumber(row: Row, key: string): number {
 
 function optional<T extends object>(value: T): T | undefined {
   return Object.keys(value).length > 0 ? value : undefined;
-}
-
-export function definedFields<T extends object>(fields: T): T {
-  for (const key in fields) {
-    if (fields[key] === undefined) {
-      delete fields[key];
-    }
-  }
-  return fields;
 }
 
 export function blobToBase64(value: unknown): string {
@@ -136,7 +130,7 @@ function groupByCardId(rows: Iterable<Row>): Map<string, Row[]> {
   return grouped;
 }
 
-export function loadCardChildRows(db: DatabaseSync, cardIds?: string[]): CardChildRows {
+export function loadCardChildRows(db: WorkboardSqlConnection, cardIds?: string[]): CardChildRows {
   // Group raw rows only: every preload must finish before card decoding can fail.
   const query = getNodeSqliteKysely<WorkboardCardDatabase>(db);
   // Scope to captured IDs so a concurrent board move cannot discard a selected card's children.
@@ -169,7 +163,7 @@ export function loadCardChildRows(db: DatabaseSync, cardIds?: string[]): CardChi
 }
 
 function childRows(
-  db: DatabaseSync,
+  db: WorkboardSqlConnection,
   table: string,
   cardId: string,
   preloaded?: CardChildRows,
@@ -187,7 +181,7 @@ function childRows(
 }
 
 function workerProtocolRow(
-  db: DatabaseSync,
+  db: WorkboardSqlConnection,
   cardId: string,
   preloaded?: CardChildRows,
 ): Row | undefined {
@@ -199,7 +193,11 @@ function workerProtocolRow(
   return db.prepare("SELECT * FROM workboard_worker_protocol WHERE card_id = ?").get(cardId);
 }
 
-export function readLabels(db: DatabaseSync, cardId: string, preloaded?: CardChildRows): string[] {
+export function readLabels(
+  db: WorkboardSqlConnection,
+  cardId: string,
+  preloaded?: CardChildRows,
+): string[] {
   return childRows(db, "workboard_card_labels", cardId, preloaded).flatMap((row) => {
     const label = stringValue(row, "label");
     return label ? [label] : [];
@@ -207,7 +205,7 @@ export function readLabels(db: DatabaseSync, cardId: string, preloaded?: CardChi
 }
 
 function readEvents(
-  db: DatabaseSync,
+  db: WorkboardSqlConnection,
   cardId: string,
   preloaded?: CardChildRows,
 ): WorkboardEvent[] | undefined {
@@ -262,7 +260,7 @@ export function readAttachment(row: Row): WorkboardAttachment {
 }
 
 function readMetadata(
-  db: DatabaseSync,
+  db: WorkboardSqlConnection,
   row: Row,
   preloaded?: CardChildRows,
 ): WorkboardMetadata | undefined {
@@ -363,6 +361,14 @@ function readMetadata(
   const protocol = workerProtocolRow(db, cardId, preloaded);
   // SAFETY: insertCard serializes WorkboardMetadata.automation unchanged.
   const automation = parseJson(row.automation_json) as WorkboardMetadata["automation"] | undefined;
+  if (isRecord(automation)) {
+    const launch = normalizeLaunchState(automation.launch);
+    if (launch) {
+      automation.launch = launch;
+    } else {
+      delete automation.launch;
+    }
+  }
   // SAFETY: insertCard serializes WorkboardMetadata.claim unchanged.
   const claim = parseJson(row.claim_json) as WorkboardMetadata["claim"] | undefined;
   // SAFETY: insertCard serializes WorkboardMetadata.stale unchanged.
@@ -400,7 +406,11 @@ function readMetadata(
   );
 }
 
-export function readCard(db: DatabaseSync, row: Row, preloaded?: CardChildRows): WorkboardCard {
+export function readCard(
+  db: WorkboardSqlConnection,
+  row: Row,
+  preloaded?: CardChildRows,
+): WorkboardCard {
   const card: WorkboardCard = {
     id: requiredString(row, "id"),
     title: requiredString(row, "title"),

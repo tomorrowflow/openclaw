@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { registerWorkboardGatewayMethods } from "./gateway.js";
-import { createGatewayMethodCapture } from "./test/gateway-methods.js";
+import { createGatewayMethodCapture } from "./test/gateway-method-capture.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 
 describe("workboard gateway method registry", () => {
@@ -12,7 +12,9 @@ describe("workboard gateway method registry", () => {
 
     expect([...methods.keys()]).toEqual([
       "workboard.cards.list",
+      "workboard.cards.list.owner",
       "workboard.cards.create",
+      "workboard.cards.create.owner",
       "workboard.cards.captureSession",
       "workboard.cards.update",
       "workboard.cards.start",
@@ -20,6 +22,7 @@ describe("workboard gateway method registry", () => {
       "workboard.cards.sampleRead",
       "workboard.cards.grill.end",
       "workboard.cards.move",
+      "workboard.cards.move.owner",
       "workboard.cards.delete",
       "workboard.cards.comment",
       "workboard.cards.link",
@@ -39,7 +42,9 @@ describe("workboard gateway method registry", () => {
       "workboard.cards.diagnostics",
       "workboard.cards.diagnostics.refresh",
       "workboard.cards.dispatch",
+      "workboard.cards.dispatch.owner",
       "workboard.cards.dispatchWithOptions",
+      "workboard.cards.dispatchWithOptions.owner",
       "workboard.boards.list",
       "workboard.boards.upsert",
       "workboard.sessionsBoard.read",

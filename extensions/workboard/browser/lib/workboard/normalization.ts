@@ -1,9 +1,9 @@
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { normalizeNodeClaudeTarget } from "./metadata-contract-normalization.ts";
 import {
   normalizeEvents,
   normalizeExecution,
   normalizeMetadata,
+  normalizeNodeClaudeTarget,
 } from "./metadata-normalization.ts";
 import { normalizeNodeRounds } from "./node-rounds-normalization.ts";
 import {

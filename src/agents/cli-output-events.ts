@@ -12,6 +12,7 @@ import type {
   CliStreamingDelta,
   CliThinkingDelta,
   CliThinkingProgress,
+  CliToolInputDelta,
   CliToolResultDelta,
   CliToolUseStartDelta,
   CliUsage,
@@ -24,12 +25,17 @@ import {
   supportsCliJsonlToolEvents,
 } from "./cli-output-records.js";
 import type { RetainedOutputLedger, RetainedOutputScope } from "./cli-output-stream-limits.js";
+import {
+  updateLiveEditDiffProgressFromInput,
+  type LiveEditDiffProgressState,
+} from "./embedded-agent-live-edit-diff.js";
 
 type PendingToolUse = {
   toolCallId: string;
   name: string;
   kind: CliToolUseStartDelta["kind"];
   inputJsonParts: string[];
+  inputJsonLength: number;
   /**
    * Complete input carried on `content_block_start`. Some CLI backends send the
    * whole tool input there and never emit `input_json_delta` chunks, so without
@@ -47,6 +53,7 @@ export function createToolUseTracker(ledger: RetainedOutputLedger) {
   return {
     ledger,
     pendingByIndex: new Map<number, PendingToolUse>(),
+    inputProgressById: new Map<string, LiveEditDiffProgressState>(),
     nameById: new Map<string, string>(),
     startedIds: new Set<string>(),
     resultDeliveredIds: new Set<string>(),
@@ -61,6 +68,7 @@ function emitToolStartOnce(
   args: Record<string, unknown>,
   onToolUseStart?: (delta: CliToolUseStartDelta) => void,
 ): void {
+  tracker.inputProgressById.delete(toolCallId);
   // Streaming and final assistant records may both describe the same tool call.
   if (tracker.startedIds.has(toolCallId)) {
     return;
@@ -86,6 +94,7 @@ function retainToolName(tracker: ToolUseTracker, toolCallId: string, name: strin
 function dropPendingToolBlocks(tracker: ToolUseTracker): void {
   for (const pending of tracker.pendingByIndex.values()) {
     pending.retained.release();
+    tracker.inputProgressById.delete(pending.toolCallId);
   }
   tracker.pendingByIndex.clear();
 }
@@ -286,6 +295,7 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
   parsed: Record<string, unknown>;
   tracker: ToolUseTracker;
   onToolUseStart?: (delta: CliToolUseStartDelta) => void;
+  onToolInputDelta?: (delta: CliToolInputDelta) => void;
   onToolResult?: (delta: CliToolResultDelta) => void;
 }): void {
   if (!supportsCliJsonlToolEvents(params) || isClaudeSubagentRecord(params.parsed)) {
@@ -307,6 +317,13 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
       isRecord(event.content_block)
     ) {
       const block = event.content_block;
+      const previous = tracker.pendingByIndex.get(event.index);
+      tracker.pendingByIndex.delete(event.index);
+      previous?.retained.release();
+      const nextToolCallId = typeof block.id === "string" ? block.id.trim() : "";
+      if (previous && previous.toolCallId !== nextToolCallId) {
+        tracker.inputProgressById.delete(previous.toolCallId);
+      }
       if (isClaudeToolUseBlockType(block.type)) {
         const toolCallId = typeof block.id === "string" ? block.id.trim() : "";
         const name = typeof block.name === "string" ? block.name.trim() : "";
@@ -316,12 +333,12 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
           retained.retain(
             toolCallId.length + name.length + (blockInput ? JSON.stringify(blockInput).length : 0),
           );
-          tracker.pendingByIndex.get(event.index)?.retained.release();
           tracker.pendingByIndex.set(event.index, {
             toolCallId,
             name,
             kind: block.type,
             inputJsonParts: [],
+            inputJsonLength: 0,
             ...(blockInput ? { blockInput } : {}),
             retained,
           });
@@ -341,6 +358,18 @@ export function dispatchClaudeCliStreamingToolEvent(params: {
         if (pending) {
           pending.retained.retain(event.delta.partial_json.length);
           pending.inputJsonParts.push(event.delta.partial_json);
+          pending.inputJsonLength += event.delta.partial_json.length;
+          if (params.onToolInputDelta && !tracker.startedIds.has(pending.toolCallId)) {
+            const progress = updateLiveEditDiffProgressFromInput(tracker.inputProgressById, {
+              toolCallId: pending.toolCallId,
+              name: pending.name,
+              partialJsonLength: pending.inputJsonLength,
+              readPartialJson: () => pending.inputJsonParts.join(""),
+            });
+            if (progress) {
+              params.onToolInputDelta(progress);
+            }
+          }
         }
       }
       return;

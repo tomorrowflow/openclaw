@@ -1,5 +1,6 @@
 import type { WorkboardCommentSource } from "@openclaw/workboard-contract";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { MAX_RUN_ID_LENGTH } from "./store-constants.js";
 
 export function normalizeBoundedString(
   value: unknown,
@@ -17,6 +18,10 @@ export function normalizeBoundedString(
     );
   }
   return normalized;
+}
+
+export function normalizeRunId(value: unknown): string | undefined {
+  return normalizeBoundedString(value, undefined, MAX_RUN_ID_LENGTH, "run id");
 }
 
 const COMMENT_AGENT_SOURCE_PATTERN = /^agent:([\w.-]{1,64})$/;

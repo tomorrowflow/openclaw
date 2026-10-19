@@ -1,4 +1,4 @@
-import { realpathSync, statSync, type BigIntStats } from "node:fs";
+import { fstatSync, readdirSync, realpathSync, statSync, type BigIntStats } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { hasErrnoCode } from "./errno.js";
@@ -11,15 +11,15 @@ export type DatabaseFileIdentity = Readonly<{
 export type DatabasePathIdentity = DatabaseFileIdentity & Readonly<{ canonicalPath: string }>;
 
 // The physical host policy stays fixed across every admission in this process.
-const useDatabaseBirthtime = process.platform !== "linux";
+const useDatabaseBirthtime = process.platform !== "linux" && process.platform !== "android";
 
 export function databaseFileIdentityKey(file: Pick<BigIntStats, "dev" | "ino">): string {
   return `${file.dev}:${file.ino}`;
 }
 
 export function readDatabaseIdentityBirthtime(file: Pick<BigIntStats, "birthtimeNs">): string {
-  // Node does not expose Linux STATX_BTIME availability and can substitute ctime.
-  // Keep the unknown creation-time value stable across ordinary database writes.
+  // Node does not expose STATX_BTIME availability on Linux or Android (Termux) and can
+  // substitute ctime. Keep the unknown creation-time value stable across ordinary database writes.
   return useDatabaseBirthtime ? file.birthtimeNs.toString() : "0";
 }
 
@@ -213,4 +213,30 @@ export function assertExistingDatabaseIdentity(
     key: expected,
     birthtime: expectedBirthtime,
   });
+}
+
+export function isSoleDatabaseFileDescriptor(descriptor: number, file: BigIntStats): boolean {
+  if (process.platform !== "linux") {
+    return false;
+  }
+  try {
+    for (const name of readdirSync("/proc/self/fd")) {
+      if (!/^\d+$/u.test(name) || Number(name) === descriptor) {
+        continue;
+      }
+      try {
+        const other = fstatSync(Number(name), { bigint: true });
+        if (other.dev === file.dev && other.ino === file.ino) {
+          return false;
+        }
+      } catch (error) {
+        if (!hasErrnoCode(error, "EBADF")) {
+          return false;
+        }
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }

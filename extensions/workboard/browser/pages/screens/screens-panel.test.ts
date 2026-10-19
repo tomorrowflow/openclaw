@@ -5,10 +5,11 @@ import { createWorkboardCapability } from "../../lib/workboard/capability.ts";
 import { createWorkboardCard } from "../../lib/workboard/test/index-helpers.ts";
 import { workboardTestHost } from "../../test/host.setup.ts";
 import { createViewContext } from "../../test/host.ts";
-import { createScreensPanel } from "./screens-panel.ts";
+import { createScreensPanel } from "./screens-panel.tsx";
 
 const LIST = "workboard.cards.screenshots.list";
 const GET = "workboard.cards.screenshots.get";
+const CARDS = "workboard.cards.list";
 const SESSION = "agent:dev:workboard:card-1";
 
 beforeEach(() => {
@@ -47,6 +48,7 @@ function nodeCard(status: "running" | "review" = "running") {
 function mountPanel(
   listed: () => WorkboardScreenshotListResult | Promise<WorkboardScreenshotListResult>,
   cards = [nodeCard()],
+  sessionCards: unknown[] = [],
 ) {
   const fixture = workboardTestHost();
   fixture.connection.connected = true;
@@ -55,7 +57,9 @@ function mountPanel(
       ? listed()
       : method === GET
         ? { mimeType: "image/png", contentBase64: btoa(String(params?.path)) }
-        : {},
+        : method === CARDS && params?.sessionKey === SESSION
+          ? { cards: sessionCards }
+          : {},
   );
   fixture.host.request = request as typeof fixture.host.request;
   const workboard = createWorkboardCapability();
@@ -100,6 +104,23 @@ it("shows the agent's live screenshots above each round's committed ones", async
       { id: "card-1", live: true, path: "docs/screenshots/T-1/home.png" },
       { id: "card-1", round: 0, path: "docs/screenshots/T-1/done.png" },
     ]);
+  } finally {
+    panel.dispose();
+  }
+});
+
+it("loads the session's own card when the board has not loaded yet", async () => {
+  const panel = mountPanel(
+    () => ({
+      committed: { state: "available", rounds: [ROUND] },
+      live: { state: "available", shots: [] },
+    }),
+    [],
+    [nodeCard()],
+  );
+  try {
+    await vi.waitFor(() => expect(panel.container.querySelectorAll("img")).toHaveLength(1));
+    expect(panel.calls(CARDS).map(([, params]) => params)).toEqual([{ sessionKey: SESSION }]);
   } finally {
     panel.dispose();
   }

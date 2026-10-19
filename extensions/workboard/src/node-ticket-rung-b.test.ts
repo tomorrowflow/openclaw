@@ -22,7 +22,7 @@ import {
   startNodeCard,
 } from "./node-ticket.test-support.js";
 import type { WorkboardStore } from "./store.js";
-import { createGatewayMethodCapture } from "./test/gateway-methods.js";
+import { createGatewayMethodCapture } from "./test/gateway-method-capture.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 import { createWorkboardTools } from "./tools.js";
 

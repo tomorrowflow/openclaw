@@ -361,7 +361,10 @@ describe("Workboard node ticket lifecycle", () => {
     }
     // A line too long for one comment continues in the next one.
     const text = bodies.join("").replace(/\s/g, "");
-    const lines = [...value.summary.split("\n"), ...("questions" in value ? value.questions : [])];
+    const lines = [
+      ...value.summary.split("\n"),
+      ...("questions" in value ? (value.questions ?? []) : []),
+    ];
     for (const line of lines) {
       expect(text).toContain(line.replace(/\s/g, ""));
     }

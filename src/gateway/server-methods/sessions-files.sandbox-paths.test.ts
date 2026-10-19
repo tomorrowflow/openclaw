@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveSandboxConfigForAgent } from "../../agents/sandbox/config.js";
 import { resolveSandboxWorkspaceLayoutPaths } from "../../agents/sandbox/shared.js";
+import type { withSessionTranscriptDeltaReader } from "../../config/sessions/session-transcript-delta-read.js";
 import { sessionsFilesHandlers } from "./sessions-files.js";
 import {
   assistantToolCall,
@@ -23,7 +24,7 @@ const hoisted = vi.hoisted(() => ({
   loadSessionEntry: vi.fn(),
   resolveAgentWorkspaceDir: vi.fn(),
   resolveDefaultAgentId: vi.fn(),
-  readSessionTranscriptVisibleMessageDeltaCore: vi.fn(),
+  readDelta: vi.fn(),
   readRegisteredSandboxRuntimeIds: vi.fn(),
   readRegistryEntry: vi.fn(),
 }));
@@ -45,30 +46,30 @@ vi.mock("../../agents/agent-scope.js", async (importOriginal) => ({
   resolveDefaultAgentId: hoisted.resolveDefaultAgentId,
 }));
 
-vi.mock("../session-utils.js", async () => {
-  const actual = await vi.importActual<typeof import("../session-utils.js")>("../session-utils.js");
-  return {
-    ...actual,
-    loadSessionEntry: hoisted.loadSessionEntry,
-    loadGatewaySessionEntryReadOnly: hoisted.loadSessionEntry,
-  };
-});
+vi.mock("../session-utils.js", async (original) => ({
+  ...(await original<typeof import("../session-utils.js")>()),
+  loadIncognitoGatewaySessionEntryReadOnly: hoisted.loadSessionEntry,
+}));
 
-vi.mock("../session-transcript-readers.js", async () => {
-  const actual = await vi.importActual<typeof import("../session-transcript-readers.js")>(
-    "../session-transcript-readers.js",
-  );
-  return {
-    ...actual,
-    readSessionTranscriptVisibleMessageDeltaCore:
-      hoisted.readSessionTranscriptVisibleMessageDeltaCore,
-  };
-});
+vi.mock("../session-utils-store-worker.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../session-utils-store-worker.js")>()),
+  loadGatewaySessionEntryReadOnlyInWorker: async (params: { key: string; agentId?: string }) =>
+    hoisted.loadSessionEntry(params.key, { agentId: params.agentId }),
+}));
+
+// mock-isolation: file browsing reads only the visible transcript pages the test supplies.
+vi.mock("../../config/sessions/session-transcript-delta-read.js", () => ({
+  withSessionTranscriptDeltaReader: ((scope, consume) =>
+    consume({
+      visible: async (limits) => hoisted.readDelta(scope, limits),
+      raw: async () => {
+        throw new Error("File browsing must consume visible transcript pages");
+      },
+    })) satisfies typeof withSessionTranscriptDeltaReader,
+}));
 
 const invokeSessionFilesHandler = createSessionFilesHandlerInvoker(sessionsFilesHandlers);
-const mockVisibleMessages = createVisibleMessagesMock(
-  hoisted.readSessionTranscriptVisibleMessageDeltaCore,
-);
+const mockVisibleMessages = createVisibleMessagesMock(hoisted.readDelta);
 
 /** Re-points the session entry at a sandboxed agent; binds are operator mounts. */
 function useSandboxedSession(

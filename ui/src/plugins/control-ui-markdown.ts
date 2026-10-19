@@ -2,10 +2,10 @@ import { html } from "lit";
 import { property } from "lit/decorators.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { toSanitizedMarkdownHtml } from "../components/markdown.ts";
-import { OpenClawLightDomElement } from "../lit/openclaw-element.ts";
+import { OpenClawLightDomContentsElement } from "../lit/openclaw-element.ts";
 import "../styles/sidebar-markdown.css";
 
-class PluginMarkdown extends OpenClawLightDomElement {
+class PluginMarkdown extends OpenClawLightDomContentsElement {
   @property({ attribute: false }) markdown = "";
 
   override render() {

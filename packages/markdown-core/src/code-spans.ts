@@ -24,7 +24,7 @@ type CodeSpanIndex = {
   /** Inline-code state to carry into the next streamed chunk. */
   inlineState: InlineCodeState;
   /** Fenced-code state to carry into the next streamed chunk. */
-  fenceState?: FenceScanState;
+  fenceState: FenceScanState;
   /** True when an offset is inside fenced code or inline code. */
   isInside: (index: number) => boolean;
 };

@@ -105,6 +105,7 @@ export type WorkboardSlotClaimResult =
 export type WorkboardCardReadScope =
   | { kind: "board"; boardId: string }
   | { kind: "session"; sessionKey: string }
+  | { kind: "session-links"; sessionKey: string; boardId?: string }
   | {
       kind: "worker-context";
       cardId: string;

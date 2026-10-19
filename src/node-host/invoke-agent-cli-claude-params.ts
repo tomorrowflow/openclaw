@@ -109,6 +109,22 @@ export const NODE_CLAUDE_CLEAR_ENV_KEYS: ReadonlySet<string> = new Set([
   "OTEL_TRACES_EXPORTER",
 ]);
 
+const ALLOWED_PARAMS = new Set([
+  "argv",
+  "stdin",
+  "cwd",
+  "env",
+  "clearEnv",
+  "systemPrompt",
+  "agentId",
+  "sessionKey",
+  "approvalDecision",
+  "systemRunPlan",
+  "idleTimeoutMs",
+  "timeoutMs",
+  "skillRuntime",
+]);
+
 export type ClaudeCliNodeRunParams = Awaited<ReturnType<typeof decodeClaudeCliNodeRunParams>>;
 
 export type ClaudeCliNodeRunResult = {
@@ -201,22 +217,7 @@ export async function decodeClaudeCliNodeRunParams(raw?: string | null) {
   if (!value) {
     throw new Error("INVALID_REQUEST: Claude CLI params must be an object");
   }
-  const allowed = new Set([
-    "argv",
-    "stdin",
-    "cwd",
-    "env",
-    "clearEnv",
-    "systemPrompt",
-    "agentId",
-    "sessionKey",
-    "approvalDecision",
-    "systemRunPlan",
-    "idleTimeoutMs",
-    "timeoutMs",
-    "skillRuntime",
-  ]);
-  const unknown = Object.keys(value).find((key) => !allowed.has(key));
+  const unknown = Object.keys(value).find((key) => !ALLOWED_PARAMS.has(key));
   if (unknown) {
     throw new Error(`INVALID_REQUEST: unknown Claude CLI parameter: ${unknown}`);
   }

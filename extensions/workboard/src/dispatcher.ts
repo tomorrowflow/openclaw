@@ -383,7 +383,6 @@ async function runWorkboardDispatch(
   const startedOwners = new Set<string>();
   // Allow one fallback per worker slot without draining the queue during an outage.
   const maxAttempts = maxStarts * 2;
-  let acceptedStarts = 0;
   let attemptedStarts = 0;
 
   const nodeTicketSlots = await params.store.nodeTicketSlots(
@@ -406,7 +405,7 @@ async function runWorkboardDispatch(
   }
   for (const card of selection.cards) {
     const ownerId = ownerOverride || workboardCardSlotOwner(card, now);
-    if (acceptedStarts >= maxStarts || attemptedStarts >= maxAttempts) {
+    if (started.length >= maxStarts || attemptedStarts >= maxAttempts) {
       break;
     }
     const nodeTarget = nodeTicketTarget(card);
@@ -664,7 +663,6 @@ async function runWorkboardDispatch(
             execution: acceptedExecution,
           })
           .catch(() => undefined)) ?? acceptedCard;
-      acceptedStarts += 1;
       if (!nodeTarget) {
         startedOwners.add(ownerId);
       }

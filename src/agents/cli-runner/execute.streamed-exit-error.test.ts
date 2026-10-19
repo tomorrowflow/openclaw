@@ -12,6 +12,7 @@ import {
   wrapPreparedCliRunWithTestAdmission,
 } from "./execute.test-support.js";
 
+// mock-isolation: the real child adapter would spawn a process; each test stubs the supervisor spawn.
 vi.mock("../../process/supervisor/adapters/child.js", () => ({ createChildAdapter: vi.fn() }));
 
 type SupervisorSpawnInput = Parameters<ReturnType<typeof getProcessSupervisor>["spawn"]>[0];

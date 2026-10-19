@@ -1,11 +1,25 @@
 import "../../test/dom.setup.ts";
-import { render } from "lit";
+import { render } from "@solidjs/web";
+import { createComponent, flush, type Component } from "solid-js";
 import { afterEach, expect, it, vi } from "vitest";
 import { normalizeCardsPayload } from "../../lib/workboard/normalization.ts";
 import { createWorkboardCard } from "../../lib/workboard/test/index-helpers.ts";
-import { renderCardMeta, renderCardPullRequest, renderCardStage } from "./view-card-content.ts";
+import { CardMeta, CardPullRequest, CardStage } from "./view-card-content.tsx";
 
-afterEach(() => vi.unstubAllGlobals());
+const disposers: Array<() => void> = [];
+afterEach(() => {
+  for (const dispose of disposers.splice(0)) {
+    dispose();
+  }
+  vi.unstubAllGlobals();
+});
+
+function mount<Props extends object>(component: Component<Props>, props: Props) {
+  const container = document.createElement("div");
+  disposers.push(render(() => createComponent(component, props), container));
+  flush();
+  return container;
+}
 
 it("leaves settled labels untouched until their available width changes", () => {
   let resize: ResizeObserverCallback = () => {};
@@ -28,9 +42,14 @@ it("leaves settled labels untouched until their available width changes", () => 
   const container = document.createElement("div");
   document.body.append(container);
   const root = render(
-    renderCardMeta(createWorkboardCard({ labels: ["alpha", "beta"] }), false),
+    () =>
+      createComponent(CardMeta, {
+        card: createWorkboardCard({ labels: ["alpha", "beta"] }),
+        archived: false,
+      }),
     container,
   );
+  flush();
   const labels = container.querySelector<HTMLElement>(".workboard-card__labels")!;
   const chips = [...labels.querySelectorAll<HTMLElement>(".workboard-card__label")];
   const overflow = labels.querySelector<HTMLElement>(".workboard-card__label-overflow")!;
@@ -74,7 +93,7 @@ it("leaves settled labels untouched until their available width changes", () => 
     expect(overflow.title).toBe("beta");
   } finally {
     mutations.disconnect();
-    root.setConnected(false);
+    root();
   }
 });
 
@@ -86,10 +105,12 @@ it("shows a queued card's chip in the tile meta, which is visible without hover"
     worktreesRoot: "/Users/factory/worktrees",
     hostRepoPath: "/home/openclaw/repos/app",
   } as const;
-  const container = document.createElement("div");
   const meta = (startRequest?: { requestedAt: number }) => {
     const automation = { target, ...(startRequest ? { startRequest } : {}) };
-    render(renderCardMeta(createWorkboardCard({ metadata: { automation } }), false), container);
+    const container = mount(CardMeta, {
+      card: createWorkboardCard({ metadata: { automation } }),
+      archived: false,
+    });
     return container.querySelector(".workboard-card__meta .workboard-card__queued");
   };
 
@@ -98,14 +119,14 @@ it("shows a queued card's chip in the tile meta, which is visible without hover"
 });
 
 it("links a card's draft PR by its number, and renders nothing before a PR exists", () => {
-  const container = document.createElement("div");
   // Through the board's own normalization, which every card read passes.
   const pullRequestLink = (pullRequestUrl?: string) => {
     const [card] = normalizeCardsPayload({
       cards: [{ ...createWorkboardCard(), ...(pullRequestUrl ? { pullRequestUrl } : {}) }],
     }).cards;
-    render(renderCardPullRequest(card!), container);
-    return container.querySelector<HTMLAnchorElement>("a.workboard-card__pull-request");
+    return mount(CardPullRequest, { card: card! }).querySelector<HTMLAnchorElement>(
+      "a.workboard-card__pull-request",
+    );
   };
   expect(pullRequestLink()).toBeNull();
   expect(pullRequestLink("javascript:alert(1)")).toBeNull();
@@ -120,14 +141,15 @@ it("links a card's draft PR by its number, and renders nothing before a PR exist
 
 it("shortens a device-id node on the stage line and keeps the full id on hover", () => {
   const nodeId = "7ab5c2865e49b8cdc3d890d00d9a19767cfc0057936c87c86ebeef0cc70f5e03";
-  const container = document.createElement("div");
-  render(renderCardStage({ kind: "running", nodeId, attempt: 3 }, 0), container);
+  const container = mount(CardStage, { stage: { kind: "running", nodeId, attempt: 3 }, now: 0 });
   const label = container.querySelector(".workboard-card__stage > span");
   expect(label?.textContent).toBe("Running on 7ab5c2865e49b8cd… · attempt 3");
   expect(label?.getAttribute("title")).toBe(nodeId);
 
-  render(renderCardStage({ kind: "running", nodeId: "mac-factory" }, 0), container);
-  expect(container.querySelector(".workboard-card__stage > span")?.textContent).toBe(
-    "Running on mac-factory",
-  );
+  expect(
+    mount(CardStage, {
+      stage: { kind: "running", nodeId: "mac-factory" },
+      now: 0,
+    }).querySelector(".workboard-card__stage > span")?.textContent,
+  ).toBe("Running on mac-factory");
 });

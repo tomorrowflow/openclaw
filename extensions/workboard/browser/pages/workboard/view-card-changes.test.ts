@@ -1,7 +1,6 @@
 import "../../test/dom.setup.ts";
 import { createHash } from "node:crypto";
 import { expectDefined } from "@openclaw/normalization-core";
-import { nothing, render } from "lit";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { normalizeCardsPayload } from "../../lib/workboard/normalization.ts";
 import { getWorkboardState } from "../../lib/workboard/runtime.ts";
@@ -11,8 +10,8 @@ import {
 } from "../../lib/workboard/test/index-helpers.ts";
 import { workboardTestHost } from "../../test/host.setup.ts";
 import { waitForFast } from "../../test/wait-for.ts";
-import { createCardChanges } from "./view-card-changes.ts";
-import { renderCardDetailsPanel } from "./view-card-details.ts";
+import { createCardChanges } from "./view-card-changes.tsx";
+import { createWorkboardRenderProps, renderInto } from "./view.test-support.ts";
 
 const text = (element: Element | null | undefined) =>
   element?.textContent?.replace(/\s+/g, " ").trim();
@@ -68,24 +67,17 @@ it("lists each round's files in a Changes tab, opens a file's diff, and links pu
   state.detailTab = "changes";
   const container = document.createElement("div");
   document.body.append(container);
-  onTestFinished(() => {
-    render(nothing, container);
-    container.remove();
-  });
+  onTestFinished(() => container.remove());
   workboardTestHost().connection.connected = true;
   const renderPanel = () =>
-    render(
-      renderCardDetailsPanel({
-        host,
+    renderInto(
+      container,
+      createWorkboardRenderProps(host, {
         client,
-        connected: true,
         canWrite: true,
-        agentsList: null,
-        sessions: [],
         onOpenSession: vi.fn(),
         detailChanges: changes,
       }),
-      container,
     );
   const changes = createCardChanges(client, () => renderPanel());
   renderPanel();

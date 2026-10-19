@@ -32,6 +32,7 @@ beforeAll(async () => {
   installEmbeddedRunnerBaseE2eMocks({ hookRunner: "full" });
   // The real transport path links the full provider-hook binding surface; keep
   // every export present and provider-plugin free.
+  // mock-isolation: provider plugins must stay unloaded on the real transport path.
   vi.doMock("../../../plugins/provider-hook-runtime.js", () => ({
     attachModelProviderRuntimePluginHandle: (model: unknown) => model,
     getModelProviderRuntimePluginHandle: vi.fn(() => undefined),
@@ -50,6 +51,7 @@ beforeAll(async () => {
     wrapProviderStreamFn: vi.fn(() => undefined),
     clearProviderRuntimePluginCacheForTest: vi.fn(),
   }));
+  // mock-isolation: the harness must not write the operator models.json.
   vi.doMock("../../models-config.js", () => ({
     ensureOpenClawModelsJson: vi.fn(async () => ({ wrote: false })),
   }));
@@ -207,7 +209,7 @@ it.each(["openai-responses", "openai-completions"] as const)(
         // The finalizer reopens the session through a byte cap derived from this
         // budget. Sized for a fresh turn, that view cannot hold the settled tool
         // batch; the finalizer must answer from the settled snapshot instead.
-        contextTokenBudget: 100,
+        contextTokenBudget: 128,
         authProfileStore: { version: 1, profiles: {} },
       });
       input.finalization.harness = createOpenClawAgentHarness();

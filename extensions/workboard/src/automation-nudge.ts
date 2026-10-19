@@ -51,7 +51,7 @@ function clearPendingBoardNudges(state: WorkboardAutomationNudgeState): void {
 function getWorkboardAutomationNudgeState(): WorkboardAutomationNudgeState {
   return resolveGlobalSingleton<WorkboardAutomationNudgeState>(
     WORKBOARD_AUTOMATION_NUDGE_STATE_KEY,
-    () => ({ pendingByBoard: new Map<string, PendingBoardNudge>() }),
+    () => ({ pendingByBoard: new Map() }),
     (state) => {
       state.owner = undefined;
       clearPendingBoardNudges(state);
@@ -123,11 +123,7 @@ export function createWorkboardAutomationNudgeService(params: {
     } catch (error) {
       // The automation schedule is the backstop; a nudge failure must not alter
       // lifecycle synchronization or card state.
-      if (state.owner === owner) {
-        owner.logger.warn(
-          `workboard automation nudge failed for board ${boardId}: ${String(error)}`,
-        );
-      }
+      owner.logger.warn(`workboard automation nudge failed for board ${boardId}: ${String(error)}`);
     } finally {
       if (state.owner === owner && state.pendingByBoard.get(boardId) === pending) {
         pending.timer = setTimeout(
@@ -152,7 +148,6 @@ export function createWorkboardAutomationNudgeService(params: {
     owner: NudgeOwner,
     rerunCount: number,
   ) => {
-    const state = getWorkboardAutomationNudgeState();
     try {
       const automationByBoard = new Map(
         (await params.store.listBoards()).boards.flatMap((board) =>
@@ -166,9 +161,7 @@ export function createWorkboardAutomationNudgeService(params: {
         }),
       );
     } catch (error) {
-      if (state.owner === owner) {
-        owner.logger.warn(`workboard automation nudge failed: ${String(error)}`);
-      }
+      owner.logger.warn(`workboard automation nudge failed: ${String(error)}`);
     }
   };
 

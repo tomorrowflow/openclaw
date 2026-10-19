@@ -4,6 +4,7 @@ import type {
   WorkboardMetadata,
   WorkboardNodeRound,
 } from "@openclaw/workboard-contract";
+import { definedFields } from "../record-fields.js";
 import { grillLogAttachmentId } from "./node-ticket-grill.js";
 import { MAX_CARD_ATTACHMENTS, MAX_CARD_METADATA_BYTES } from "./store-constants.js";
 
@@ -27,33 +28,10 @@ export function capAttachments(
 }
 
 export function removeUndefinedMetadataFields(metadata: WorkboardMetadata): WorkboardMetadata {
-  const next = { ...metadata };
-  for (const key of [
-    "attempts",
-    "comments",
-    "links",
-    "proof",
-    "artifacts",
-    "attachments",
-    "workerLogs",
-    "workerProtocol",
-    "automation",
-    "claim",
-    "diagnostics",
-    "notifications",
-    "templateId",
-    "archivedAt",
-    "stale",
-    "lifecycleStatusSourceUpdatedAt",
-    "failureCount",
-  ] as const) {
-    const value = next[key];
-    if (
-      value === undefined ||
-      (Array.isArray(value) && value.length === 0) ||
-      (typeof value === "number" && value === 0 && key === "failureCount")
-    ) {
-      delete next[key];
+  const next = definedFields({ ...metadata });
+  for (const [key, value] of Object.entries(next)) {
+    if ((Array.isArray(value) && value.length === 0) || (key === "failureCount" && value === 0)) {
+      Reflect.deleteProperty(next, key);
     }
   }
   return next;
@@ -93,7 +71,7 @@ function withOldestNodeRoundTrimmed(metadata: WorkboardMetadata): WorkboardMetad
 
 export function trimMetadataToBudget(
   metadata: WorkboardMetadata,
-  options: { preserveProofId?: string } = {},
+  options: { preserveProofId?: string; preserveNotificationId?: string } = {},
 ): WorkboardMetadata {
   let next = removeUndefinedMetadataFields(metadata);
   const grillLogId = grillLogAttachmentId(next);
@@ -119,31 +97,35 @@ export function trimMetadataToBudget(
       if (!entries?.length) {
         continue;
       }
-      const index =
+      const preserveId =
         key === "proof"
-          ? (next.proof?.findIndex(
-              (proof) => !options.preserveProofId || proof.id !== options.preserveProofId,
-            ) ?? -1)
+          ? options.preserveProofId
+          : key === "notifications"
+            ? options.preserveNotificationId
+            : grillLogId;
+      const index =
+        key === "proof" || key === "notifications" || key === "attachments"
+          ? (next[key]?.findIndex((entry) => entry.id !== preserveId) ?? -1)
           : key === "links"
             ? (next.links?.findIndex((link) => !isDependencyLink(link)) ?? -1)
-            : key === "attachments"
-              ? (next.attachments?.findIndex((entry) => entry.id !== grillLogId) ?? -1)
-              : 0;
+            : 0;
       if (index < 0) {
         continue;
       }
       next = removeUndefinedMetadataFields({
         ...next,
-        [key]:
-          key === "proof" || key === "links" || key === "attachments"
-            ? entries.filter((_, entryIndex) => entryIndex !== index)
-            : entries.slice(1),
+        [key]: entries.filter((_, entryIndex) => entryIndex !== index),
       });
       break;
     }
     if (metadataByteSize(next) >= currentSize) {
       if (options.preserveProofId) {
         throw new Error(`card metadata cannot retain proof: ${options.preserveProofId}`);
+      }
+      if (options.preserveNotificationId) {
+        throw new Error(
+          `card metadata cannot retain notification: ${options.preserveNotificationId}`,
+        );
       }
       break;
     }

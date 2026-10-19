@@ -8,6 +8,7 @@ import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 import {
   buildReleaseStateArtifact,
+  readReleaseJobListing,
   releaseExecutionPlanSha256,
 } from "../../scripts/full-release-validation-policy.mjs";
 import { validateParentManifest } from "../../scripts/release-ci-summary.mjs";
@@ -59,6 +60,58 @@ describe("FRV protected gh evidence reads", () => {
       expect(result.calls).toHaveLength(1);
     },
   );
+
+  it("rereads a job listing at a smaller page size after a GitHub 5xx", () => {
+    const result = runProtectedFrv(
+      "getAttemptJobs",
+      ["101", 2],
+      "actions/runs/101/attempts/2/jobs?per_page=50",
+      "large-page-502",
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual([{ id: 1 }, { id: 2 }]);
+    expect(result.calls.map((call) => call[2])).toEqual([
+      `repos/${REPOSITORY}/actions/runs/101/attempts/2/jobs?per_page=100`,
+      `repos/${REPOSITORY}/actions/runs/101/attempts/2/jobs?per_page=50`,
+    ]);
+  });
+
+  it("fails closed when every job listing page size returns a 5xx", async () => {
+    const serverError = Object.assign(new Error("Command failed"), {
+      stderr: "gh: Server Error (HTTP 502)",
+    });
+    const pageSizes: number[] = [];
+    await expect(
+      readReleaseJobListing(async (perPage, { smallerPageFallback }) => {
+        pageSizes.push(perPage);
+        expect(smallerPageFallback).toBe(perPage !== 30);
+        throw serverError;
+      }),
+    ).rejects.toBe(serverError);
+    expect(pageSizes).toEqual([100, 50, 30]);
+    const notFound = Object.assign(new Error("Command failed"), {
+      stderr: "gh: Not Found (HTTP 404)",
+    });
+    await expect(
+      readReleaseJobListing(async (perPage) => {
+        pageSizes.push(perPage);
+        throw notFound;
+      }),
+    ).rejects.toBe(notFound);
+    expect(pageSizes).toEqual([100, 50, 30, 100]);
+  });
+
+  it("reads the mutable release tip freshly even when watcher reads are cached", () => {
+    const result = runProtectedFrv(
+      "getRef",
+      ["refs/heads/release/candidate"],
+      "git/ref/heads/release/candidate",
+      "none",
+      true,
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.calls).toHaveLength(1);
+  });
 
   it.each(["403", "429"] as const)(
     "retains a later-page %s throttle deadline without fast transport retries",
@@ -131,8 +184,10 @@ function runProtectedFrv(
     | "unrelated"
     | "transient-deadline"
     | "empty"
+    | "large-page-502"
     | "403"
     | "429" = "none",
+  cachedReads = false,
 ) {
   const root = mkdtempSync(join(tmpdir(), "frv-protected-"));
   const gh = join(root, "gh");
@@ -146,6 +201,10 @@ const fail = (message, code) => { console.error(message); process.exit(code); };
 const failure = ${JSON.stringify(failure)};
 if (failure === "protected") fail("protected refusal", 19);
 if (failure === "transient-deadline") fail("HTTP 502: transient fixture failure", 1);
+if (failure === "large-page-502" && args.some((arg) => arg.endsWith("/jobs?per_page=100"))) {
+  process.stdout.write("HTTP/2.0 502 Bad Gateway\\r\\n\\r\\n");
+  fail("gh: Server Error (HTTP 502)", 1);
+}
 if (args[0] !== "api" || !args.includes(${JSON.stringify(`repos/${REPOSITORY}/${endpoint}`)})) fail("unexpected request", 17);
 if (!args.some((arg, i) => ["-H", "--header"].includes(arg) && args[i+1] === "Cache-Control: max-age=0")) fail("missing live header", 18);
 if (${endpoint.endsWith("/logs")} && failure === "legacy-flag" && args.includes("--allow-escape-sequences")) fail("unknown flag: --allow-escape-sequences", 1);
@@ -188,7 +247,7 @@ if (${endpoint.includes("/jobs?")}) {
         };
       }
       try {
-        console.log(JSON.stringify(await createClient(${JSON.stringify(REPOSITORY)})[${JSON.stringify(method)}](...${JSON.stringify(args)})));
+        console.log(JSON.stringify(await createClient(${JSON.stringify(REPOSITORY)}, { cachedReads: ${cachedReads} })[${JSON.stringify(method)}](...${JSON.stringify(args)})));
       } catch (error) {
         console.error(throttled ? JSON.stringify({ retryAt: releaseGhRateLimitRetryAt(error), classification: classifyReleaseGhTransportError(error) }) : error.message);
         process.exitCode = typeof error.code === "number" ? error.code : 1;
@@ -483,7 +542,10 @@ async function runPublicationCli(
   responses[endpoint("actions/runs/77/jobs?filter=all&per_page=100")] = {
     jobs: [{ ...job("Diagnostic Drain"), run_attempt: fixture.root.run_attempt }],
   };
-  responses[endpoint("git/ref/heads/release/2026.9.9")] = { object: { sha: TARGET_SHA } };
+  responses[endpoint("git/ref/heads/release/2026.9.9")] = {
+    ref: "refs/heads/release/2026.9.9",
+    object: { type: "commit", sha: TARGET_SHA },
+  };
   await amend(responses, artifact);
   writeFileSync(join(directory, "responses.json"), JSON.stringify(responses));
   writeFileSync(join(directory, "legacy-plan.json"), JSON.stringify(fixture.executionPlan));
@@ -682,6 +744,12 @@ describe("publication status real CLI", () => {
       runAttempt: 1,
       conclusion: kind === "successful verification" ? "success" : "failure",
     });
+    expect(publication.release).toEqual({
+      version: "2026.9.9",
+      tag: "v2026.9.9",
+      distTag: "latest",
+      sourceSha: TARGET_SHA,
+    });
     expect(publication.surfaces.activation.operation.state).toBe("unknown");
     expect(value.children).toHaveLength(4);
     expect(result.calls.length).toBeGreaterThan(0);
@@ -734,6 +802,11 @@ describe("publication status real CLI", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("Publication observation (not release authorization)");
     expect(result.stdout).toContain("selected-attempt=2");
+    expect(result.stdout).toContain(
+      `release: version=2026.9.9 tag=v2026.9.9 dist-tag=latest source-sha=${TARGET_SHA} (producer diagnostic)`,
+    );
+    expect(result.stdout).toContain("pnpm release:stable 2026.9.9 --status");
+    expect(result.stdout).toContain("Website deployment is not observed here");
     expect(result.stdout).toContain(
       "pluginNpm: selection=unknown operation=unknown verification=failure",
     );
@@ -1294,6 +1367,7 @@ describe("publication status real CLI", () => {
       });
       expect(result.status, result.stdout).toBe(0);
       const surface = JSON.parse(result.stdout).publication.surfaces.nativeWindows;
+      expect(surface.target).toEqual({ tag: "v2026.9.9", sourceTag: "windows-v1" });
       expect(surface.children[0].recordedAttempt).toBeNull();
       expect(surface.children[0].status).toBe(native.status);
       expect(surface.children[0].conclusion).toBe(native.conclusion);
@@ -1600,7 +1674,10 @@ describe("publication status real CLI", () => {
         (responses) => {
           responses[`repos/${REPOSITORY}/git/ref/heads/release/2026.9.9`] =
             tipState === "superseded"
-              ? { object: { sha: "d".repeat(40) } }
+              ? {
+                  ref: "refs/heads/release/2026.9.9",
+                  object: { type: "commit", sha: "d".repeat(40) },
+                }
               : { failure: "HTTP 403 Resource not accessible by integration" };
         },
       );

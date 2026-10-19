@@ -4,6 +4,7 @@ import type {
   WorkboardDiagnostic,
   WorkboardEvent,
   WorkboardExecutionTarget,
+  WorkboardLaunchState,
   WorkboardWorkspace,
   WorkboardWorkspaceAccess,
 } from "@openclaw/workboard-contract";
@@ -42,12 +43,18 @@ type WorkboardCardInput = {
 };
 
 export type WorkboardCardPatch = WorkboardCardInput;
+/** Internal builders carry launch state separately from untrusted metadata. */
+export type WorkboardOwnedCardPatch = WorkboardCardPatch & {
+  ownedLaunch?: WorkboardLaunchState;
+};
 /** An agent tool mutation's author; mutations without one are the operator's or Workboard's own. */
 export type WorkboardAgentActor = `agent:${string}`;
 
 export type WorkboardUpdateCardOptions = {
   actor?: WorkboardAgentActor;
+  /** Trusted host writes may record host-owned automation state (node worktree, start request). */
   allowAutomationLaunch?: boolean;
+  automationLaunch?: WorkboardLaunchState;
   allowMetadataDependencyLinks?: boolean;
   enforceStatusHolds?: boolean;
   event?: Omit<WorkboardEvent, "id" | "at">;
@@ -55,6 +62,7 @@ export type WorkboardUpdateCardOptions = {
   expectedUpdatedAt?: number;
   claimSlot?: { slot: WorkboardClaimSlot; now: number };
   preserveProofId?: string;
+  preserveNotificationId?: string;
 };
 export type WorkboardCommentInput = { body?: unknown };
 export type WorkboardLinkInput = {

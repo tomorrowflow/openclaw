@@ -20,6 +20,7 @@ import { preserveServicePolicyXml } from "./service-policy-xml.js";
 import {
   publishServiceFile,
   matchesServiceFilePublication,
+  matchesServiceFileState,
   readServiceFileState,
   type GatewayServiceDefinitionTransactionHooks,
 } from "./service-stage.js";
@@ -63,11 +64,10 @@ function collectLaunchAgentEnvironmentEntries(
   environment: GatewayServiceEnv | undefined,
 ): Array<[string, string]> {
   const entries: Array<[string, string]> = [];
-  for (const [rawKey, rawValue] of Object.entries(environment ?? {})) {
+  for (const [rawKey, value] of Object.entries(environment ?? {})) {
     const key = normalizeEnvVarKey(rawKey, { portable: true });
-    const value = rawValue?.trim();
     // Empty NODE_OPTIONS intentionally clears launchd's inherited Node flags.
-    if (!key || value === undefined || (!value && key !== "NODE_OPTIONS")) {
+    if (!key || value === undefined || (!value.trim() && key !== "NODE_OPTIONS")) {
       continue;
     }
     entries.push([key, value]);
@@ -268,7 +268,7 @@ export async function captureLaunchAgentInstallFiles(env: GatewayServiceEnv) {
     const expected = published.get(file);
     if (
       expected
-        ? !matchesServiceFilePublication(current, expected)
+        ? !matchesServiceFileState(current, expected)
         : !isDeepStrictEqual(current, originals.get(file)?.state)
     ) {
       throw new Error(`LaunchAgent artifact changed after capture or publication: ${file}`);

@@ -3,6 +3,8 @@ import {
   isRecord,
   normalizeBoundedOptionalString,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { definedFields } from "../record-fields.js";
+import { normalizeRunId } from "./store-value-normalizers.js";
 
 // Host-issued automation run state: only trusted store writes may set it, and
 // a stored value that fails these shapes is dropped rather than repaired.
@@ -23,7 +25,7 @@ export function normalizeLaunchState(value: unknown): WorkboardLaunchState | und
     return undefined;
   }
   const requestedSessionKey = normalizeBoundedOptionalString(value.requestedSessionKey, 240);
-  const provisionalRunId = normalizeBoundedOptionalString(value.provisionalRunId, 160);
+  const provisionalRunId = normalizeRunId(value.provisionalRunId);
   const preparedAt = normalizeLaunchTimestamp(value.preparedAt);
   if (!requestedSessionKey || !provisionalRunId || preparedAt === undefined) {
     return undefined;
@@ -35,16 +37,16 @@ export function normalizeLaunchState(value: unknown): WorkboardLaunchState | und
   if (value.phase === "accepted") {
     const acceptedAt = normalizeLaunchTimestamp(value.acceptedAt);
     const acceptedSessionKey = normalizeBoundedOptionalString(value.acceptedSessionKey, 240);
-    const acceptedRunId = normalizeBoundedOptionalString(value.acceptedRunId, 160);
+    const acceptedRunId = normalizeRunId(value.acceptedRunId);
     return acceptedAt === undefined || !acceptedSessionKey
       ? undefined
-      : {
+      : definedFields<WorkboardLaunchState>({
           phase: "accepted",
           ...identity,
           acceptedAt,
           acceptedSessionKey,
-          ...(acceptedRunId ? { acceptedRunId } : {}),
-        };
+          acceptedRunId,
+        });
   }
   if (value.phase === "failed") {
     const failedAt = normalizeLaunchTimestamp(value.failedAt);

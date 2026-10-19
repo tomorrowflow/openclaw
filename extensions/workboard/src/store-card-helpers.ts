@@ -26,12 +26,7 @@ import {
 } from "./store-constants.js";
 import type { WorkboardMutationScope } from "./store-inputs.js";
 import { removeUndefinedMetadataFields } from "./store-metadata-budget.js";
-import {
-  capText,
-  metadataIsEmpty,
-  normalizeEvents,
-  normalizeTimestamp,
-} from "./store-normalizers.js";
+import { capText, normalizeTimestamp } from "./store-normalizers.js";
 
 export function compareCards(left: WorkboardCard, right: WorkboardCard): number {
   if (left.status !== right.status) {
@@ -74,11 +69,12 @@ export function syncExecutionAttemptMetadata(
   }
   const attemptStatus = executionAttemptStatus(execution);
   const attempts = [...(metadata.attempts ?? [])];
-  const key = execution.runId ?? execution.sessionKey ?? execution.id;
-  const existingIndex = attempts.findIndex(
-    (attempt) =>
-      (execution.runId && attempt.runId === execution.runId) ||
-      (!execution.runId && attempt.id === key),
+  const existingIndex = attempts.findIndex((attempt) =>
+    execution.runId
+      ? attempt.runId === execution.runId
+      : execution.sessionKey
+        ? !attempt.runId && attempt.sessionKey === execution.sessionKey
+        : !attempt.runId && !attempt.sessionKey,
   );
   const existingAttempt = existingIndex >= 0 ? attempts[existingIndex] : undefined;
   // A later observation that only saw the session go idle must not relabel a
@@ -87,7 +83,7 @@ export function syncExecutionAttemptMetadata(
     return metadata;
   }
   const nextAttempt: WorkboardRunAttempt = {
-    id: existingAttempt?.id ?? key,
+    id: existingAttempt?.id ?? randomUUID(),
     status: attemptStatus,
     startedAt: existingAttempt?.startedAt ?? execution.startedAt,
     mode: execution.mode,
@@ -127,7 +123,7 @@ export function appendEvent(
   at = Date.now(),
 ): WorkboardEvent[] {
   return [
-    ...normalizeEvents(card.events),
+    ...(card.events ?? []),
     {
       id: randomUUID(),
       at,
@@ -258,21 +254,16 @@ export function updateEvent(
     const existingAttempts = existing.metadata?.attempts ?? [];
     const nextAttempts = next.metadata?.attempts ?? [];
     const latestAttempt = nextAttempts.at(-1);
-    if (nextAttempts.length > existingAttempts.length) {
+    const attemptStarted = nextAttempts.length > existingAttempts.length;
+    const previousAttempt =
+      !attemptStarted && latestAttempt
+        ? existingAttempts.find((attempt) => attempt.id === latestAttempt.id)
+        : undefined;
+    if (attemptStarted || (latestAttempt && previousAttempt?.status !== latestAttempt.status)) {
       return {
-        kind: "attempt_started",
+        kind: attemptStarted ? "attempt_started" : "attempt_updated",
         ...(latestAttempt?.sessionKey ? { sessionKey: latestAttempt.sessionKey } : {}),
         ...(latestAttempt?.runId ? { runId: latestAttempt.runId } : {}),
-      };
-    }
-    const previousAttempt = latestAttempt
-      ? existingAttempts.find((attempt) => attempt.id === latestAttempt.id)
-      : undefined;
-    if (latestAttempt && previousAttempt?.status !== latestAttempt.status) {
-      return {
-        kind: "attempt_updated",
-        ...(latestAttempt.sessionKey ? { sessionKey: latestAttempt.sessionKey } : {}),
-        ...(latestAttempt.runId ? { runId: latestAttempt.runId } : {}),
       };
     }
     return {
@@ -326,29 +317,6 @@ export function updateEvent(
   return { kind: "edited" };
 }
 
-export function removeUndefinedCardFields(card: WorkboardCard): WorkboardCard {
-  const next = { ...card };
-  for (const key of [
-    "notes",
-    "agentId",
-    "sessionKey",
-    "runId",
-    "sourceUrl",
-    "execution",
-    "startedAt",
-    "completedAt",
-    "metadata",
-  ] as const) {
-    if (next[key] === undefined) {
-      delete next[key];
-    }
-  }
-  if (metadataIsEmpty(next.metadata)) {
-    delete next.metadata;
-  }
-  return next;
-}
-
 export function assertCanMutateClaimedCard(
   card: WorkboardCard,
   scope: WorkboardMutationScope | undefined,
@@ -377,11 +345,20 @@ export function retryBudgetExhausted(card: WorkboardCard): boolean {
  * claim the card already holds. An exact start checks it before the slot, so a
  * card the claim would refuse is never queued for a slot.
  */
-export function workboardClaimRefusal(card: WorkboardCard, claimed: boolean): string | undefined {
+export function workboardClaimRefusal(
+  card: WorkboardCard,
+  claimed: boolean,
+  parentsDone?: boolean,
+): string | undefined {
   if (cardParentIds(card).length > 0 && card.status !== "ready" && !claimed) {
-    return card.status === "blocked"
-      ? "card is blocked; use workboard_unblock before claiming."
-      : "card dependencies are not done.";
+    if (card.status === "blocked") {
+      return "card is blocked; use workboard_unblock before claiming.";
+    }
+    // Dependency promotion skips review and running cards, so a caller that
+    // read the parents may judge them; without that read the card waits.
+    if (parentsDone !== true) {
+      return "card dependencies are not done.";
+    }
   }
   if (card.status === "scheduled") {
     return "card is scheduled for later.";

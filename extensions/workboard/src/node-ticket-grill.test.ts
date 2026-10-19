@@ -13,7 +13,7 @@ import { createNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import { createNodeGateway, endedSession, startNodeCard } from "./node-ticket.test-support.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
 import type { WorkboardStore } from "./store.js";
-import { createGatewayMethodCapture } from "./test/gateway-methods.js";
+import { createGatewayMethodCapture } from "./test/gateway-method-capture.js";
 import {
   createWorkboardSqliteTestHarness,
   createWorkboardSqliteTestStore,
@@ -659,9 +659,13 @@ describe("grilling ended by the operator", () => {
     expect(ticket.warn).not.toHaveBeenCalled();
     const relaunched = await store.get(card.id);
     expect(relaunched?.status).toBe("running");
-    expect(cardRunId(relaunched!), "the earlier run is not linked to the round").toMatch(
-      new RegExp(`^workboard:${card.id}:`),
+    // The relaunch's own accepted run is linked, never the earlier turn.
+    const launch = relaunched?.metadata?.automation?.launch;
+    expect(launch?.phase).toBe("accepted");
+    expect(cardRunId(relaunched!), "the earlier run is not linked to the round").toBe(
+      launch?.phase === "accepted" ? launch.acceptedRunId : undefined,
     );
+    expect(cardRunId(relaunched!)).not.toBe("earlier-turn");
   });
 
   it("names the grilling result when its start waits or fails", async () => {

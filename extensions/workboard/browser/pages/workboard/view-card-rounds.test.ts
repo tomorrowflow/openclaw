@@ -1,15 +1,12 @@
 import "../../test/dom.setup.ts";
 import { expectDefined } from "@openclaw/normalization-core";
-import { nothing, render } from "lit";
-import { expect, it, onTestFinished, vi } from "vitest";
+import { expect, it } from "vitest";
 import { normalizeCardsPayload } from "../../lib/workboard/normalization.ts";
-import { getWorkboardState } from "../../lib/workboard/runtime.ts";
 import {
   createWorkboardCard,
   createWorkboardTestClient,
 } from "../../lib/workboard/test/index-helpers.ts";
-import { workboardTestHost } from "../../test/host.setup.ts";
-import { renderCardDetailsPanel } from "./view-card-details.ts";
+import { createWorkboardView } from "./view.test-support.ts";
 
 it("shows each round's decisions in the activity tab, newest round first, without its files", () => {
   const changes = (path: string, added: number, deleted: number) => ({
@@ -54,31 +51,15 @@ it("shows each round's decisions in the activity tab, newest round first, withou
     ],
   }).cards;
   const listed = expectDefined(card, "card");
-  const host = {};
-  const state = getWorkboardState(host);
-  state.loaded = true;
+  const { state, container, renderView } = createWorkboardView({
+    client: createWorkboardTestClient({}),
+    connected: true,
+    canWrite: true,
+  });
   state.cards = [listed];
   state.detailCardId = listed.id;
   state.detailTab = "activity";
-  const container = document.createElement("div");
-  document.body.append(container);
-  onTestFinished(() => {
-    render(nothing, container);
-    container.remove();
-  });
-  workboardTestHost().connection.connected = true;
-  render(
-    renderCardDetailsPanel({
-      host,
-      client: createWorkboardTestClient({}),
-      connected: true,
-      canWrite: true,
-      agentsList: null,
-      sessions: [],
-      onOpenSession: vi.fn(),
-    }),
-    container,
-  );
+  renderView();
 
   const text = (element: Element | null | undefined) =>
     element?.textContent?.replace(/\s+/g, " ").trim();

@@ -1,16 +1,16 @@
 import "../../test/dom.setup.ts";
 import { expectDefined } from "@openclaw/normalization-core";
-import { nothing, render } from "lit";
-import { expect, it, onTestFinished, vi } from "vitest";
+import { expect, it, vi } from "vitest";
+import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { normalizeCardsPayload } from "../../lib/workboard/normalization.ts";
-import { getWorkboardState } from "../../lib/workboard/runtime.ts";
 import {
   createWorkboardCard,
   createWorkboardTestClient,
 } from "../../lib/workboard/test/index-helpers.ts";
 import { waitForFast } from "../../test/wait-for.ts";
-import { openCardDetails, renderCardDetailsPanel } from "./view-card-details.ts";
-import { createCardGrilling } from "./view-card-grilling.ts";
+import { openCardDetails } from "./view-card-details.tsx";
+import { createCardGrilling } from "./view-card-grilling.tsx";
+import { createWorkboardView } from "./view.test-support.ts";
 
 const text = (element: Element | null | undefined) =>
   element?.textContent?.replace(/\s+/g, " ").trim();
@@ -44,6 +44,34 @@ function grillingCard(overrides: Record<string, unknown> = {}) {
   return expectDefined(card, "card");
 }
 
+/** Renders the board with the card's drawer open; the grilling controller re-renders it. */
+function renderDrawer(
+  card: ReturnType<typeof grillingCard>,
+  client: GatewayBrowserClient,
+  onOpenSession: (target: { sessionKey: string }) => void = vi.fn(),
+  tab?: "grilling",
+) {
+  let rerender = () => {};
+  const grilling = createCardGrilling(client, () => rerender());
+  const view = createWorkboardView({
+    client,
+    connected: true,
+    canWrite: true,
+    onOpenSession,
+    detailGrilling: grilling,
+  });
+  rerender = () => view.renderView();
+  view.state.cards = [card];
+  if (tab) {
+    view.state.detailCardId = card.id;
+    view.state.detailTab = tab;
+  } else {
+    openCardDetails(view.state, card);
+  }
+  view.renderView();
+  return view.container;
+}
+
 const SESSION_KEY = "agent:dev:subagent:workboard-default-card-1";
 const GRILL_SESSION_KEY = "agent:dev:grill-card-1-1";
 const OPEN_GRILL = {
@@ -59,34 +87,7 @@ it("opens a waiting card on its Grilling tab, shows the log, and leads to the gr
     "workboard.cards.attachments.get": { contentBase64: Buffer.from(LOG).toString("base64") },
   });
   const onOpenSession = vi.fn();
-  const host = {};
-  const state = getWorkboardState(host);
-  state.loaded = true;
-  state.cards = [card];
-  openCardDetails(state, card);
-  const container = document.createElement("div");
-  document.body.append(container);
-  onTestFinished(() => {
-    render(nothing, container);
-    container.remove();
-  });
-  const renderPanel = () =>
-    render(
-      renderCardDetailsPanel({
-        host,
-        client,
-        connected: true,
-        canWrite: true,
-        agentsList: null,
-        sessions: [],
-        onOpenSession,
-        onRequestUpdate: () => renderPanel(),
-        detailGrilling: grilling,
-      }),
-      container,
-    );
-  const grilling = createCardGrilling(client, () => renderPanel());
-  renderPanel();
+  const container = renderDrawer(card, client, onOpenSession);
 
   expect(
     container.querySelector("#workboard-detail-tab-grilling")?.getAttribute("aria-selected"),
@@ -118,32 +119,7 @@ it("says the grill session is starting until Workboard recorded it", async () =>
   const client = createWorkboardTestClient({
     "workboard.cards.attachments.get": { contentBase64: Buffer.from(LOG).toString("base64") },
   });
-  const host = {};
-  const state = getWorkboardState(host);
-  state.loaded = true;
-  state.cards = [card];
-  state.detailCardId = card.id;
-  state.detailTab = "grilling";
-  const container = document.createElement("div");
-  document.body.append(container);
-  onTestFinished(() => {
-    render(nothing, container);
-    container.remove();
-  });
-  const grilling = createCardGrilling(client, () => undefined);
-  render(
-    renderCardDetailsPanel({
-      host,
-      client,
-      connected: true,
-      canWrite: true,
-      agentsList: null,
-      sessions: [],
-      onOpenSession: vi.fn(),
-      detailGrilling: grilling,
-    }),
-    container,
-  );
+  const container = renderDrawer(card, client, vi.fn(), "grilling");
 
   const panel = expectDefined(
     container.querySelector("#workboard-detail-panel-grilling"),
@@ -168,35 +144,7 @@ it("ends a waiting grilling from the Grilling tab", async () => {
     "workboard.cards.attachments.get": { contentBase64: Buffer.from(LOG).toString("base64") },
     "workboard.cards.grill.end": { card: ended },
   });
-  const host = {};
-  const state = getWorkboardState(host);
-  state.loaded = true;
-  state.cards = [card];
-  state.detailCardId = card.id;
-  state.detailTab = "grilling";
-  const container = document.createElement("div");
-  document.body.append(container);
-  onTestFinished(() => {
-    render(nothing, container);
-    container.remove();
-  });
-  const renderPanel = () =>
-    render(
-      renderCardDetailsPanel({
-        host,
-        client,
-        connected: true,
-        canWrite: true,
-        agentsList: null,
-        sessions: [],
-        onOpenSession: vi.fn(),
-        onRequestUpdate: () => renderPanel(),
-        detailGrilling: grilling,
-      }),
-      container,
-    );
-  const grilling = createCardGrilling(client, () => renderPanel());
-  renderPanel();
+  const container = renderDrawer(card, client, vi.fn(), "grilling");
 
   const panel = expectDefined(
     container.querySelector("#workboard-detail-panel-grilling"),
@@ -226,34 +174,7 @@ it("shows a closed grilling's log without its actions", async () => {
   const client = createWorkboardTestClient({
     "workboard.cards.attachments.get": { contentBase64: Buffer.from(LOG).toString("base64") },
   });
-  const host = {};
-  const state = getWorkboardState(host);
-  state.loaded = true;
-  state.cards = [card];
-  state.detailCardId = card.id;
-  state.detailTab = "grilling";
-  const container = document.createElement("div");
-  document.body.append(container);
-  onTestFinished(() => {
-    render(nothing, container);
-    container.remove();
-  });
-  const renderPanel = () =>
-    render(
-      renderCardDetailsPanel({
-        host,
-        client,
-        connected: true,
-        canWrite: true,
-        agentsList: null,
-        sessions: [],
-        onOpenSession: vi.fn(),
-        detailGrilling: grilling,
-      }),
-      container,
-    );
-  const grilling = createCardGrilling(client, () => renderPanel());
-  renderPanel();
+  const container = renderDrawer(card, client, vi.fn(), "grilling");
 
   const panel = expectDefined(
     container.querySelector("#workboard-detail-panel-grilling"),
@@ -281,34 +202,7 @@ it.each([
   const client = createWorkboardTestClient(() => {
     throw new Error("attachment not found: log-1");
   });
-  const host = {};
-  const state = getWorkboardState(host);
-  state.loaded = true;
-  state.cards = [card];
-  state.detailCardId = card.id;
-  state.detailTab = "grilling";
-  const container = document.createElement("div");
-  document.body.append(container);
-  onTestFinished(() => {
-    render(nothing, container);
-    container.remove();
-  });
-  const renderPanel = () =>
-    render(
-      renderCardDetailsPanel({
-        host,
-        client,
-        connected: true,
-        canWrite: true,
-        agentsList: null,
-        sessions: [],
-        onOpenSession: vi.fn(),
-        detailGrilling: grilling,
-      }),
-      container,
-    );
-  const grilling = createCardGrilling(client, () => renderPanel());
-  renderPanel();
+  const container = renderDrawer(card, client, vi.fn(), "grilling");
 
   const panel = expectDefined(
     container.querySelector("#workboard-detail-panel-grilling"),

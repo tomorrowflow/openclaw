@@ -1,11 +1,8 @@
 import "../../test/dom.setup.ts";
-import { nothing, render } from "lit";
 import { expect, it, onTestFinished, vi } from "vitest";
-import { getWorkboardState } from "../../lib/workboard/runtime.ts";
 import { createWorkboardCard } from "../../lib/workboard/test/index-helpers.ts";
-import { workboardTestHost } from "../../test/host.setup.ts";
-import { renderCardDetailsPanel } from "./view-card-details.ts";
-import type { WorkboardProps } from "./view-helpers.ts";
+import type { WorkboardProps } from "./view-helpers.tsx";
+import { createWorkboardView, toast } from "./view.test-support.ts";
 
 const portal = {
   id: "p17317",
@@ -19,44 +16,25 @@ const portal = {
 };
 
 function mountDetails(respond: () => Promise<unknown>) {
-  const host = {};
-  const state = getWorkboardState(host);
-  state.loaded = true;
-  state.cards = [
-    createWorkboardCard({ id: "card/1 #a", sessionKey: "agent:dev:subagent:ticket" }),
-    createWorkboardCard({ id: "card-2", runId: "run-2", position: 2000 }),
-  ];
-  state.detailTab = "details";
-  const container = document.createElement("div");
-  document.body.append(container);
-  onTestFinished(() => {
-    render(nothing, container);
-    container.remove();
-  });
-  workboardTestHost().connection.connected = true;
   const tab = { opener: window as Window | null, location: { href: "" }, close: vi.fn() };
   const open = vi.spyOn(window, "open").mockReturnValue(tab as unknown as Window);
   onTestFinished(() => open.mockRestore());
   const request = vi.fn(respond);
   const client = { request } as unknown as NonNullable<WorkboardProps["client"]>;
+  const { state, container, renderView } = createWorkboardView({
+    client,
+    canWrite: true,
+    transcriptViewerPort: 17317,
+  });
+  state.cards = [
+    createWorkboardCard({ id: "card/1 #a", sessionKey: "agent:dev:subagent:ticket" }),
+    createWorkboardCard({ id: "card-2", runId: "run-2", position: 2000 }),
+  ];
+  state.detailTab = "details";
   const show = (cardId: string, props: Partial<WorkboardProps> = {}) => {
     state.detailCardId = cardId;
-    const draw = () =>
-      render(
-        renderCardDetailsPanel({
-          host,
-          client,
-          connected: true,
-          agentsList: null,
-          sessions: [],
-          onOpenSession: vi.fn(),
-          onRequestUpdate: draw,
-          transcriptViewerPort: 17317,
-          ...props,
-        }),
-        container,
-      );
-    draw();
+    state.detailTab = "details";
+    renderView(props);
     return [...container.querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent?.trim() === "Open transcript",
     );
@@ -99,11 +77,7 @@ it.each([
   await vi.waitFor(() => expect(tab.close).toHaveBeenCalledOnce());
   expect(tab.location.href).toBe("");
   await vi.waitFor(() =>
-    expect(
-      container
-        .querySelector("openclaw-workboard-toast:not([hidden])")
-        ?.shadowRoot?.querySelector('[role="alert"]')?.textContent,
-    ).toContain(message),
+    expect(toast(container).querySelector('[role="alert"]')?.textContent).toContain(message),
   );
 });
 

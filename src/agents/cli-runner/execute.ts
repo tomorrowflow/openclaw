@@ -12,6 +12,7 @@ import {
 import { compareValidSemver } from "../../infra/semver.js";
 import { getAgentScopedMediaLocalRoots } from "../../media/local-roots.js";
 import { NODE_CLAUDE_CLEAR_ENV_KEYS } from "../../node-host/invoke-agent-cli-claude-params.js";
+import { enqueueCommandInLane } from "../../process/command-queue.js";
 import { applySkillEnvOverridesFromSnapshot } from "../../skills/runtime/env-overrides.js";
 import {
   fingerprintCliRuntimeArtifact,
@@ -52,7 +53,6 @@ import { createCliToolTracking } from "./execute-tool-tracking.js";
 import { createCliRunCurrentAssertion } from "./execution-target.js";
 import {
   buildCliArgs,
-  enqueueCliRun,
   isClaudeCliBackendId,
   prepareCliPromptImagePayload,
   resolveCliRunQueueKey,
@@ -112,6 +112,8 @@ function assertExactToolAvailabilityRuntimeVersion(params: {
 
 type ExecutePreparedCliRunOptions = {
   onPhase?: (phase: "send" | "resolve" | "cleanup") => void;
+  /** Receives the exact composed prompt sent to the CLI, once per attempt. */
+  onPromptPrepared?: (prompt: string) => void;
 };
 
 type PreparedCliRunInternalParams = PreparedCliRunContext["params"] & {
@@ -123,18 +125,17 @@ export async function executePreparedCliRun(
   cliSessionIdToUse?: string,
   options?: ExecutePreparedCliRunOptions,
 ): Promise<CliOutput> {
-  // Fresh recovery retains its exact account/read authority across every await
-  // and through the process/plugin execution callbacks, not just preparation.
-  const context =
-    !cliSessionIdToUse && inputContext.openClawHistoryPrompt && inputContext.cliHistoryWriter
-      ? {
-          ...inputContext,
-          params: {
-            ...inputContext.params,
-            assertCurrent: inputContext.cliHistoryWriter.assertReadable,
-          },
-        }
-      : inputContext;
+  // Reuse the writer's run authority; each transport checks private history
+  // separately at its disclosure boundary.
+  const context = inputContext.cliHistoryWriter
+    ? {
+        ...inputContext,
+        params: {
+          ...inputContext.params,
+          assertCurrent: inputContext.cliHistoryWriter.assertCurrent,
+        },
+      }
+    : inputContext;
   const params = context.params as PreparedCliRunInternalParams;
   const assertCurrent = createCliRunCurrentAssertion(params);
   assertCurrent();
@@ -257,9 +258,11 @@ export async function executePreparedCliRun(
     usePluginOwnedExecution && acceptsCliLiveSession(context) && !params.onSuccessfulAuthBinding;
   // Fresh-session retries invoke this function again. Keep one helper per
   // observable CLI attempt so every started call retains its own terminal event.
+  const sentPrompt = composeCliPromptContext(prompt, promptContext);
+  options?.onPromptPrepared?.(sentPrompt);
   const diagnostics = createClaudeCliModelCallDiagnostics({
     context,
-    prompt: composeCliPromptContext(prompt, promptContext),
+    prompt: sentPrompt,
     systemPrompt: systemPromptArg ?? undefined,
     transport: nodePlacement
       ? "paired-node-cli"
@@ -634,32 +637,40 @@ export async function executePreparedCliRun(
     });
   };
   try {
-    completedOutput = await enqueueCliRun(queueKey, () => {
-      const runQueuedAttempt = async () => {
-        assertCurrent();
-        if (params.lifecycleGeneration) {
-          assertAgentRunLifecycleGenerationCurrent(params.lifecycleGeneration);
-        }
-        diagnostics?.emitStarted();
-        if (params.forkCliSessionOnResume && useResume) {
-          if (!params.persistCliSessionForkSuccessor) {
-            throw new Error("CLI session fork successor persistence is unavailable");
+    completedOutput = await enqueueCommandInLane(
+      `cli:${queueKey}`,
+      () => {
+        const runQueuedAttempt = async () => {
+          assertCurrent();
+          if (params.lifecycleGeneration) {
+            assertAgentRunLifecycleGenerationCurrent(params.lifecycleGeneration);
           }
-          forkResumeClaimed = (await params.claimCliSessionFork?.()) === true;
-          if (!forkResumeClaimed) {
-            throw new Error("CLI session fork marker is no longer available");
+          diagnostics?.emitStarted();
+          if (params.controlOperation === "compact") {
+            // A one-shot compactor rewrites persisted history behind the warm process.
+            await restartCliLiveSession(context);
           }
-          // The fork argument only applies at process startup; a cached warm child
-          // would run inside the source session. Force a fresh spawn.
-          await restartCliLiveSession(context);
-        }
-        return await executeAttempt();
-      };
-      // The retained consumer keeps every plugin call of this queued attempt, including
-      // a fork-on-resume live-session restart, admitted across a plugin hot reload.
-      const consumer = context.pluginExecutionConsumer;
-      return consumer ? consumer.run(runQueuedAttempt) : runQueuedAttempt();
-    });
+          if (params.forkCliSessionOnResume && useResume) {
+            if (!params.persistCliSessionForkSuccessor) {
+              throw new Error("CLI session fork successor persistence is unavailable");
+            }
+            forkResumeClaimed = (await params.claimCliSessionFork?.()) === true;
+            if (!forkResumeClaimed) {
+              throw new Error("CLI session fork marker is no longer available");
+            }
+            // The fork argument only applies at process startup; a cached warm child
+            // would run inside the source session. Force a fresh spawn.
+            await restartCliLiveSession(context);
+          }
+          return await executeAttempt();
+        };
+        // The retained consumer keeps every plugin call of this queued attempt, including
+        // a fork-on-resume live-session restart, admitted across a plugin hot reload.
+        const consumer = context.pluginExecutionConsumer;
+        return consumer ? consumer.run(runQueuedAttempt) : runQueuedAttempt();
+      },
+      { abortSignal: params.abortSignal },
+    );
     if (completedOutput.sessionId) {
       observeForkSuccessor(completedOutput.sessionId);
     }

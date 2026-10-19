@@ -15,12 +15,12 @@ when the run ID, workflow path, workflow ref, Tooling SHA, dispatch title, and
 event are unchanged. For each logical job, the newest observed attempt wins,
 including a newer failure; a job absent from a newer attempt carries forward
 from the last attempt that included it. Duplicate job names within one attempt,
-missing attempts, or provenance drift fail closed. During GitHub's rerun-attempt
+missing attempts, or provenance drift are rejected. During GitHub's rerun-attempt
 materialization window, `status` and `continue` re-read duplicate identities in
 the newest retry attempt for up to 60 seconds. The run identity and attempt stay
 pinned throughout; request timeouts, pagination, and transport backoff share
 the retry deadline. Persistent duplicates, duplicates in an earlier attempt, and
-changed identities still fail closed; ambiguous rows never become evidence.
+changed identities are still rejected; ambiguous rows never become evidence.
 
 Inspect or continue an existing parent:
 
@@ -55,12 +55,34 @@ prints the next eligible check and resumes automatically. Permission-denied
 403 responses remain terminal. A local state file under `$TMPDIR/openclaw-frv/`
 retains the retry boundary and reported events across watcher restarts.
 
-`rerun --child` waits for one failed child, sends exactly one
-rerun-failed-jobs request, confirms the new attempt has no duplicate jobs, and
+Once the immutable execution plan is available, `watch` reports its frozen
+candidate SHA and observes the admitted context ref's current tip freshly. If
+that tip advances, the watcher keeps observing the original run and labels the
+candidate **superseded**: this run does not qualify the new tip. A missing plan,
+SHA-only context, or unavailable tip remains **unknown**, never inferred from the
+parent's Tooling SHA. NDJSON candidate events include the candidate SHA, context
+ref, observed tip SHA, and `current`, `superseded`, or `unknown` state; none is
+a qualification verdict.
+
+Resume an absent or exited watcher with the same `watch --run` command and state
+path. It rechecks the run and mutable tip without dispatching anything. Existing
+state suppresses repeated attempt, candidate-observation, and terminal events;
+a later rerun or newly observed tip is reported. Losing the local notification
+state can repeat notifications, but cannot authorize a retry or publication.
+
+`rerun --child` waits for one failed child, sends exactly one retry request,
+confirms the new attempt has no duplicate jobs, and
 records an audit line. It refuses children past `--max-attempts` (default 2,
 which allows one rerun). When a failed consumer is bound to a green producer's
 run attempt, it reruns that producer and its dependents instead. It returns
 after the new attempt starts; `continue --failed` still owns the final reseal.
+
+When every workload passed and only **Seal child receipt** failed, the preview
+reports `mode: receipt`. The same bounded `rerun --child` command selects that
+exact receipt job instead of rerunning the passing workloads. It carries forward
+their accepted attempts, seals the new receipt against the exact child attempt,
+and still requires `continue --failed` plus strict verification before reporting
+qualification accepted. A metadata retry starting is not qualification success.
 
 `continue --failed` reruns each failed child's jobs as soon as that child is
 terminal, while sibling children and the original parent may still run. It
@@ -101,7 +123,7 @@ workflow. Final verification must pass before recovery is reported successful.
 Each child or parent rerun mutation is sent exactly once. If GitHub returns an
 ambiguous transient error, the controller performs read-only reconciliation
 until the newer attempt becomes visible or the bounded reconciliation deadline
-expires. It never repeats the mutation, and provenance drift fails closed.
+expires. It never repeats the mutation, and provenance drift stops the operation.
 `frv status` leads with qualification, evidence acceptance, diagnostic drain,
 workload failures, and the next supported command. A passing GitHub badge or green
 child list is not an accepted seal: terminal successful parents are checked by the
@@ -156,6 +178,40 @@ Missing contracts require deliberate candidate backports, never newer-tooling
 substitution. Existing historical requests retain their original identities.
 The workflow never creates or updates repository refs itself.
 
+### Cancel an owned validation tree
+
+Preview the exact cancellation targets, then request cancellation:
+
+```bash
+pnpm frv cancel --run <parent-run-id> --dry-run --json
+pnpm frv cancel --run <parent-run-id> --json
+```
+
+The command authenticates the original sealed execution plan and dispatch
+producer logs. It cancels recorded Telegram descendants, owned diagnostic and
+artifact children, then the parent. Reused children are borrowed evidence and
+remain untouched. Current run identities and attempts are checked immediately
+before each request; unrelated runs are never selected by branch or latest-run
+order.
+
+Cancellation acceptance is not completion. JSON lists requested actions,
+remaining active run IDs, excluded borrowed children, failures, and the next
+command. Missing plans, unsettled dispatch logs, changed attempts, or unavailable
+observations stay explicit; they never prove the tree is terminal. Exit 0 requires
+a complete terminal tree (or a read-only preview); incomplete cancellation exits 1.
+Repeat the same command after an interruption or delayed response. It rereads
+GitHub state and skips terminal runs without creating a cancellation ledger,
+replacement parent, or candidate. Wait for completion before dispatching a replacement.
+
+If an earlier cancellation is not settling, explicitly use
+`pnpm frv cancel --run <parent-run-id> --force`. GitHub's force-cancel operation
+bypasses conditions such as `always()`; it is not an automatic fallback.
+
+GitHub's cancellation endpoint has no atomic run-attempt compare-and-swap. FRV
+refreshes the target and then its originating lineage immediately before each
+request, and validates exact identities again during reconciliation. Concurrent
+reruns remain an external coordination risk; do not rerun a tree while cancelling it.
+
 ### Automatic retries for declared flakes
 
 Automatic test retries are disabled. Failed or timed out jobs remain blockers;
@@ -196,7 +252,10 @@ FRV and publication workflow identities independently, then joins supported
 manifest recorded by that publisher. An original plan from attempt 1 can bind a
 final validation manifest from attempt 2. The two attempts are reported
 separately; neither is silently replaced with the latest attempt.
-Linked children retain their own observed tooling SHA/ref.
+Linked children retain their own observed tooling SHA/ref. The report preserves
+the publisher diagnostic's release version, tag, npm dist-tag and requested source
+SHA. Windows dispatch observations also retain the target tag and source tag;
+the source can differ from the overall release version.
 
 This view reports observations, **not release authorization or current registry
 visibility**. Writer selection, verification selection, job conclusions,
@@ -205,7 +264,12 @@ can retain successful readback and partial package results. Docker and VCR
 remain parent jobs; VCR copy, smoke and alias values are API step conclusions.
 Detached Windows acknowledgement, its pre-upload marker and the current child
 conclusion are separate observations. The normal ClawHub dispatch record is not
-a complete child inventory.
+a complete child inventory. Mac assets/feeds and website deployment are not
+collected by this reader. Use the native publication and website deployment
+owners for their current readbacks. The [website owner's download checks](https://github.com/openclaw/openclaw.ai#companion-downloads)
+can inspect production without deploying. For a stable release,
+`pnpm release:stable <version> --status` shows retained Mac run and appcast facts
+from the original orchestration state directory, not a new live verification.
 
 Prepared-release activation remains unknown without an authenticated link to
 its external owner. A successful inner publisher or skipped finalize job does
@@ -286,6 +350,6 @@ mapping remains authoritative even when `main` advances. The suffix records
 tag-creation provenance, not the current parent run id. Publication must re-read
 that exact tag and revalidate the exact parent run tuple immediately before each
 core or plugin npm publish or dist-tag mutation. A missing, moved, annotated, or
-wrong-SHA tag, parent mismatch, or disallowed parent state fails closed. Other
+wrong-SHA tag, parent mismatch, or disallowed parent state blocks publication. Other
 privileged writers require their dependent enforcement changes before the
 protected-tag publication route is globally complete.

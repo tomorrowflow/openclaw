@@ -130,12 +130,12 @@ describe("transcribeWhisperAsr", () => {
     ).rejects.toThrow("Whisper ASR transcription failed");
   });
 
-  it("throws on empty transcription", async () => {
+  it("reports a blank transcription as silence", async () => {
     const fetchFn = mockFetch([{ ok: true, body: "   " }]);
 
     await expect(
       transcribeWhisperAsr(baseParams({ fetchFn: fetchFn as typeof fetch })),
-    ).rejects.toThrow("Whisper ASR transcription response was empty");
+    ).resolves.toMatchObject({ text: "" });
   });
 
   it("throws on ffmpeg conversion failure", async () => {
