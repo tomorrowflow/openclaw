@@ -26,8 +26,7 @@ export function findWorkboardSession(
 
 /**
  * Whether an agent run is in progress in the card's session: its started run
- * is unresolved, or the session owner reports one. While it is, the grilling
- * neither ends nor takes another chat turn.
+ * is unresolved, or the session owner reports one.
  */
 export function workboardCardRunIsLive(
   card: WorkboardCard,

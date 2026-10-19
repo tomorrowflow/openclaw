@@ -10,14 +10,12 @@ import {
   appendGrillLog,
   GRILL_LOG_FILE_NAME,
   GRILL_LOG_MIME_TYPE,
-  grillChatEntry,
   grillEndEntry,
   type GrillEndedBy,
+  grillHandoffEntry,
   grillOutcomeEntry,
-  grillQuestionComment,
-  grillQuestionEntry,
+  grillSessionName,
   nodeGrillIsLive,
-  nodeGrillTakesChatTurn,
 } from "./node-ticket-grill.js";
 import { cutReportText } from "./node-ticket-report.js";
 import { appendComment, assertCanMutateClaimedCard } from "./store-card-helpers.js";
@@ -26,8 +24,8 @@ import type { WorkboardMutationScope } from "./store-inputs.js";
 import { WorkboardNodeTicketSampleStore } from "./store-node-ticket-sample.js";
 
 const NOT_GRILLING = "This card is not grilling; refresh it to see where it stands.";
-// The closing note a resumed round's brief carries; the full text is in the session.
-const MAX_CLOSING_NOTE_CHARS = 4000;
+// The result a resumed round's brief carries; the full text is in the grill session.
+const MAX_RESULT_CHARS = 8000;
 
 /** One write to a node ticket's grilling: the log entries, if any, and the state it leaves. */
 type GrillStep = {
@@ -39,53 +37,32 @@ type GrillStep = {
 };
 
 /**
- * One chat turn in the card's session: what the operator sent and what the
- * agent replied. A turn without its start is dated when it ended.
- */
-type GrillChatTurn = {
-  worktreePath: string;
-  startedAt?: number;
-  runId?: string;
-  prompt: string;
-  reply: string;
-};
-
-function chatTurnIsLive(card: WorkboardCard, worktree: WorkboardNodeWorktree, turn: GrillChatTurn) {
-  return worktree.path === turn.worktreePath && nodeGrillTakesChatTurn(card, worktree, turn);
-}
-
-function chatTurnEntries(turn: GrillChatTurn, now: number, note?: string): string[] {
-  return [
-    grillChatEntry("Operator", turn.prompt, turn.startedAt ?? now),
-    grillChatEntry("Agent", note ? `${turn.reply}\n\n${note}`.trim() : turn.reply, now),
-  ];
-}
-
-function unreadableReportComment(reason: string): string {
-  return `The agent's last reply in the session chat ended with a report the board could not read, so the grilling goes on: ${reason} Tell the agent in the session chat.`;
-}
-
-/**
- * Ends the grilling: the log gets its outcome, the grill closes, and the card
- * moves to todo, which resumes the session through the grilling reopen with
- * the end pending for its brief. A full log cuts the note, never refuses the end.
+ * Ends the grilling: the log gets its result, the grill closes, and the card
+ * moves to todo, which resumes the ticket session through the grilling reopen
+ * with the end pending for its brief. A full log cuts the result, never
+ * refuses the end.
  */
 function endGrillStep(
-  worktree: WorkboardNodeWorktree,
+  grill: WorkboardNodeGrill,
   by: GrillEndedBy,
-  note: string,
+  result: string,
   now: number,
-  before: string[] = [],
 ): GrillStep {
   return {
-    entries: [...before, grillEndEntry(by, cutReportText(note, MAX_CLOSING_NOTE_CHARS), now)],
+    entries: [grillEndEntry(by, cutReportText(result, MAX_RESULT_CHARS), now)],
     grill: {
       status: "closed",
-      rounds: worktree.grill?.rounds ?? 1,
+      rounds: grill.rounds,
+      ...(grill.sessionKey ? { sessionKey: grill.sessionKey } : {}),
       pending: { kind: "end", at: now },
     },
     status: "todo",
   };
+}
+
+/** Session keys compare as the Gateway canonicalizes them. */
+function sameSessionKey(left: string | undefined, right: string | undefined): boolean {
+  return Boolean(left && right && left.toLowerCase() === right.toLowerCase());
 }
 
 type GrillPlan = (
@@ -96,13 +73,13 @@ type GrillPlan = (
 
 export class WorkboardNodeTicketGrillStore extends WorkboardNodeTicketSampleStore {
   /**
-   * A grill report: logs the question, opens the grill or counts its next
-   * round, posts the question's card comment, and waits in the grilling
-   * handoff, where the operator chats with the session.
+   * A grill report: logs its handoff, opens the grill or counts its next
+   * round, and waits in the grilling handoff until the grill session for
+   * this round is created and recorded.
    */
-  async recordNodeGrillQuestion(
+  async recordNodeGrillHandoff(
     id: string,
-    input: { worktreePath: string; question: string; summary: string },
+    input: { worktreePath: string; handoff: string },
     scope?: WorkboardMutationScope,
   ): Promise<WorkboardCard | undefined> {
     return await this.updateNodeGrill(id, scope, (_card, worktree, now) => {
@@ -111,74 +88,69 @@ export class WorkboardNodeTicketGrillStore extends WorkboardNodeTicketSampleStor
       }
       const rounds = (worktree.grill?.rounds ?? 0) + 1;
       return {
-        entries: [grillQuestionEntry(rounds, input.question, input.summary)],
+        entries: [grillHandoffEntry(rounds, input.handoff)],
         grill: { status: "open", rounds },
         handoff: { phase: "grilling", askedAt: now },
-        comment: grillQuestionComment(rounds, input.question),
       };
     });
   }
 
-  /**
-   * A chat turn of the live grilling: the operator's message and the agent's
-   * reply go to the log, and the card keeps waiting in review. A reply that
-   * asks its next question with a grill report logs it as the next round.
-   */
-  async recordNodeGrillChatTurn(
+  /** Records the grill session created for grilling `round`, and says on the card where it runs. */
+  async setNodeGrillSession(
     id: string,
-    turn: GrillChatTurn & {
-      question?: { text: string; summary: string };
-      /** Why the reply's report block could not be read; the card says so too. */
-      unreadable?: string;
-      /** A line the agent's entry ends with, such as a failed reply's. */
-      note?: string;
-    },
+    input: { worktreePath: string; round: number; sessionKey: string },
   ): Promise<WorkboardCard | undefined> {
-    return await this.updateNodeGrill(id, undefined, (card, worktree, now) => {
+    return await this.updateNodeGrill(id, undefined, (card, worktree) => {
       const grill = worktree.grill;
-      if (!grill || !chatTurnIsLive(card, worktree, turn)) {
+      if (
+        worktree.path !== input.worktreePath ||
+        !grill ||
+        grill.rounds !== input.round ||
+        grill.sessionKey ||
+        !nodeGrillIsLive(card, worktree)
+      ) {
         return undefined;
       }
-      const rounds = grill.rounds + (turn.question ? 1 : 0);
-      const note = turn.unreadable
-        ? `The reply's report could not be read: ${turn.unreadable}`
-        : turn.note;
       return {
-        entries: [
-          ...chatTurnEntries(turn, now, note),
-          ...(turn.question
-            ? [grillQuestionEntry(rounds, turn.question.text, turn.question.summary)]
-            : []),
-        ],
-        grill: { status: "open", rounds },
-        ...(turn.unreadable ? { comment: unreadableReportComment(turn.unreadable) } : {}),
+        grill: { status: grill.status, rounds: grill.rounds, sessionKey: input.sessionKey },
+        comment: `**Grilling ${grill.rounds}** runs in its own session, ${grillSessionName(card)} (\`${input.sessionKey}\`). Open it from the card's Grilling tab; the result comes back here when the grilling ends.`,
       };
     });
   }
 
   /**
-   * A chat turn whose reply ended the live grilling with any other report:
-   * the turn and the end go to the log, and the session resumes as after End
-   * grilling, with the report's summary as the closing note. Nothing the
-   * reply reported is imported; the resumed round reports for the ticket.
+   * The grill session hands its result back. Only the session recorded for
+   * the live grilling may; the card's id narrows the search when given.
    */
-  async endNodeGrillFromChat(
-    id: string,
-    turn: GrillChatTurn & {
-      outcome: "grill_done" | "done" | "blocked" | "needs_input";
-      summary: string;
-    },
-  ): Promise<WorkboardCard | undefined> {
-    return await this.updateNodeGrill(id, undefined, (card, worktree, now) => {
-      if (!chatTurnIsLive(card, worktree, turn)) {
-        return undefined;
-      }
-      const by: GrillEndedBy =
-        turn.outcome === "grill_done"
-          ? "settled in the session chat"
-          : `ended by a ${turn.outcome} reply in the session chat`;
-      return endGrillStep(worktree, by, turn.summary, now, chatTurnEntries(turn, now));
-    });
+  async settleNodeGrill(input: {
+    cardId?: string;
+    sessionKey: string | undefined;
+    result: string;
+  }): Promise<WorkboardCard> {
+    const owned = (card: WorkboardCard) => {
+      const worktree = card.metadata?.automation?.target?.worktree;
+      return Boolean(
+        worktree &&
+        nodeGrillIsLive(card, worktree) &&
+        sameSessionKey(worktree.grill?.sessionKey, input.sessionKey),
+      );
+    };
+    const candidates = input.cardId ? [await this.requireCard(input.cardId)] : await this.list();
+    const card = candidates.find(owned);
+    if (!card) {
+      throw new Error(
+        "No grilling runs in this session: only the grill session Workboard created for a card's live grilling can hand its result back.",
+      );
+    }
+    const settled = await this.updateNodeGrill(card.id, undefined, (current, worktree, now) =>
+      owned(current) && worktree.grill
+        ? endGrillStep(worktree.grill, "settled in the grill session", input.result, now)
+        : undefined,
+    );
+    if (!settled) {
+      throw new Error(NOT_GRILLING);
+    }
+    return settled;
   }
 
   /**
@@ -196,23 +168,24 @@ export class WorkboardNodeTicketGrillStore extends WorkboardNodeTicketSampleStor
       if (worktree.path !== input.worktreePath || !grill) {
         return undefined;
       }
+      const { pending, attachmentId: _attachmentId, ...kept } = grill;
       if (grill.status === "open") {
         return {
           entries: [grillOutcomeEntry(input.outcome, input.summary)],
-          grill: { status: "closed", rounds: grill.rounds },
+          grill: { ...kept, status: "closed" },
         };
       }
-      return grill.pending ? { grill: { status: "closed", rounds: grill.rounds } } : undefined;
+      return pending ? { grill: kept } : undefined;
     });
   }
 
-  /** The operator's End grilling. */
-  async endNodeGrill(id: string): Promise<WorkboardCard> {
+  /** The operator's End grilling, with the grill session's last reply as its result. */
+  async endNodeGrill(id: string, result: string): Promise<WorkboardCard> {
     const card = await this.updateNodeGrill(id, undefined, (current, worktree, now) => {
-      if (!nodeGrillIsLive(current, worktree)) {
+      if (!nodeGrillIsLive(current, worktree) || !worktree.grill) {
         throw new Error(NOT_GRILLING);
       }
-      return endGrillStep(worktree, "ended by the operator", "", now);
+      return endGrillStep(worktree.grill, "ended by the operator", result, now);
     });
     if (!card) {
       throw new Error(NOT_GRILLING);
@@ -228,7 +201,7 @@ export class WorkboardNodeTicketGrillStore extends WorkboardNodeTicketSampleStor
    */
   async endNodeGrillMovedToDone(
     id: string,
-    input: { worktreePath: string },
+    input: { worktreePath: string; result: string },
   ): Promise<WorkboardCard | undefined> {
     return await this.updateNodeGrill(id, undefined, (card, worktree, now) => {
       const grill = worktree.grill;
@@ -243,16 +216,13 @@ export class WorkboardNodeTicketGrillStore extends WorkboardNodeTicketSampleStor
       }
       return grill.status === "closed" && grill.pending
         ? { grill, status: "todo" }
-        : endGrillStep(worktree, "ended by the operator", "", now);
+        : endGrillStep(grill, "ended by the operator", input.result, now);
     });
   }
 
-  /**
-   * The grilling log a round's brief reads the closing note from; undefined
-   * when nothing is pending or the log is gone.
-   */
+  /** The card's grilling log; undefined without a grill or when the log is gone. */
   async readNodeGrillLog(worktree: WorkboardNodeWorktree): Promise<string | undefined> {
-    if (!worktree.grill?.pending) {
+    if (!worktree.grill) {
       return undefined;
     }
     const stored = await this.attachmentStore.lookup(worktree.grill.attachmentId);

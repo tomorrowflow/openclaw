@@ -1,4 +1,4 @@
-// Workboard tests cover a node ticket grilling the operator live in its session chat.
+// Workboard tests cover a node ticket handing its grilling off to a grill session and back.
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { describe, expect, it, vi } from "vitest";
@@ -18,24 +18,22 @@ import {
   createWorkboardSqliteTestHarness,
   createWorkboardSqliteTestStore,
 } from "./test/sqlite-store.js";
+import { createWorkboardTools } from "./tools.js";
 
 function reportMessages(report: Record<string, unknown>) {
   return [
     {
       role: "assistant",
-      content: `Asking.\n\n\`\`\`workboard-report\n${JSON.stringify(report)}\n\`\`\``,
+      content: `Handing off.\n\n\`\`\`workboard-report\n${JSON.stringify(report)}\n\`\`\``,
     },
   ];
 }
 
-const QUESTION =
-  "Should the parser accept empty input?\n\nRecommended: yes, return `[]` so the CLI treats it as a no-op.";
+const HANDOFF =
+  "**Researched:** `src/parser.ts` splits on newlines.\n\n**Settled:** scope is the parser only.\n\n**First question:** should the parser accept empty input? Recommended: yes, return `[]`.";
+const RESULT = "**Settled:** empty input returns `[]`; `None` raises `TypeError`.";
 
-const grillReport = reportMessages({
-  outcome: "grill",
-  question: QUESTION,
-  summary: "Scope is the parser only.",
-});
+const grillReport = reportMessages({ outcome: "grill", summary: HANDOFF });
 
 async function endTurn(store: WorkboardStore, cardId: string, messages: unknown[]) {
   const card = await store.get(cardId);
@@ -48,82 +46,82 @@ async function endTurn(store: WorkboardStore, cardId: string, messages: unknown[
   });
 }
 
-/** A chat turn the operator sent in the card's session, started `startedAgoMs` before it ended. */
-async function chatTurn(
-  store: WorkboardStore,
-  cardId: string,
-  reply: string,
-  options: {
-    prompt?: string;
-    /** null: the turn's end carries no start. */
-    startedAgoMs?: number | null;
-    /** The attempt failed while the session still runs, as before a fallback. */
-    failed?: boolean;
-    onMatched?: Parameters<typeof syncWorkboardAgentEnded>[0]["onMatched"];
-    warn?: (message: string) => void;
-  } = {},
-) {
+/** A turn that ended on the card's own session after it handed the grilling off. */
+async function cardSessionTurn(store: WorkboardStore, cardId: string, reply: string) {
   const card = await store.get(cardId);
   const now = Date.now() + 1000;
-  const startedAgoMs = options.startedAgoMs === undefined ? 500 : options.startedAgoMs;
   await syncWorkboardAgentEnded({
     store,
     event: {
       runId: `chat-${now}`,
-      success: !options.failed,
-      ...(startedAgoMs === null ? {} : { durationMs: startedAgoMs }),
+      success: true,
+      durationMs: 500,
       messages: [
-        { role: "user", content: "Earlier round prompt" },
-        { role: "assistant", content: "Earlier round reply" },
-        { role: "user", content: options.prompt ?? "Yes, return []." },
+        { role: "user", content: "Yes, return []." },
         { role: "assistant", content: reply },
       ],
     },
     context: { runId: `chat-${now}`, sessionKey: card ? cardSessionKey(card) : undefined },
     now,
-    readSessions: options.failed
-      ? async ({ sessionKey }) => ({
-          sessions: sessionKey ? [{ key: sessionKey, status: "running", hasActiveRun: true }] : [],
-          complete: false,
-        })
-      : endedSession(),
-    ...(options.onMatched ? { onMatched: options.onMatched } : {}),
-    ...(options.warn ? { warn: options.warn } : {}),
+    readSessions: endedSession(),
   });
 }
 
-const reportBlock = (report: Record<string, unknown>) =>
-  `\n\n\`\`\`workboard-report\n${JSON.stringify(report)}\n\`\`\``;
-
-async function grillingTicket(store = createWorkboardSqliteTestStore()) {
+/**
+ * A node ticket that handed its grilling off; `open` runs the handoff pass
+ * that creates the grill session. The fake Gateway answers `chat.history`
+ * with `history`, and starts no run in a grill session create while `failCreate` is set.
+ */
+async function grillingTicket(store = createWorkboardSqliteTestStore(), open = true) {
   const gateway = createNodeGateway();
+  const answer = gateway.respond.getMockImplementation()!;
+  let history: unknown[] = [];
+  let failCreate: string | undefined;
+  // Grill sessions the fake Gateway created, and whether a run started in each.
+  const grillSessions = new Map<string, boolean>();
+  gateway.respond.mockImplementation((method, params) => {
+    if (method === "chat.history") {
+      return { messages: history };
+    }
+    if (method === "sessions.create" && String(params?.key).includes(":grill-")) {
+      grillSessions.set(String(params?.key), !failCreate);
+    }
+    if (method === "sessions.create" && String(params?.key).includes(":grill-") && failCreate) {
+      return {
+        ok: true,
+        key: params?.key,
+        runStarted: false,
+        runError: { code: "UNAVAILABLE", message: failCreate },
+      };
+    }
+    return answer(method, params);
+  });
   const { card, sessionKey } = await startNodeCard(store, gateway);
   await endTurn(store, card.id, grillReport);
-  // Whether a chat turn is replying in the card's session, as the session owner reports it;
-  // "unreadable" makes the read fail.
+  // Whether the grill session runs a turn, as the session owner reports it; "unreadable" makes the read fail.
   let replying: boolean | "unreadable" = false;
   const readSessions = async (options: { sessionKey?: string }) => {
     if (replying === "unreadable") {
       throw new Error("sessions.describe returned an invalid lifecycle snapshot");
     }
-    return {
-      sessions: options.sessionKey
-        ? [
-            {
-              key: options.sessionKey,
+    const key = options.sessionKey;
+    // A grill session exists once created; a create that started no run leaves it idle.
+    const ran = key?.includes(":grill-") ? grillSessions.get(key) : key !== undefined;
+    const session =
+      key === undefined || ran === undefined
+        ? undefined
+        : ran
+          ? {
+              key,
               hasActiveRun: replying,
               status: replying ? ("running" as const) : ("done" as const),
               updatedAt: Date.now(),
-            },
-          ]
-        : [],
-      complete: false,
-    };
-  };
-  const setReplying = (value: typeof replying) => {
-    replying = value;
+            }
+          : { key, hasActiveRun: false };
+    return { sessions: session ? [session] : [], complete: false };
   };
   const capture = createGatewayMethodCapture();
+  (capture.api.runtime as { gateway: unknown }).gateway = gateway;
   registerWorkboardGatewayMethods({ api: capture.api, store, readSessions });
   const end = async () => {
     const respond = await capture.invoke("workboard.cards.grill.end", { id: card.id });
@@ -143,30 +141,51 @@ async function grillingTicket(store = createWorkboardSqliteTestStore()) {
         options: { cardId, queue },
       }),
   });
+  if (open) {
+    await handoffs.resume(warn);
+  }
   const log = async () => {
-    const attachmentId = (await store.get(card.id))?.metadata?.automation?.target?.worktree?.grill
-      ?.attachmentId;
+    const attachmentId = worktreeOf(await store.get(card.id))?.grill?.attachmentId;
     const stored = attachmentId ? await store.getAttachment(attachmentId) : undefined;
     return stored ? Buffer.from(stored.contentBase64, "base64").toString("utf8") : undefined;
   };
-  const launches = () =>
+  const creates = () =>
     gateway.respond.mock.calls.filter(([method]) => method === "sessions.create");
-  const brief = () => String(launches().at(-1)?.[1]?.message).split("## Turn contract")[0];
-  const chat = async (reply: string, options?: Parameters<typeof chatTurn>[3]) =>
-    await chatTurn(store, card.id, reply, options);
+  const grillCreates = () =>
+    creates().filter(([, params]) => String(params?.key).includes(":grill-"));
+  const ticketLaunches = () =>
+    creates().filter(([, params]) => !String(params?.key).includes(":grill-"));
+  const brief = () => String(ticketLaunches().at(-1)?.[1]?.message).split("## Turn contract")[0];
+  const grillDone = async (fromSessionKey: string | undefined, input: Record<string, unknown>) =>
+    await createWorkboardTools({
+      store,
+      context: { agentId: "dev", ...(fromSessionKey ? { sessionKey: fromSessionKey } : {}) },
+    })
+      .find((tool) => tool.name === "workboard_grill_done")!
+      .execute("grill-done", input);
   return {
     store,
     gateway,
     card,
     sessionKey,
-    chat,
     end,
     handoffs,
     warn,
     log,
-    launches,
+    grillCreates,
+    ticketLaunches,
     brief,
-    setReplying,
+    grillDone,
+    grillSessionKey: async () => worktreeOf(await store.get(card.id))?.grill?.sessionKey,
+    setReplying: (value: typeof replying) => {
+      replying = value;
+    },
+    setHistory: (messages: unknown[]) => {
+      history = messages;
+    },
+    setFailCreate: (message: string | undefined) => {
+      failCreate = message;
+    },
   };
 }
 
@@ -175,110 +194,265 @@ const worktreeOf = (card: WorkboardCard | undefined) =>
 
 // Log entries carry ISO times; the tests compare the log with them as <t>.
 const untimed = (log: string | undefined) => log?.replace(/\d{4}-\d\d-\d\dT[\d:.]+Z/g, "<t>");
-const QUESTION_LOG = `## Question 1\n\n**Settled so far:** Scope is the parser only.\n\n${QUESTION}\n`;
+const HANDOFF_LOG = `## Handoff 1\n\n${HANDOFF}\n`;
 
-describe("node ticket grilling", () => {
-  it("waits in review while the operator chats with the session, logging each turn", async () => {
-    const ticket = await grillingTicket();
+describe("node ticket grilling handoff", () => {
+  it("logs the handoff and opens a normal grill session of the card's agent on the Gateway", async () => {
+    const ticket = await grillingTicket(undefined, false);
     const { store, card } = ticket;
-    expect(ticket.launches()[0]?.[1]?.message).toContain("Use `grill` to start a live grilling");
-    expect(ticket.launches()[0]?.[1]?.message).toContain(
-      "as the readable text of your reply, above the report block",
+    expect(ticket.ticketLaunches()[0]?.[1]?.message).toContain(
+      "Do not grill in this session: Workboard hands the grilling to a new session",
     );
 
-    const asked = await store.get(card.id);
-    expect(asked?.status).toBe("review");
-    expect(asked?.metadata?.claim).toBeUndefined();
-    const worktree = worktreeOf(asked);
-    expect(worktree?.handoff).toMatchObject({ phase: "grilling" });
-    expect(worktree?.grill).toMatchObject({ status: "open", rounds: 1 });
-    expect(asked?.metadata?.attachments).toEqual([
-      expect.objectContaining({
-        id: worktree?.grill?.attachmentId,
-        fileName: GRILL_LOG_FILE_NAME,
-        mimeType: "text/markdown",
-      }),
-    ]);
-    expect(asked?.metadata?.comments?.at(-1)?.body).toBe(
-      "**Grilling question 1:** Should the parser accept empty input?\n\nAnswer it in the card's session chat; the grilling continues there until it ends.",
-    );
-    expect(redactOperatorCard(asked!)).toMatchObject({
-      stage: { kind: "grilling", round: 1 },
-      grill: { status: "open", rounds: 1, attachmentId: worktree?.grill?.attachmentId },
+    const handed = await store.get(card.id);
+    expect(handed?.status).toBe("review");
+    expect(handed?.metadata?.claim).toBeUndefined();
+    expect(worktreeOf(handed)?.handoff).toMatchObject({ phase: "grilling" });
+    expect(worktreeOf(handed)?.grill).toEqual({
+      status: "open",
+      rounds: 1,
+      attachmentId: expect.any(String),
     });
-    expect(await ticket.log()).toBe(QUESTION_LOG);
-    const comments = asked?.metadata?.comments?.length;
+    expect(handed?.metadata?.attachments).toEqual([
+      expect.objectContaining({ fileName: GRILL_LOG_FILE_NAME, mimeType: "text/markdown" }),
+    ]);
+    expect(await ticket.log()).toBe(HANDOFF_LOG);
 
-    await ticket.chat("Good. Should `None` raise?\n\nRecommended: raise `TypeError`.");
+    await ticket.handoffs.resume(ticket.warn);
+    await ticket.handoffs.resume(ticket.warn);
 
-    const chatted = await store.get(card.id);
-    expect(chatted?.status).toBe("review");
-    expect(worktreeOf(chatted)?.handoff).toEqual(worktree?.handoff);
-    expect(worktreeOf(chatted)?.grill).toEqual(worktree?.grill);
-    expect(chatted?.metadata?.comments).toHaveLength(comments!);
-    expect(untimed(await ticket.log())).toBe(
-      `${QUESTION_LOG}\n**Operator** (<t>)\n\nYes, return [].\n\n**Agent** (<t>)\n\nGood. Should \`None\` raise?\n\nRecommended: raise \`TypeError\`.\n`,
+    expect(ticket.warn).not.toHaveBeenCalled();
+    expect(ticket.grillCreates()).toHaveLength(1);
+    const [, params] = ticket.grillCreates()[0]!;
+    const key = `agent:dev:grill-${card.id.slice(0, 8)}-1`;
+    expect(params).toEqual({
+      key,
+      agentId: "dev",
+      displayName: "Grill Fix the parser",
+      message: expect.any(String),
+    });
+    expect(params?.message).toContain(
+      "Grill the operator on this Workboard ticket: Fix the parser",
     );
-    expect(chatted?.metadata?.attachments?.[0]?.byteSize).toBe(
-      Buffer.byteLength((await ticket.log())!),
+    expect(params?.message).toContain(HANDOFF);
+    expect(params?.message).toContain("Interview the operator one question at a time");
+    expect(params?.message).toMatch(
+      /The repository is checked out at `[^`]+`; the ticket's own commits are on branch `[^`]+` on the node/,
     );
+    expect(params?.message).toContain("Do not build anything");
+    expect(params?.message).toContain("Call `workboard_grill_done`");
 
-    await ticket.chat(
-      `Next one.${reportBlock({ outcome: "grill", question: "Accept tabs?", summary: "Empty input returns []." })}`,
-      { prompt: "Raise." },
+    const opened = await store.get(card.id);
+    expect(opened?.status).toBe("review");
+    expect(worktreeOf(opened)?.grill).toMatchObject({ status: "open", sessionKey: key });
+    expect(redactOperatorCard(opened!)).toMatchObject({
+      stage: { kind: "grilling", round: 1 },
+      grill: { status: "open", rounds: 1, sessionKey: key },
+    });
+    expect(opened?.metadata?.comments?.at(-1)?.body).toBe(
+      `**Grilling 1** runs in its own session, Grill Fix the parser (\`${key}\`). Open it from the card's Grilling tab; the result comes back here when the grilling ends.`,
     );
-
-    const next = await store.get(card.id);
-    expect(next?.status).toBe("review");
-    expect(worktreeOf(next)?.grill).toMatchObject({ status: "open", rounds: 2 });
-    expect(next?.metadata?.comments).toHaveLength(comments!);
-    expect(untimed(await ticket.log())).toMatch(
-      /\n\*\*Operator\*\* \(<t>\)\n\nRaise\.\n\n\*\*Agent\*\* \(<t>\)\n\nNext one\.\n\n## Question 2\n\n\*\*Settled so far:\*\* Empty input returns \[\]\.\n\nAccept tabs\?\n$/,
-    );
-    expect(ticket.launches()).toHaveLength(1);
+    expect(await ticket.log()).toBe(HANDOFF_LOG);
+    expect(ticket.ticketLaunches()).toHaveLength(1);
   });
 
-  it("ignores a turn that started before the question and turns on a card that is not grilling", async () => {
-    const ticket = await grillingTicket();
-    await ticket.chat("Old reply.", { startedAgoMs: 60_000 });
-    expect(await ticket.log()).toBe(QUESTION_LOG);
+  it("blocks the card when its grill session cannot start, and retries after a move to todo", async () => {
+    const ticket = await grillingTicket(undefined, false);
+    ticket.setFailCreate("agent dev is not configured");
 
-    expect((await ticket.end())[0]).toBe(true);
-    const ended = await ticket.log();
-    await ticket.chat(`Late.${reportBlock({ outcome: "grill_done", summary: "Late." })}`);
+    await ticket.handoffs.resume(ticket.warn);
 
-    expect(await ticket.log()).toBe(ended);
-    expect((await ticket.store.get(ticket.card.id))?.status).toBe("todo");
+    const blocked = await ticket.store.get(ticket.card.id);
+    expect(blocked?.status).toBe("blocked");
+    expect(blocked?.metadata?.comments?.at(-1)?.body).toBe(
+      "The grill session could not start: agent dev is not configured\nFix the cause, then move the card to todo to try again.",
+    );
+    expect(worktreeOf(blocked)?.grill?.sessionKey).toBeUndefined();
+
+    ticket.setFailCreate(undefined);
+    await ticket.store.move(ticket.card.id, "todo", undefined);
+    await ticket.handoffs.resume(ticket.warn);
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect(ticket.grillCreates()).toHaveLength(2);
+    const retried = await ticket.store.get(ticket.card.id);
+    expect(retried?.status).toBe("review");
+    expect(worktreeOf(retried)?.grill?.sessionKey).toBe(
+      `agent:dev:grill-${ticket.card.id.slice(0, 8)}-1`,
+    );
   });
 
-  it("ends the grilling on a grill_done reply and resumes the same session with the summary", async () => {
+  it("adopts a grill session that ran its handoff but was not recorded, without sending the handoff again", async () => {
+    const ticket = await grillingTicket(undefined, false);
+    vi.spyOn(ticket.store, "setNodeGrillSession").mockResolvedValueOnce(undefined);
+
+    await ticket.handoffs.resume(ticket.warn);
+
+    const key = `agent:dev:grill-${ticket.card.id.slice(0, 8)}-1`;
+    expect(ticket.warn).toHaveBeenCalledWith(
+      `workboard: grill session ${key} of card ${ticket.card.id} was not recorded; the card's grilling changed while it was created`,
+    );
+    expect(await ticket.grillSessionKey()).toBeUndefined();
+
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect(ticket.grillCreates()).toHaveLength(1);
+    expect(await ticket.grillSessionKey()).toBe(key);
+    expect((await ticket.store.get(ticket.card.id))?.status).toBe("review");
+  });
+
+  it("opens the grill session on the card when the full log dropped its handoff", async () => {
     const ticket = await grillingTicket();
     const { store, card } = ticket;
+    await ticket.grillDone(await ticket.grillSessionKey(), { handoff: RESULT });
+    await ticket.handoffs.resume(ticket.warn);
+    await endTurn(
+      store,
+      card.id,
+      reportMessages({ outcome: "grill", summary: "h".repeat(300_000) }),
+    );
+    await ticket.handoffs.resume(ticket.warn);
+    await ticket.grillDone(await ticket.grillSessionKey(), { handoff: RESULT });
+    await ticket.handoffs.resume(ticket.warn);
+    await endTurn(store, card.id, grillReport);
+    expect(await ticket.log(), "the full log dropped handoff 3").not.toContain("## Handoff 3");
 
-    await ticket.chat(
-      `Agreed.${reportBlock({ outcome: "grill_done", summary: "Parser only; empty input returns []." })}`,
+    await ticket.handoffs.resume(ticket.warn);
+
+    const opened = await store.get(card.id);
+    expect(opened?.status).toBe("review");
+    expect(await ticket.grillSessionKey()).toBe(`agent:dev:grill-${card.id.slice(0, 8)}-3`);
+    const message = String(ticket.grillCreates().at(-1)?.[1]?.message);
+    expect(message).toContain(
+      "but the card's grilling log (`grilling.md`) reached its size limit, which cut the handoff. Read the card with `workboard_read` and the grilling log",
+    );
+    expect(message).not.toContain(HANDOFF);
+  });
+
+  it("blocks a grill report without a handoff", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card } = await startNodeCard(store, createNodeGateway());
+
+    await endTurn(store, card.id, reportMessages({ outcome: "grill", question: "Empty input?" }));
+
+    const blocked = await store.get(card.id);
+    expect(blocked?.status).toBe("blocked");
+    expect(blocked?.metadata?.comments?.at(-1)?.body).toContain(
+      "The ticket session's grill report has no handoff in `summary`.",
+    );
+  });
+
+  it("blocks a grill report whose handoff could not be recorded", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card } = await startNodeCard(store, createNodeGateway());
+    vi.spyOn(store, "recordNodeGrillHandoff").mockResolvedValue(undefined);
+
+    await endTurn(store, card.id, grillReport);
+
+    const blocked = await store.get(card.id);
+    expect(blocked?.status).toBe("blocked");
+    expect(blocked?.metadata?.claim).toBeUndefined();
+    expect(blocked?.metadata?.comments?.at(-1)?.body).toContain(
+      "Handed off a grilling, but the card's node worktree changed before it could be recorded",
+    );
+  });
+
+  it("ignores a turn on the card's own session while grilling", async () => {
+    const ticket = await grillingTicket();
+    const before = await ticket.store.get(ticket.card.id);
+
+    await cardSessionTurn(
+      ticket.store,
+      ticket.card.id,
+      `Agreed.\n\n\`\`\`workboard-report\n${JSON.stringify({ outcome: "done", summary: "x", proof: [{ status: "passed" }] })}\n\`\`\``,
     );
 
+    const after = await ticket.store.get(ticket.card.id);
+    expect(after?.status).toBe("review");
+    expect(worktreeOf(after)?.grill).toEqual(worktreeOf(before)?.grill);
+    expect(after?.metadata?.comments).toEqual(before?.metadata?.comments);
+    expect(after?.metadata?.proof ?? []).toEqual([]);
+    expect(await ticket.log()).toBe(HANDOFF_LOG);
+  });
+
+  it("bounces a move to todo while grilling back to review once", async () => {
+    const ticket = await grillingTicket();
+
+    for (const attempt of [1, 2]) {
+      await ticket.store.move(ticket.card.id, "todo", undefined);
+      await ticket.handoffs.resume(ticket.warn);
+      expect((await ticket.store.get(ticket.card.id))?.status, `todo move ${attempt}`).toBe(
+        "review",
+      );
+    }
+    const notices = ((await ticket.store.get(ticket.card.id))?.metadata?.comments ?? []).filter(
+      (comment) => comment.body.startsWith("Moved to todo"),
+    );
+    expect(notices.map((comment) => comment.body)).toEqual([
+      "Moved to todo while grilling; the grilling goes on in its grill session, which the card names once it is open. Finish it there, or choose End grilling on the card to let the agent continue with the grill session's last reply, if it has one.",
+    ]);
+    expect(ticket.ticketLaunches()).toHaveLength(1);
+    expect(ticket.grillCreates()).toHaveLength(1);
+  });
+
+  it("wakes the board automation for a questions round but not for a grilling handoff", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({ id: "default", automationJobId: "job-review" });
+    const request = vi.fn().mockResolvedValue({ ok: true, ran: true });
+    const service = createWorkboardAutomationNudgeService({ store });
+    await service.start(nudgeContext(request));
+    try {
+      const end = async (messages: unknown[]) => {
+        const { sessionKey, runId } = await startNodeCard(store);
+        await syncWorkboardAgentEnded({
+          store,
+          event: { runId, success: true, messages },
+          context: { runId, sessionKey },
+          readSessions: endedSession(),
+          onMatched: service.nudge,
+        });
+      };
+
+      await end(grillReport);
+      expect(request).not.toHaveBeenCalled();
+      await end(reportMessages({ outcome: "needs_input", summary: "Two fit", questions: ["Q1"] }));
+      expect(request).toHaveBeenCalledOnce();
+    } finally {
+      service.stop();
+    }
+  });
+});
+
+describe("grilling result from the grill session", () => {
+  it("takes the result handoff from the grill session and resumes the ticket session with it", async () => {
+    const ticket = await grillingTicket();
+    const { store, card } = ticket;
+    const grillKey = await ticket.grillSessionKey();
+
+    const result = await ticket.grillDone(grillKey, { handoff: RESULT });
+
+    expect(result.details).toMatchObject({ card: { id: card.id, status: "todo" } });
     const ended = await store.get(card.id);
     expect(ended?.status).toBe("todo");
     expect(worktreeOf(ended)?.grill).toEqual({
       status: "closed",
       rounds: 1,
       attachmentId: expect.any(String),
+      sessionKey: grillKey,
       pending: { kind: "end", at: expect.any(Number) },
     });
-    expect(untimed(await ticket.log())).toMatch(
-      /\n\*\*Agent\*\* \(<t>\)\n\nAgreed\.\n\n## Outcome\n\n\*\*settled in the session chat\*\* \(<t>\): Parser only; empty input returns \[\]\.\n$/,
+    expect(untimed(await ticket.log())).toBe(
+      `${HANDOFF_LOG}\n## Result\n\n**settled in the grill session** (<t>)\n\n${RESULT}\n`,
     );
 
     await ticket.handoffs.resume(ticket.warn);
 
     expect(ticket.warn).not.toHaveBeenCalled();
     expect((await store.get(card.id))?.status).toBe("running");
-    expect(ticket.launches()).toHaveLength(2);
-    expect(ticket.launches().at(-1)?.[1]).toMatchObject({ key: ticket.sessionKey });
+    expect(ticket.ticketLaunches()).toHaveLength(2);
+    expect(ticket.ticketLaunches().at(-1)?.[1]).toMatchObject({ key: ticket.sessionKey });
     expect(ticket.brief()).toContain(
-      "## Grilling ended\nThe grilling ended. What you settled together is in this session and in the card's grilling log (`grilling.md`).\n\nClosing note:\n\nParser only; empty input returns [].\n\nNow carry out the ticket with that result and end with `done`, `blocked`, or `needs_input`.",
+      `## Grilling ended\nThe grilling you handed off ended. Its result is below and in the card's grilling log (\`grilling.md\`).\n\nResult:\n\n${RESULT}\n\nNow carry out the ticket`,
     );
 
     await endTurn(
@@ -300,155 +474,57 @@ describe("node ticket grilling", () => {
     expect(worktreeOf(done)?.grill?.pending).toBeUndefined();
   });
 
-  it("ends the grilling on any other report in a chat turn without importing it", async () => {
-    for (const report of [
-      {
-        outcome: "done",
-        headline: "Did it.",
-        summary: "Changed the parser.",
-        proof: [{ command: "pytest", status: "passed" }],
-      },
-      { outcome: "needs_input", summary: "Which file?", questions: ["Q1"] },
-    ]) {
-      const ticket = await grillingTicket();
-      await ticket.chat(`Here.${reportBlock(report)}`);
-
-      const ended = await ticket.store.get(ticket.card.id);
-      expect(ended?.status, report.outcome).toBe("todo");
-      expect(worktreeOf(ended)?.handoff, report.outcome).toMatchObject({ phase: "grilling" });
-      expect(worktreeOf(ended)?.grill?.pending, report.outcome).toMatchObject({ kind: "end" });
-      expect(ended?.metadata?.proof ?? [], report.outcome).toEqual([]);
-      expect(await ticket.log()).toContain(
-        `**ended by a ${report.outcome} reply in the session chat** (`,
-      );
-    }
-  });
-
-  it("blocks a grill_done report that ends a claimed round", async () => {
-    const store = createWorkboardSqliteTestStore();
-    const { card } = await startNodeCard(store, createNodeGateway());
-
-    await endTurn(store, card.id, reportMessages({ outcome: "grill_done", summary: "Settled." }));
-
-    const blocked = await store.get(card.id);
-    expect(blocked?.status).toBe("blocked");
-    expect(blocked?.metadata?.comments?.at(-1)?.body).toContain(
-      "Reported grill_done, but no grilling was live in the session chat: Settled.",
-    );
-  });
-
-  it("bounces a move to todo while grilling back to review once", async () => {
+  it("refuses a result from any session but the card's grill session", async () => {
     const ticket = await grillingTicket();
+    const { store, card } = ticket;
 
-    for (const attempt of [1, 2]) {
-      await ticket.store.move(ticket.card.id, "todo", undefined);
-      await ticket.handoffs.resume(ticket.warn);
-      expect((await ticket.store.get(ticket.card.id))?.status, `todo move ${attempt}`).toBe(
-        "review",
+    for (const from of [ticket.sessionKey, "agent:dev:intake-server-20261018", undefined]) {
+      await expect(ticket.grillDone(from, { handoff: RESULT }), String(from)).rejects.toThrow(
+        "No grilling runs in this session: only the grill session Workboard created for a card's live grilling can hand its result back.",
       );
+      await expect(
+        ticket.grillDone(from, { cardId: card.id, handoff: RESULT }),
+        String(from),
+      ).rejects.toThrow("No grilling runs in this session");
     }
-    const notices = ((await ticket.store.get(ticket.card.id))?.metadata?.comments ?? []).filter(
-      (comment) => comment.body.startsWith("Moved to todo"),
+
+    const waiting = await store.get(card.id);
+    expect(waiting?.status).toBe("review");
+    expect(worktreeOf(waiting)?.grill).toMatchObject({ status: "open" });
+    expect(await ticket.log()).toBe(HANDOFF_LOG);
+  });
+
+  it("refuses a second result after the grilling ended", async () => {
+    const ticket = await grillingTicket();
+    const grillKey = await ticket.grillSessionKey();
+    await ticket.grillDone(grillKey, { handoff: RESULT });
+
+    await expect(ticket.grillDone(grillKey, { handoff: "Again." })).rejects.toThrow(
+      "No grilling runs in this session",
     );
-    expect(notices.map((comment) => comment.body)).toEqual([
-      "Moved to todo while grilling; keep answering in the card's session chat, or choose End grilling on the card to let the agent continue with what is settled.",
+  });
+});
+
+describe("grilling ended by the operator", () => {
+  it("takes the grill session's last reply as the result of End grilling", async () => {
+    const ticket = await grillingTicket();
+    const { store, card } = ticket;
+    ticket.setHistory([
+      { role: "user", content: "Let's wrap up." },
+      { role: "assistant", content: [{ type: "text", text: RESULT }] },
+      { role: "assistant", content: [{ type: "toolCall", name: "read" }] },
     ]);
-    expect(ticket.launches()).toHaveLength(1);
-  });
-
-  it("wakes the board automation for a questions round but not for a grilling round or its chat", async () => {
-    const store = createWorkboardSqliteTestStore();
-    await store.upsertBoard({ id: "default", automationJobId: "job-review" });
-    const request = vi.fn().mockResolvedValue({ ok: true, ran: true });
-    const service = createWorkboardAutomationNudgeService({ store });
-    await service.start(nudgeContext(request));
-    try {
-      const end = async (messages: unknown[]) => {
-        const { card, sessionKey, runId } = await startNodeCard(store);
-        await syncWorkboardAgentEnded({
-          store,
-          event: { runId, success: true, messages },
-          context: { runId, sessionKey },
-          readSessions: endedSession(),
-          onMatched: service.nudge,
-        });
-        return card.id;
-      };
-
-      const grilling = await end(grillReport);
-      await chatTurn(store, grilling, "Next?", { onMatched: service.nudge });
-      expect(request).not.toHaveBeenCalled();
-      await end(reportMessages({ outcome: "needs_input", summary: "Two fit", questions: ["Q1"] }));
-      expect(request).toHaveBeenCalledOnce();
-    } finally {
-      service.stop();
-    }
-  });
-});
-
-describe("grilling log ownership", () => {
-  it("keeps the log through the metadata budget and the attachment cap, and cuts a long chat message", async () => {
-    const ticket = await grillingTicket();
-    const { store, card } = ticket;
-    const logId = worktreeOf(await store.get(card.id))?.grill?.attachmentId;
-    const attachmentIds = async () =>
-      (await store.get(card.id))?.metadata?.attachments?.map((entry) => entry.id);
-    for (let index = 0; index < 20; index += 1) {
-      await store.addAttachment(card.id, {
-        fileName: `note-${index}.txt`,
-        mimeType: "text/plain",
-        contentBase64: Buffer.from(`note ${index}`).toString("base64"),
-      });
-    }
-    expect(await attachmentIds()).toHaveLength(20);
-    expect(await attachmentIds()).toContain(logId);
-
-    for (let index = 0; index < 14; index += 1) {
-      await store.addComment(card.id, { body: `${index} ${"x".repeat(1900)}` });
-    }
-    await ticket.chat(`Long. ${"y".repeat(9000)}`);
-    expect(await attachmentIds()).toContain(logId);
-    const log = await ticket.log();
-    expect(log).toMatch(/^## Question 1\n/);
-    expect(log).toContain(
-      `Long. ${"y".repeat(7994)}… (cut; the full message is in the session chat)\n`,
-    );
-  });
-
-  it("refuses to delete the grilling log", async () => {
-    const ticket = await grillingTicket();
-    const capture = createGatewayMethodCapture();
-    registerWorkboardGatewayMethods({ api: capture.api, store: ticket.store });
-    const attachmentId = worktreeOf(await ticket.store.get(ticket.card.id))?.grill?.attachmentId;
-
-    const respond = await capture.invoke("workboard.cards.attachments.delete", {
-      id: ticket.card.id,
-      attachmentId,
-    });
-
-    expect(respond.mock.calls[0]?.[2]?.message).toContain(
-      "grilling.md is this card's grilling log and cannot be deleted",
-    );
-    expect(await ticket.log()).toMatch(/^## Question 1\n/);
-  });
-});
-
-describe("grilling endings", () => {
-  it("ends the grilling from the card and resumes the same session to carry out the ticket", async () => {
-    const ticket = await grillingTicket();
-    const { store, card } = ticket;
 
     const [ok, result] = await ticket.end();
+
     expect(ok).toBe(true);
     expect(result).toMatchObject({ card: { status: "todo" } });
-    expect(worktreeOf(await store.get(card.id))?.grill).toEqual({
-      status: "closed",
-      rounds: 1,
-      attachmentId: expect.any(String),
-      pending: { kind: "end", at: expect.any(Number) },
+    expect(ticket.gateway.respond).toHaveBeenCalledWith("chat.history", {
+      sessionKey: await ticket.grillSessionKey(),
+      limit: 20,
     });
-    expect(untimed(await ticket.log())).toMatch(
-      /\n## Outcome\n\n\*\*ended by the operator\*\* \(<t>\): no note\n$/,
+    expect(untimed(await ticket.log())).toBe(
+      `${HANDOFF_LOG}\n## Result\n\n**ended by the operator** (<t>)\n\n${RESULT}\n`,
     );
     expect((await ticket.end())[2]?.message).toContain("This card is not grilling");
 
@@ -456,16 +532,63 @@ describe("grilling endings", () => {
 
     expect(ticket.warn).not.toHaveBeenCalled();
     expect((await store.get(card.id))?.status).toBe("running");
-    expect(ticket.launches().at(-1)?.[1]).toMatchObject({ key: ticket.sessionKey });
-    expect(ticket.brief()).toContain("## Grilling ended\n");
-    expect(ticket.brief()).not.toContain("Closing note");
+    expect(ticket.ticketLaunches().at(-1)?.[1]).toMatchObject({ key: ticket.sessionKey });
+    expect(ticket.brief()).toContain(
+      `The operator ended the grilling, so the result is the grill session's last reply. It may be an open question rather than a decision; do not treat a question in it as settled. Carry out what it decides, and end with \`needs_input\` for a question that blocks the ticket.\n\nResult:\n\n${RESULT}\n`,
+    );
   });
 
-  it("ends the grilling when the operator moves the card to done", async () => {
+  it("ends without a result when the grill session has not replied", async () => {
+    const ticket = await grillingTicket();
+
+    expect((await ticket.end())[0]).toBe(true);
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect(untimed(await ticket.log())).toMatch(
+      /\n## Result\n\n\*\*ended by the operator\*\* \(<t>\)\n\nNo result was handed back\.\n$/,
+    );
+    expect(ticket.brief()).toContain(
+      "The grilling ended without a result; carry out the ticket with what you know.",
+    );
+  });
+
+  it("refuses End grilling while the grill session replies, and when it cannot read it", async () => {
+    const ticket = await grillingTicket();
+    ticket.setReplying(true);
+
+    const [ok, , error] = await ticket.end();
+
+    expect(ok).toBe(false);
+    expect(error?.message).toBe(
+      "The agent is still replying in the grill session; end the grilling when it has answered.",
+    );
+    ticket.setReplying("unreadable");
+    expect((await ticket.end())[2]?.message).toBe(
+      "Could not read the grill session; try End grilling again. | sessions.describe returned an invalid lifecycle snapshot",
+    );
+    const waiting = await ticket.store.get(ticket.card.id);
+    expect(waiting?.status).toBe("review");
+    expect(worktreeOf(waiting)?.grill).toMatchObject({ status: "open" });
+
+    ticket.setReplying(false);
+    expect((await ticket.end())[0]).toBe(true);
+  });
+
+  it("ends a grilling moved to done with the last reply once the grill session answered", async () => {
     const ticket = await grillingTicket();
     const { store, card } = ticket;
+    ticket.setReplying(true);
 
     await store.move(card.id, "done", undefined);
+    await ticket.handoffs.resume(ticket.warn);
+
+    const moved = await store.get(card.id);
+    expect(moved?.status).toBe("done");
+    expect(worktreeOf(moved)?.grill).toMatchObject({ status: "open" });
+    expect(ticket.ticketLaunches()).toHaveLength(1);
+
+    ticket.setHistory([{ role: "assistant", content: RESULT }]);
+    ticket.setReplying(false);
     await ticket.handoffs.resume(ticket.warn);
 
     expect(ticket.warn).not.toHaveBeenCalled();
@@ -475,45 +598,69 @@ describe("grilling endings", () => {
       status: "closed",
       pending: { kind: "end" },
     });
-    expect(untimed(await ticket.log())).toMatch(
-      /\n## Outcome\n\n\*\*ended by the operator\*\* \(<t>\): no note\n$/,
+    expect(untimed(await ticket.log())).toBe(
+      `${HANDOFF_LOG}\n## Result\n\n**ended by the operator** (<t>)\n\n${RESULT}\n`,
     );
-    expect(ticket.launches().at(-1)?.[1]).toMatchObject({ key: ticket.sessionKey });
-    expect(ticket.brief()).toContain("## Grilling ended\n");
+    expect(ticket.ticketLaunches()).toHaveLength(2);
+    expect(ticket.brief()).toContain(`Result:\n\n${RESULT}\n`);
   });
 
-  it("resumes a grilling settled in chat that the operator moved to done before it started", async () => {
+  it("resumes a grilling settled in its grill session that the operator moved to done before it started", async () => {
     const ticket = await grillingTicket();
     const { store, card } = ticket;
-    await ticket.chat(`Done.${reportBlock({ outcome: "grill_done", summary: "Parser only." })}`);
+    await ticket.grillDone(await ticket.grillSessionKey(), { handoff: RESULT });
 
     await store.move(card.id, "done", undefined);
     await ticket.handoffs.resume(ticket.warn);
 
     expect(ticket.warn).not.toHaveBeenCalled();
     expect((await store.get(card.id))?.status).toBe("running");
-    expect(ticket.launches().at(-1)?.[1]).toMatchObject({ key: ticket.sessionKey });
-    expect(ticket.brief()).toContain("Closing note:\n\nParser only.\n");
+    expect(ticket.brief()).toContain(`Result:\n\n${RESULT}\n`);
   });
 
-  it("does not present an earlier closing note when the full log dropped the latest end", async () => {
+  it("never takes a turn that started before the relaunch as the relaunched round's report", async () => {
     const ticket = await grillingTicket();
-    const { store, card } = ticket;
-    await ticket.chat(`Ok.${reportBlock({ outcome: "grill_done", summary: "Old note." })}`);
-    await ticket.handoffs.resume(ticket.warn);
-    await endTurn(
-      store,
-      card.id,
-      reportMessages({ outcome: "grill", question: "q".repeat(300_000) }),
-    );
-
+    const { store, card, gateway } = ticket;
     expect((await ticket.end())[0]).toBe(true);
-    await ticket.handoffs.resume(ticket.warn);
-
-    expect(ticket.brief()).toContain(
-      "If the grilling ended with a closing note, it could not be read from the grilling log.",
+    // The relaunch waits in sessions.create while an earlier turn on the card session ends.
+    const answer = gateway.respond.getMockImplementation()!;
+    const relaunching = createDeferred<void>();
+    const released = createDeferred<void>();
+    gateway.respond.mockImplementation((method, params) =>
+      method === "sessions.create"
+        ? (async () => {
+            relaunching.resolve();
+            await released.promise;
+            return answer(method, params);
+          })()
+        : answer(method, params),
     );
-    expect(ticket.brief()).not.toContain("Old note.");
+
+    const resuming = ticket.handoffs.resume(ticket.warn);
+    await relaunching.promise;
+    expect(cardRunId((await store.get(card.id))!)).toMatch(new RegExp(`^workboard:${card.id}:`));
+    const now = Date.now() + 1000;
+    await syncWorkboardAgentEnded({
+      store,
+      event: {
+        runId: "earlier-turn",
+        success: true,
+        durationMs: 60_000,
+        messages: [{ role: "assistant", content: "That settles it." }],
+      },
+      context: { runId: "earlier-turn", sessionKey: ticket.sessionKey },
+      now,
+      readSessions: endedSession(),
+    });
+    released.resolve();
+    await resuming;
+
+    expect(ticket.warn).not.toHaveBeenCalled();
+    const relaunched = await store.get(card.id);
+    expect(relaunched?.status).toBe("running");
+    expect(cardRunId(relaunched!), "the earlier run is not linked to the round").toMatch(
+      new RegExp(`^workboard:${card.id}:`),
+    );
   });
 
   it("names the grilling result when its start waits or fails", async () => {
@@ -564,136 +711,59 @@ describe("grilling endings", () => {
       status: "closed",
       rounds: 1,
       attachmentId: expect.any(String),
+      sessionKey: await ticket.grillSessionKey(),
     });
     expect(await ticket.log()).toBe(ended);
   });
 
-  it("blocks a grill report whose question could not be recorded", async () => {
-    const store = createWorkboardSqliteTestStore();
-    const { card } = await startNodeCard(store, createNodeGateway());
-    vi.spyOn(store, "recordNodeGrillQuestion").mockResolvedValue(undefined);
-
-    await endTurn(store, card.id, grillReport);
-
-    const blocked = await store.get(card.id);
-    expect(blocked?.status).toBe("blocked");
-    expect(blocked?.metadata?.claim).toBeUndefined();
-    expect(blocked?.metadata?.comments?.at(-1)?.body).toContain(
-      "Asked a grilling question, but the card's node worktree changed before it could be recorded",
-    );
-  });
-});
-
-describe("grilling while a chat turn replies", () => {
-  it("refuses End grilling until the agent answered in the session chat", async () => {
-    const ticket = await grillingTicket();
-    ticket.setReplying(true);
-
-    const [ok, , error] = await ticket.end();
-
-    expect(ok).toBe(false);
-    expect(error?.message).toBe(
-      "The agent is still replying in the session chat; end the grilling when it has answered.",
-    );
-    const waiting = await ticket.store.get(ticket.card.id);
-    expect(waiting?.status).toBe("review");
-    expect(worktreeOf(waiting)?.grill).toMatchObject({ status: "open" });
-
-    ticket.setReplying(false);
-    expect((await ticket.end())[0]).toBe(true);
-  });
-
-  it("refuses End grilling with a retry hint when it cannot read the session", async () => {
-    const ticket = await grillingTicket();
-    ticket.setReplying("unreadable");
-
-    const [ok, , error] = await ticket.end();
-
-    expect(ok).toBe(false);
-    expect(error?.message).toBe(
-      "Could not check whether the agent is still replying in the session chat; try End grilling again. | sessions.describe returned an invalid lifecycle snapshot",
-    );
-    expect(worktreeOf(await ticket.store.get(ticket.card.id))?.grill).toMatchObject({
-      status: "open",
-    });
-  });
-
-  it("ends a grilling moved to done once the chat turn in flight answered", async () => {
+  it("does not present an earlier result when the full log dropped the latest end", async () => {
     const ticket = await grillingTicket();
     const { store, card } = ticket;
-    ticket.setReplying(true);
-
-    await store.move(card.id, "done", undefined);
+    await ticket.grillDone(await ticket.grillSessionKey(), { handoff: "Old result." });
     await ticket.handoffs.resume(ticket.warn);
-
-    const moved = await store.get(card.id);
-    expect(moved?.status).toBe("done");
-    expect(worktreeOf(moved)?.grill).toMatchObject({ status: "open" });
-    expect(ticket.launches()).toHaveLength(1);
-
-    await ticket.chat("Noted, empty input returns [].");
-    ticket.setReplying(false);
-    await ticket.handoffs.resume(ticket.warn);
-
-    expect(ticket.warn).not.toHaveBeenCalled();
-    const resumed = await store.get(card.id);
-    expect(resumed?.status).toBe("running");
-    expect(worktreeOf(resumed)?.grill).toMatchObject({
-      status: "closed",
-      pending: { kind: "end" },
-    });
-    expect(untimed(await ticket.log())).toMatch(
-      /\n\*\*Agent\*\* \(<t>\)\n\nNoted, empty input returns \[\]\.\n\n## Outcome\n\n\*\*ended by the operator\*\* \(<t>\): no note\n$/,
+    await endTurn(
+      store,
+      card.id,
+      reportMessages({ outcome: "grill", summary: "h".repeat(300_000) }),
     );
-    expect(ticket.launches()).toHaveLength(2);
-  });
+    await ticket.handoffs.resume(ticket.warn);
 
-  it("never takes a chat turn that started before the relaunch as the relaunched round's report", async () => {
-    const ticket = await grillingTicket();
-    const { store, card, gateway } = ticket;
     expect((await ticket.end())[0]).toBe(true);
-    // The relaunch waits in sessions.create while the earlier chat turn ends.
-    const answer = gateway.respond.getMockImplementation()!;
-    const relaunching = createDeferred<void>();
-    const released = createDeferred<void>();
-    gateway.respond.mockImplementation((method, params) =>
-      method === "sessions.create"
-        ? (async () => {
-            relaunching.resolve();
-            await released.promise;
-            return answer(method, params);
-          })()
-        : answer(method, params),
-    );
+    await ticket.handoffs.resume(ticket.warn);
 
-    const resuming = ticket.handoffs.resume(ticket.warn);
-    await relaunching.promise;
-    expect(cardRunId((await store.get(card.id))!)).toMatch(new RegExp(`^workboard:${card.id}:`));
-    await ticket.chat("That settles it.", { startedAgoMs: 60_000 });
-    released.resolve();
-    await resuming;
-
-    expect(ticket.warn).not.toHaveBeenCalled();
-    const relaunched = await store.get(card.id);
-    expect(relaunched?.status).toBe("running");
-    expect(cardRunId(relaunched!), "the chat run is not linked to the round").toMatch(
-      new RegExp(`^workboard:${card.id}:`),
-    );
+    expect(ticket.grillCreates()).toHaveLength(2);
+    expect(ticket.grillCreates().at(-1)?.[1]?.key).toBe(`agent:dev:grill-${card.id.slice(0, 8)}-2`);
+    expect(ticket.brief()).toContain("The result could not be read from the grilling log.");
+    expect(ticket.brief()).not.toContain("Old result.");
   });
 });
 
-describe("grilling chat turns the board cannot drop", () => {
-  it("logs a chat turn whose end carries no start, told apart by its run id", async () => {
+describe("grilling log ownership", () => {
+  it("keeps the log through the metadata budget and the attachment cap", async () => {
     const ticket = await grillingTicket();
+    const { store, card } = ticket;
+    const logId = worktreeOf(await store.get(card.id))?.grill?.attachmentId;
+    const attachmentIds = async () =>
+      (await store.get(card.id))?.metadata?.attachments?.map((entry) => entry.id);
+    for (let index = 0; index < 20; index += 1) {
+      await store.addAttachment(card.id, {
+        fileName: `note-${index}.txt`,
+        mimeType: "text/plain",
+        contentBase64: Buffer.from(`note ${index}`).toString("base64"),
+      });
+    }
+    expect(await attachmentIds()).toHaveLength(20);
+    expect(await attachmentIds()).toContain(logId);
 
-    await ticket.chat("Yes, keep it to the parser.", { startedAgoMs: null });
-
-    expect(untimed(await ticket.log())).toBe(
-      `${QUESTION_LOG}\n**Operator** (<t>)\n\nYes, return [].\n\n**Agent** (<t>)\n\nYes, keep it to the parser.\n`,
-    );
+    for (let index = 0; index < 14; index += 1) {
+      await store.addComment(card.id, { body: `${index} ${"x".repeat(1900)}` });
+    }
+    await ticket.grillDone(await ticket.grillSessionKey(), { handoff: RESULT });
+    expect(await attachmentIds()).toContain(logId);
+    expect(await ticket.log()).toMatch(/^## Handoff 1\n/);
   });
 
-  it("logs a chat turn whose card another writer changed meanwhile", async () => {
+  it("keeps a result the grill session hands back while another writer changed the card", async () => {
     let interfere = false;
     const harness = createWorkboardSqliteTestHarness({
       beforeCardWrite: async (key) => {
@@ -713,56 +783,41 @@ describe("grilling chat turns the board cannot drop", () => {
       },
     });
     const ticket = await grillingTicket(harness.store);
-    const warn = vi.fn();
 
     interfere = true;
-    await ticket.chat("Good, empty input returns [].", { warn });
+    await ticket.grillDone(await ticket.grillSessionKey(), { handoff: RESULT });
 
-    expect(warn).not.toHaveBeenCalled();
     const card = await ticket.store.get(ticket.card.id);
     expect(card?.title).toBe("Renamed on another Gateway");
-    expect(await ticket.log()).toContain("Good, empty input returns [].");
+    expect(card?.status).toBe("todo");
+    expect(await ticket.log()).toContain(RESULT);
     expect(card?.metadata?.attachments?.[0]?.byteSize).toBe(
       Buffer.byteLength((await ticket.log())!),
     );
   });
 
-  it("logs a reply whose report cannot be read and says so on the card", async () => {
+  it("refuses to delete the grilling log", async () => {
     const ticket = await grillingTicket();
+    const capture = createGatewayMethodCapture();
+    registerWorkboardGatewayMethods({ api: capture.api, store: ticket.store });
+    const attachmentId = worktreeOf(await ticket.store.get(ticket.card.id))?.grill?.attachmentId;
 
-    await ticket.chat(
-      'Agreed, that settles it.\n\n```workboard-report\n{"outcome": "grill_done",\n```',
-    );
+    const respond = await capture.invoke("workboard.cards.attachments.delete", {
+      id: ticket.card.id,
+      attachmentId,
+    });
 
-    const card = await ticket.store.get(ticket.card.id);
-    expect(card?.status).toBe("review");
-    expect(worktreeOf(card)?.grill).toMatchObject({ status: "open" });
-    expect(await ticket.log()).toMatch(
-      /\*\*Agent\*\* \([^)]+\)\n\nAgreed, that settles it\.\n\nThe reply's report could not be read: The ticket session's workboard-report block is not valid JSON\.\n$/,
+    expect(respond.mock.calls[0]?.[2]?.message).toContain(
+      "grilling.md is this card's grilling log and cannot be deleted",
     );
-    expect(card?.metadata?.comments?.at(-1)?.body).toBe(
-      "The agent's last reply in the session chat ended with a report the board could not read, so the grilling goes on: The ticket session's workboard-report block is not valid JSON. Tell the agent in the session chat.",
-    );
+    expect(await ticket.log()).toMatch(/^## Handoff 1\n/);
   });
 
-  it("logs a chat turn that failed before it settled", async () => {
-    const ticket = await grillingTicket();
-
-    await ticket.chat("", { failed: true });
-
-    expect(untimed(await ticket.log())).toBe(
-      `${QUESTION_LOG}\n**Operator** (<t>)\n\nYes, return [].\n\n**Agent** (<t>)\n\nThe reply failed before it settled; a retry may follow in the session chat.\n`,
-    );
-    expect((await ticket.store.get(ticket.card.id))?.status).toBe("review");
-  });
-});
-
-describe("grilling log", () => {
   it("cuts an entry that would pass the size limit and says so, then stays as it is", () => {
-    const full = appendGrillLog("## Question 1\n", "é".repeat(400), 300);
+    const full = appendGrillLog("## Handoff 1\n", "é".repeat(400), 300);
 
     expect(Buffer.byteLength(full)).toBeLessThanOrEqual(300);
-    expect(full).toMatch(/^## Question 1\n\né+\n\n\(The grilling log reached its size limit/);
-    expect(appendGrillLog(full, "## Question 2", 300)).toBe(full);
+    expect(full).toMatch(/^## Handoff 1\n\né+\n\n\(The grilling log reached its size limit/);
+    expect(appendGrillLog(full, "## Handoff 2", 300)).toBe(full);
   });
 });

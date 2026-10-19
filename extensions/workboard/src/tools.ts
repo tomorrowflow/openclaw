@@ -448,6 +448,32 @@ export function createWorkboardTools(params: {
         store.move(id, record.status, undefined, scope, { actor }),
       ),
     },
+    {
+      name: "workboard_grill_done",
+      label: "Workboard Grill Done",
+      description:
+        "Hand the result of the grilling this session runs back to its Workboard node ticket, once the operator confirmed a shared understanding. The ticket's own session resumes with the handoff. Only the grill session Workboard created for the card can call it.",
+      parameters: strictObject({
+        cardId: Type.Optional(
+          Type.String({ description: "Workboard card id; found from this session when left out." }),
+        ),
+        handoff: Type.String({
+          description:
+            "The result handoff (Markdown): settled decisions, agreed terms, open risks, and what the ticket session should do next.",
+        }),
+      }),
+      execute: async (_toolCallId, rawParams) => {
+        const record = rawParams as Record<string, unknown>;
+        const handoff = readStringParam(record, "handoff", { required: true });
+        const cardId = readStringParam(record, "cardId");
+        const card = await store.settleNodeGrill({
+          ...(cardId ? { cardId } : {}),
+          sessionKey: params.context?.sessionKey,
+          result: handoff,
+        });
+        return jsonResult({ card: summarizeCard(card) });
+      },
+    },
     ...createWorkboardOrchestrationTools({ store, ownerId, actor }),
   ];
   for (const tool of tools) {

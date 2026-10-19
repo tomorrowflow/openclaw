@@ -10,10 +10,10 @@ import {
   isWorkboardWorktreeCleanupCandidate,
   type WorkboardWorktreeCleanupRuntime,
 } from "./dispatcher-workspace.js";
-import { takeNodeGrillChatTurn } from "./node-ticket-grill.js";
 import type { WorkboardNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import { applyNodeTicketReport, nodeTicketIdleVerdict, nodeTicketTarget } from "./node-ticket.js";
 import {
+  sessionProvesPreparedAcceptance,
   workboardCardMatchesLifecycleLink,
   workboardCardSessionLookupKey,
   workboardCardTakesEndedRunReport,
@@ -49,7 +49,7 @@ type WorkboardLifecycleObservation = Partial<
   state: keyof typeof LIFECYCLE_TARGETS;
 };
 
-type WorkboardLifecycleSession = {
+export type WorkboardLifecycleSession = {
   key: string;
   updatedAt?: number;
   status?: "running" | "done" | "failed" | "killed" | "timeout";
@@ -61,16 +61,6 @@ type WorkboardLifecycleSessionSnapshot = {
   sessions: WorkboardLifecycleSession[];
   complete: boolean;
 };
-
-function sessionProvesPreparedAcceptance(session: WorkboardLifecycleSession): boolean {
-  return (
-    session.hasActiveRun === true ||
-    session.status === "done" ||
-    session.status === "failed" ||
-    session.status === "killed" ||
-    session.status === "timeout"
-  );
-}
 
 type WorkboardLifecycleSessionReadOptions = {
   includeUnknown: boolean;
@@ -210,7 +200,6 @@ export async function syncWorkboardAgentEnded(params: {
     options: WorkboardLifecycleSessionReadOptions,
   ) => Promise<WorkboardLifecycleSessionSnapshot>;
   onMatched?: WorkboardLifecycleMatchHandler;
-  warn?: (message: string) => void;
 }): Promise<number> {
   const now = params.now ?? Date.now();
   // The run's start fences it from rounds claimed after it began.
@@ -247,11 +236,6 @@ export async function syncWorkboardAgentEnded(params: {
   let nodeTicket = false;
   const reported: WorkboardCard[] = [];
   for (const card of linked) {
-    const chat = { ...source, card, messages: params.event.messages ?? [] };
-    const settled = terminal || params.event.success;
-    if (await takeNodeGrillChatTurn(params.store, chat, settled, params.warn)) {
-      continue;
-    }
     if (card.status === "running" && nodeTicketTarget(card)) {
       nodeTicket = true;
       if (terminal || params.event.success) {

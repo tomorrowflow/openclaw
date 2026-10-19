@@ -164,6 +164,12 @@ function normalizeNodeGrill(value: unknown): WorkboardNodeGrill | undefined {
   if (rounds === undefined || !attachmentId) {
     return undefined;
   }
+  const sessionKey = normalizeBoundedString(
+    value.sessionKey,
+    undefined,
+    500,
+    "node grill session key",
+  );
   const pending = isRecord(value.pending) ? value.pending : undefined;
   const kind = pending?.kind;
   const at = resolveOptionalIntegerOption(pending?.at, { min: 0 });
@@ -171,6 +177,7 @@ function normalizeNodeGrill(value: unknown): WorkboardNodeGrill | undefined {
     status: value.status,
     rounds,
     attachmentId,
+    ...(sessionKey ? { sessionKey } : {}),
     ...(kind === "end" && at !== undefined ? { pending: { kind, at } } : {}),
   };
 }

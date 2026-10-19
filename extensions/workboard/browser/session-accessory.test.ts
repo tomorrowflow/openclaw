@@ -179,15 +179,17 @@ it("offers a node ticket's session its Screens panel, and no other session", asy
   }
 });
 
-it("says a grilling card chats with its session and opens it on the board", async () => {
+it("says where a grilling card's grilling runs and opens its grill session", async () => {
   const fixture = workboardTestHost();
   fixture.connection.connected = true;
   const sessionKey = "agent:dev:subagent:workboard-platform-card";
+  const grillSessionKey = "agent:dev:grill-card-2";
   const card = createWorkboardCard({
     title: "Spec the parser",
     status: "review",
     sessionKey,
     stage: { kind: "grilling", since: 1, round: 2 },
+    grill: { status: "open", rounds: 2, attachmentId: "log-1", sessionKey: grillSessionKey },
     metadata: { automation: { boardId: "platform" } },
   });
   const workboard = createWorkboardCapability();
@@ -201,14 +203,11 @@ it("says a grilling card chats with its session and opens it on the board", asyn
     await vi.waitFor(() => expect(container.textContent).toContain(card.title));
     const link = container.querySelector("a")!;
     expect(link.querySelector(".workboard-session-chip__status")?.textContent).toBe(
-      "Grilling — chat with the session",
+      "Grilling — in Grill Spec the parser",
     );
     link.click();
-    expect(workboard.state.revealCardId).toBe(card.id);
-    expect(fixture.host.navigation.openPage).toHaveBeenCalledWith({
-      id: "workboard",
-      path: ["platform"],
-    });
+    expect(fixture.host.sessions.open).toHaveBeenCalledWith({ sessionKey: grillSessionKey });
+    expect(fixture.host.navigation.openPage).not.toHaveBeenCalled();
   } finally {
     mounted?.dispose?.();
     workboard.dispose();

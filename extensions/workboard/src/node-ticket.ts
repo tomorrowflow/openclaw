@@ -509,6 +509,14 @@ export async function createNodeTicketWorktree(params: {
   return { path: worktreePath, branch, baseCommit, ...kept };
 }
 
+/** Why a `sessions.create` reply started no run; its `runError` is a Gateway error shape. */
+export function sessionCreateRunError(record: Record<string, unknown>): string {
+  const error = record.runError;
+  return isRecord(error) && typeof error.message === "string" && error.message
+    ? error.message
+    : "no run was started";
+}
+
 /** Starts a fresh Claude Code session on the node, in the worktree, under the card's session key. */
 export async function startNodeTicketSession(params: {
   runtime: WorkboardNodeTicketRuntime;
@@ -539,8 +547,7 @@ export async function startNodeTicketSession(params: {
   );
   const record = isRecord(result) ? result : {};
   if (record.runStarted === false || typeof record.runId !== "string" || !record.runId) {
-    const reason = typeof record.runError === "string" ? record.runError : "no run was started";
-    throw new Error(`node ticket session did not start: ${reason}`);
+    throw new Error(`node ticket session did not start: ${sessionCreateRunError(record)}`);
   }
   const resolved = isRecord(record.resolved) ? record.resolved : {};
   return {
@@ -571,11 +578,10 @@ function blockReason(report: NodeTicketStopReport): string {
  * moves the card to review, and its headline replaces the card summary. A
  * needs_input report posts the questions and waits in review for an answer;
  * the agent_end nudge wakes the board's automation so `dev` can answer. A
- * grill report logs its question and waits in review while the operator
- * chats with the session; any other report closes an open grill with the
- * outcome the card gets, so a refused done closes it blocked, and clears the
- * pending end of a grill that ended. A grill_done report outside a live
- * grilling blocks.
+ * grill report logs its handoff and waits in review while the node handoff
+ * owner opens its grill session; any other report closes an open grill with
+ * the outcome the card gets, so a refused done closes it blocked, and clears
+ * the pending end of a grill that ended.
  * Every other ending blocks the card so `dev` sees the reason. Proof that
  * did not pass also blocks, and so does a rung b round's done report without
  * its standards review.
@@ -630,17 +636,17 @@ export async function applyNodeTicketReport(params: {
   }
   if (report.outcome === "grill") {
     if (!worktree) {
-      await block("Asked a grilling question, but the card has no recorded node worktree.");
+      await block("Handed off a grilling, but the card has no recorded node worktree.");
       return;
     }
-    const asked = await store.recordNodeGrillQuestion(
+    const handed = await store.recordNodeGrillHandoff(
       card.id,
-      { worktreePath: worktree.path, question: report.question, summary: report.summary },
+      { worktreePath: worktree.path, handoff: report.handoff },
       scope,
     );
-    if (!asked) {
+    if (!handed) {
       await block(
-        "Asked a grilling question, but the card's node worktree changed before it could be recorded, so the question is not on the card. Read it in the ticket session, then comment the answer and move the card to todo to restart; the next run reuses the worktree.",
+        "Handed off a grilling, but the card's node worktree changed before it could be recorded, so no grill session started. Read the handoff in the ticket session, then comment what to do and move the card to todo to restart; the next run reuses the worktree.",
       );
       return;
     }
@@ -669,12 +675,6 @@ export async function applyNodeTicketReport(params: {
       scope,
     );
     await store.releaseClaim(card.id, { ...scope, status: "review" });
-    return;
-  }
-  if (report.outcome === "grill_done") {
-    await blockReport(
-      `Reported grill_done, but no grilling was live in the session chat: ${report.summary || "no summary given"}\nMove the card to todo to resume the session; the next run reuses the worktree.`,
-    );
     return;
   }
   if (report.outcome !== "done") {

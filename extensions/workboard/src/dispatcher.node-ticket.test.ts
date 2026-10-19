@@ -413,6 +413,35 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     expect(stored?.metadata?.claim).toBeUndefined();
   });
 
+  it("blocks the card with the Gateway's reason when the session starts no run", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const card = await createNodeCard(store);
+    const nodeTickets = createNodeGateway();
+    const answer = nodeTickets.respond.getMockImplementation()!;
+    nodeTickets.respond.mockImplementation((method, params) =>
+      method === "sessions.create"
+        ? {
+            ok: true,
+            key: params?.key,
+            runStarted: false,
+            runError: { code: "UNAVAILABLE", message: "model auth expired" },
+          }
+        : answer(method, params),
+    );
+
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets,
+      options: { now: 10, maxStarts: 1 },
+    });
+
+    expect(result.startFailures[0]?.error).toContain(
+      "node ticket session did not start: model auth expired",
+    );
+    expect((await store.get(card.id))?.status).toBe("blocked");
+  });
+
   it("reuses the worktree a failed launch left on the card's branch", async () => {
     const store = createWorkboardSqliteTestStore();
     const card = await createNodeCard(store);

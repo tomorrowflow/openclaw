@@ -6,6 +6,11 @@ import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import { fetchNodeFile } from "./node-files.js";
 import {
+  nodeGrillSessionToOpen,
+  openNodeGrillSession,
+  readNodeGrillResult,
+} from "./node-ticket-grill-session.js";
+import {
   publishCandidate,
   publishNodeTicket,
   type WorkboardGitHubAccess,
@@ -21,7 +26,6 @@ import {
   runNodeCommand,
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
-import { workboardCardSessionHasActiveRun } from "./session-link.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
 import { MAX_BLOCK_REASON_CHARS, MAX_PROOF_NOTE_CHARS } from "./store-constants.js";
 import { capText } from "./store-normalizers.js";
@@ -409,7 +413,7 @@ async function reopenNodeTicket(params: {
       body: rework
         ? `Reopened without a review comment; add what should change and move it to todo again to start rework round ${round}.`
         : reopen.kind === "grill"
-          ? "Moved to todo while grilling; keep answering in the card's session chat, or choose End grilling on the card to let the agent continue with what is settled."
+          ? "Moved to todo while grilling; the grilling goes on in its grill session, which the card names once it is open. Finish it there, or choose End grilling on the card to let the agent continue with the grill session's last reply, if it has one."
           : "Moved to todo without an answer; answer the questions in a comment and move it to todo again to resume the session.",
       applies: (current) => nodeTicketReopen(current, params.now())?.reviewed === false,
     });
@@ -482,9 +486,10 @@ function unansweredDone(
 /**
  * Owns moving finished node tickets from a pending handoff to review,
  * accepted ones from done to a draft PR, reopened published ones into
- * their next rework round, and answered ones back into their session. The agent_end report and card changes start it
- * right away and the lifecycle sweep resumes it after a restart; each card
- * runs at most once at a time.
+ * their next rework round, answered ones back into their session, and
+ * handed-off grillings into their grill session. The agent_end report and
+ * card changes start it right away and the lifecycle sweep resumes it after
+ * a restart; each card runs at most once at a time.
  */
 export function createNodeTicketHandoffs(params: {
   store: WorkboardStore;
@@ -493,7 +498,7 @@ export function createNodeTicketHandoffs(params: {
   start: WorkboardNodeTicketStart;
   /** Wakes the board automation once an import moved the card to review. */
   onReview?: (card: WorkboardCard) => Promise<void>;
-  /** The session owner's view, which says whether a grilling chat turn is still replying. */
+  /** The session owner's view, which says whether a grill session is still replying. */
   readSessions?: WorkboardLifecycleSessionReader;
   now?: () => number;
 }) {
@@ -510,7 +515,8 @@ export function createNodeTicketHandoffs(params: {
             ? undefined
             : nodeTicketReopen(card, now());
         const unanswered = unansweredDone(card);
-        if ((!item && !publish && !reopen && !unanswered) || inFlight.has(card.id)) {
+        const grilling = nodeGrillSessionToOpen(card);
+        if ((!item && !publish && !reopen && !unanswered && !grilling) || inFlight.has(card.id)) {
           continue;
         }
         inFlight.add(card.id);
@@ -536,17 +542,31 @@ export function createNodeTicketHandoffs(params: {
             });
           } else if (reopen) {
             await reopenNodeTicket({ store: params.store, start: params.start, card, now });
+          } else if (grilling) {
+            await openNodeGrillSession({
+              store: params.store,
+              runtime: params.runtime,
+              readSessions: params.readSessions,
+              card,
+              worktree: grilling,
+              warn,
+            });
           } else if (unanswered?.phase === "grilling") {
-            // A chat turn still replying keeps the grilling live; the pass
-            // after its agent_end, or the sweep, ends it.
-            if (
-              params.readSessions &&
-              (await workboardCardSessionHasActiveRun(params.readSessions, card))
-            ) {
+            // The grill session's last reply is the result, so a reply still
+            // running keeps the grilling live; a later pass or the sweep ends it.
+            const read = await readNodeGrillResult(
+              params.runtime,
+              params.readSessions,
+              nodeTicketTarget(card)?.worktree?.grill?.sessionKey,
+            );
+            if (read.replying) {
               continue;
             }
             // The card change this move makes finds the card in flight, so its reopen runs here.
-            const moved = await params.store.endNodeGrillMovedToDone(card.id, unanswered);
+            const moved = await params.store.endNodeGrillMovedToDone(card.id, {
+              ...unanswered,
+              result: read.result,
+            });
             if (moved) {
               await reopenNodeTicket({
                 store: params.store,

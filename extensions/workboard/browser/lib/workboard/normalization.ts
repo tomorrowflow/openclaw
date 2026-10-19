@@ -155,7 +155,14 @@ function normalizeGrill(value: unknown): WorkboardCard["grill"] {
   const rounds = finiteNumber(value.rounds);
   return rounds === undefined
     ? undefined
-    : { status: value.status, rounds, attachmentId: value.attachmentId };
+    : {
+        status: value.status,
+        rounds,
+        attachmentId: value.attachmentId,
+        ...(typeof value.sessionKey === "string" && value.sessionKey
+          ? { sessionKey: value.sessionKey }
+          : {}),
+      };
 }
 
 function normalizeCard(value: unknown): WorkboardCard | null {

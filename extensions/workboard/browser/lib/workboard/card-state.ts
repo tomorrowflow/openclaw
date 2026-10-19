@@ -12,6 +12,11 @@ export function isActiveWorkboardCard(card: WorkboardCard): boolean {
   return !card.metadata?.archivedAt;
 }
 
+/** The grill session's name, as Workboard created it (`grillSessionName` on the server). */
+export function workboardGrillSessionName(card: WorkboardCard): string {
+  return `Grill ${card.title}`;
+}
+
 export function nextWorkboardCardPosition(
   cards: readonly WorkboardCard[],
   card: WorkboardCard,

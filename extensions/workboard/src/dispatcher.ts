@@ -596,7 +596,9 @@ async function runWorkboardDispatch(
                 card: claimed.card,
                 worktree: roundWorktree,
                 context,
-                grillLog: await params.store.readNodeGrillLog(roundWorktree),
+                grillLog: roundWorktree.grill?.pending
+                  ? await params.store.readNodeGrillLog(roundWorktree)
+                  : undefined,
               }),
             })
           : await params.subagent.run({
