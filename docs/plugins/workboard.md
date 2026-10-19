@@ -734,7 +734,7 @@ report, address the findings, and report them (see **Report** below).
    The node handoff pass then creates the grill session: a normal session of
    the card's agent on the Gateway (not on the node, no worktree), with that
    agent's own model, under the key `agent:<agentId>:grill-<cardId8>-<N>` and
-   the name `Grill <card title>`. Its first message carries the card title,
+   the name `Grill <card title>`, in the session group **Grilling** (created on first use). Its first message carries the card title,
    the handoff, and the rules: interview you one question at a time with a
    recommended answer, look facts up itself, build nothing, and when you
    confirm a shared understanding, write the result handoff (settled
