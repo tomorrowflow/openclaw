@@ -21,7 +21,7 @@ function pkg(version: string, extra: Record<string, unknown> = {}) {
  * A fork `main` and two upstream release cuts from one base: release/1.0.0 (an
  * earlier cut the fork merged) and release/1.0.1 (the sync target).
  */
-function makeFork() {
+function makeFork({ squashOldCut = false } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), "openclaw-sync-merge-"));
   roots.push(root);
   const git = (...args: string[]) =>
@@ -66,13 +66,14 @@ function makeFork() {
     "CHANGELOG.md": "base\n",
     "src/fork.ts": "export const x = 1;\n",
     "src/oldcut.ts": "a\n",
+    "src/dropped.ts": "d\n",
     ".github/workflows/ci.yml": "ci\n",
   });
   git("checkout", "-q", "-b", "cut-1.0.0", base);
   git(
     "update-ref",
     "refs/remotes/upstream/release/1.0.0",
-    commit("old cut", { "src/oldcut.ts": "a-old\n" }),
+    commit("old cut", { "src/oldcut.ts": "a-old\n", "src/dropped.ts": "d-old\n" }),
   );
   git("checkout", "-q", "-b", "cut-1.0.1", base);
   git(
@@ -84,12 +85,21 @@ function makeFork() {
       "CHANGELOG.md": "release notes\n",
       "src/fork.ts": "export const x = 3;\n",
       "src/oldcut.ts": "a-new\n",
+      "src/dropped.ts": null,
       ".github/workflows/ci.yml": "ci v2\n",
       ".github/workflows/new.yml": "new\n",
     }),
   );
   git("checkout", "-q", "main");
-  git("merge", "-q", "--no-ff", "-m", "merge old cut", "upstream/release/1.0.0");
+  if (squashOldCut) {
+    // How GitHub landed the 10.5 sync: one squash commit carrying the cut's
+    // changes, then a `-s ours` merge recording its ancestry.
+    git("merge", "-q", "--squash", "upstream/release/1.0.0");
+    git("commit", "-q", "-m", "squash old cut");
+    git("merge", "-q", "-s", "ours", "-m", "record old cut", "upstream/release/1.0.0");
+  } else {
+    git("merge", "-q", "--no-ff", "-m", "merge old cut", "upstream/release/1.0.0");
+  }
   commit("fork work", {
     "package.json": pkg("1.0.0", {
       scripts: { "deploy:globally": "node scripts/deploy-globally.mjs" },
@@ -138,6 +148,17 @@ describe("sync-merge-release", () => {
     expect(git("rev-parse", "--verify", "MERGE_HEAD")).toBe(
       git("rev-parse", "upstream/release/1.0.1"),
     );
+  });
+
+  it("takes the release for a previous cut's file that landed through a squash commit", () => {
+    const { root } = makeFork({ squashOldCut: true });
+
+    const result = run(root, "1.0.1");
+
+    expect(result.remaining).toEqual(["src/fork.ts"]);
+    expect(result.mechanical["previous-release-cut"]).toEqual(["src/dropped.ts", "src/oldcut.ts"]);
+    expect(readFileSync(path.join(root, "src/oldcut.ts"), "utf8")).toBe("a-new\n");
+    expect(existsSync(path.join(root, "src/dropped.ts"))).toBe(false);
   });
 
   it("leaves a package.json the release deleted to the agent instead of emptying it", () => {
