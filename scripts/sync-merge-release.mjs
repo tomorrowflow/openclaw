@@ -83,6 +83,18 @@ function unmergedFiles() {
   return [...new Set(paths(["diff", "-z", "--name-only", "--diff-filter=U"]))];
 }
 
+/**
+ * The newest upstream release commit main already contains. Release cuts branch
+ * independently from upstream main, so each cut's merge base with HEAD is a
+ * candidate and the latest one is what main was last synced to.
+ */
+function lastMergedCut() {
+  const points = git(["for-each-ref", "--format=%(refname)", "refs/remotes/upstream/release/"])
+    .split("\n")
+    .map((ref) => git(["merge-base", "HEAD", ref]));
+  return git(["rev-list", "-1", "--date-order", ...new Set(points)]);
+}
+
 function main(target) {
   if (!/^\d+\.\d+\.\d+$/.test(target ?? "")) {
     throw new Error("usage: sync-merge-release.mjs <X.Y.Z>");
@@ -100,6 +112,9 @@ function main(target) {
     return { state: "up-to-date", target, upstreamCommits };
   }
   const base = git(["merge-base", "HEAD", release]);
+  // Compared by content, not by commit: a sync that landed as a squash commit
+  // (as #57 did) is a fork commit touching every file that cut changed.
+  const forkChanged = new Set(paths(["diff", "-z", "--name-only", lastMergedCut(), "HEAD"]));
   // A conflicting merge exits 1 with the conflicts in the index. Anything else
   // (an untracked file in the way, a missing ref) never started the merge.
   const merge = spawnSync("git", ["merge", "--no-ff", "--no-commit", release], {
@@ -137,22 +152,20 @@ function main(target) {
       if (resolveHunksToRelease(file, base, release)) {
         note(releaseOwned ? "release-owned" : "package-json-hunks", file);
       }
-    } else {
-      // No fork commit changed it, only another release cut's commits (which
-      // are in upstream refs): the target carries that change, evolved.
-      const forkCommits = git([
-        "rev-list",
-        `${base}..HEAD`,
-        "--not",
-        "--remotes=upstream",
-        "--",
-        file,
-      ]);
-      if (!forkCommits) {
+    } else if (!forkChanged.has(file)) {
+      // Main holds the last merged cut's content unchanged: the target carries
+      // that cut's change, evolved, or deleted.
+      if (
+        git(["ls-files", "--stage", "--", file])
+          .split("\n")
+          .some((e) => e.includes(" 3\t"))
+      ) {
         git(["checkout", "--theirs", "--", file]);
         git(["add", "--", file]);
-        note("previous-release-cut", file);
+      } else {
+        git(["rm", "-q", "--", file]);
       }
+      note("previous-release-cut", file);
     }
   }
 
