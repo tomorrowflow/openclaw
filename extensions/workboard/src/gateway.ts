@@ -163,6 +163,11 @@ export function registerWorkboardGatewayMethods(params: {
       redactCardResult(mutate(readId(input), input)),
     );
   const dispatchCards = createWorkboardDispatchHandler({ api, store });
+  const transcriptViewer = api.pluginConfig?.transcriptViewer;
+  const transcriptViewerPort =
+    isRecord(transcriptViewer) && typeof transcriptViewer.port === "number"
+      ? transcriptViewer.port
+      : null;
 
   register("workboard.cards.list", READ_SCOPE, async ({ params: input }) => {
     const result = await store.listCards(input.boardId);
@@ -381,6 +386,7 @@ export function registerWorkboardGatewayMethods(params: {
     store.trust({ boardId: input.boardId }),
   );
   register("workboard.overview", READ_SCOPE, ({ params: input }) => store.overview(input.boardId));
+  register("workboard.transcriptViewer", READ_SCOPE, () => ({ port: transcriptViewerPort }));
   register("workboard.cards.runs", READ_SCOPE, async ({ params: input }) => {
     const result = await store.runs(readId(input));
     return { ...result, card: redactOperatorCard(result.card) };

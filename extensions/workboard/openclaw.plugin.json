@@ -306,6 +306,22 @@
             "description": "How many node tickets may run at once across all nodes. Tickets in review do not count."
           }
         }
+      },
+      "transcriptViewer": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A transcript viewer listening on the Gateway host. The Control UI opens it through an OpenClaw Portal from a Transcripts page and from each card with a linked session.",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "The viewer's loopback port on the Gateway host."
+          }
+        },
+        "required": [
+          "port"
+        ]
       }
     }
   },
