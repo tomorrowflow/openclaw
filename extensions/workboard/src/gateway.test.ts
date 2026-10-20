@@ -546,12 +546,12 @@ describe("workboard gateway methods", () => {
 
     const oversizedRespond = await invoke("workboard.cards.comment", {
       id: cardId,
-      body: "x".repeat(2001),
+      body: "x".repeat(8001),
     });
 
     expect(oversizedRespond.mock.calls[0]?.[0]).toBe(false);
     expect(oversizedRespond.mock.calls[0]?.[2]).toMatchObject({
-      message: "comment body must be 2000 characters or fewer (got 2001).",
+      message: "comment body must be 8000 characters or fewer (got 8001).",
     });
   });
 

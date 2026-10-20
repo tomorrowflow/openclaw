@@ -583,7 +583,7 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                         class="settings-input workboard-detail__note"
                         aria-label={t("workboard.detailOperatorNotes")}
                         rows="2"
-                        maxlength="2000"
+                        maxlength="8000"
                         placeholder={t("workboard.detailNotePlaceholder")}
                         ref={noteValue}
                         disabled={action().busy}
@@ -591,6 +591,19 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                           state().detailCommentBody = event.currentTarget.value;
                           state().detailCommentDrafts.set(card().id, state().detailCommentBody);
                           props.onRequestUpdate?.();
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) {
+                            return;
+                          }
+                          event.preventDefault();
+                          if (!action().busy && state().detailCommentBody.trim()) {
+                            void addWorkboardCardComment({
+                              ...workboardMutationContext(props),
+                              cardId: card().id,
+                              body: state().detailCommentBody,
+                            });
+                          }
                         }}
                       />
                       <button

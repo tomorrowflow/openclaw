@@ -781,6 +781,46 @@ describe("WorkboardView", () => {
     },
   );
 
+  it.each([
+    ["detail", ".workboard-detail__note", "metaKey"],
+    ["editor", ".workboard-comments__input", "ctrlKey"],
+  ] as const)("adds a %s note on mod+Enter but not plain Enter", async (surface, selector, mod) => {
+    const card = createWorkboardCard({ title: "Review this card" });
+    const body = "Line one\nLine two";
+    const saved = { card: { ...card, metadata: { comments: [{ id: "c", body, createdAt: 2 }] } } };
+    const client = createWorkboardTestClient({ "workboard.cards.comment": saved });
+    const { state, container, renderView } = createWorkboardView({ client });
+    state.cards = [card];
+    renderView();
+    if (surface === "detail") {
+      requireButton(container, "View details").click();
+      state.detailTab = "activity";
+    } else {
+      requireButton(container, "Edit card").click();
+    }
+    renderView();
+    const note = expectDefined(container.querySelector<HTMLTextAreaElement>(selector), selector);
+    note.value = body;
+    note.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    renderView();
+    const press = (init: KeyboardEventInit) => {
+      const event = new KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+        cancelable: true,
+        ...init,
+      });
+      note.dispatchEvent(event);
+      return event;
+    };
+    expect(press({}).defaultPrevented).toBe(false);
+    expect(client.request).not.toHaveBeenCalledWith("workboard.cards.comment", expect.anything());
+    expect(press({ [mod]: true }).defaultPrevented).toBe(true);
+    await waitForFast(() =>
+      expect(client.request).toHaveBeenCalledWith("workboard.cards.comment", { id: card.id, body }),
+    );
+  });
+
   it("keeps another card's editor draft when an earlier note finishes", async () => {
     const first = createWorkboardCard({ title: "First card" });
     const second = createWorkboardCard({ id: "card-2", title: "Second card" });
