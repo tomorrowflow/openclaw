@@ -7,11 +7,7 @@ import {
   normalizeNodeFindings,
   normalizeNodeReview,
 } from "./node-ticket-rounds.js";
-import {
-  MAX_COMMENT_BODY_CHARS,
-  MAX_PROOF_COMMAND_CHARS,
-  MAX_PROOF_NOTE_CHARS,
-} from "./store-constants.js";
+import { MAX_PROOF_COMMAND_CHARS, MAX_PROOF_NOTE_CHARS } from "./store-constants.js";
 import { capText } from "./store-normalizers.js";
 
 /** The fence of the report block that ends a node ticket session's final message. */
@@ -23,6 +19,8 @@ const REPORT_PATTERN = new RegExp("```" + REPORT_FENCE + "\\s*\\n([\\s\\S]*?)\\n
 // One report posts at most this many comments, so a run-on report cannot evict
 // the card's other comments from its metadata budget.
 const MAX_REPORT_COMMENTS = 3;
+// Report comments stay well under the operator note cap for the same budget reason.
+const MAX_REPORT_COMMENT_CHARS = 2000;
 
 const REPORT_PROOF_STATUSES = ["passed", "failed", "skipped"] as const;
 
@@ -120,7 +118,7 @@ export function cutReportText(text: string, max: number): string {
  */
 export function reportComments(
   text: string,
-  { footer, max = MAX_COMMENT_BODY_CHARS }: { footer?: string; max?: number } = {},
+  { footer, max = MAX_REPORT_COMMENT_CHARS }: { footer?: string; max?: number } = {},
 ): string[] {
   const tail = footer ? `\n\n${footer}` : "";
   const room = max - tail.length - cutMarker(text.length).length - 2;

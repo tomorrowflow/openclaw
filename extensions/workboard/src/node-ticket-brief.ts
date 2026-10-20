@@ -7,7 +7,7 @@ import { grillEndFromLog } from "./node-ticket-grill.js";
 import { REPORT_FENCE } from "./node-ticket-report.js";
 import { nodeTicketReviewComments, nodeTicketTarget } from "./node-ticket.js";
 
-// Comments are capped at 2000 chars on write, so this bounds the brief's feedback section.
+// Comments are capped at 8000 chars on write, so this bounds the brief's feedback section.
 const REWORK_FEEDBACK_MAX_ENTRIES = 5;
 
 /** The end of the grilling a resumed round carries out, with the grill session's result. */

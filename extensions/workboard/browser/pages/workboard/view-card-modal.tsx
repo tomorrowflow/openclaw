@@ -432,9 +432,18 @@ function CardModalContent(props: WorkboardProps) {
                 <textarea
                   class="settings-input workboard-comments__input"
                   aria-labelledby="workboard-card-comments-title"
-                  maxlength="2000"
+                  maxlength="8000"
                   disabled={draftActionsBusy()}
                   ref={commentValue}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) {
+                      return;
+                    }
+                    event.preventDefault();
+                    if (!draftActionsBusy() && commentBody().trim()) {
+                      void addWorkboardCardComment(workboardMutationContext(props));
+                    }
+                  }}
                 />
                 <div class="workboard-modal__actions">
                   <button
