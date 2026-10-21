@@ -17,6 +17,10 @@ type WorkspaceRow = Pick<SelectionRow, "agentId" | "key" | "entry">;
 type PublicationFact = { available: boolean; github?: WorkerGitHubLaunchBinding };
 const unavailable: PublicationFact = { available: false };
 const PUBLICATION_FACT_MAX_AGE_MS = 60_000;
+// Each preparation reads its session through the shared target-discovery worker lane
+// (128 pending tasks). Startup and identity/config refreshes cover every projected row,
+// so unbounded jobs fill that lane and starve startup orphan marking.
+const PUBLICATION_FACT_CONCURRENCY = 4;
 let readPublished: ((session: PublicationSessionIdentity) => PublicationFact) | undefined;
 
 /** Discovery can lag a refresh; publication and process launch still validate at the effect. */
@@ -36,6 +40,29 @@ export function startGitHubPublicationDiscovery(params: {
 }) {
   const inOwner = AsyncLocalStorage.snapshot();
   const scheduler = params.scheduler.scope();
+  // Starts synchronously below the bound, so a wake dispatches its first refreshes at once.
+  let activePreparations = 0;
+  const waitingPreparations: Array<() => void> = [];
+  const preparations = async (work: () => Promise<void>) => {
+    if (activePreparations < PUBLICATION_FACT_CONCURRENCY) {
+      activePreparations++;
+    } else {
+      // The finishing preparation hands its slot over directly.
+      await new Promise<void>((resolve) => {
+        waitingPreparations.push(resolve);
+      });
+    }
+    try {
+      await work();
+    } finally {
+      const next = waitingPreparations.shift();
+      if (next) {
+        next();
+      } else {
+        activePreparations--;
+      }
+    }
+  };
   const sessions = new LruCache<{
     session: PublicationSessionIdentity;
     binding?: string;
@@ -60,47 +87,48 @@ export function startGitHubPublicationDiscovery(params: {
       scheduler.schedule({
         id: `github-publication:${key}`,
         delayMs: 0,
-        run: async () => {
-          const prepare = () =>
-            prepareGitHubPublicationFact({
-              ...current.session,
-              assertCurrent: () => !scheduler.signal.aborted && sessions.peek(key) === current,
-            });
-          let fact: PublicationFact | undefined;
-          if (current.incognito) {
-            // Discovery belongs to the Gateway, independently of the borrowing turn.
-            const assertCurrent = () => scheduler.signal.throwIfAborted();
-            try {
-              const actor = await current.incognito.owner?.acquireExisting(
-                current.session.sessionKey,
-                { assertCurrent, assertReadable: assertCurrent },
-              );
-              if (actor) {
-                try {
-                  fact = await runWithSessionActorStorage(
-                    {
-                      actor,
-                      agentId: current.incognito.agentId,
-                      path: current.incognito.path,
-                      authority: { assertCurrent, authorize: assertCurrent },
-                    },
-                    prepare,
-                  );
-                } finally {
-                  await actor.release();
+        run: () =>
+          preparations(async () => {
+            const prepare = () =>
+              prepareGitHubPublicationFact({
+                ...current.session,
+                assertCurrent: () => !scheduler.signal.aborted && sessions.peek(key) === current,
+              });
+            let fact: PublicationFact | undefined;
+            if (current.incognito) {
+              // Discovery belongs to the Gateway, independently of the borrowing turn.
+              const assertCurrent = () => scheduler.signal.throwIfAborted();
+              try {
+                const actor = await current.incognito.owner?.acquireExisting(
+                  current.session.sessionKey,
+                  { assertCurrent, assertReadable: assertCurrent },
+                );
+                if (actor) {
+                  try {
+                    fact = await runWithSessionActorStorage(
+                      {
+                        actor,
+                        agentId: current.incognito.agentId,
+                        path: current.incognito.path,
+                        authority: { assertCurrent, authorize: assertCurrent },
+                      },
+                      prepare,
+                    );
+                  } finally {
+                    await actor.release();
+                  }
                 }
+              } catch {
+                // Closed memory owners retire discovery without creating a replacement.
+                fact = undefined;
               }
-            } catch {
-              // Closed memory owners retire discovery without creating a replacement.
-              fact = undefined;
+            } else {
+              fact = await prepare();
             }
-          } else {
-            fact = await prepare();
-          }
-          if (!scheduler.signal.aborted && sessions.peek(key) === current) {
-            current.fact = fact ?? unavailable;
-          }
-        },
+            if (!scheduler.signal.aborted && sessions.peek(key) === current) {
+              current.fact = fact ?? unavailable;
+            }
+          }),
       }),
     );
     return current;
