@@ -49,7 +49,9 @@ LOG_DIR="${OPENCLAW_SATELLITES_LOG_DIR:-$HOME/logs/satellites}"
 PROFILE_DIR="${OPENCLAW_NODE_PROFILE_DIR:-$HOME/.config/openclaw-deploy/node-profile}"
 NODE_USER=factory
 GLOBAL_ROOT="$(npm root -g)/openclaw"
-SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10)
+# The Mac build stays silent for minutes (output goes to /dev/null), and an idle
+# session dropped mid-build ("client_loop: send disconnect: Broken pipe").
+SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
 
 [[ "$PHASE" == prepare-source || "$PHASE" == prepare || "$PHASE" == activate || "$PHASE" == provision ]] || {
   echo "usage: $(basename "$0") prepare-source|prepare|activate|provision" >&2
@@ -105,7 +107,9 @@ prepare-source_one() {
     # Shallow: the fork's full history is many GB; the build needs one commit.
     [ -d \$SRC/.git ] || git init --quiet \$SRC
     cd \$SRC
-    git fetch --quiet --depth 1 $FORK_REMOTE_URL $SHA
+    # One retry: a shallow fetch cut off mid-transfer fails with
+    # \"fetch-pack: invalid index-pack output\" and has always worked on the next deploy.
+    git fetch --quiet --depth 1 $FORK_REMOTE_URL $SHA || git fetch --quiet --depth 1 $FORK_REMOTE_URL $SHA
     git checkout --quiet --force --detach FETCH_HEAD
     corepack pnpm install --frozen-lockfile --reporter=silent
     # A killed deploy leaves the build lock behind on this node too.
