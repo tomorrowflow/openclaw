@@ -5,6 +5,7 @@ import { disposeAcpSessionManager } from "../acp/control-plane/manager.js";
 import { disposeAllSessionMcpRuntimes } from "../agents/agent-bundle-mcp-tools.js";
 import { disposeRegisteredAgentHarnesses } from "../agents/harness/registry.js";
 import { closePreparedModelRuntimeSnapshots } from "../agents/prepared-model-runtime.lifecycle.js";
+import { stopAllCachedBrowserBridges } from "../agents/sandbox/browser-bridges.js";
 import { fenceSessionSuspensionWritesForGatewayShutdown } from "../agents/session-suspension.js";
 import { closeSwarmScheduler } from "../agents/subagents/swarm/swarm-scheduler.js";
 import { type ChannelId, listChannelPlugins } from "../channels/plugins/index.js";
@@ -347,6 +348,7 @@ async function closeGatewayResources(
   const { measureCloseStep, shutdownStep } = createCloseSteps(reason, warnings);
   const disposeRuntime = async (
     label:
+      | "sandbox-browser-bridges"
       | "plugin-services"
       | "agent-harnesses"
       | "bundle-mcp"
@@ -386,6 +388,8 @@ async function closeGatewayResources(
     if (params.bonjourStop) {
       await shutdownStep("bonjour", () => params.bonjourStop!());
     }
+    // Bridges stop through the browser plugin, so they close before plugin services retire it.
+    await disposeRuntime("sandbox-browser-bridges", stopAllCachedBrowserBridges);
     if (params.pluginServices) {
       const cleanup = cleanupWork.track(() =>
         Promise.resolve().then(async () => {
