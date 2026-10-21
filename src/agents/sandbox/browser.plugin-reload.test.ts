@@ -1,6 +1,7 @@
 // Cached browser bridges outlive the plugin generation that started them. A
 // config edit that reloads plugins retires that generation, so provisioning must
 // not keep handing the retired bridge to later turns.
+import http from "node:http";
 import { describe, expect, it } from "vitest";
 import { PluginInstance } from "../../plugins/plugin-instance.js";
 import { createSandboxBrowserTestHarness } from "./browser.create.test-helpers.js";
@@ -96,10 +97,14 @@ describe("ensureSandboxBrowser cached bridge plugin generation", () => {
     }
   });
 
-  it("rebuilds a cached bridge whose owning plugin instance was retired", async () => {
+  it("closes and rebuilds a cached bridge whose owning plugin instance was retired", async () => {
+    const server = http.createServer((_req, res) => res.end());
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
     const instance = new PluginInstance("browser");
     const cached = {
-      bridge: instance.adopt(reusableBridge()),
+      bridge: instance.adopt({ ...reusableBridge(), server }),
       containerName: CONTAINER_NAME,
       authToken: "test-bridge-token",
     };
@@ -107,9 +112,16 @@ describe("ensureSandboxBrowser cached bridge plugin generation", () => {
     // A plugins.* config edit retires the generation that started this bridge.
     await instance.dispose();
 
-    await provision();
+    try {
+      await provision();
 
-    expect(bridgeMocks.startBrowserBridgeServer).toHaveBeenCalled();
-    expect(harness.BROWSER_BRIDGES.get("session:test")).not.toBe(cached);
+      // Disposal leaves the listener open; a leaked one keeps the Gateway process alive.
+      expect(server.listening).toBe(false);
+      expect(bridgeMocks.stopBrowserBridgeServer).not.toHaveBeenCalled();
+      expect(bridgeMocks.startBrowserBridgeServer).toHaveBeenCalled();
+      expect(harness.BROWSER_BRIDGES.get("session:test")).not.toBe(cached);
+    } finally {
+      server.close();
+    }
   });
 });

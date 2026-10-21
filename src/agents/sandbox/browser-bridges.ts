@@ -3,6 +3,7 @@
  *
  * The prune path uses this table to stop bridge servers when backing containers expire.
  */
+import type { Server } from "node:http";
 import { type BrowserBridge, stopBrowserBridgeServer } from "../../plugin-sdk/browser-bridge.js";
 import { getPluginValueInstance } from "../../plugins/plugin-instance-scope.js";
 
@@ -15,6 +16,15 @@ export type CachedBrowserBridge = {
 
 export const BROWSER_BRIDGES = new Map<string, CachedBrowserBridge>();
 
+function closeRetiredBridgeServer(server: Server): Promise<void> {
+  if (!server.listening) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
+
 /** Stop and remove only the cached bridge instance the caller inspected. */
 export async function stopCachedBrowserBridge(
   sessionKey: string,
@@ -25,11 +35,12 @@ export async function stopCachedBrowserBridge(
   if (BROWSER_BRIDGES.get(sessionKey) !== expected) {
     return;
   }
-  // A retired plugin generation stopped its own bridge while it was disposed.
-  // Calling back into it would only raise the retired-instance error and leave
-  // the dead entry cached, so drop it without touching the retired owner.
+  // Disposing a plugin generation leaves the bridges it started listening, and
+  // calling back into the retired owner only raises the retired-instance error.
+  // Close the listener directly so it cannot keep the Gateway process alive.
   if (getPluginValueInstance(expected.bridge)?.acceptingCalls === false) {
     BROWSER_BRIDGES.delete(sessionKey);
+    await closeRetiredBridgeServer(expected.bridge.server);
     return;
   }
   await stopBrowserBridgeServer(expected.bridge.server);
