@@ -48,8 +48,9 @@ export async function markGatewayStartupMainSessionOrphans(
         }),
       );
     } catch (err) {
+      // The stack names the pool caller; the message alone cannot say which startup work overloaded it.
       params.log.warn(
-        `main-session startup orphan marking failed before channel startup: ${String(err)}`,
+        `main-session startup orphan marking failed before channel startup: ${err instanceof Error ? (err.stack ?? String(err)) : String(err)}`,
       );
     }
   });
