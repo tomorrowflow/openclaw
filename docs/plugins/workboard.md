@@ -1003,7 +1003,8 @@ worktree's `reviews` (the last 20 rounds). A round agrees when the verdict was
 `rework` and it was. The counts report `verdictRounds` and
 `verdictAgreedRounds` per round, `verdictCards` and `verdictAgreedCards` for
 tickets whose every round had a verdict and every verdict agreed, and
-`verdictMissed` rounds, which count in neither rate. A round accepted and then
+`verdictMissed` rounds, which count in neither rate, with `verdictMissedRecent`
+for those among the newest 10 rounds by publish time. A round accepted and then
 reopened later counts as reworked once its rework round starts. These counts
 cover only rounds the operator moved to `done`.
 
@@ -1014,6 +1015,15 @@ person disagreed), `sampledRounds`, and `sampledAgreed` (sampled and never
 reworked). Whether a person merged an unsampled PR without reading it needs
 GitHub state that the projection does not have. On a one-board projection
 (`boardId` set), each class row carries the board's `rung` for that class.
+
+**Blind counts:** each class row also carries `blind`, the same counts over
+rounds published since the blind verdict went live (2026-10-11 13:01 CEST),
+split by the rung that decided each round: `blind.b` for rounds an agent
+decided, `blind.a` for the rest. A rung leaves its key out when the class had
+no blind round there. A ticket counts as accepted in a rung when its first
+publish was decided there, so a class demoted from b to a keeps its rung b
+acceptances apart from the rung a ones. Rework, blocks, and attempts stay
+ticket-wide.
 
 Node tickets share one pool instead of their owner's single slot: up to
 `nodeTickets.maxConcurrent` (default 2) run at once across all nodes, even for

@@ -29,6 +29,7 @@ function trustResult(accepted: number, autonomous: number): WorkboardTrustResult
     verdictCards: 0,
     verdictAgreedCards: 0,
     verdictMissed: 0,
+    verdictMissedRecent: 0,
     agentAccepts: 0,
     reworkedAccepts: 0,
     sampledRounds: 0,
@@ -41,7 +42,7 @@ function trustResult(accepted: number, autonomous: number): WorkboardTrustResult
     generatedAt: 1,
     smartZoneTokens: 150_000,
     total: counts,
-    classes: [{ taskClass: "dead-code", ...counts }],
+    classes: [{ taskClass: "dead-code", ...counts, blind: {} }],
     weeks: [
       {
         weekStart: Date.UTC(2026, 9, 5),
