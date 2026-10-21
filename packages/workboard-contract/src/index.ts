@@ -833,6 +833,8 @@ export type WorkboardTrustCounts = {
   verdictAgreedCards: number;
   /** Rounds published before any verdict; excluded from both rates. */
   verdictMissed: number;
+  /** Missed rounds among the newest 10 operator-decided rounds, by publish time. */
+  verdictMissedRecent: number;
   /** Rounds an agent accepted at rung b, and those a later rework round reopened. */
   agentAccepts: number;
   reworkedAccepts: number;
@@ -858,6 +860,16 @@ export type WorkboardTrustWeek = {
 };
 
 /**
+ * A class's counts over blind rounds: those published at or after
+ * 2026-10-11 13:01 CEST, when the operator stopped seeing the agent's verdict
+ * before deciding. A round an agent decided ran at rung b, every other
+ * round at rung a. A ticket is in a rung when it has a blind round there, and
+ * counts as accepted there when its first publish is one of them; its
+ * ticket-wide facts (rework, blocks, attempts) come along whole.
+ */
+export type WorkboardTrustBlind = Partial<Record<"a" | "b", WorkboardTrustCounts>>;
+
+/**
  * A read-time projection of node ticket card facts, never stored. Task class
  * comes from a `class:<name>` label. Blocks are counted from card events,
  * which keep the newest 50 per card.
@@ -868,8 +880,14 @@ export type WorkboardTrustResult = {
   /** A run's turn-end context above this many tokens is a smart-zone breach. */
   smartZoneTokens: number;
   total: WorkboardTrustCounts;
-  /** `rung` is the board's rung for the class; only a one-board projection has it. */
-  classes: Array<WorkboardTrustCounts & { taskClass: string; rung?: "a" | "b" }>;
+  /**
+   * `rung` is the board's rung for the class; only a one-board projection has it.
+   * `blind` counts only rounds published since the blind verdict went live,
+   * split by the rung each round was decided at; see {@link WorkboardTrustBlind}.
+   */
+  classes: Array<
+    WorkboardTrustCounts & { taskClass: string; rung?: "a" | "b"; blind: WorkboardTrustBlind }
+  >;
   /** The last 8 weeks, oldest first, including the current one. */
   weeks: WorkboardTrustWeek[];
 };

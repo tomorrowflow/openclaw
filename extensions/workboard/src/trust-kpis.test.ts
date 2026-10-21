@@ -311,4 +311,92 @@ describe("projectWorkboardTrust", () => {
     ]);
     expect(projectWorkboardTrust(cards, "all", MONDAY).classes[0]).not.toHaveProperty("rung");
   });
+
+  it("counts blind rounds by the rung that decided them, leaving out rounds the operator saw", () => {
+    const blindSince = Date.parse("2026-10-11T13:01:00+02:00");
+    const before = blindSince - HOUR;
+    const after = blindSince + HOUR;
+    const cards = [
+      ticket("seen", {
+        createdAt: before,
+        labels: ["class:docs"],
+        worktree: {
+          ...published(before),
+          reviews: [{ round: 0, verdict: "accept", publishedAt: before }],
+        },
+      }),
+      ticket("operator", {
+        createdAt: before,
+        labels: ["class:docs"],
+        worktree: {
+          ...published(after),
+          reviews: [{ round: 0, verdict: "accept", publishedAt: after }],
+        },
+      }),
+      // Accepted by the agent at rung b, then demoted: the operator decided round 1 at rung a.
+      ticket("demoted", {
+        createdAt: before,
+        labels: ["class:docs"],
+        worktree: {
+          ...published(after),
+          rework: { round: 1, pullRequestUrl: "u", acceptedAt: after, outsideCommits: 0 },
+          reviews: [
+            { round: 0, verdict: "accept", decidedBy: "agent", sampled: true, publishedAt: after },
+            { round: 1, verdict: "missed", publishedAt: after + HOUR },
+          ],
+        },
+      }),
+    ];
+
+    const [docs] = projectWorkboardTrust(cards, "app", after).classes;
+
+    expect(docs).toMatchObject({ tickets: 3, accepted: 3, verdictRounds: 2 });
+    expect(docs?.blind.a).toMatchObject({
+      tickets: 2,
+      accepted: 1,
+      cleanAccepted: 1,
+      verdictRounds: 1,
+      verdictAgreedRounds: 1,
+      verdictMissed: 1,
+      verdictMissedRecent: 1,
+      agentAccepts: 0,
+    });
+    expect(docs?.blind.b).toMatchObject({
+      tickets: 1,
+      accepted: 1,
+      cleanAccepted: 0,
+      verdictRounds: 0,
+      agentAccepts: 1,
+      reworkedAccepts: 1,
+      sampledRounds: 1,
+    });
+  });
+
+  it("counts missed verdicts among the newest 10 operator rounds by publish time", () => {
+    const round = (id: string, verdict: "accept" | "missed", publishedAt?: number) =>
+      ticket(id, {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(MONDAY),
+          reviews: [{ round: 0, verdict, ...(publishedAt === undefined ? {} : { publishedAt }) }],
+        },
+      });
+    const older = [
+      round("unrecorded", "missed"),
+      round("oldest", "missed", MONDAY),
+      ...Array.from({ length: 10 }, (_, index) =>
+        round(`newer-${index}`, "accept", MONDAY + (index + 1) * HOUR),
+      ),
+    ];
+
+    expect(projectWorkboardTrust(older, "app", MONDAY).total).toMatchObject({
+      verdictMissed: 2,
+      verdictMissedRecent: 0,
+    });
+    const latest = [...older, round("latest", "missed", MONDAY + 20 * HOUR)];
+    expect(projectWorkboardTrust(latest, "app", MONDAY).total).toMatchObject({
+      verdictMissed: 3,
+      verdictMissedRecent: 1,
+    });
+  });
 });

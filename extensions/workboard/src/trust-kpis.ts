@@ -1,7 +1,9 @@
 import type {
   WorkboardCard,
+  WorkboardClassRung,
   WorkboardNodeReviewVerdict,
   WorkboardOrchestrationSettings,
+  WorkboardTrustBlind,
   WorkboardTrustCounts,
   WorkboardTrustResult,
   WorkboardTrustWeek,
@@ -14,6 +16,9 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 // 1970-01-01 was a Thursday; shifting by 3 days puts week boundaries on Mondays.
 const MONDAY_OFFSET_MS = 3 * 24 * 60 * 60 * 1000;
 const UNCLASSIFIED = "unclassified";
+// The blind verdict (#49) and per-round publish times (#50) were deployed together.
+const BLIND_SINCE = Date.parse("2026-10-11T13:01:00+02:00");
+const RECENT_VERDICTS = 10;
 
 type TicketFacts = {
   taskClass: string;
@@ -84,6 +89,37 @@ function verdictAgrees(ticket: TicketFacts, review: WorkboardNodeReviewVerdict):
   return (review.verdict === "rework") === review.round < ticket.reworkRounds;
 }
 
+// Rung b lets an agent decide a round; at rung a the operator decides every one.
+function roundRung(review: WorkboardNodeReviewVerdict): WorkboardClassRung["rung"] {
+  return review.decidedBy === "agent" ? "b" : "a";
+}
+
+function blindAt(ticket: TicketFacts, rung: WorkboardClassRung["rung"]): TicketFacts | undefined {
+  const reviews = ticket.reviews.filter(
+    (review) =>
+      review.publishedAt !== undefined &&
+      review.publishedAt >= BLIND_SINCE &&
+      roundRung(review) === rung,
+  );
+  if (reviews.length === 0) {
+    return undefined;
+  }
+  const { acceptedAt, ...rest } = ticket;
+  const acceptedHere = acceptedAt !== undefined && reviews.some((review) => review.round === 0);
+  return { ...rest, ...(acceptedHere ? { acceptedAt } : {}), reviews };
+}
+
+function countBlind(tickets: readonly TicketFacts[]): WorkboardTrustBlind {
+  const blind: WorkboardTrustBlind = {};
+  for (const rung of ["a", "b"] as const) {
+    const scoped = tickets.flatMap((ticket) => blindAt(ticket, rung) ?? []);
+    if (scoped.length > 0) {
+      blind[rung] = countTickets(scoped);
+    }
+  }
+  return blind;
+}
+
 function isClean(ticket: TicketFacts): boolean {
   // A question an agent answered is not a human touch; one an operator answered is.
   return ticket.reworkRounds === 0 && ticket.outsideCommits === 0 && ticket.operatorAnswers === 0;
@@ -111,6 +147,7 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
     verdictCards: 0,
     verdictAgreedCards: 0,
     verdictMissed: 0,
+    verdictMissedRecent: 0,
     agentAccepts: 0,
     reworkedAccepts: 0,
     sampledRounds: 0,
@@ -153,6 +190,12 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
       (context) => context.contextTokens > SMART_ZONE_TOKENS,
     ).length;
   }
+  // Rounds from before publish times were recorded sort as the oldest.
+  counts.verdictMissedRecent = tickets
+    .flatMap((ticket) => ticket.reviews.filter((review) => review.decidedBy === undefined))
+    .toSorted((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
+    .slice(0, RECENT_VERDICTS)
+    .filter((review) => review.verdict === "missed").length;
   return counts;
 }
 
@@ -234,6 +277,7 @@ export function projectWorkboardTrust(
           { taskClass },
           board ? { rung: workboardClassRung(board, [`class:${taskClass}`])?.rung ?? "a" } : {},
           countTickets(entries),
+          { blind: countBlind(entries) },
         ),
       )
       .toSorted((a, b) => a.taskClass.localeCompare(b.taskClass)),
