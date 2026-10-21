@@ -2452,7 +2452,9 @@ describe("startGatewayPostAttachRuntime", () => {
     });
 
     expect(log.warn).toHaveBeenCalledWith(
-      "main-session startup orphan marking failed before channel startup: Error: store unreadable",
+      expect.stringMatching(
+        /^main-session startup orphan marking failed before channel startup: Error: store unreadable\n\s+at /,
+      ),
     );
     expect(startChannels).toHaveBeenCalledTimes(1);
   });
