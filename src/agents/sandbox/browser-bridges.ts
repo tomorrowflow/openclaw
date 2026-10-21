@@ -39,6 +39,17 @@ export async function stopCachedBrowserBridge(
   }
 }
 
+/** Stop every cached bridge; a listening bridge keeps the Gateway process alive after close. */
+export async function stopAllCachedBrowserBridges(): Promise<void> {
+  const results = await Promise.allSettled(
+    [...BROWSER_BRIDGES].map(([sessionKey, cached]) => stopCachedBrowserBridge(sessionKey, cached)),
+  );
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure) {
+    throw failure.reason;
+  }
+}
+
 /** Drain every cached bridge that still owns one sandbox container. */
 export async function stopCachedBrowserBridgesForContainer(
   containerName: string,
