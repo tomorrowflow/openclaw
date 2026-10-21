@@ -346,6 +346,12 @@ export type WorkboardNodeRework = {
   acceptedAt: number;
   outsideCommits: number;
   startCommit?: string;
+  /**
+   * Rework rounds whose import added no commit besides merges (a base-branch
+   * merge to clear a conflict, or nothing). Ascending, unique. Trust KPIs do
+   * not count them as rework.
+   */
+  unchangedRounds?: number[];
 };
 
 /**

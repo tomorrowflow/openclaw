@@ -788,6 +788,38 @@ describe("node ticket draft PR", () => {
     expect(gone.startFailures[0]?.error).toContain("is no longer on origin");
   });
 
+  it("records a rework round that only merged main as unchanged, so trust counts no rework", async () => {
+    const { store, card, repos, worktree, handoffs, warn, github, gateway } =
+      await acceptImportedTicket();
+    github.tokens.set("acme/app", "token-app");
+    await handoffs.resume(warn);
+    github.openPulls.push("https://github.com/acme/app/pull/7");
+    // Main moved under the PR, so the round's only commit merges it to clear the conflict.
+    git(repos.origin, "commit", "-q", "--allow-empty", "-m", "main moved");
+    await store.move(card.id, "todo", undefined);
+    await store.addComment(card.id, { body: "Resolve the conflict with main." });
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets: gateway,
+      options: { cardId: card.id, now: Date.now() },
+    });
+    git(worktree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "origin/main");
+    const { runId, sessionKey } = result.started[0] ?? {};
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: true, messages: doneReport },
+      context: { runId, sessionKey },
+      readSessions: endedSession(),
+    });
+    await handoffs.resume(warn);
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("review");
+    expect(stored?.metadata?.automation?.target?.worktree?.rework?.unchangedRounds).toEqual([1]);
+    expect((await store.trust({})).total).toMatchObject({ cleanAccepted: 1, reworkRounds: 0 });
+  });
+
   it("keeps a rework publish and says so on the card when the PR comment fails", async () => {
     const { store, card, repos, worktree, handoffs, warn, github, gateway } =
       await acceptImportedTicket();

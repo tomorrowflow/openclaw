@@ -2,6 +2,7 @@ import type {
   WorkboardCard,
   WorkboardClassRung,
   WorkboardNodeReviewVerdict,
+  WorkboardNodeRework,
   WorkboardOrchestrationSettings,
   WorkboardTrustBlind,
   WorkboardTrustCounts,
@@ -26,7 +27,8 @@ type TicketFacts = {
   acceptedAt?: number;
   imported: boolean;
   blocks: number;
-  reworkRounds: number;
+  /** Rework rounds that count as human corrections, ascending; unchanged rounds are left out. */
+  reworkRounds: readonly number[];
   outsideCommits: number;
   questionRounds: number;
   operatorAnswers: number;
@@ -72,7 +74,7 @@ function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
       handoff?.phase === "published" ||
       worktree?.rework !== undefined,
     blocks: (card.events ?? []).filter((event) => event.toStatus === "blocked").length,
-    reworkRounds: worktree?.rework?.round ?? 0,
+    reworkRounds: countedReworkRounds(worktree?.rework),
     outsideCommits: worktree?.rework?.outsideCommits ?? 0,
     questionRounds: worktree?.questions?.rounds ?? 0,
     operatorAnswers: worktree?.questions?.operatorAnswers ?? 0,
@@ -84,9 +86,19 @@ function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
   };
 }
 
-// The operator reworked a published round when the ticket went on to a later rework round.
+// A round that only merged the base branch, or added nothing, corrected nothing.
+function countedReworkRounds(rework: WorkboardNodeRework | undefined): number[] {
+  const unchanged = new Set(rework?.unchangedRounds);
+  return Array.from({ length: rework?.round ?? 0 }, (_, index) => index + 1).filter(
+    (round) => !unchanged.has(round),
+  );
+}
+
+// The operator reworked a published round when the ticket went on to a later counted rework round.
 function verdictAgrees(ticket: TicketFacts, review: WorkboardNodeReviewVerdict): boolean {
-  return (review.verdict === "rework") === review.round < ticket.reworkRounds;
+  return (
+    (review.verdict === "rework") === ticket.reworkRounds.some((round) => round > review.round)
+  );
 }
 
 // Rung b lets an agent decide a round; at rung a the operator decides every one.
@@ -122,7 +134,9 @@ function countBlind(tickets: readonly TicketFacts[]): WorkboardTrustBlind {
 
 function isClean(ticket: TicketFacts): boolean {
   // A question an agent answered is not a human touch; one an operator answered is.
-  return ticket.reworkRounds === 0 && ticket.outsideCommits === 0 && ticket.operatorAnswers === 0;
+  return (
+    ticket.reworkRounds.length === 0 && ticket.outsideCommits === 0 && ticket.operatorAnswers === 0
+  );
 }
 
 // An agent's own accept at rung b; a later rework round means a person disagreed.
@@ -180,7 +194,7 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
     counts.cleanAccepted += accepted && isClean(ticket) ? 1 : 0;
     counts.firstPass += ticket.imported && ticket.blocks === 0 ? 1 : 0;
     counts.blocked += ticket.blocks > 0 ? 1 : 0;
-    counts.reworkRounds += ticket.reworkRounds;
+    counts.reworkRounds += ticket.reworkRounds.length;
     counts.outsideCommits += ticket.outsideCommits;
     counts.questionRounds += ticket.questionRounds;
     counts.operatorAnswers += ticket.operatorAnswers;

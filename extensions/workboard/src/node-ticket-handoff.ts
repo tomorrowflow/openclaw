@@ -88,6 +88,13 @@ class ImportCheckError extends Error {
   }
 }
 
+type ImportedBundle = {
+  from: string;
+  headCommit: string;
+  /** A rework round whose own commits are all merges, or none. */
+  reworkUnchanged?: true;
+};
+
 /**
  * Bundles the ticket branch on the node and imports it into the host clone.
  * The bundle must carry exactly the ticket branch, descend from the recorded
@@ -97,7 +104,7 @@ async function importNodeBundle(
   runtime: WorkboardNodeTicketRuntime,
   item: HandoffCard,
   assertCurrent: () => Promise<void>,
-): Promise<{ from: string; headCommit: string }> {
+): Promise<ImportedBundle> {
   const { nodeId, worktree, bundlePath, hostRepoPath } = item;
   const git = (...args: string[]) =>
     runNodeCommand(runtime, nodeId, ["git", "-C", worktree.path, ...args]);
@@ -192,7 +199,24 @@ async function importNodeBundle(
       // The old value makes git refuse if another writer moved or created the ref meanwhile.
       await requireHostGit(hostRepoPath, ["update-ref", ref, headCommit, existingHead]);
     }
-    return { from: checkFrom, headCommit };
+    // The round's own commits: --first-parent leaves out what a merge brings
+    // in from main. Only a recorded start commit bounds the round; the
+    // fallback head moves with a retried import. Accepted edge cases: a merge
+    // carrying manual conflict-resolution edits, or merging a side branch of
+    // the agent's own commits, counts as unchanged. The count only feeds the
+    // trust KPIs, so a failed count leaves the round counted as rework.
+    const startCommit = worktree.rework?.startCommit;
+    const ownCommits = startCommit
+      ? await hostGit(hostRepoPath, [
+          "rev-list",
+          "--count",
+          "--first-parent",
+          "--no-merges",
+          `${startCommit}..${headCommit}`,
+        ])
+      : undefined;
+    const reworkUnchanged = ownCommits?.code === 0 && ownCommits.stdout.trim() === "0";
+    return { from: checkFrom, headCommit, ...(reworkUnchanged ? { reworkUnchanged: true } : {}) };
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
@@ -228,7 +252,7 @@ async function runNodeTicketHandoff(params: {
   const claim = card.metadata?.claim;
   const scope = claim ? { ownerId: claim.ownerId, token: claim.token } : undefined;
   if (worktree.handoff.phase === "pending") {
-    let imported: { from: string; headCommit: string };
+    let imported: ImportedBundle;
     try {
       imported = await importNodeBundle(runtime, item, async () => {
         // The card may have been cancelled or re-dispatched while the bundle travelled.
@@ -332,6 +356,7 @@ async function runNodeTicketHandoff(params: {
       {
         worktreePath: worktree.path,
         handoff: { phase: "imported", headCommit, importedAt: params.now() },
+        ...(imported.reworkUnchanged ? { reworkUnchanged: true } : {}),
       },
       scope,
     );

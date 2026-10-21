@@ -258,6 +258,37 @@ describe("projectWorkboardTrust", () => {
     });
   });
 
+  it("leaves rework rounds that added no commit besides merges out of rework and disagreement", () => {
+    const at = MONDAY + HOUR;
+    const rework = { pullRequestUrl: "u", acceptedAt: at, outsideCommits: 0, unchangedRounds: [1] };
+    const accept = (round: number) => ({ round, verdict: "accept" as const });
+    const cards = [
+      // Round 1 only merged main to clear a conflict: the round 0 accept held.
+      ticket("merged", {
+        createdAt: MONDAY,
+        worktree: { ...published(at), rework: { ...rework, round: 1 }, reviews: [accept(0)] },
+      }),
+      // Round 2 changed code, so the accepts on rounds 0 and 1 were both reworked.
+      ticket("changed", {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(at),
+          rework: { ...rework, round: 2 },
+          reviews: [accept(0), accept(1), accept(2)],
+        },
+      }),
+    ];
+
+    expect(projectWorkboardTrust(cards, "app", MONDAY).total).toMatchObject({
+      accepted: 2,
+      cleanAccepted: 1,
+      reworkRounds: 1,
+      verdictRounds: 4,
+      verdictAgreedRounds: 2,
+      verdictAgreedCards: 1,
+    });
+  });
+
   it("scores agent acceptances at rung b apart from shadow verdicts, with the sample and the board's rung", () => {
     const at = MONDAY + HOUR;
     const reworked = { round: 1, pullRequestUrl: "u", acceptedAt: at, outsideCommits: 0 };

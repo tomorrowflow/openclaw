@@ -454,6 +454,9 @@ export async function createNodeTicketWorktree(params: {
         acceptedAt: previous.rework?.acceptedAt ?? published.publishedAt,
         outsideCommits: (previous.rework?.outsideCommits ?? 0) + outside,
         startCommit: start,
+        ...(previous.rework?.unchangedRounds
+          ? { unchangedRounds: previous.rework.unchangedRounds }
+          : {}),
       };
     } else {
       const baseRef = target.baseRef ?? "origin/HEAD";
