@@ -419,6 +419,60 @@ describe("Code Mode wait, scope, and suspended runs", () => {
     },
   );
 
+  it("reports a pending call as awaiting approval until approval resolves, then as running", async () => {
+    const requested = createDeferred();
+    const decision = createDeferred();
+    const resolved = createDeferred();
+    const work = createDeferred();
+    const install = pluginToolWithExecute("install", "Install a pack", async (toolCallId) => {
+      const event = {
+        runId: fixture.ctx.runId,
+        sessionId: fixture.ctx.sessionId,
+        stream: "lifecycle" as const,
+      };
+      emitAgentEvent({
+        ...event,
+        data: { phase: "waiting-approval", approvalId: "approval", toolCallId },
+      });
+      requested.resolve();
+      await decision.promise;
+      emitAgentEvent({
+        ...event,
+        data: { phase: "approval-resolved", approvalId: "approval", toolCallId },
+      });
+      resolved.resolve();
+      await work.promise;
+      return jsonResult({ installed: true });
+    });
+    const fixture = harness([install]);
+    try {
+      const first = await fixture.exec.execute("approval-state", {
+        code: "const pending = install({}); await yield_control(); await yield_control(); await yield_control(); return await pending;",
+      });
+      await requested.promise;
+      const parked = await fixture.wait.execute("approval-state-parked", {
+        runId: resultDetails(first).runId,
+      });
+      expect(resultDetails(parked).pendingToolCalls).toEqual([
+        expect.objectContaining({ method: "callValue", state: "awaiting_approval" }),
+        { id: expect.any(String), method: "yield" },
+      ]);
+
+      decision.resolve();
+      await resolved.promise;
+      const running = await fixture.wait.execute("approval-state-running", {
+        runId: resultDetails(parked).runId,
+      });
+      expect(resultDetails(running).pendingToolCalls).toEqual([
+        expect.objectContaining({ method: "callValue", state: "running" }),
+        { id: expect.any(String), method: "yield" },
+      ]);
+    } finally {
+      decision.resolve();
+      work.resolve();
+    }
+  });
+
   it.each([false, true])(
     "wraps network content acquired after a safe suspension (failure=%s)",
     async (fail) => {
