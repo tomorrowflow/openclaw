@@ -112,7 +112,10 @@ Maintenance stops also read the resident Gateway's recorded shutdown budget.
 If rollback finds the service already stopped, the Gateway cannot be reached,
 and its local port is free, it proceeds directly through the guarded native stop
 to restoration instead of waiting for the drain deadline. Running Gateways and
-unverified service or port states keep the normal drain checks.
+unverified service or port states keep the normal drain checks, except that a
+running Gateway that stays unreachable with its port free for 60 seconds has
+already shut down and is only exiting: it is stopped directly with a warning
+instead of holding Doctor's or the updater's state custody until the deadline.
 Published 2026.9.5 residents keep their startup budget even after `daemon-reload`;
 their first stop therefore uses the short/unknown-budget path. The Gateway's
 lifecycle owner fences admission and reports drain progress until idle or the
