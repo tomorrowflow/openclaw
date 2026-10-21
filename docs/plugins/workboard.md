@@ -977,6 +977,11 @@ week" under the board title; select it for the weekly and per-class tables.
 Blocks come from card events, which keep the newest 50 per card. An archived
 ticket counts only when it was accepted before; archiving one that never
 published (a probe, a duplicate, a dropped ticket) removes it from every count.
+A rework round whose import adds no commit of its own besides merges (only a
+merge of the base branch to clear a PR conflict, or nothing) is recorded in
+`rework.unchangedRounds` and is not rework: it leaves rework rounds, clean
+accepts, and verdict agreement as they were. Rounds imported before this was
+recorded still count.
 
 **Smart zone:** when a run ends, Workboard records its context use at turn end
 on the attempt (`contextTokens`): the prompt tokens of the run's last model

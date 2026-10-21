@@ -114,6 +114,13 @@ function normalizeNodeRework(value: unknown): WorkboardNodeRework | undefined {
     64,
     "node rework start commit",
   );
+  const unchangedRounds = [
+    ...new Set(
+      (Array.isArray(value.unchangedRounds) ? value.unchangedRounds : []).flatMap(
+        (entry) => resolveOptionalIntegerOption(entry, { min: 1 }) ?? [],
+      ),
+    ),
+  ].toSorted((a, b) => a - b);
   return round === undefined ||
     outsideCommits === undefined ||
     acceptedAt === undefined ||
@@ -125,6 +132,7 @@ function normalizeNodeRework(value: unknown): WorkboardNodeRework | undefined {
         acceptedAt,
         outsideCommits,
         ...(startCommit ? { startCommit } : {}),
+        ...(unchangedRounds.length > 0 ? { unchangedRounds } : {}),
       };
 }
 
@@ -258,6 +266,8 @@ export type WorkboardNodeHandoffInput = {
   review?: WorkboardNodeReviewVerdict;
   /** A done report's headline; replaces the card's `automation.summary` in the same write. */
   summary?: string;
+  /** The imported rework round added no commit besides merges; recorded in `rework.unchangedRounds`. */
+  reworkUnchanged?: true;
 };
 
 export function withNodeHandoff(
@@ -267,7 +277,17 @@ export function withNodeHandoff(
   const reviews = input.review
     ? [...(worktree.reviews ?? []), input.review].slice(-MAX_NODE_REVIEW_VERDICTS)
     : worktree.reviews;
-  return { ...worktree, handoff: input.handoff, ...(reviews ? { reviews } : {}) };
+  const rework = worktree.rework;
+  const unchanged =
+    input.reworkUnchanged && rework && !rework.unchangedRounds?.includes(rework.round)
+      ? { ...rework, unchangedRounds: [...(rework.unchangedRounds ?? []), rework.round] }
+      : rework;
+  return {
+    ...worktree,
+    handoff: input.handoff,
+    ...(unchanged ? { rework: unchanged } : {}),
+    ...(reviews ? { reviews } : {}),
+  };
 }
 
 const MAX_SCREENSHOT_DIRS = 8;
