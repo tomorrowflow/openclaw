@@ -108,6 +108,14 @@ type CodeModeWaitingResult = {
   telemetry: CodeModeTelemetry;
 };
 
+type CodeModePendingToolCall = {
+  id: string;
+  method: string;
+  // Omitted for explicit yields. "awaiting_approval" while any approval in the
+  // run is open; otherwise the call was admitted and is still executing.
+  state?: "awaiting_approval" | "running";
+};
+
 type CodeModeFailedResult = {
   status: "failed";
   error: string;

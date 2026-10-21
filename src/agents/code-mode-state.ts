@@ -647,7 +647,7 @@ export function storeSuspendedRun(
       status: "waiting" as const,
       runId,
       reason: codeModeWaitingReason(params.pending),
-      pendingToolCalls: pendingToolCalls(params.pending),
+      pendingToolCalls: pendingToolCalls(params.pending, params.owner.approvalWait.pending),
       replaySafe: params.replaySafe,
       telemetry: telemetry(params.runtime),
     },
@@ -686,12 +686,22 @@ function codeModeWaitingReason(pending: readonly PendingBridgeState[]): "pending
     : "pending_tools";
 }
 
-function pendingToolCalls(pending: readonly PendingBridgeState[]) {
+function pendingToolCalls(pending: readonly PendingBridgeState[], approvalPending: boolean) {
   // Settled calls remain in continuations until the guest consumes their response,
   // but they must not be advertised as outstanding work to exec or wait.
+  // Approval waits are observed per run, not per call: while any approval in the
+  // run is open, every outstanding call reports awaiting_approval.
   return pending
     .filter((entry) => !entry.settled)
-    .map((entry) => ({ id: entry.id, method: entry.method }));
+    .map((entry) =>
+      entry.method === "yield"
+        ? { id: entry.id, method: entry.method }
+        : {
+            id: entry.id,
+            method: entry.method,
+            state: approvalPending ? ("awaiting_approval" as const) : ("running" as const),
+          },
+    );
 }
 
 export function telemetry(runtime: ToolSearchRuntime) {
