@@ -24,6 +24,9 @@ import { resolveGatewayRestartProbeContext } from "../daemon-cli/restart-health-
 import { allListenersOwnedByRuntimePid } from "../daemon-cli/restart-port-ownership.js";
 import { resolveUpdatedGatewayRestartPort } from "./update-command-service-plan.js";
 
+// Longer than a Gateway needs to bind its port after its service reports running.
+const CLOSED_RESIDENT_GRACE_MS = 60_000;
+
 /** Keep short-budget residents behind their own admission fence until stop or release. */
 export async function withGatewayMaintenanceDrain<T>(
   params: {
@@ -245,6 +248,26 @@ export async function withGatewayMaintenanceDrain<T>(
     legacyStalePid = legacy.pid;
     return true;
   };
+  // A running resident whose port stays free past startup has finished its own
+  // shutdown and is only exiting, so it admits no work. Retrying it until the
+  // deadline holds the caller's state custody, which keeps the supervisor's
+  // replacement from starting. The grace keeps a Gateway that has not bound yet
+  // on the normal drain path.
+  let portFreeSince: number | undefined;
+  const closedResident = async () => {
+    if (!observationFailure || !connection?.target || !params.state.running) {
+      portFreeSince = undefined;
+      return false;
+    }
+    const usage = await inspectPortUsage(connection.port, { probeHosts: ["127.0.0.1"] });
+    assertResidentCurrent();
+    if (usage.status !== "free") {
+      portFreeSince = undefined;
+      return false;
+    }
+    portFreeSince ??= performance.now();
+    return performance.now() - portFreeSince >= CLOSED_RESIDENT_GRACE_MS;
+  };
   if (!explicitDrain && (await staleResident())) {
     params.warn(
       "WARNING: The running Gateway's installation was replaced before this stop; it refuses connections, so lifecycle drain is skipped and it is stopped directly.",
@@ -310,6 +333,12 @@ export async function withGatewayMaintenanceDrain<T>(
       if (!explicitDrain && (await staleResident())) {
         params.warn(
           "WARNING: The running Gateway's installation was replaced during this stop; it refuses connections, so lifecycle drain is skipped and it is stopped directly.",
+        );
+        return await finish();
+      }
+      if (!explicitDrain && (await closedResident())) {
+        params.warn(
+          "WARNING: The running Gateway no longer listens on its port; it has no work left to drain, so lifecycle drain is skipped and it is stopped directly.",
         );
         return await finish();
       }

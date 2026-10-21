@@ -286,6 +286,37 @@ it("retains stop authority after checking an offline Gateway port", async () => 
   expect(f.stop).not.toHaveBeenCalled();
 });
 
+it("stops a running Gateway whose port stays free past startup", async () => {
+  const f = fixture();
+  mocks.call.mockRejectedValue(
+    Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+  );
+  mocks.portUsage.mockResolvedValue({ port: 18789, status: "free", listeners: [], hints: [] });
+  const running = withGatewayMaintenanceDrain(
+    { ...f.params, timeoutMs: DEFAULT_UPDATE_STEP_TIMEOUT_MS },
+    f.stop,
+  );
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(f.stop).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(31_000);
+  expect(f.stop).toHaveBeenCalledOnce();
+  await expect(running).resolves.toBe("stopped");
+  expect(f.warn).toHaveBeenCalledWith(expect.stringContaining("no longer listens on its port"));
+});
+
+it("keeps draining a running Gateway whose port is still bound", async () => {
+  const f = fixture();
+  mocks.call.mockRejectedValue(
+    Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" }),
+  );
+  const running = withGatewayMaintenanceDrain(f.params, f.stop);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(f.stop).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(f.params.timeoutMs);
+  await expect(running).resolves.toBe("stopped");
+  expect(f.warn).toHaveBeenCalledWith(expect.stringContaining("drain deadline reached"));
+});
+
 it.each(["admitted work", "published resident", "expired observation"] as const)(
   "warns before stopping at the drain deadline: %s",
   async (scenario) => {
