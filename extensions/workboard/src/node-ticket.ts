@@ -541,7 +541,10 @@ export async function startNodeTicketSession(params: {
       ...(card.agentId ? { agentId: card.agentId } : {}),
       execNode: target.nodeId,
       cwd: params.worktree.path,
-      ...(target.model ? { model: target.model } : {}),
+      // Pin the runtime explicitly: model-only routing quietly falls back to the
+      // embedded runtime when claude-cli is unavailable, and that runtime cannot
+      // edit the node worktree. An explicit pin fails the start with the reason.
+      ...(target.model ? { model: target.model, agentRuntime: "claude-cli" } : {}),
       // Session labels are unique per agent; the card id keeps same-titled cards apart.
       label: `Workboard ${card.id.slice(0, 8)}: ${card.title}`.slice(0, 120),
       message: params.message,
