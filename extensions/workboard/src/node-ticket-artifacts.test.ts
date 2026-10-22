@@ -6,11 +6,12 @@ import type {
   WorkboardCard,
   WorkboardNodeRound,
   WorkboardNodeWorktree,
-  WorkboardScreenshotRound,
+  WorkboardNodeFileRound,
+  WorkboardNodeFileSource,
 } from "@openclaw/workboard-contract";
 import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { listNodeTicketScreenshots, readNodeTicketScreenshot } from "./node-ticket-screenshots.js";
+import { listNodeTicketArtifacts, readNodeTicketArtifact } from "./node-ticket-artifacts.js";
 import type { WorkboardNodeTicketRuntime } from "./node-ticket.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -57,6 +58,28 @@ function nodeRuntime(
   };
 }
 
+const listScreenshots = (
+  runtime: WorkboardNodeTicketRuntime,
+  card: WorkboardCard,
+  options: { live: boolean; now?: () => number },
+) => listNodeTicketArtifacts(runtime, card, "screenshot", options);
+
+async function readScreenshot(
+  runtime: WorkboardNodeTicketRuntime,
+  card: WorkboardCard,
+  source: WorkboardNodeFileSource,
+  path: string,
+) {
+  const { mimeType, bytes } = await readNodeTicketArtifact(
+    runtime,
+    card,
+    "screenshot",
+    source,
+    path,
+  );
+  return { mimeType, contentBase64: bytes.toString("base64") };
+}
+
 const COMMITTED = { live: false };
 
 const noNode = nodeRuntime(() => {
@@ -69,7 +92,7 @@ const imported: WorkboardNodeWorktree["handoff"] = {
   importedAt: 1,
 };
 
-function committed(rounds: WorkboardScreenshotRound[]) {
+function committed(rounds: WorkboardNodeFileRound[]) {
   return { committed: { state: "available", rounds } };
 }
 
@@ -124,7 +147,7 @@ it("lists each round's committed images and serves their exact bytes, refusing o
     { round: 1, changes: changes(first, rework) },
   ]);
 
-  expect(await listNodeTicketScreenshots(noNode, card, COMMITTED)).toEqual(
+  expect(await listScreenshots(noNode, card, COMMITTED)).toEqual(
     committed([
       {
         round: 0,
@@ -135,12 +158,7 @@ it("lists each round's committed images and serves their exact bytes, refusing o
     ]),
   );
   expect(
-    await readNodeTicketScreenshot(
-      noNode,
-      card,
-      { round: 0 },
-      "docs/screenshots/T-1/card-light.png",
-    ),
+    await readScreenshot(noNode, card, { round: 0 }, "docs/screenshots/T-1/card-light.png"),
   ).toEqual({
     mimeType: "image/png",
     contentBase64: png.toString("base64"),
@@ -150,7 +168,7 @@ it("lists each round's committed images and serves their exact bytes, refusing o
     [0, "docs/screenshots/T-1/README.md"],
     [1, "docs/screenshots/T-1/card-dark.png"],
   ] as const) {
-    await expect(readNodeTicketScreenshot(noNode, card, { round }, file)).rejects.toThrow(
+    await expect(readScreenshot(noNode, card, { round }, file)).rejects.toThrow(
       "screenshot not found",
     );
   }
@@ -167,7 +185,7 @@ it("lists an image the round moved, whatever diff.renames says", async () => {
   git("config", "diff.renames", "true");
 
   expect(
-    await listNodeTicketScreenshots(
+    await listScreenshots(
       noNode,
       nodeCard([{ round: 0, changes: changes(base, moved) }]),
       COMMITTED,
@@ -183,13 +201,13 @@ it("lists no rounds, without failing, when the readable rounds committed no imag
     { round: 1, changes: changes(notes, "f".repeat(40)) },
   ]);
 
-  expect(await listNodeTicketScreenshots(noNode, card, COMMITTED)).toEqual(committed([]));
+  expect(await listScreenshots(noNode, card, COMMITTED)).toEqual(committed([]));
 });
 
 it("reports the committed screenshots unavailable when every round's commits are gone", async () => {
   const card = nodeCard([{ round: 0, changes: changes("e".repeat(40), "f".repeat(40)) }]);
 
-  expect((await listNodeTicketScreenshots(noNode, card, COMMITTED)).committed).toEqual({
+  expect((await listScreenshots(noNode, card, COMMITTED)).committed).toEqual({
     state: "unavailable",
     reason: `no round's commits are left in ${repo}`,
   });
@@ -201,19 +219,17 @@ it("reports a broken host clone instead of skipping its rounds", async () => {
   const card = nodeCard([{ round: 0, changes: changes(base, shot) }]);
   fs.rmSync(path.join(repo, ".git"), { recursive: true });
 
-  expect((await listNodeTicketScreenshots(noNode, card, COMMITTED)).committed).toMatchObject({
+  expect((await listScreenshots(noNode, card, COMMITTED)).committed).toMatchObject({
     state: "unavailable",
     reason: expect.stringContaining("host git diff"),
   });
   await expect(
-    readNodeTicketScreenshot(noNode, card, { round: 0 }, "docs/screenshots/T-1/card.png"),
+    readScreenshot(noNode, card, { round: 0 }, "docs/screenshots/T-1/card.png"),
   ).rejects.toThrow("host git diff");
 });
 
 it("lists nothing for a card without imported rounds", async () => {
-  expect(await listNodeTicketScreenshots(noNode, nodeCard([{ round: 0 }]), COMMITTED)).toEqual(
-    committed([]),
-  );
+  expect(await listScreenshots(noNode, nodeCard([{ round: 0 }]), COMMITTED)).toEqual(committed([]));
 });
 
 it("lists the remaining rounds when one round's commits are gone from the host clone", async () => {
@@ -224,7 +240,7 @@ it("lists the remaining rounds when one round's commits are gone from the host c
     { round: 1, changes: changes(base, shot) },
   ]);
 
-  expect(await listNodeTicketScreenshots(noNode, card, COMMITTED)).toEqual(
+  expect(await listScreenshots(noNode, card, COMMITTED)).toEqual(
     committed([{ round: 1, commit: shot, paths: ["docs/screenshots/T-1/card.png"] }]),
   );
 });
@@ -234,12 +250,12 @@ it("refuses commit ids that are not object names before running git", async () =
   const shot = commit({ "docs/screenshots/T-1/card.png": Buffer.from([1]) });
   const card = nodeCard([{ round: 0, changes: changes("--output=/dev/null", shot) }]);
 
-  expect((await listNodeTicketScreenshots(noNode, card, COMMITTED)).committed).toMatchObject({
+  expect((await listScreenshots(noNode, card, COMMITTED)).committed).toMatchObject({
     state: "unavailable",
     reason: expect.stringContaining("are not commit ids"),
   });
   await expect(
-    readNodeTicketScreenshot(
+    readScreenshot(
       noNode,
       nodeCard([{ round: 0, changes: changes(base, "HEAD") }]),
       { round: 0 },
@@ -254,7 +270,7 @@ it("refuses a listed screenshot over 8 MB", async () => {
   const card = nodeCard([{ round: 0, changes: changes(base, big) }]);
 
   await expect(
-    readNodeTicketScreenshot(noNode, card, { round: 0 }, "docs/screenshots/T-1/big.png"),
+    readScreenshot(noNode, card, { round: 0 }, "docs/screenshots/T-1/big.png"),
   ).rejects.toThrow("over the 8388608-byte limit");
 });
 
@@ -331,23 +347,18 @@ it("lists a running ticket's worktree images newest first, nested runs included,
   });
   const card = nodeCard([], running);
 
-  expect(await listNodeTicketScreenshots(node.runtime, card, { live: true })).toEqual({
+  expect(await listScreenshots(node.runtime, card, { live: true })).toEqual({
     committed: { state: "available", rounds: [] },
     live: {
       state: "available",
-      shots: [
+      files: [
         { path: "features/evidence/ios-run-3/login.jpg", bytes: 1, mtimeMs: 300 },
         { path: "docs/screenshots/T-1/home.png", bytes: png.length, mtimeMs: 200 },
       ],
     },
   });
   expect(
-    await readNodeTicketScreenshot(
-      node.runtime,
-      card,
-      { live: true },
-      "docs/screenshots/T-1/home.png",
-    ),
+    await readScreenshot(node.runtime, card, { live: true }, "docs/screenshots/T-1/home.png"),
   ).toEqual({ mimeType: "image/png", contentBase64: png.toString("base64") });
 });
 
@@ -355,17 +366,15 @@ it("lists the default docs/screenshots dir, empty until the agent creates it", a
   const node = fakeNode({});
   const card = nodeCard([], { handoff: { phase: "pending", reportedAt: 1 } });
 
-  expect((await listNodeTicketScreenshots(node.runtime, card, { live: true })).live).toEqual({
+  expect((await listScreenshots(node.runtime, card, { live: true })).live).toEqual({
     state: "available",
-    shots: [],
+    files: [],
   });
   expect(node.calls).toEqual([{ command: "dir.list", path: "/wt/card-1/docs/screenshots" }]);
 });
 
 it("walks no node worktree when the list does not ask for live shots", async () => {
-  expect(await listNodeTicketScreenshots(noNode, nodeCard([], running), COMMITTED)).toEqual(
-    committed([]),
-  );
+  expect(await listScreenshots(noNode, nodeCard([], running), COMMITTED)).toEqual(committed([]));
 });
 
 it("bounds the whole live walk by one deadline, shortening the last call's timeout", async () => {
@@ -382,7 +391,7 @@ it("bounds the whole live walk by one deadline, shortening the last call's timeo
   const clock = [0, 0, 25_000, 30_000];
   const now = () => clock.shift() ?? 30_000;
 
-  const listed = await listNodeTicketScreenshots(runtime, nodeCard([], running), {
+  const listed = await listScreenshots(runtime, nodeCard([], running), {
     live: true,
     now,
   });
@@ -410,7 +419,7 @@ it("reports live unavailable with the grants to add, keeping the committed round
     ],
     [offline, "node factory is not connected"],
   ] as const) {
-    const listed = await listNodeTicketScreenshots(runtime, card, { live: true });
+    const listed = await listScreenshots(runtime, card, { live: true });
     expect(listed.committed).toEqual({
       state: "available",
       rounds: [{ round: 0, commit: shot, paths: ["docs/screenshots/T-1/card.png"] }],
@@ -437,8 +446,7 @@ it("lists no live screenshots once the round is imported and the worktree remove
     { ...imported, phase: "published" as const, publishedAt: 2, pullRequestUrl: "u" },
   ]) {
     expect(
-      (await listNodeTicketScreenshots(node.runtime, nodeCard([], { handoff }), { live: true }))
-        .live,
+      (await listScreenshots(node.runtime, nodeCard([], { handoff }), { live: true })).live,
     ).toEqual({
       state: "none",
     });
@@ -461,12 +469,12 @@ it("refuses live reads outside the target's screenshot dirs before reaching the 
     "docs/screenshots//a.png",
     "docs/screenshots/a/b/c/deep.png",
   ]) {
-    await expect(
-      readNodeTicketScreenshot(node.runtime, card, { live: true }, escape),
-    ).rejects.toThrow(`screenshot not found: live ${escape}`);
+    await expect(readScreenshot(node.runtime, card, { live: true }, escape)).rejects.toThrow(
+      `screenshot not found: live ${escape}`,
+    );
   }
   await expect(
-    readNodeTicketScreenshot(
+    readScreenshot(
       node.runtime,
       nodeCard([], { handoff: imported }),
       { live: true },
@@ -483,6 +491,92 @@ it("refuses a live image whose bytes do not match the node's sha256", async () =
   }));
 
   await expect(
-    readNodeTicketScreenshot(runtime, card, { live: true }, "docs/screenshots/a.png"),
+    readScreenshot(runtime, card, { live: true }, "docs/screenshots/a.png"),
   ).rejects.toThrow("does not match its sha256");
+});
+
+it("lists only the HTML a round committed under docs/prototypes and serves its exact text", async () => {
+  const base = commit({ "README.md": "base", "docs/prototypes/T-0/old.html": "<p>old</p>" });
+  const html = "<!doctype html><button onclick=\"this.textContent='ok ✓'\">Try</button>";
+  const first = commit({
+    "docs/prototypes/T-1/flow.html": html,
+    "docs/prototypes/T-1/legacy.HTM": "<p>legacy</p>",
+    "docs/prototypes/T-1/notes.md": "notes",
+    "docs/prototypes/T-1/shot.png": Buffer.from([1]),
+    "index.html": "<p>the app itself</p>",
+    "docs/guide.html": "<p>docs</p>",
+  });
+  const card = nodeCard([{ round: 0, changes: changes(base, first) }]);
+
+  expect(await listNodeTicketArtifacts(noNode, card, "prototype", COMMITTED)).toEqual(
+    committed([
+      {
+        round: 0,
+        commit: first,
+        paths: ["docs/prototypes/T-1/flow.html", "docs/prototypes/T-1/legacy.HTM"],
+      },
+    ]),
+  );
+  const read = await readNodeTicketArtifact(
+    noNode,
+    card,
+    "prototype",
+    { round: 0 },
+    "docs/prototypes/T-1/flow.html",
+  );
+  expect(read.mimeType).toBe("text/html");
+  expect(read.bytes.toString("utf8")).toBe(html);
+  for (const file of ["index.html", "docs/guide.html", "docs/prototypes/T-0/old.html"]) {
+    await expect(
+      readNodeTicketArtifact(noNode, card, "prototype", { round: 0 }, file),
+    ).rejects.toThrow(`prototype not found: round 0 ${file}`);
+  }
+});
+
+it("refuses a listed prototype over 2 MiB", async () => {
+  const base = commit({ "README.md": "base" });
+  const big = commit({ "docs/prototypes/T-1/big.html": "x".repeat(2 * 1024 * 1024 + 1) });
+  const card = nodeCard([{ round: 0, changes: changes(base, big) }]);
+
+  await expect(
+    readNodeTicketArtifact(noNode, card, "prototype", { round: 0 }, "docs/prototypes/T-1/big.html"),
+  ).rejects.toThrow("over the 2097152-byte limit");
+});
+
+it("walks only docs/prototypes for a running ticket's live prototypes, whatever its screenshot dirs", async () => {
+  const html = Buffer.from("<!doctype html><p>live</p>");
+  const node = fakeNode({
+    "/wt/card-1/docs/prototypes/T-1/flow.html": { bytes: html, mtime: 200 },
+    "/wt/card-1/docs/prototypes/T-1/notes.md": { bytes: Buffer.from("x"), mtime: 900 },
+    "/wt/card-1/docs/screenshots/T-1/page.html": { bytes: html, mtime: 300 },
+  });
+  const card = nodeCard([], running);
+
+  expect(
+    (await listNodeTicketArtifacts(node.runtime, card, "prototype", { live: true })).live,
+  ).toEqual({
+    state: "available",
+    files: [{ path: "docs/prototypes/T-1/flow.html", bytes: html.length, mtimeMs: 200 }],
+  });
+  expect(node.calls).toEqual([
+    { command: "dir.list", path: "/wt/card-1/docs/prototypes" },
+    { command: "dir.list", path: "/wt/card-1/docs/prototypes/T-1" },
+  ]);
+  const read = await readNodeTicketArtifact(
+    node.runtime,
+    card,
+    "prototype",
+    { live: true },
+    "docs/prototypes/T-1/flow.html",
+  );
+  expect(read.bytes.equals(html)).toBe(true);
+  for (const escape of [
+    "docs/screenshots/T-1/page.html",
+    "index.html",
+    "docs/prototypes/../x.html",
+  ]) {
+    await expect(
+      readNodeTicketArtifact(node.runtime, card, "prototype", { live: true }, escape),
+    ).rejects.toThrow(`prototype not found: live ${escape}`);
+  }
 });

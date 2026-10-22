@@ -49,6 +49,7 @@ import {
 import { createCardChanges, type CardChanges } from "./view-card-changes.tsx";
 import { getVisibleDetailCard, openCardDetails } from "./view-card-details.tsx";
 import { createCardGrilling, type CardGrilling } from "./view-card-grilling.tsx";
+import { createCardPrototypes, type CardPrototypes } from "./view-card-prototypes.tsx";
 import { createCardScreenshots, type CardScreenshots } from "./view-card-screenshots.tsx";
 import {
   workboardErrorMessage,
@@ -91,6 +92,7 @@ export function createWorkboardPage(
     const automations = new Map<string, BoardAutomationState>();
     let trust: BoardTrustState | undefined;
     let screenshots: CardScreenshots | undefined;
+    let prototypes: CardPrototypes | undefined;
     let changes: CardChanges | undefined;
     let grilling: CardGrilling | undefined;
     type PagePresentation = {
@@ -181,6 +183,8 @@ export function createWorkboardPage(
       screenshots = connected
         ? createCardScreenshots(client, requestUpdate, { live: false })
         : undefined;
+      prototypes?.dispose();
+      prototypes = connected ? createCardPrototypes(client, requestUpdate) : undefined;
       changes?.dispose();
       changes = connected ? createCardChanges(client, requestUpdate) : undefined;
       grilling?.dispose();
@@ -273,6 +277,7 @@ export function createWorkboardPage(
       }
       const detailCard = getVisibleDetailCard(state);
       screenshots?.show((context.presented && detailCard) || undefined);
+      prototypes?.show((context.presented && detailCard) || undefined);
       const detailJobId = detailCard
         ? state.boards.find((board) => board.id === workboardCardBoardId(detailCard))
             ?.automationJobId
@@ -364,6 +369,7 @@ export function createWorkboardPage(
         presented: context.presented,
         detailBoardAutomation: detailJobId ? automations.get(detailJobId) : undefined,
         detailScreenshots: screenshots,
+        detailPrototypes: prototypes,
         detailChanges: changes,
         detailGrilling: grilling,
         transcriptViewerPort: transcriptViewerPort(),
@@ -385,6 +391,7 @@ export function createWorkboardPage(
           automations.clear();
           trust = undefined;
           screenshots?.refresh();
+          prototypes?.refresh();
           changes?.refresh();
           void refreshMetadata();
           sessionResolver.refresh();
@@ -658,6 +665,7 @@ export function createWorkboardPage(
         sessionResolver.dispose();
         runningSessionResolvers.dispose();
         screenshots?.dispose();
+        prototypes?.dispose();
         changes?.dispose();
         grilling?.dispose();
         document.removeEventListener("visibilitychange", onVisibilityChange);

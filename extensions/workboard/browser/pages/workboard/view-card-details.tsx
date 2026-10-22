@@ -38,7 +38,12 @@ import {
   technicalDetailsData,
   type DetailNavigation,
 } from "./view-card-detail-records.tsx";
-import { DetailTabs, detailScreenshots, NodeTicketTabPanels } from "./view-card-detail-tabs.tsx";
+import {
+  DetailTabs,
+  detailPrototypes,
+  detailScreenshots,
+  NodeTicketTabPanels,
+} from "./view-card-detail-tabs.tsx";
 import { CardDiscardDialog } from "./view-card-modal.tsx";
 import { NodeRounds } from "./view-card-rounds.tsx";
 import { CardSessionHeading } from "./view-card-session-heading.tsx";
@@ -261,6 +266,9 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
         : []),
       ...(detailScreenshots(props, card())
         ? [{ id: "screenshots", label: t("workboard.detailTabScreenshots") } as const]
+        : []),
+      ...(detailPrototypes(props, card())
+        ? [{ id: "prototype", label: t("workboard.detailTabPrototype") } as const]
         : []),
       ...(action().sessionTarget
         ? [{ id: "session", label: t("workboard.detailTabSession") } as const]

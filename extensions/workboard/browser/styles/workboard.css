@@ -2988,6 +2988,7 @@
 .workboard-detail__changes,
 .workboard-grilling,
 .workboard-detail__screenshots,
+.workboard-detail__prototypes,
 .workboard-detail__session-panel,
 .workboard-detail__technical {
   display: grid;
@@ -5187,4 +5188,51 @@ workboard-inline-text {
 
 .workboard-screens__refresh {
   margin-left: auto;
+}
+
+.workboard-detail__prototypes {
+  gap: 12px;
+}
+
+.workboard-prototypes__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.workboard-prototypes__picker,
+.workboard-prototypes__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workboard-prototypes__frame,
+.workboard-prototypes__placeholder {
+  box-sizing: border-box;
+  width: 100%;
+  height: min(70vh, 720px);
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* Prototypes are authored against a browser's default white page. */
+.workboard-prototypes__frame {
+  background: white;
+}
+
+.workboard-prototypes__placeholder {
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  background: var(--bg-elevated);
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
 }
