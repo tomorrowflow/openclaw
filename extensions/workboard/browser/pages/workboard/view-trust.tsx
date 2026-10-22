@@ -154,11 +154,7 @@ export function BoardTrustHeading(props: { trust: BoardTrustState | undefined })
     const loaded = result();
     const week = loaded?.weeks.at(-1);
     return !loaded
-      ? t(
-          props.trust?.status === "loading"
-            ? "workboard.trustLoading"
-            : "workboard.trustUnavailable",
-        )
+      ? t(props.trust?.status === "loading" ? "workboard.trustLoading" : "workboard.trustUnavailable")
       : week?.accepted
         ? t("workboard.trustThisWeek", {
             autonomous: String(week.autonomous),

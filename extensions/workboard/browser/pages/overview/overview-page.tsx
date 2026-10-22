@@ -99,7 +99,10 @@ function Band<Row extends WorkboardOverviewCard>(props: {
   children: (row: Row) => JSX.Element;
 }) {
   return (
-    <section class="workboard-overview__band" aria-labelledby={`workboard-overview-${props.id}`}>
+    <section
+      class="workboard-overview__band"
+      aria-labelledby={`workboard-overview-${props.id}`}
+    >
       <h2 id={`workboard-overview-${props.id}`}>
         <span>{props.title}</span>
         <span class="workboard-overview__count">{props.rows.length}</span>
