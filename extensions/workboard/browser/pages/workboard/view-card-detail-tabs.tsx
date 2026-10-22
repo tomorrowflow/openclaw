@@ -4,6 +4,7 @@ import { t } from "../../i18n/index.ts";
 import type { WorkboardCard, WorkboardUiState } from "../../lib/workboard/index.ts";
 import { ChangesPanel, hasCardChanges } from "./view-card-changes.tsx";
 import { GrillingPanel } from "./view-card-grilling.tsx";
+import { hasPrototypes, PrototypePanel } from "./view-card-prototypes.tsx";
 import { hasCommittedScreenshots, ScreenshotsPanel } from "./view-card-screenshots.tsx";
 import type { WorkboardProps } from "./view-helpers.tsx";
 
@@ -74,7 +75,15 @@ export function detailScreenshots(props: WorkboardProps, card: WorkboardCard) {
     : undefined;
 }
 
-/** A node ticket's Grilling, Changes, and Screenshots tab panels, each only when it has content. */
+/** The card's prototypes, live and committed, once listed and only when there is one. */
+export function detailPrototypes(props: WorkboardProps, card: WorkboardCard) {
+  void props.revision;
+  const controller = props.detailPrototypes;
+  const listed = controller?.list(card.id);
+  return controller && listed && hasPrototypes(listed) ? { controller, listed } : undefined;
+}
+
+/** A node ticket's Grilling, Changes, Screenshots, and Prototype tab panels, each only when it has content. */
 export function NodeTicketTabPanels(props: {
   workboard: WorkboardProps;
   card: WorkboardCard;
@@ -122,6 +131,17 @@ export function NodeTicketTabPanels(props: {
             cardId={props.card.id}
             listed={shown().listed}
             active={props.activeTab === "screenshots"}
+            revision={props.workboard.revision}
+          />
+        )}
+      </Show>
+      <Show when={detailPrototypes(props.workboard, props.card)}>
+        {(shown) => (
+          <PrototypePanel
+            prototypes={shown().controller}
+            cardId={props.card.id}
+            listed={shown().listed}
+            active={props.activeTab === "prototype"}
             revision={props.workboard.revision}
           />
         )}

@@ -437,28 +437,31 @@ export type WorkboardNodeChangedFile = { path: string; previousPath?: string } &
   | { binary: true }
 );
 
-/** The images a node ticket round added or changed, read from its `to` commit on the host. */
-export type WorkboardScreenshotRound = {
+/**
+ * The files of one kind (screenshots or prototypes) a node ticket round added
+ * or changed, read from its `to` commit on the host.
+ */
+export type WorkboardNodeFileRound = {
   round: number;
   commit: string;
   paths: string[];
 };
 
-/** The committed screenshots, or why the host clone could not list them. */
-export type WorkboardCommittedScreenshots =
-  | { state: "available"; rounds: WorkboardScreenshotRound[] }
+/** The committed files, or why the host clone could not list them. */
+export type WorkboardCommittedNodeFiles =
+  | { state: "available"; rounds: WorkboardNodeFileRound[] }
   | { state: "unavailable"; reason: string };
 
-/** An image the running agent wrote under one of its target's screenshot dirs, newest first. */
-export type WorkboardLiveScreenshot = { path: string; bytes: number; mtimeMs: number };
+/** A file the running agent wrote under one of the dirs listed for its kind, newest first. */
+export type WorkboardLiveNodeFile = { path: string; bytes: number; mtimeMs: number };
 
 /**
- * The images in the card's node worktree right now. `none`: the card has no
+ * The files in the card's node worktree right now. `none`: the card has no
  * worktree on its node (not started yet, or its round was imported and the
  * worktree removed).
  */
-export type WorkboardLiveScreenshots =
-  | { state: "available"; shots: WorkboardLiveScreenshot[] }
+export type WorkboardLiveNodeFiles =
+  | { state: "available"; files: WorkboardLiveNodeFile[] }
   | { state: "unavailable"; reason: string }
   | { state: "none" };
 
@@ -466,15 +469,18 @@ export type WorkboardLiveScreenshots =
  * Each source fails on its own, so a node outage still shows the committed
  * rounds. `live` is present only when the list asked for it with `live: true`.
  */
-export type WorkboardScreenshotListResult = {
-  committed: WorkboardCommittedScreenshots;
-  live?: WorkboardLiveScreenshots;
+export type WorkboardNodeFileListResult = {
+  committed: WorkboardCommittedNodeFiles;
+  live?: WorkboardLiveNodeFiles;
 };
 
-/** One image: a round's committed file, or a live file in the node worktree. */
-export type WorkboardScreenshotSource = { round: number } | { live: true };
+/** One file: a round's committed file, or a live file in the node worktree. */
+export type WorkboardNodeFileSource = { round: number } | { live: true };
 
 export type WorkboardScreenshotResult = { mimeType: string; contentBase64: string };
+
+/** A prototype HTML file, decoded as UTF-8. */
+export type WorkboardPrototypeResult = { html: string };
 
 /** What one round's import changed, `from..to`; `files` is capped, `totals` counts every file. */
 export type WorkboardNodeChanges = {

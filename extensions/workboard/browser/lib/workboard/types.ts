@@ -117,6 +117,7 @@ export type WorkboardUiState = {
     | "activity"
     | "changes"
     | "screenshots"
+    | "prototype"
     | "session"
     | "details";
   detailCommentBody: string;

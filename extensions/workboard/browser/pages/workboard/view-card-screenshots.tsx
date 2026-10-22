@@ -1,33 +1,22 @@
 /** @jsxImportSource @solidjs/web */
 import type {
-  WorkboardCommittedScreenshots,
-  WorkboardLiveScreenshot,
-  WorkboardLiveScreenshots,
-  WorkboardScreenshotListResult,
+  WorkboardCommittedNodeFiles,
+  WorkboardLiveNodeFile,
+  WorkboardLiveNodeFiles,
+  WorkboardNodeFileRound,
   WorkboardScreenshotResult,
-  WorkboardScreenshotRound,
 } from "@openclaw/workboard-contract";
 import { For, Show } from "solid-js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { icons } from "../../components/icons.tsx";
 import { t } from "../../i18n/index.ts";
-import { formatUiError } from "../../lib/format-error.ts";
-import { isWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
-import type { WorkboardCard } from "../../lib/workboard/index.ts";
+import { type CardFileList, createCardFileList, type SettledList } from "./card-node-files.ts";
 import { RelativeTime } from "./view-card-time.tsx";
-
-type ListState =
-  | { status: "loading" }
-  // listedAt is this browser's receipt time, so "listed ago" never mixes clocks.
-  | { status: "loaded"; result: WorkboardScreenshotListResult; listedAt: number }
-  | { status: "unavailable"; error: string };
-
-export type SettledList = Exclude<ListState, { status: "loading" }>;
 
 /** One image to show: a round's committed file or a live file in the node worktree. */
 type ScreenshotRef =
-  | { round: WorkboardScreenshotRound; path: string }
-  | { live: WorkboardLiveScreenshot };
+  | { round: WorkboardNodeFileRound; path: string }
+  | { live: WorkboardLiveNodeFile };
 
 function imageKey(ref: ScreenshotRef): string {
   return "live" in ref
@@ -46,34 +35,13 @@ type ImageState = { status: "loading" } | { status: "loaded"; url: string } | { 
 const MAX_IMAGE_READS = 3;
 
 /** One node ticket's screenshots on one Gateway connection: the drawer's tab or a session's Screens panel. */
-export type CardScreenshots = {
-  /** Lists the shown card's screenshots; another card or none drops the rest. */
-  show(card: WorkboardCard | undefined): void;
-  /**
-   * Lists the shown card again, keeping its last list meanwhile, and retries
-   * failed images; a no-op while the current list is loading.
-   */
+export type CardScreenshots = Omit<CardFileList, "refresh"> & {
+  /** Lists the shown card again and retries failed images; a no-op while the current list is loading. */
   refresh(): void;
-  /** Undefined for another card or while the first list is pending. */
-  list(cardId: string): SettledList | undefined;
   /** The image's state, queueing its read on first use. */
   image(cardId: string, ref: ScreenshotRef): ImageState;
   dispose(): void;
 };
-
-/**
- * Node tickets only; a new round's import lists again. Without live shots, a
- * card that has imported no round has nothing to list.
- */
-function listKey(card: WorkboardCard, live: boolean): string | undefined {
-  if (!isWorkboardNodeTicket(card)) {
-    return undefined;
-  }
-  const key = (card.rounds ?? [])
-    .flatMap((round) => (round.changes ? [round.changes.to] : []))
-    .join(",");
-  return key || live ? key : undefined;
-}
 
 function objectUrl(result: WorkboardScreenshotResult): string {
   const bytes = Uint8Array.from(atob(result.contentBase64), (char) => char.charCodeAt(0));
@@ -89,7 +57,6 @@ export function createCardScreenshots(
   requestUpdate: () => void,
   { live }: { live: boolean },
 ): CardScreenshots {
-  let shown: { cardId: string; key: string; list: ListState; previous?: SettledList } | undefined;
   const images = new Map<string, ImageState>();
   const queue: Array<{ key: string; cardId: string; ref: ScreenshotRef; pending: ImageState }> = [];
   let reading = 0;
@@ -135,9 +102,9 @@ export function createCardScreenshots(
   };
 
   /** A live file rewritten or removed since the last list will not be shown again. */
-  const forgetStaleLive = (listed: WorkboardLiveScreenshots) => {
+  const forgetStaleLive = (listed: WorkboardLiveNodeFiles) => {
     const current = new Set(
-      listed.state === "available" ? listed.shots.map((shot) => imageKey({ live: shot })) : [],
+      listed.state === "available" ? listed.files.map((shot) => imageKey({ live: shot })) : [],
     );
     for (const [key, image] of images) {
       if (key.startsWith("live:") && !current.has(key)) {
@@ -149,59 +116,19 @@ export function createCardScreenshots(
     }
   };
 
-  const relist = (cardId: string, key: string, previous: SettledList | undefined) => {
-    const listing: NonNullable<typeof shown> = {
-      cardId,
-      key,
-      list: { status: "loading" },
-      ...(previous ? { previous } : {}),
-    };
-    shown = listing;
-    void client
-      .request<WorkboardScreenshotListResult>("workboard.cards.screenshots.list", {
-        id: cardId,
-        live,
-      })
-      .then(
-        (result): SettledList => ({ status: "loaded", result, listedAt: Date.now() }),
-        (error: unknown): SettledList => ({ status: "unavailable", error: formatUiError(error) }),
-      )
-      .then((settled) => {
-        if (shown === listing) {
-          if (settled.status === "loaded" && settled.result.live) {
-            forgetStaleLive(settled.result.live);
-          }
-          listing.list = settled;
-          delete listing.previous;
-          requestUpdate();
-        }
-      });
-  };
-
-  const settledList = () =>
-    shown && (shown.list.status === "loading" ? shown.previous : shown.list);
+  const files = createCardFileList(client, requestUpdate, {
+    method: "workboard.cards.screenshots.list",
+    live,
+    onForget: forget,
+    onListed: (result) => result.live && forgetStaleLive(result.live),
+  });
 
   return {
-    show(card) {
-      const key = card ? listKey(card, live) : undefined;
-      if (!card || key === undefined) {
-        shown = undefined;
-        forget();
-        return;
-      }
-      if (shown?.cardId === card.id && shown.key === key) {
-        return;
-      }
-      if (shown?.cardId !== card.id) {
-        forget();
-        relist(card.id, key, undefined);
-        return;
-      }
-      // A new import of the same card keeps its listed rounds until the new list arrives.
-      relist(card.id, key, settledList());
-    },
+    show: files.show,
+    list: files.list,
+    dispose: files.dispose,
     refresh() {
-      if (!shown || shown.list.status === "loading") {
+      if (!files.refresh()) {
         return;
       }
       for (const [key, image] of images) {
@@ -209,10 +136,6 @@ export function createCardScreenshots(
           images.delete(key);
         }
       }
-      relist(shown.cardId, shown.key, settledList());
-    },
-    list(cardId) {
-      return shown?.cardId === cardId ? settledList() : undefined;
     },
     image(cardId, ref) {
       const key = imageKey(ref);
@@ -225,10 +148,6 @@ export function createCardScreenshots(
       queue.push({ key, cardId, ref, pending });
       read();
       return pending;
-    },
-    dispose() {
-      shown = undefined;
-      forget();
     },
   };
 }
@@ -338,7 +257,7 @@ export function hasCommittedScreenshots(state: SettledList): boolean {
 
 /** Each round's committed images, newest round first. */
 export function ScreenshotRounds(
-  props: ScreenshotsView & { committed: WorkboardCommittedScreenshots },
+  props: ScreenshotsView & { committed: WorkboardCommittedNodeFiles },
 ) {
   const rounds = () =>
     props.committed.state === "available" ? props.committed.rounds.toReversed() : undefined;
@@ -379,12 +298,12 @@ export function ScreenshotRounds(
 /** The images in the node worktree right now, with when they were listed and a refresh. */
 export function LiveScreenshots(
   props: ScreenshotsView & {
-    live: WorkboardLiveScreenshots;
+    live: WorkboardLiveNodeFiles;
     listedAt: number;
     onRefresh: () => void;
   },
 ) {
-  const shots = () => (props.live.state === "available" ? props.live.shots : undefined);
+  const shots = () => (props.live.state === "available" ? props.live.files : undefined);
   return (
     <section class="workboard-detail__section workboard-screens__live">
       <div class="workboard-screens__live-header">

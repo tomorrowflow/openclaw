@@ -3,13 +3,13 @@ import { posix } from "node:path";
 import { promisify } from "node:util";
 import type {
   WorkboardCard,
-  WorkboardCommittedScreenshots,
-  WorkboardLiveScreenshot,
-  WorkboardLiveScreenshots,
-  WorkboardScreenshotListResult,
-  WorkboardScreenshotResult,
-  WorkboardScreenshotRound,
-  WorkboardScreenshotSource,
+  WorkboardCommittedNodeFiles,
+  WorkboardExecutionTarget,
+  WorkboardLiveNodeFile,
+  WorkboardLiveNodeFiles,
+  WorkboardNodeFileListResult,
+  WorkboardNodeFileRound,
+  WorkboardNodeFileSource,
 } from "@openclaw/workboard-contract";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { fetchNodeFile, isPathSegment, listNodeDir } from "./node-files.js";
@@ -22,17 +22,48 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-const IMAGE_TYPES: Record<string, string> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
+type ArtifactKind = {
+  /** Names the kind in errors: "screenshot not found". */
+  noun: string;
+  /** Media type by lowercase extension; other files are not of this kind. */
+  types: Readonly<Record<string, string>>;
+  maxBytes: number;
+  /** Worktree-relative dirs walked live, and the only dirs a live read may name. */
+  liveDirs: (target: WorkboardExecutionTarget) => readonly string[];
+  /** Committed paths must sit under one of these; undefined accepts any path the round changed. */
+  committedDirs?: readonly string[];
 };
-const MAX_LISTED_SCREENSHOTS = 120;
-const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024;
+
+export type NodeTicketArtifactKind = "screenshot" | "prototype";
+
+const PROTOTYPE_DIRS = ["docs/prototypes"];
+
+const KINDS: Record<NodeTicketArtifactKind, ArtifactKind> = {
+  screenshot: {
+    noun: "screenshot",
+    types: {
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      webp: "image/webp",
+    },
+    maxBytes: 8 * 1024 * 1024,
+    liveDirs: (target) => target.screenshotDirs ?? ["docs/screenshots"],
+  },
+  // A repo's own HTML (an app's index.html) is not a prototype, so committed
+  // prototypes are bound to the same dir the live walk reads.
+  prototype: {
+    noun: "prototype",
+    types: { html: "text/html", htm: "text/html" },
+    maxBytes: 2 * 1024 * 1024,
+    liveDirs: () => PROTOTYPE_DIRS,
+    committedDirs: PROTOTYPE_DIRS,
+  },
+};
+
+const MAX_LISTED_FILES = 120;
 const READ_TIMEOUT_MS = 30_000;
-const DEFAULT_SCREENSHOT_DIRS = ["docs/screenshots"];
 // Evidence nests a run dir under its screenshot dir: features/evidence/ios-<run>/x.png.
 const LIVE_MAX_DEPTH = 2;
 const LIVE_MAX_LISTINGS = 40;
@@ -41,34 +72,44 @@ const DIR_LIST_TIMEOUT_MS = 20_000;
 // One walk may make LIVE_MAX_LISTINGS calls; the deadline bounds the whole walk, not each call.
 const LIVE_LIST_DEADLINE_MS = 30_000;
 
-function imageType(path: string): string | undefined {
+function mediaType(kind: ArtifactKind, path: string): string | undefined {
   const extension = /\.([a-z]+)$/i.exec(path)?.[1]?.toLowerCase();
-  return extension ? IMAGE_TYPES[extension] : undefined;
+  return extension ? kind.types[extension] : undefined;
+}
+
+function isUnder(dirs: readonly string[], path: string): boolean {
+  return dirs.some((dir) => path.startsWith(`${dir}/`));
 }
 
 /**
- * A node ticket's screenshots: images its rounds committed, for example under
- * `docs/screenshots/<ID>/`, and images the running agent has written into its
- * node worktree so far. The host clone holds every imported round, so those
- * are listed and read from git rather than copied into card state. The node
- * worktree is walked only when `live` is asked for.
+ * A node ticket's files of one kind: those its rounds committed, for example
+ * under `docs/screenshots/<ID>/` or `docs/prototypes/<ID>/`, and those the
+ * running agent has written into its node worktree so far. The host clone
+ * holds every imported round, so those are listed and read from git rather
+ * than copied into card state. The node worktree is walked only when `live`
+ * is asked for.
  */
-export async function listNodeTicketScreenshots(
+export async function listNodeTicketArtifacts(
   runtime: WorkboardNodeTicketRuntime,
   card: WorkboardCard,
+  kindName: NodeTicketArtifactKind,
   options: { live: boolean; now?: () => number },
-): Promise<WorkboardScreenshotListResult> {
+): Promise<WorkboardNodeFileListResult> {
+  const kind = KINDS[kindName];
   if (!options.live) {
-    return { committed: await listCommitted(card) };
+    return { committed: await listCommitted(card, kind) };
   }
   const [committed, live] = await Promise.all([
-    listCommitted(card),
-    listLive(runtime, card, options.now ?? Date.now),
+    listCommitted(card, kind),
+    listLive(runtime, card, kind, options.now ?? Date.now),
   ]);
   return { committed, live };
 }
 
-async function listCommitted(card: WorkboardCard): Promise<WorkboardCommittedScreenshots> {
+async function listCommitted(
+  card: WorkboardCard,
+  kind: ArtifactKind,
+): Promise<WorkboardCommittedNodeFiles> {
   const target = nodeTicketTarget(card);
   const rounds = (target?.worktree?.rounds ?? []).flatMap((entry) =>
     entry.changes ? [{ round: entry.round, changes: entry.changes }] : [],
@@ -76,11 +117,11 @@ async function listCommitted(card: WorkboardCard): Promise<WorkboardCommittedScr
   if (!target?.hostRepoPath || rounds.length === 0) {
     return { state: "available", rounds: [] };
   }
-  const listed: WorkboardScreenshotRound[] = [];
+  const listed: WorkboardNodeFileRound[] = [];
   let missing = 0;
   try {
     for (const { round, changes } of rounds) {
-      const paths = await roundImagePaths(target.hostRepoPath, changes.from, changes.to);
+      const paths = await roundPaths(kind, target.hostRepoPath, changes.from, changes.to);
       if (!paths) {
         missing += 1;
       } else if (paths.length > 0) {
@@ -99,8 +140,9 @@ async function listCommitted(card: WorkboardCard): Promise<WorkboardCommittedScr
   return { state: "available", rounds: listed };
 }
 
-/** The round's image paths; undefined when its commits are gone from the host clone. */
-async function roundImagePaths(
+/** The round's paths of this kind; undefined when its commits are gone from the host clone. */
+async function roundPaths(
+  kind: ArtifactKind,
   repoPath: string,
   from: string,
   to: string,
@@ -138,61 +180,67 @@ async function roundImagePaths(
   }
   return result.stdout
     .split("\0")
-    .filter((path) => path && imageType(path))
+    .filter(
+      (path) =>
+        path && mediaType(kind, path) && (!kind.committedDirs || isUnder(kind.committedDirs, path)),
+    )
     .toSorted()
-    .slice(0, MAX_LISTED_SCREENSHOTS);
+    .slice(0, MAX_LISTED_FILES);
 }
 
-/** One listed screenshot's bytes; paths the source did not list are refused. */
-export async function readNodeTicketScreenshot(
+export type NodeTicketArtifact = { mimeType: string; bytes: Buffer };
+
+/** One listed file's bytes; paths the source did not list are refused. */
+export async function readNodeTicketArtifact(
   runtime: WorkboardNodeTicketRuntime,
   card: WorkboardCard,
-  source: WorkboardScreenshotSource,
+  kindName: NodeTicketArtifactKind,
+  source: WorkboardNodeFileSource,
   path: string,
-): Promise<WorkboardScreenshotResult> {
+): Promise<NodeTicketArtifact> {
+  const kind = KINDS[kindName];
   return "live" in source
-    ? readLiveScreenshot(runtime, card, path)
-    : readRoundScreenshot(card, source.round, path);
+    ? readLive(runtime, card, kind, path)
+    : readRound(card, kind, source.round, path);
 }
 
-async function readRoundScreenshot(
+async function readRound(
   card: WorkboardCard,
+  kind: ArtifactKind,
   round: number,
   path: string,
-): Promise<WorkboardScreenshotResult> {
+): Promise<NodeTicketArtifact> {
   const target = nodeTicketTarget(card);
   const changes = target?.worktree?.rounds?.find((entry) => entry.round === round)?.changes;
-  const mimeType = imageType(path);
+  const mimeType = mediaType(kind, path);
   const paths =
     target && changes && mimeType
-      ? await roundImagePaths(target.hostRepoPath, changes.from, changes.to)
+      ? await roundPaths(kind, target.hostRepoPath, changes.from, changes.to)
       : undefined;
   if (!target || !changes || !mimeType || !paths?.includes(path)) {
-    throw new Error(`screenshot not found: round ${round} ${path}`);
+    throw new Error(`${kind.noun} not found: round ${round} ${path}`);
   }
   const repoPath = target.hostRepoPath;
   const object = `${changes.to}:${path}`;
   const size = await hostGit(repoPath, ["cat-file", "-s", object]);
   const bytes = Number(size.stdout.trim());
   if (size.code !== 0 || !Number.isInteger(bytes)) {
-    throw new Error(`screenshot ${path} is no longer in ${repoPath}`);
+    throw new Error(`${kind.noun} ${path} is no longer in ${repoPath}`);
   }
-  if (bytes > MAX_SCREENSHOT_BYTES) {
-    throw new Error(
-      `screenshot ${path} is ${bytes} bytes, over the ${MAX_SCREENSHOT_BYTES}-byte limit`,
-    );
+  if (bytes > kind.maxBytes) {
+    throw new Error(`${kind.noun} ${path} is ${bytes} bytes, over the ${kind.maxBytes}-byte limit`);
   }
   // The SDK command runner decodes stdout as text, which corrupts image bytes.
   const { stdout } = await execFileAsync("git", ["-C", repoPath, "cat-file", "blob", object], {
     encoding: "buffer",
-    maxBuffer: MAX_SCREENSHOT_BYTES + 1,
+    maxBuffer: kind.maxBytes + 1,
     timeout: READ_TIMEOUT_MS,
   });
-  return { mimeType, contentBase64: stdout.toString("base64") };
+  return { mimeType, bytes: stdout };
 }
 
-/** Where the agent writes screenshots; undefined once its round was imported and the worktree removed. */
-function liveWorktree(card: WorkboardCard) {
+/** Where the agent writes this kind; undefined once its round was imported and the worktree removed. */
+function liveWorktree(card: WorkboardCard, kind: ArtifactKind) {
   const target = nodeTicketTarget(card);
   const worktree = target?.worktree;
   const phase = worktree?.handoff?.phase;
@@ -202,30 +250,36 @@ function liveWorktree(card: WorkboardCard) {
   return {
     nodeId: target.nodeId,
     root: worktree.path,
-    dirs: target.screenshotDirs ?? DEFAULT_SCREENSHOT_DIRS,
+    dirs: kind.liveDirs(target),
   };
 }
 
-function liveUnavailableReason(nodeId: string, root: string, error: unknown): string {
-  return `${formatErrorMessage(error)}. Check that node ${nodeId} is connected, that gateway.nodes.commands.allow includes dir.list and file.fetch, and that its file-transfer allowReadPaths cover the screenshot dirs under ${root}.`;
+function liveUnavailableReason(
+  kind: ArtifactKind,
+  nodeId: string,
+  root: string,
+  error: unknown,
+): string {
+  return `${formatErrorMessage(error)}. Check that node ${nodeId} is connected, that gateway.nodes.commands.allow includes dir.list and file.fetch, and that its file-transfer allowReadPaths cover the ${kind.noun} dirs under ${root}.`;
 }
 
 async function listLive(
   runtime: WorkboardNodeTicketRuntime,
   card: WorkboardCard,
+  kind: ArtifactKind,
   now: () => number,
-): Promise<WorkboardLiveScreenshots> {
-  const worktree = liveWorktree(card);
+): Promise<WorkboardLiveNodeFiles> {
+  const worktree = liveWorktree(card, kind);
   if (!worktree) {
     return { state: "none" };
   }
   const { nodeId, root, dirs } = worktree;
-  const shots: WorkboardLiveScreenshot[] = [];
+  const files: WorkboardLiveNodeFile[] = [];
   const pending = dirs.map((dir) => ({ dir, depth: 0 }));
   const deadline = now() + LIVE_LIST_DEADLINE_MS;
   const overDeadline = {
     state: "unavailable",
-    reason: `listing the screenshot dirs under ${root} on node ${nodeId} took over ${LIVE_LIST_DEADLINE_MS / 1000} seconds. Check that the node is responsive and that the screenshot dirs hold few files.`,
+    reason: `listing the ${kind.noun} dirs under ${root} on node ${nodeId} took over ${LIVE_LIST_DEADLINE_MS / 1000} seconds. Check that the node is responsive and that the ${kind.noun} dirs hold few files.`,
   } as const;
   try {
     for (let listings = 0; listings < LIVE_MAX_LISTINGS; listings += 1) {
@@ -244,28 +298,28 @@ async function listLive(
         const relative = `${next.dir}/${entry.name}`;
         if (entry.isDir && next.depth < LIVE_MAX_DEPTH) {
           pending.push({ dir: relative, depth: next.depth + 1 });
-        } else if (entry.isFile && imageType(entry.name)) {
-          shots.push({ path: relative, bytes: entry.size, mtimeMs: entry.mtime });
+        } else if (entry.isFile && mediaType(kind, entry.name)) {
+          files.push({ path: relative, bytes: entry.size, mtimeMs: entry.mtime });
         }
       }
     }
   } catch (error) {
     return now() >= deadline
       ? overDeadline
-      : { state: "unavailable", reason: liveUnavailableReason(nodeId, root, error) };
+      : { state: "unavailable", reason: liveUnavailableReason(kind, nodeId, root, error) };
   }
   return {
     state: "available",
-    shots: shots
+    files: files
       .toSorted(
         (left, right) => right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path),
       )
-      .slice(0, MAX_LISTED_SCREENSHOTS),
+      .slice(0, MAX_LISTED_FILES),
   };
 }
 
-/** A live path must be an image inside one of the target's screenshot dirs, at most as deep as the listing walks. */
-function isLiveScreenshotPath(dirs: readonly string[], path: string): boolean {
+/** A live path must sit inside one of the kind's live dirs, at most as deep as the listing walks. */
+function isLivePath(dirs: readonly string[], path: string): boolean {
   return dirs.some((dir) => {
     if (!path.startsWith(`${dir}/`)) {
       return false;
@@ -275,21 +329,22 @@ function isLiveScreenshotPath(dirs: readonly string[], path: string): boolean {
   });
 }
 
-async function readLiveScreenshot(
+async function readLive(
   runtime: WorkboardNodeTicketRuntime,
   card: WorkboardCard,
+  kind: ArtifactKind,
   path: string,
-): Promise<WorkboardScreenshotResult> {
-  const worktree = liveWorktree(card);
-  const mimeType = imageType(path);
-  if (!worktree || !mimeType || !isLiveScreenshotPath(worktree.dirs, path)) {
-    throw new Error(`screenshot not found: live ${path}`);
+): Promise<NodeTicketArtifact> {
+  const worktree = liveWorktree(card, kind);
+  const mimeType = mediaType(kind, path);
+  if (!worktree || !mimeType || !isLivePath(worktree.dirs, path)) {
+    throw new Error(`${kind.noun} not found: live ${path}`);
   }
   const bytes = await fetchNodeFile(
     runtime,
     worktree.nodeId,
     posix.join(worktree.root, path),
-    MAX_SCREENSHOT_BYTES,
+    kind.maxBytes,
   );
-  return { mimeType, contentBase64: bytes.toString("base64") };
+  return { mimeType, bytes };
 }

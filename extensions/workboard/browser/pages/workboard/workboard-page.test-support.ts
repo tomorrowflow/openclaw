@@ -43,6 +43,12 @@ export function mountPage(
     if (method === "workboard.cards.list") {
       return { cards };
     }
+    if (
+      method === "workboard.cards.screenshots.list" ||
+      method === "workboard.cards.prototypes.list"
+    ) {
+      return { committed: { state: "available", rounds: [] } };
+    }
     if (method === "workboard.boards.upsert") {
       return {
         board: { ...(requestParams as Record<string, unknown>), createdAt: 1, updatedAt: 1 },

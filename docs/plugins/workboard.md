@@ -618,6 +618,19 @@ listing uses File Transfer's `dir.list` and
 [Workboard node setup](/plugins/workboard-node-setup#gateway-side); without
 them the panel names the denial and still shows the committed rounds.
 
+A node ticket's throwaway prototypes are self-contained HTML files the agent
+writes under `docs/prototypes/` (for example `docs/prototypes/<ID>/flow.html`).
+The card drawer's **Prototype** tab lists the `.html` and `.htm` files under
+that directory in the node worktree right now (newest first, same walk and
+grants as live screenshots) and those each round committed there, and appears
+once at least one exists. A picker switches between files, and the chosen one
+renders in a frame sandboxed with `allow-scripts` only, so it cannot reach the
+Control UI. The frame inherits the Control UI's content security policy, so
+when the Gateway serves the Control UI the prototype's markup and inline styles
+render but its inline and CDN scripts are blocked. The tab lists when the drawer opens, when the card imports a
+round, and on **List again** or a board refresh; a ticket with no prototype yet
+shows the tab once a later list finds one. Files over 2 MiB are refused.
+
 A project board can carry the target once as
 `orchestration.defaultTarget` through `workboard.boards.upsert`. New cards on
 that board copy it, including cards an agent creates with `workboard_create`

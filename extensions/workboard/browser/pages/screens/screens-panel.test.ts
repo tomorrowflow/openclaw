@@ -1,5 +1,5 @@
 import "../../test/dom.setup.ts";
-import type { WorkboardScreenshotListResult } from "@openclaw/workboard-contract";
+import type { WorkboardNodeFileListResult } from "@openclaw/workboard-contract";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createWorkboardCapability } from "../../lib/workboard/capability.ts";
 import { createWorkboardCard } from "../../lib/workboard/test/index-helpers.ts";
@@ -46,7 +46,7 @@ function nodeCard(status: "running" | "review" = "running") {
 
 /** The Screens panel for one session, its Gateway answering the list with `listed`. */
 function mountPanel(
-  listed: () => WorkboardScreenshotListResult | Promise<WorkboardScreenshotListResult>,
+  listed: () => WorkboardNodeFileListResult | Promise<WorkboardNodeFileListResult>,
   cards = [nodeCard()],
   sessionCards: unknown[] = [],
 ) {
@@ -86,7 +86,7 @@ it("shows the agent's live screenshots above each round's committed ones", async
     committed: { state: "available", rounds: [ROUND] },
     live: {
       state: "available",
-      shots: [
+      files: [
         { path: "features/evidence/ios-run-2/login.png", bytes: 10, mtimeMs: 2 },
         { path: "docs/screenshots/T-1/home.png", bytes: 10, mtimeMs: 1 },
       ],
@@ -113,7 +113,7 @@ it("loads the session's own card when the board has not loaded yet", async () =>
   const panel = mountPanel(
     () => ({
       committed: { state: "available", rounds: [ROUND] },
-      live: { state: "available", shots: [] },
+      live: { state: "available", files: [] },
     }),
     [],
     [nodeCard()],
@@ -147,7 +147,7 @@ it("lists again every 20 seconds only while shown and the ticket runs", async ()
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   const panel = mountPanel(() => ({
     committed: { state: "available", rounds: [] },
-    live: { state: "available", shots: [] },
+    live: { state: "available", files: [] },
   }));
   try {
     expect(panel.calls(LIST)).toHaveLength(1);
@@ -180,7 +180,7 @@ it("lists again every 20 seconds only while shown and the ticket runs", async ()
 
 it("skips a tick while the previous list is still loading", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-  const panel = mountPanel(() => new Promise<WorkboardScreenshotListResult>(() => {}));
+  const panel = mountPanel(() => new Promise<WorkboardNodeFileListResult>(() => {}));
   try {
     expect(panel.calls(LIST)).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(20_000);

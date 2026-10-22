@@ -1,6 +1,6 @@
 /** @jsxImportSource @solidjs/web */
 import type { BoardGetParams } from "@openclaw/gateway-protocol";
-import type { WorkboardCommittedScreenshots } from "@openclaw/workboard-contract";
+import type { WorkboardCommittedNodeFiles } from "@openclaw/workboard-contract";
 import { render } from "@solidjs/web";
 import type { ControlUiView } from "openclaw/plugin-sdk/control-ui";
 import { createSignal, Show } from "solid-js";
@@ -17,7 +17,7 @@ import {
   type CardScreenshots,
 } from "../workboard/view-card-screenshots.tsx";
 
-function hasNoCommittedRounds(committed: WorkboardCommittedScreenshots): boolean {
+function hasNoCommittedRounds(committed: WorkboardCommittedNodeFiles): boolean {
   return committed.state === "available" && committed.rounds.length === 0;
 }
 
