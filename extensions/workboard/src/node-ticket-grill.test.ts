@@ -72,7 +72,11 @@ async function cardSessionTurn(store: WorkboardStore, cardId: string, reply: str
  * that creates the grill session. The fake Gateway answers `chat.history`
  * with `history`, and starts no run in a grill session create while `failCreate` is set.
  */
-async function grillingTicket(store = createWorkboardSqliteTestStore(), open = true) {
+async function grillingTicket(
+  store = createWorkboardSqliteTestStore(),
+  open = true,
+  firstReport: unknown[] = grillReport,
+) {
   const gateway = createNodeGateway();
   const answer = gateway.respond.getMockImplementation()!;
   let history: unknown[] = [];
@@ -97,7 +101,7 @@ async function grillingTicket(store = createWorkboardSqliteTestStore(), open = t
     return answer(method, params);
   });
   const { card, sessionKey } = await startNodeCard(store, gateway);
-  await endTurn(store, card.id, grillReport);
+  await endTurn(store, card.id, firstReport);
   // Whether the grill session runs a turn, as the session owner reports it; "unreadable" makes the read fail.
   let replying: boolean | "unreadable" = false;
   const readSessions = async (options: { sessionKey?: string }) => {
@@ -163,12 +167,17 @@ async function grillingTicket(store = createWorkboardSqliteTestStore(), open = t
     })
       .find((tool) => tool.name === "workboard_grill_done")!
       .execute("grill-done", input);
+  const grillQuestions = async () => {
+    const respond = await capture.invoke("workboard.cards.grill.questions", { id: card.id });
+    return respond.mock.calls[0] as [boolean, unknown, { message?: string }?];
+  };
   return {
     store,
     gateway,
     card,
     sessionKey,
     end,
+    grillQuestions,
     handoffs,
     warn,
     log,
@@ -421,6 +430,56 @@ describe("node ticket grilling handoff", () => {
     } finally {
       service.stop();
     }
+  });
+});
+
+describe("Grill this on a questions round", () => {
+  const questionsReport = reportMessages({
+    outcome: "needs_input",
+    summary: "Two shapes fit.",
+    questions: [
+      "**Q1 – Empty input:** return `[]`? ➡️ yes",
+      "**Q2 – None:** raise `TypeError`? ➡️ yes",
+    ],
+  });
+
+  it("hands the questions round and later comments to a grill session, then resumes the ticket with its result", async () => {
+    const ticket = await grillingTicket(undefined, true, questionsReport);
+    const { store, card } = ticket;
+    await store.addComment(card.id, { body: "Q2 depends on the caller; ask me." });
+
+    const [ok, result] = await ticket.grillQuestions();
+
+    expect(ok).toBe(true);
+    expect(result).toMatchObject({ card: { status: "review", stage: { kind: "grilling" } } });
+    const log = await ticket.log();
+    expect(log).toMatch(/^## Handoff 1\n\nThe ticket session stopped with open questions/);
+    expect(log).toContain("**Q1 – Empty input:** return `[]`? ➡️ yes");
+    expect(log).toContain("Q2 depends on the caller; ask me.");
+
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect(ticket.warn).not.toHaveBeenCalled();
+    expect(ticket.grillCreates()).toHaveLength(1);
+    expect(ticket.grillCreates()[0]?.[1]?.message).toContain("**Q2 – None:** raise `TypeError`?");
+
+    await ticket.grillDone(await ticket.grillSessionKey(), { handoff: RESULT });
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect((await store.get(card.id))?.status).toBe("running");
+    expect(ticket.ticketLaunches().at(-1)?.[1]).toMatchObject({ key: ticket.sessionKey });
+    expect(ticket.brief()).toContain(`## Grilling ended`);
+    expect(ticket.brief()).toContain(RESULT);
+  });
+
+  it("refuses Grill this unless the card waits on a questions round", async () => {
+    const ticket = await grillingTicket();
+
+    const [ok, , error] = await ticket.grillQuestions();
+
+    expect(ok).toBe(false);
+    expect(error?.message).toContain("This card does not wait on a questions round");
+    expect(await ticket.log()).toBe(HANDOFF_LOG);
   });
 });
 

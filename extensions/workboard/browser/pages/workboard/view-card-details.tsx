@@ -21,6 +21,7 @@ import {
   getWorkboardDependencyState,
   getWorkboardLifecycle,
   getWorkboardState,
+  grillWorkboardQuestions,
   type WorkboardCard,
   type WorkboardUiState,
 } from "../../lib/workboard/index.ts";
@@ -450,6 +451,31 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                         </Show>
                         <CardStage stage={card().stage} now={Date.now()} />{" "}
                         <CardPullRequest card={card()} />
+                        <Show
+                          when={
+                            card().stage?.kind === "questions" &&
+                            action().writable &&
+                            !action().archived
+                          }
+                        >
+                          <div class="workboard-detail__actions">
+                            <button
+                              class="btn"
+                              type="button"
+                              data-card-action="grill-questions"
+                              title={t("workboard.grillQuestionsTitle")}
+                              disabled={action().busy}
+                              onClick={() =>
+                                void grillWorkboardQuestions({
+                                  ...workboardMutationContext(actionProps),
+                                  cardId: card().id,
+                                })
+                              }
+                            >
+                              {t("workboard.grillQuestions")}
+                            </button>
+                          </div>
+                        </Show>
                       </section>
                     </Show>
                     <InlineText

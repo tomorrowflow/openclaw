@@ -283,6 +283,15 @@ export async function endWorkboardGrill(params: WorkboardCardMutationParams) {
   });
 }
 
+/** Hands a node ticket's questions round to a grill session instead of a comment. */
+export async function grillWorkboardQuestions(params: WorkboardCardMutationParams) {
+  return runWorkboardCardMutation(params, async (state, client) => {
+    const payload = await client.request("workboard.cards.grill.questions", { id: params.cardId });
+    replaceCard(state, normalizeCardPayload(payload));
+    return true;
+  });
+}
+
 export async function updateWorkboardCardProperties(
   params: WorkboardClientContext & {
     card: WorkboardCard;
