@@ -256,12 +256,14 @@ describe("release candidate checklist", () => {
     telegramRunId?: string;
     retainedHelperRequest?: boolean;
     sdkAcknowledgement?: string;
+    sdkReport?: boolean;
     generatedFailure?: boolean;
   };
 
   it.each<QualificationCase>([
     ...["", "deadbeef", "f4b495f3"].map<QualificationCase>((sdkAcknowledgement) => ({
       sdkAcknowledgement,
+      sdkReport: sdkAcknowledgement === "",
     })),
     { launch: "npm-only", generatedFailure: true },
     { workflowSha: "b".repeat(40), savedToolingTag: "release-publish/bbbbbbbbbbbb-100" },
@@ -375,6 +377,7 @@ describe("release candidate checklist", () => {
       telegramRunId,
       retainedHelperRequest,
       sdkAcknowledgement,
+      sdkReport,
       generatedFailure,
     }) => {
       const { root: targetRoot, git } = candidateGitFixture({
@@ -573,6 +576,7 @@ describe("release candidate checklist", () => {
             env: {},
             execPath: process.execPath,
           },
+          TextDecoder,
           DEFAULT_REPO: "openclaw/openclaw",
           resolvePath: (...paths: string[]) => join(...paths),
           console: { log, warn: log },
@@ -628,7 +632,10 @@ describe("release candidate checklist", () => {
           validateCandidateChangelogProvenance: () => ({ status: "passed", shippedBaselines: [] }),
           runLocalGeneratedCheckIfNeeded: generatedChecks,
           releaseBranchForTag,
-          readFileSync: () => readFileSync(".github/workflows/full-release-validation.yml", "utf8"),
+          readFileSync: (file: string) =>
+            file.endsWith("plugin-sdk-api-release-diff.md")
+              ? readFileSync(file)
+              : readFileSync(".github/workflows/full-release-validation.yml", "utf8"),
           waitForSuccessfulRun: async (_repo: string, runId: string) => {
             if (dispatches.length === 0) {
               expect(generatedChecks).not.toHaveBeenCalled();
@@ -640,7 +647,26 @@ describe("release candidate checklist", () => {
               source: { workflowRef: options.workflowRef },
             };
           },
-          downloadArtifact: () => {},
+          downloadArtifact: (_repo: string, _runId: string, name: string, outputDir: string) => {
+            if (sdkReport && name.startsWith("plugin-sdk-api-release-diff-")) {
+              mkdirSync(outputDir, { recursive: true });
+              writeFileSync(
+                join(outputDir, "plugin-sdk-api-release-diff.md"),
+                [
+                  "# Plugin SDK API diff",
+                  "",
+                  "latest: v2026.8.1 → fixture",
+                  "",
+                  "Acknowledgement digest: `f4b495f3`",
+                  "",
+                  "## Exports added (1)",
+                  "",
+                  "- `openclaw/plugin-sdk` — `send`",
+                  "",
+                ].join("\n"),
+              );
+            }
+          },
           readJson: (file: string) =>
             file === statePath || file.endsWith("frv-request.json")
               ? JSON.parse(readFileSync(file, "utf8"))
@@ -707,7 +733,14 @@ describe("release candidate checklist", () => {
         expect(error.message).toContain(
           "Plugin SDK API changes require acknowledgement digest f4b495f3",
         );
-        expect(error.message).toContain("Review the Plugin SDK API diff before rerunning.");
+        if (sdkReport) {
+          expect(error.message).toContain("## Exports added (1)");
+          expect(error.message).toContain("- `openclaw/plugin-sdk` — `send`");
+        } else {
+          expect(error.message).toContain(
+            "Review the Plugin SDK API diff artifact before rerunning.",
+          );
+        }
         const command = error.message.split("\n").at(-1);
         const decoded = execFileSync(
           "bash",
@@ -2791,6 +2824,103 @@ describe("GitHub API public fallback", () => {
       expect(fetchImpl).toHaveBeenCalledTimes(2);
       expect(fetchImpl.mock.calls[0]?.[1]?.headers).toMatchObject({ Authorization: "Bearer x" });
       expect(fetchImpl.mock.calls[1]?.[1]?.headers).not.toHaveProperty("Authorization");
+    },
+  );
+});
+
+describe("release run environment approval diagnostics", () => {
+  it.each([
+    { capability: true, unavailable: false, empty: false },
+    { capability: false, unavailable: false, empty: false },
+    { capability: undefined, unavailable: false, empty: false },
+    { capability: undefined, unavailable: true, empty: false },
+    { capability: undefined, unavailable: false, empty: true },
+  ])(
+    "reports approval capability $capability (unavailable=$unavailable, empty=$empty)",
+    async ({ capability, unavailable, empty }) => {
+      const source = readFileSync("scripts/release-candidate-checklist.mts", "utf8");
+      const owners = [
+        "runInfo",
+        "pendingDeployments",
+        "summarizePendingDeployments",
+        "summarizeFailedRun",
+        "waitForSuccessfulRun",
+      ]
+        .map(
+          (name) =>
+            source.match(new RegExp(`^(?:async )?function ${name}\\([\\s\\S]*?^\\}`, "mu"))?.[0],
+        )
+        .join("\n");
+      const log = vi.fn();
+      let reads = 0;
+      const fetchImpl = vi.fn(async (path: string, init?: RequestInit) => {
+        if (path.endsWith("/pending_deployments")) {
+          if (unavailable && new Headers(init?.headers).has("Authorization")) {
+            return jsonResponse(
+              { message: "API rate limit exceeded; credential-private fixture error" },
+              { status: 403 },
+            );
+          }
+          return jsonResponse(
+            empty || reads > 1
+              ? []
+              : [
+                  {
+                    environment: { id: 7, name: "npm-release" },
+                    current_user_can_approve: unavailable ? false : capability,
+                  },
+                ],
+          );
+        }
+        if (path.includes("/jobs?")) {
+          return jsonResponse({ jobs: [] });
+        }
+        reads++;
+        return jsonResponse({
+          id: 123,
+          name: "Release",
+          head_branch: "main",
+          status: reads === 1 ? "waiting" : "completed",
+          conclusion: reads === 1 ? null : "success",
+          html_url: "https://github.com/fixture/repo/actions/runs/123",
+        });
+      });
+      await runInNewContext(
+        stripNodeTypeScriptTypes(
+          `${owners}\nwaitForSuccessfulRun("fixture/repo", "123", { workflowName: "Release", workflowRef: "main" });`,
+        ),
+        {
+          githubApi: (path: string, options: Parameters<typeof githubApi>[1]) =>
+            githubApi(path, { ...options, token: "test-token", fetchImpl }),
+          isRecord,
+          formatJsonValue: JSON.stringify,
+          console: { log },
+          wait: async () => {},
+        },
+      );
+      const output = log.mock.calls.map(([line]) => line).join("\n");
+      if (unavailable) {
+        expect(output).toContain("environment approval status unavailable");
+        expect(output).toContain("not proof that no approval is pending");
+        expect(output).not.toContain("credential-private");
+      } else if (empty) {
+        expect(output).not.toContain("pending approval");
+        expect(output).not.toContain("approval status unavailable");
+      } else {
+        expect(output).toContain('pending approval: env="npm-release"');
+        expect(output).toContain(
+          "Environment approval is separate from repository write, organization membership, branch-policy read, CI bypass, and production deployment authority",
+        );
+        expect(output.includes("approve: gh api -X POST")).toBe(capability === true);
+        if (capability !== true) {
+          expect(output).toContain("ask an eligible environment reviewer");
+          expect(output).toContain(
+            capability === false
+              ? "authenticated caller cannot approve"
+              : "Caller approval capability is unknown",
+          );
+        }
+      }
     },
   );
 });

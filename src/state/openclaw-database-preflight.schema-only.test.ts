@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
+import { SqliteReadOnlyInspectionContentionError } from "../infra/sqlite-readonly-worker-protocol.js";
 import * as snapshots from "../infra/sqlite-snapshot-source.js";
 import { withAgentDatabaseStartupAdmission } from "./agent-database-startup.js";
 import {
@@ -14,6 +15,7 @@ import {
   assertOpenClawDatabasesReady,
   preflightOpenClawDatabaseSchemas,
 } from "./openclaw-database-preflight.js";
+import { formatIndeterminateDatabaseReadiness } from "./openclaw-database-preflight.messages.js";
 import { OPENCLAW_STATE_SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
 import {
   withArtifactPreservingStateReads,
@@ -29,6 +31,52 @@ afterEach(() => {
   vi.restoreAllMocks();
   closeOpenClawAgentDatabasesForTest();
   closeOpenClawStateDatabaseForTest();
+});
+
+it.each([
+  {
+    name: "retryable snapshot contention",
+    error: new SqliteReadOnlyInspectionContentionError("snapshot did not stabilize"),
+    guidance: "Wait a moment for write activity to settle, then retry the inspection.",
+    restore: false,
+  },
+  {
+    name: "database corruption",
+    error: new Error("database disk image is malformed"),
+    guidance: "Stop OpenClaw processes, then restore the affected database from a verified backup.",
+    restore: true,
+  },
+])("gives Doctor the next step for $name", ({ error, guidance, restore }) => {
+  const row = { kind: "state" as const, path: "/state.sqlite", reason: error.message };
+  const causes = new WeakMap([[row, error]]);
+  const message = formatIndeterminateDatabaseReadiness([row], "doctor", causes);
+  expect(message).toContain("Doctor could not complete repair");
+  expect(message).toContain(guidance);
+  if (!restore) {
+    expect(message).not.toContain("restore");
+  }
+});
+
+it("keeps retry and restore guidance with their affected agent databases", () => {
+  const busy = {
+    kind: "agent" as const,
+    path: "/busy.sqlite",
+    reason: "snapshot did not stabilize",
+  };
+  const corrupt = {
+    kind: "agent" as const,
+    path: "/corrupt.sqlite",
+    reason: "database disk image is malformed",
+  };
+  const causes = new WeakMap<object, unknown>([
+    [busy, new SqliteReadOnlyInspectionContentionError(busy.reason)],
+    [corrupt, new Error(corrupt.reason)],
+  ]);
+  expect(formatIndeterminateDatabaseReadiness([busy, corrupt], "doctor", causes)).toBe(
+    "Doctor could not complete repair because persisted database readiness could not be verified:\n" +
+      "agent /busy.sqlite: snapshot did not stabilize Wait a moment for write activity to settle, then retry the inspection.\n" +
+      "agent /corrupt.sqlite: database disk image is malformed Stop OpenClaw processes, then restore the affected database from a verified backup.",
+  );
 });
 
 it("keeps readiness on the admitted shared-state snapshot and observes changes in the next admission", async () => {

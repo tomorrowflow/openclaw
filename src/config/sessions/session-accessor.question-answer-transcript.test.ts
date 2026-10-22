@@ -208,6 +208,8 @@ it.each([
       }
       releaseAppend.resolve();
       const result = await outcome;
+      commitAdmission?.mockRestore();
+      commitAdmission = undefined;
       const messages = await readTranscriptMessages({
         sessionId: target.sessionId,
         sessionKey: target.sessionKey,

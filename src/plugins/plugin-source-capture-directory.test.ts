@@ -19,6 +19,7 @@ import { capturePluginGenerationArtifact } from "./plugin-generation-artifact.js
 import { retainGatewayPluginMetadata } from "./plugin-metadata-lifecycle.js";
 import { withPluginSourceCaptureDirectory } from "./plugin-package-metadata-capture.js";
 import {
+  createPluginNativeCaptureRoot,
   createPluginSourceCaptureRoot,
   prunePluginNativeCaptureDirectories,
   retainPluginSourceCaptureInstance,
@@ -56,6 +57,53 @@ function age(directory: string): void {
   const timestamp = new Date(Date.now() - 2 * hour);
   fs.utimesSync(directory, timestamp, timestamp);
 }
+
+it("keeps update source copies in TMPDIR without relocating retained native captures", async () => {
+  const stateDir = temp.make("plugin-capture-update-state-");
+  const source = createSource();
+  vi.stubEnv("OPENCLAW_UPDATE_IN_PROGRESS", "1");
+  vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+  const artifact = capturePluginGenerationArtifact(source);
+  const native = createPluginNativeCaptureRoot(stateDir);
+  try {
+    expect(
+      artifact.boundaryRoot.startsWith(path.join(process.env.TMPDIR!, "openclaw-plugin-captures-")),
+    ).toBe(true);
+    expect(fs.readFileSync(artifact.resolve(path.join(source, "index.cjs")), "utf8")).toBe(
+      capturedSource,
+    );
+    expect(
+      native.directory.startsWith(path.join(stateDir, "tmp", "plugin-captures") + path.sep),
+    ).toBe(true);
+  } finally {
+    await native.disposeAsync();
+    await artifact.disposeAsync();
+  }
+});
+
+it("keeps update plugin captures on the selected temporary volume", async () => {
+  const stateDir = temp.make("plugin-capture-update-instance-");
+  const source = createSource();
+  vi.stubEnv("OPENCLAW_UPDATE_IN_PROGRESS", "1");
+  vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+  const instance = retainPluginSourceCaptureInstance(stateDir);
+  const capture = instance.createDirectory();
+  const artifact = withPluginSourceCaptureDirectory(capture, () =>
+    capturePluginGenerationArtifact(source),
+  );
+  try {
+    const root = path.dirname(path.dirname(capture));
+    expect(root.startsWith(`${process.env.TMPDIR}${path.sep}`)).toBe(true);
+    expect(fs.readFileSync(artifact.resolve(path.join(source, "index.cjs")), "utf8")).toBe(
+      capturedSource,
+    );
+    expect(fs.existsSync(path.join(stateDir, "tmp", "plugin-captures"))).toBe(false);
+  } finally {
+    await artifact.disposeAsync();
+    await instance.releaseAsync();
+    await sweepPluginSourceCapturesForTest(stateDir);
+  }
+});
 
 function capturePaths(
   stateDir: string,

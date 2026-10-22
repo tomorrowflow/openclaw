@@ -20,20 +20,25 @@ import * as windowsRecovery from "./update-command-windows-task.js";
 const { mocks, withServiceHome } =
   await import("./update-command-service-maintenance.test-support.js");
 
-it.each(["ERROR: Access is denied.", "HRESULT 0x80070005"])(
-  "reports elevation guidance without restoring a denied task disable: %s",
-  (detail) =>
+it.each([
+  { hresult: -2147024891, detail: "", denied: true },
+  { hresult: -2147024894, detail: "ERROR: Access is denied.", denied: false },
+])(
+  "reports task elevation from HRESULT $hresult, not diagnostic text",
+  ({ hresult, detail, denied }) =>
     withServiceHome(async (home) => {
       mockProcessPlatform("win32");
-      const task = vi.spyOn(schtasksExec, "execSchtasks").mockImplementation(async (args) =>
-        args[0] === "/Query"
-          ? {
-              code: 0,
-              stdout: "<Task><Settings><Enabled>true</Enabled></Settings></Task>",
-              stderr: "",
-            }
-          : { code: 1, stdout: "", stderr: detail },
-      );
+      vi.spyOn(schtasksExec, "execSchtasks").mockResolvedValue({
+        code: 0,
+        stdout: "<Task><Settings><Enabled>true</Enabled></Settings></Task>",
+        stderr: "",
+      });
+      const task = vi.spyOn(schtasksExec, "execScheduledTaskEnabledChange").mockResolvedValue({
+        code: 1,
+        stdout: String(hresult),
+        stderr: detail,
+        hresult,
+      });
       const service = createMockGatewayService({
         readCommand: async () => ({
           programArguments: [process.execPath, path.join(process.cwd(), "openclaw.mjs"), "gateway"],
@@ -50,16 +55,19 @@ it.each(["ERROR: Access is denied.", "HRESULT 0x80070005"])(
         shouldRestart: true,
         jsonMode: true,
       }).catch((error: unknown) => error);
-      expect(failure).toMatchObject({
-        failureFacts: [expect.objectContaining({ code: "windows-task-elevation-required" })],
-        message: expect.stringContaining("elevated terminal (Run as administrator)"),
-      });
-      expect(String(failure)).toContain("npm i -g 'openclaw@<target>' --allow-scripts=openclaw");
-      expect(String(failure)).toContain("openclaw doctor --fix");
-      expect(String(failure)).toContain("openclaw gateway restart");
-      expect(
-        task.mock.calls.map(([args]) => (args[0] === "/Change" ? args.at(-1) : args[0])),
-      ).toEqual(["/Query", "/DISABLE"]);
+      if (denied) {
+        expect(failure).toMatchObject({
+          failureFacts: [expect.objectContaining({ code: "windows-task-elevation-required" })],
+          message: expect.stringContaining("elevated terminal (Run as administrator)"),
+        });
+        expect(String(failure)).toContain("npm i -g 'openclaw@<target>' --allow-scripts=openclaw");
+        expect(String(failure)).toContain("openclaw doctor --fix");
+        expect(String(failure)).toContain("openclaw gateway restart");
+      } else {
+        expect(String(failure)).toContain("Scheduled Task disable failed");
+        expect(String(failure)).not.toContain("elevated terminal");
+      }
+      expect(task).toHaveBeenCalledTimes(denied ? 1 : 2);
       expect(service.stop).not.toHaveBeenCalled();
     }),
 );
@@ -109,15 +117,15 @@ it.each(["disable", "restore", "compensation", "never", "stop-return", "stop-rej
             stderr: "",
           };
         }
-        expect(args[0]).toBe("/Change");
-        const action = args.at(-1);
-        if (action !== "/ENABLE" && action !== "/DISABLE") {
-          throw new Error("Unexpected Scheduled Task mutation");
-        }
-        mutations.push(action);
-        enabled = action === "/ENABLE";
-        return { code: 0, stdout: "", stderr: "" };
+        throw new Error("Unexpected Scheduled Task query");
       });
+      vi.spyOn(schtasksExec, "execScheduledTaskEnabledChange").mockImplementation(
+        async (_taskName, requestedEnabled) => {
+          mutations.push(requestedEnabled ? "/ENABLE" : "/DISABLE");
+          enabled = requestedEnabled;
+          return { code: 0, stdout: "", stderr: "" };
+        },
+      );
       mocks.service.mockReturnValue(
         createMockGatewayService({
           readCommand: async () => ({
@@ -246,18 +254,19 @@ it.each(["before-disable", "after-disable"] as const)(
             stderr: "",
           };
         }
-        const action = args.at(-1);
-        if (args[0] !== "/Change" || (action !== "/ENABLE" && action !== "/DISABLE")) {
-          throw new Error("Unexpected Scheduled Task mutation");
-        }
-        mutations.push(action);
-        enabled = action === "/ENABLE";
-        if (action === "/DISABLE") {
-          run.interrupted = true;
-          return { code: 124, stdout: "", stderr: "disable failed after commit" };
-        }
-        return { code: 0, stdout: "", stderr: "" };
+        throw new Error("Unexpected Scheduled Task query");
       });
+      vi.spyOn(schtasksExec, "execScheduledTaskEnabledChange").mockImplementation(
+        async (_taskName, requestedEnabled) => {
+          mutations.push(requestedEnabled ? "/ENABLE" : "/DISABLE");
+          enabled = requestedEnabled;
+          if (!requestedEnabled) {
+            run.interrupted = true;
+            return { code: 124, stdout: "", stderr: "disable failed after commit" };
+          }
+          return { code: 0, stdout: "", stderr: "" };
+        },
+      );
       const service = createMockGatewayService({
         readCommand: async () => ({
           programArguments: [process.execPath, path.join(root, "openclaw.mjs"), "gateway"],
@@ -297,7 +306,7 @@ it.each(["before-disable", "after-disable"] as const)(
       expect(String(failure)).toMatch(
         interruption === "before-disable"
           ? /requester-revoked/
-          : /schtasks disable failed: disable failed after commit/,
+          : /Scheduled Task disable failed: disable failed after commit/,
       );
     }),
 );

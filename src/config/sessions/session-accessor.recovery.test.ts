@@ -429,6 +429,8 @@ describe("recoverSessionEntryFromRestartTombstone", () => {
                   verifiedCommands++;
                   if (retireOwner && verifiedCommands === 1) {
                     // Retirement belongs to an independent caller after the native commit.
+                    captures.mockClear();
+                    preparations.mockClear();
                     closing = runInDetachedAsyncContext(() =>
                       closeOpenClawAgentDatabaseByPathAsync(
                         resolveOpenClawAgentSqlitePath(databaseOptions),
@@ -436,8 +438,6 @@ describe("recoverSessionEntryFromRestartTombstone", () => {
                       ),
                     );
                     void closing.catch(() => undefined);
-                    captures.mockClear();
-                    preparations.mockClear();
                   }
                   if (dropReceipt) {
                     const receipt = vi

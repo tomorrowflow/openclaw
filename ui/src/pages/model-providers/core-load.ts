@@ -2,6 +2,7 @@ import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { ModelCatalogResult } from "../../api/types.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
+import { invalidateModelCatalogCache } from "../../lib/model-catalog-cache.ts";
 import { loadModelCatalog, modelCatalogRefreshError } from "../../lib/model-catalog-store.ts";
 import { loadModelProvidersData, type ModelProvidersData } from "./load.ts";
 import type { ControllerHost } from "./page-controller.ts";
@@ -25,6 +26,7 @@ export class ModelProviderCoreLoader {
   private catalogRequest: AbortController | null = null;
   catalogError: string | null = null;
   private request: AbortController | null = null;
+  private publicationPending = false;
 
   constructor(
     private readonly host: ControllerHost,
@@ -80,6 +82,7 @@ export class ModelProviderCoreLoader {
     } finally {
       if (this.catalogRequest === request) {
         this.catalogRequest = null;
+        this.refreshPendingPublication(client, agentId);
         this.host.requestUpdate();
       }
     }
@@ -91,9 +94,10 @@ export class ModelProviderCoreLoader {
     reason: ModelProviderRefreshReason,
   ): Promise<void> {
     if (reason === "publication" && (this.active || this.catalogLoading)) {
-      // Catalog changes during an existing read are best effort until the next refresh.
+      this.publicationPending = true;
       return;
     }
+    this.publicationPending = false;
     this.request?.abort();
     const request = new AbortController();
     this.request = request;
@@ -119,12 +123,22 @@ export class ModelProviderCoreLoader {
       if (this.request === request) {
         this.request = null;
         this.active = false;
+        this.refreshPendingPublication(client, agentId);
         this.host.requestUpdate();
       }
     }
   }
 
+  private refreshPendingPublication(client: GatewayBrowserClient, agentId: string): void {
+    if (this.publicationPending && !this.active && !this.catalogLoading) {
+      // A completed read may have republished facts captured before the notification.
+      invalidateModelCatalogCache(client, { agentId });
+      void this.refresh(client, agentId, "publication");
+    }
+  }
+
   invalidate(): void {
+    this.publicationPending = false;
     this.resetCatalog();
     this.active = false;
     this.request?.abort();

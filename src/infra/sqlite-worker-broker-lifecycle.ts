@@ -150,7 +150,8 @@ export function createSqliteWorkerLifecycle({
     const { carrierUrl } = options;
     const { worker, exited } = runInDetachedAsyncContext(() => ({
       worker: createCpuTrackedWorker(carrierUrl, {
-        resourceLimits: { maxOldGenerationSizeMb: 512 },
+        // V8's default young generation lets each carrier keep ~60 MiB of idle nursery.
+        resourceLimits: { maxOldGenerationSizeMb: 512, maxYoungGenerationSizeMb: 32 },
         env: resolveNodeCompileCacheEnv(),
         execArgv: resolveRuntimeWorkerThreadExecArgv(carrierUrl),
       }),
@@ -289,7 +290,11 @@ export function createSqliteWorkerLifecycle({
             actor.markNativeStopped();
           }
         } catch (error) {
-          errors.push(error);
+          // A close refused by an already failed slot never ran. Native exit owns
+          // its retirement; the original request still reports the slot failure.
+          if (error !== actor.slot.failed) {
+            errors.push(error);
+          }
           fail(actor.slot, error instanceof Error ? error : new Error(String(error)));
           await actor.slot.exit;
         }

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { ModelsListResult } from "../../../packages/gateway-protocol/src/schema/agents-models-skills.js";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import type { AuthProfileStore } from "../../agents/auth-profiles/types.js";
+import { OPENCLAW_SQLITE_BUSY_TIMEOUT_MS } from "../../state/openclaw-state-db-contract.js";
 import { resolveTestNodeExecPath } from "../../test-utils/node-process.js";
 import { createOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { disconnectGatewayClient, startGatewayWithClient } from "../test-helpers.e2e.js";
@@ -153,7 +154,7 @@ describe("models.authRefresh learned catalog", () => {
             "--eval",
             `
               import { DatabaseSync } from "node:sqlite";
-              const database = new DatabaseSync(process.argv[1]);
+              const database = new DatabaseSync(process.argv[1], { timeout: Number(process.argv[3]) });
               try {
                 const result = database
                   .prepare("UPDATE auth_profile_store SET store_json = ?, updated_at = ? WHERE store_key = ?")
@@ -165,6 +166,7 @@ describe("models.authRefresh learned catalog", () => {
             `,
             agentDatabasePath,
             JSON.stringify(store),
+            String(OPENCLAW_SQLITE_BUSY_TIMEOUT_MS),
           ],
           { env: { ...state.env, NODE_OPTIONS: undefined } },
         );

@@ -194,7 +194,15 @@ it.each([
             on: hooks,
             registerService: (service) => services.push(service),
           });
+        const backgroundTasks: Promise<unknown>[] = [];
         if (!owner) {
+          api.lifecycle.runInBackgroundContext = (run) => {
+            const task = run();
+            if (task instanceof Promise) {
+              backgroundTasks.push(task);
+            }
+            return task;
+          };
           Object.assign(api.runtime, { config: { current: () => config } });
           memoryCore.register?.(api);
         }
@@ -230,17 +238,29 @@ it.each([
                 return preparation;
               });
               owner?.bindGateway();
+              if (owner) {
+                const runInBackgroundContext = api.lifecycle.runInBackgroundContext;
+                api.lifecycle.runInBackgroundContext = (run) => {
+                  const task = runInBackgroundContext ? runInBackgroundContext(run) : run();
+                  if (task instanceof Promise) {
+                    backgroundTasks.push(task);
+                  }
+                  return task;
+                };
+              }
               await service.start(context);
+              backgroundTasks.length = 0;
               const startup = (
                 hook as (event: { port: number }, ctx: { config: OpenClawConfig }) => Promise<void>
               )({ port: 0 }, { config });
               // On the regression, the hook settles with a warning instead of joining preparation.
-              await Promise.race([joining.promise, startup]);
+              await Promise.race([joining.promise, Promise.all(backgroundTasks)]);
               const prepared = wait("main", { env: state.env });
               expect(prepared).toBeDefined();
               activate();
               await prepared;
               await startup;
+              await Promise.all(backgroundTasks);
               expect.soft(logger.warn.mock.calls).toEqual([]);
               expect.soft(getSessionEntry({ agentId: "main", sessionKey })).toBeUndefined();
               expect
@@ -354,6 +374,7 @@ it("does not warn when fresh agent stores are created during dreaming startup cl
       };
       const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
       const owner = createManagedMemoryCore(config, logger);
+      const backgroundTasks: Promise<unknown>[] = [];
       const service = owner.registry.services.find(
         (entry) => entry.service.id === "memory-core-dreaming",
       )?.service;
@@ -391,11 +412,21 @@ it("does not warn when fresh agent stores are created during dreaming startup cl
       );
       try {
         owner.bindGateway();
+        const runInBackgroundContext = owner.api.lifecycle.runInBackgroundContext;
+        owner.api.lifecycle.runInBackgroundContext = (run) => {
+          const task = runInBackgroundContext ? runInBackgroundContext(run) : run();
+          if (task instanceof Promise) {
+            backgroundTasks.push(task);
+          }
+          return task;
+        };
         await service.start(context);
+        backgroundTasks.length = 0;
         await (hook as (event: { port: number }, ctx: { config: OpenClawConfig }) => Promise<void>)(
           { port: 0 },
           { config },
         );
+        await Promise.all(backgroundTasks);
         expect(startedAgents).toEqual(agentIds);
         expect(logger.warn).not.toHaveBeenCalled();
         expect(logger.error).not.toHaveBeenCalled();
@@ -491,6 +522,13 @@ it.for([
       }
       const runtime = (getPluginOriginalValue(registeredRuntime, instance) ??
         registeredRuntime) as typeof registeredRuntime;
+      // Service restarts reopen indexes only after a manager has run in this process.
+      const earlier = await runtime.getMemorySearchManager({ cfg: config, agentId: "main" });
+      if (!earlier.manager) {
+        throw new Error(earlier.error ?? "Expected an earlier memory manager");
+      }
+      await runtime.closeAllMemorySearchManagers?.();
+      subscriptions.length = 0;
       const getManager = runtime.getMemorySearchManager.bind(runtime);
       const acquired = createDeferredCore<Awaited<ReturnType<typeof getManager>>>();
       const acquisition = vi

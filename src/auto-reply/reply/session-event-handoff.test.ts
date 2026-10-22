@@ -622,9 +622,14 @@ describe("session event target custody", () => {
   );
 
   it.each(["awaited", "ignored"] as const)(
-    "reports a queued event's policy failure once with an %s receipt",
+    "reports a re-admitted event's dispatch failure once with an %s receipt",
     async (receiptUse) => {
       await withTargetFixture(async ({ env }) => {
+        const readmissionDispatched = createDeferred();
+        dispatch.mockImplementationOnce(() => {
+          readmissionDispatched.resolve();
+          throw new Error("Re-admitted execution failed");
+        });
         const target = await captureSessionEventTargetForHost("main", sessionKey, { env });
         const receipt = enqueueSessionEventForHost("Process completed", {
           agentId: "main",
@@ -636,13 +641,14 @@ describe("session event target custody", () => {
           ...getRuntimeConfigSnapshot(),
           tools: { deny: ["write", "message"] },
         });
+        await readmissionDispatched.promise;
 
         if (receiptUse === "awaited") {
           await expect(receipt.settled).resolves.toMatchObject({
             status: "failed",
             executionStarted: false,
             delivered: false,
-            error: expect.stringContaining("configuration changed"),
+            error: expect.stringContaining("Re-admitted execution failed"),
           });
         }
         // Join the independent owner without requiring a producer to consume its receipt.
@@ -658,9 +664,9 @@ describe("session event target custody", () => {
           agentId: "main",
           sessionKey,
           eventId: receipt.id,
-          error: expect.stringContaining("configuration changed"),
+          error: expect.stringContaining("Re-admitted execution failed"),
         });
-        expect(dispatch).not.toHaveBeenCalled();
+        expect(dispatch).toHaveBeenCalledTimes(1);
         expect(peekSystemEventEntries(sessionKey)).toEqual([]);
       });
     },

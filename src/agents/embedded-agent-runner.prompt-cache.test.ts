@@ -217,6 +217,18 @@ function responseFor(
   return { response, output };
 }
 
+function rateLimitResponse(api: Api) {
+  const message = "Synthetic tokens-per-minute limit";
+  const body =
+    api === "anthropic-messages"
+      ? { type: "error", error: { type: "rate_limit_error", message } }
+      : { error: { message, type: "tokens", param: null, code: "rate_limit_exceeded" } };
+  return new Response(JSON.stringify(body), {
+    status: 429,
+    headers: { "content-type": "application/json", "retry-after-ms": "10" },
+  });
+}
+
 afterEach(async () => {
   await clearActivePluginRegistry();
 });
@@ -464,13 +476,17 @@ describe("provider prefix across admitted Gateway agent turns", () => {
                 if (requestsThisTurn > 4) {
                   throw new Error(`Unexpected provider retry in synthetic turn ${turn}`);
                 }
+                // A rate-limited tool continuation retries the same model from the transcript.
+                if (turn === 10 && requestsThisTurn === 2) {
+                  return rateLimitResponse(api);
+                }
                 // Replay the error in turn 6, then verify those sent bytes after reopen in turn 7.
                 const failure = api === "openai-responses" && turn === 5 && requestsThisTurn === 1;
                 const result = responseFor(
                   api,
                   model,
                   requests.length,
-                  (turn === 1 && requestsThisTurn === 1) || failure,
+                  ((turn === 1 || turn === 10) && requestsThisTurn === 1) || failure,
                   failure,
                 );
                 if (effectiveInput) {
@@ -494,7 +510,7 @@ describe("provider prefix across admitted Gateway agent turns", () => {
             },
           });
           try {
-            for (turn = 1; turn <= 10; turn++) {
+            for (turn = 1; turn <= 11; turn++) {
               requestsThisTurn = 0;
               if (turn === 3) {
                 const runtime = peekSessionMcpRuntime({ sessionKey });
@@ -674,7 +690,11 @@ describe("provider prefix across admitted Gateway agent turns", () => {
                 admission.close();
               }
             }
-            expect(requests.length).toBe(12);
+            expect(requests.length).toBe(15);
+            expect(
+              requests.filter((request) => request.turn === 10),
+              "the rate-limited continuation was retried",
+            ).toHaveLength(3);
             if (api === "openai-responses") {
               expect(requests.filter((request) => request.turn === 5)).toHaveLength(1);
               const afterFailure = requests.find((request) => request.turn === 6)!.prefix.history;

@@ -196,7 +196,11 @@ it("continues one cron user turn when the primary times out after provider dispa
       sessionKey: result.sessionKey!,
       storePath: path.join(state.agentDir(), "openclaw-agent.sqlite"),
     });
-    expect(messages.filter((message) => message.role === "user")).toHaveLength(1);
+    const userMessages = messages.filter((message) => message.role === "user");
+    expect(userMessages.filter((message) => message.display !== false)).toHaveLength(1);
+    expect(userMessages.filter((message) => message.display === false)).toEqual([
+      expect.objectContaining({ display: false, provenance: { kind: "internal_system" } }),
+    ]);
     expect(messages.map(readModelFallbackNotice).filter(Boolean)).toMatchObject([
       {
         kind: "model-fallback",

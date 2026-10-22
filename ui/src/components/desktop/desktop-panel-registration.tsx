@@ -20,6 +20,7 @@ export type DesktopPanelInputs = Pick<
   | "embedded"
   | "presented"
   | "refreshOnPresentation"
+  | "runtimeConfig"
   | "onDocumentClose"
   | "onFocusTargetChange"
   | "desktopClientFactory"
@@ -69,6 +70,7 @@ export function defineDesktopPanelElement(
         embedded: { default: false, type: Boolean, reflect: true },
         presented: { default: false, type: Boolean },
         refreshOnPresentation: { default: true, type: Boolean },
+        runtimeConfig: { default: null, attribute: false },
         onDocumentClose: { default: null, attribute: false },
         onFocusTargetChange: { default: null, attribute: false },
         desktopClientFactory: { default: () => new DesktopClient(), attribute: false },

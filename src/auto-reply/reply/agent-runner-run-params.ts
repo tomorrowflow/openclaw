@@ -11,10 +11,34 @@ import {
   findConfiguredProviderModel,
   resolveMergedModelProviderConfig,
 } from "../../config/model-provider-config.js";
+import { composeSessionSourceAssertion } from "../../config/sessions/session-source-authority.js";
+import {
+  assertAgentRunLifecycleGenerationCurrent,
+  getAgentEventLifecycleGeneration,
+} from "../../infra/agent-events.js";
 import type { AgentFallbackCandidateCommonParams } from "./agent-runner-fallback-cycle.types.js";
 import type { FollowupRun } from "./queue.js";
+import type { ReplyOperation } from "./reply-run-registry.js";
+import { getReplyOperationSessionReader } from "./reply-run-registry.state.js";
 import { resolveReplyRunTrigger } from "./reply-turn-kind.js";
 import { getReplySystemEventContext } from "./system-event-session-key.js";
+
+export function createReplySourceReadGuard(
+  operation: ReplyOperation | undefined,
+  assertOperatorCurrent: (() => void) | undefined,
+) {
+  const readGeneration = getAgentEventLifecycleGeneration();
+  const sourceReader = getReplyOperationSessionReader(operation);
+  return {
+    sourceReader,
+    assertReadCurrent: composeSessionSourceAssertion([assertOperatorCurrent], (assertSource) => {
+      assertAgentRunLifecycleGenerationCurrent(readGeneration);
+      operation?.abortSignal.throwIfAborted();
+      sourceReader?.assertCurrent();
+      assertSource();
+    }),
+  };
+}
 
 export function resolveModelFallbackOptions(
   run: FollowupRun["run"],

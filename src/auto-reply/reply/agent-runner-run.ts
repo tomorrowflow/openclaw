@@ -8,12 +8,7 @@ import { resolveRestartRecoverySteeringBlockReason } from "../../config/sessions
 import { hasRestartRecoverySourceClaim } from "../../config/sessions/restart-recovery-state.js";
 import type { SessionEntryTargetPatchScope } from "../../config/sessions/session-accessor.types.js";
 import { readSessionEntryInWorker } from "../../config/sessions/session-entry-read-runtime.js";
-import { composeSessionSourceAssertion } from "../../config/sessions/session-source-authority.js";
 import { logVerbose } from "../../globals.js";
-import {
-  assertAgentRunLifecycleGenerationCurrent,
-  getAgentEventLifecycleGeneration,
-} from "../../infra/agent-events.js";
 import { measureDiagnosticsTimelineSpan } from "../../infra/diagnostics-timeline.js";
 import { diagnosticLogger } from "../../logging/diagnostic-runtime.js";
 import { hasOutboundReplyContent } from "../../plugin-sdk/reply-payload.js";
@@ -44,7 +39,10 @@ import {
 import { deliverPreparedBlockReply } from "./agent-runner-presentation.js";
 import { runReplyQuestionInput } from "./agent-runner-question-input.js";
 import { createReplyAgentRestartRecoveryController } from "./agent-runner-restart-recovery.js";
-import { buildReplyMediaContextParams } from "./agent-runner-run-params.js";
+import {
+  buildReplyMediaContextParams,
+  createReplySourceReadGuard,
+} from "./agent-runner-run-params.js";
 import { commitQueuedReplySessionActivity } from "./agent-runner-session-activity.js";
 import { runActiveReplySteer } from "./agent-runner-steer-adoption.js";
 import { resolveQueuedReplyExecutionConfig } from "./agent-runner-utils.js";
@@ -65,10 +63,7 @@ import { REPLY_ADMISSION_TICKET } from "./reply-admission-ticket.js";
 import { createReplyMediaContext } from "./reply-media-paths.js";
 import * as replyRunState from "./reply-operation-run-state.js";
 import { type ReplyOperation, replyRunRegistry } from "./reply-run-registry.js";
-import {
-  captureReplyOperationSessionReader,
-  getReplyOperationSessionReader,
-} from "./reply-run-registry.state.js";
+import { captureReplyOperationSessionReader } from "./reply-run-registry.state.js";
 import { bindReplyOperationTyping } from "./reply-run-typing.js";
 import { createReplyToModeFilterForChannel, resolveReplyToMode } from "./reply-threading.js";
 import { prepareReplyToolAuthority } from "./reply-tool-authority.js";
@@ -180,13 +175,9 @@ export async function runReplyAgent(
       config: followupRun.run.config,
       attributes: traceAttributes,
     });
-  const readGeneration = getAgentEventLifecycleGeneration();
-  const assertReadCurrent = composeSessionSourceAssertion(
-    [followupRun.operatorAuthority?.assertCurrent],
-    (assertSource) => {
-      assertAgentRunLifecycleGenerationCurrent(readGeneration);
-      assertSource();
-    },
+  const { sourceReader, assertReadCurrent } = createReplySourceReadGuard(
+    providedReplyOperation,
+    followupRun.operatorAuthority?.assertCurrent,
   );
   const restartRecoverySourceTurnId = readChannelSourceTurnId(sessionCtx);
   let restartRecoveryEntry: typeof activeSessionEntry;
@@ -201,7 +192,9 @@ export async function runReplyAgent(
             (target) => {
               restartRecoveryTarget = target;
             },
-            getReplyOperationSessionReader(providedReplyOperation),
+            // Active native controls retain their slash-source reservation while
+            // reading the conversation target. Its reader cannot change scope.
+            providedReplyOperation?.key === sessionKey ? sourceReader : undefined,
           )) ?? activeSessionEntry)
         : activeSessionEntry;
     assertReadCurrent();
@@ -356,6 +349,10 @@ export async function runReplyAgent(
   ) {
     bindReplyOperationQueueDisposition(followupRun, replyOperationRunState);
     const result = await runActiveReplySteer({
+      assertSourceCurrent:
+        providedReplyOperation && sessionKey && providedReplyOperation.key !== sessionKey
+          ? assertReadCurrent
+          : undefined,
       followupRun,
       opts,
       providedReplyOperation: activeReplyOperation,
