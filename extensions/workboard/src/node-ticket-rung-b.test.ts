@@ -194,7 +194,7 @@ describe("Workboard rung b", () => {
   it("refuses reopening an imported round before its draft PR exists, leaving it in review", async () => {
     const store = createWorkboardSqliteTestStore();
     const card = await importedDocsTicket(store);
-    const refusal = "This ticket's branch was imported but has no draft PR yet.";
+    const refusal = "This ticket's latest round was imported but isn't published yet.";
 
     await expect(store.move(card.id, "todo", undefined)).rejects.toThrow(refusal);
     await expect(store.move(card.id, "ready", undefined)).rejects.toThrow(refusal);

@@ -1037,7 +1037,7 @@ describe("node ticket draft PR", () => {
   it("refuses to rework an imported ticket before its draft PR exists", async () => {
     const { store, card, handoffs, warn, gateway } = await finishNodeTicket({});
     await handoffs.resume(warn);
-    await expect(store.move(card.id, "todo", undefined)).rejects.toThrow("has no draft PR yet");
+    await expect(store.move(card.id, "todo", undefined)).rejects.toThrow("isn't published yet");
 
     await dispatchAndStartWorkboardCards({
       store,
