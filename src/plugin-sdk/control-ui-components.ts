@@ -88,6 +88,17 @@ export type ControlUiMarkdownProps = {
   markdown: string;
 };
 
+/**
+ * A complete HTML document rendered on the host's isolated sandbox origin, with
+ * scripts allowed unless the operator configured strict embeds. It cannot reach
+ * the Control UI, session files, or widget host APIs.
+ */
+export type ControlUiHtmlPreviewProps = {
+  html: string;
+  /** Accessible name of the frame. */
+  title: string;
+};
+
 export type ControlUiComponents = {
   /** Resolve a shared palette or custom hex color; invalid or cleared values return an empty string. */
   resolveAppearanceColor: (value: string | null | undefined) => string;
@@ -127,4 +138,8 @@ export type ControlUiComponents = {
     container: HTMLElement,
     props: ControlUiMarkdownProps,
   ) => ControlUiComponentHandle<ControlUiMarkdownProps>;
+  mountHtmlPreview: (
+    container: HTMLElement,
+    props: ControlUiHtmlPreviewProps,
+  ) => ControlUiComponentHandle<ControlUiHtmlPreviewProps>;
 };

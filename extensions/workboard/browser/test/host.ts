@@ -86,7 +86,7 @@ export function createWorkboardTestHost() {
     navigation: {
       openPage: vi.fn(),
       pageHref: ({ id, path, params }) =>
-        `/${id}${path?.length ? `/${path.join("/")}` : params?.boardId ? `/${params.boardId}` : ""}`,
+        `/${id}${path?.length ? `/${path.join("/")}` : ""}${params ? `?${new URLSearchParams(params)}` : ""}`,
     },
     components: {
       resolveAppearanceColor: vi.fn(() => ""),
@@ -115,6 +115,9 @@ export function createWorkboardTestHost() {
         throw new Error("This test did not install DOM components");
       },
       mountMarkdown: () => {
+        throw new Error("This test did not install DOM components");
+      },
+      mountHtmlPreview: () => {
         throw new Error("This test did not install DOM components");
       },
     },

@@ -5222,9 +5222,35 @@ workboard-inline-text {
   border-radius: 6px;
 }
 
-/* Prototypes are authored against a browser's default white page. */
-.workboard-prototypes__frame {
-  background: white;
+/* The host's preview frame grows to fill this box. */
+.workboard-prototypes__frame,
+.workboard-prototype-page__frame {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.workboard-prototypes__popout {
+  flex: none;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.workboard-prototype-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.workboard-prototype-page__frame {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.workboard-prototype-page__message {
+  margin: var(--space-4);
+  color: var(--muted);
 }
 
 .workboard-prototypes__placeholder {

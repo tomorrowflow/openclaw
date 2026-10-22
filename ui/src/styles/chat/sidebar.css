@@ -646,10 +646,6 @@ openclaw-session-discussion {
   display: none;
 }
 
-openclaw-chat-html-preview {
-  display: contents;
-}
-
 .chat-html-preview {
   display: flex;
   flex: 1 1 auto;
@@ -659,22 +655,14 @@ openclaw-chat-html-preview {
   overflow: auto;
 }
 
-.chat-html-preview__frame,
 .sidebar-pdf-preview__frame {
   display: block;
   flex: 1 1 auto;
   width: 100%;
+  min-width: 0;
   min-height: 0;
   border: 0;
   background: var(--bg);
-}
-
-.chat-html-preview__error {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-  color: var(--text);
 }
 
 .file-view__mount,
@@ -860,10 +848,6 @@ openclaw-chat-html-preview {
 
 .sidebar-pdf-preview__surface > .sidebar-attachment-preview__loading {
   flex: 1;
-}
-
-.sidebar-pdf-preview__frame {
-  min-width: 0;
 }
 
 .sidebar-attachment-preview__markdown {

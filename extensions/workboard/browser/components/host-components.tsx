@@ -13,6 +13,7 @@ type AppearancePickerProps = Parameters<Components["mountAppearancePicker"]>[1];
 type AppearanceGlyphProps = Parameters<Components["mountAppearanceGlyph"]>[1];
 type SessionSummaryProps = Parameters<Components["mountSessionSummary"]>[1];
 type MarkdownProps = Parameters<Components["mountMarkdown"]>[1];
+type HtmlPreviewProps = Parameters<Components["mountHtmlPreview"]>[1];
 type Styled = { class?: string; className?: string };
 
 function hostMount<Props extends object>(
@@ -128,4 +129,13 @@ export function Markdown(props: MarkdownProps) {
     (container, value) => workboardHost().components.mountMarkdown(container, value),
   );
   return <div class="workboard-markdown" ref={mount} />;
+}
+
+/** A full HTML document with its scripts, on the host's sandbox origin rather than in the Control UI. */
+export function HtmlPreview(props: HtmlPreviewProps & Styled) {
+  const mount = hostMount(
+    () => ({ html: props.html, title: props.title }),
+    (container, value) => workboardHost().components.mountHtmlPreview(container, value),
+  );
+  return <div class={props.class ?? props.className ?? ""} ref={mount} />;
 }

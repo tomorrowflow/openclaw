@@ -624,12 +624,17 @@ The card drawer's **Prototype** tab lists the `.html` and `.htm` files under
 that directory in the node worktree right now (newest first, same walk and
 grants as live screenshots) and those each round committed there, and appears
 once at least one exists. A picker switches between files, and the chosen one
-renders in a frame sandboxed with `allow-scripts` only, so it cannot reach the
-Control UI. The frame inherits the Control UI's content security policy, so
-when the Gateway serves the Control UI the prototype's markup and inline styles
-render but its inline and CDN scripts are blocked. The tab lists when the drawer opens, when the card imports a
-round, and on **List again** or a board refresh; a ticket with no prototype yet
-shows the tab once a later list finds one. Files over 2 MiB are refused.
+renders through the Control UI's HTML preview, the same one chat uses for HTML
+files: the prototype runs on the Gateway's isolated sandbox origin, so its
+scripts work but it cannot reach the Control UI, and the operator's
+[`gateway.controlUi.embedSandbox`](/web/control-ui/chat#hosted-embeds) setting
+applies (`strict` turns scripts off).
+**Open in new window** opens the chosen prototype as its own Control UI page,
+inside the usual Control UI navigation. The page reads the file again from its
+link, so the link also works on another device signed in to the same Control
+UI. The tab lists when the drawer opens, when the card imports a round, and on
+**List again** or a board refresh; a ticket with no prototype yet shows the tab
+once a later list finds one. Files over 2 MiB are refused.
 
 A project board can carry the target once as
 `orchestration.defaultTarget` through `workboard.boards.upsert`. New cards on

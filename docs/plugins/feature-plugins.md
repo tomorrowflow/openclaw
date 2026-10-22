@@ -282,6 +282,11 @@ The picker matches option labels, values, and descriptions.
 Use `mountMarkdown` with `{ markdown }` to show user or agent text with the
 host's sanitized Markdown renderer and styles. Raw HTML and remote images are
 not rendered.
+Use `mountHtmlPreview` with `{ html, title }` to show a complete HTML document,
+such as an agent-written prototype. The host renders it on the Gateway's
+isolated sandbox origin, where its scripts run unless the operator configured
+strict embeds; it cannot reach the Control UI, session files, or widget host
+APIs. `title` names the frame for assistive technology.
 
 ### Dock a conversation
 
