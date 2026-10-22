@@ -41,6 +41,7 @@ export {
   deleteWorkboardCard,
   dispatchWorkboard,
   endWorkboardGrill,
+  grillWorkboardQuestions,
   moveWorkboardCard,
   saveWorkboardCardDraft,
 } from "./mutations.ts";

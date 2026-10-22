@@ -270,6 +270,9 @@ export default {
     grillingEnd: "End grilling",
     grillingEndTitle:
       "End the grilling; the agent's last reply in the grill session becomes the result, and the ticket continues with it.",
+    grillQuestions: "Grill this",
+    grillQuestionsTitle:
+      "Settle these questions in a grill session instead of a comment; the ticket continues with its result.",
     sessionChipGrilling: "Grilling — in {name}",
     detailTemplate: "Template",
     detailFailures: "Failed attempts",

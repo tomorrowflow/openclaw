@@ -24,6 +24,9 @@ import type { WorkboardMutationScope } from "./store-inputs.js";
 import { WorkboardNodeTicketSampleStore } from "./store-node-ticket-sample.js";
 
 const NOT_GRILLING = "This card is not grilling; refresh it to see where it stands.";
+const NOT_ASKING =
+  "This card does not wait on a questions round; refresh it to see where it stands.";
+const QUESTIONS_PREFIX = "**Needs input:**";
 // The result a resumed round's brief carries; the full text is in the grill session.
 const MAX_RESULT_CHARS = 8000;
 
@@ -60,6 +63,28 @@ function endGrillStep(
   };
 }
 
+/**
+ * The handoff Grill this writes from a questions round: the round's comments
+ * and every comment after them, which may already answer some questions.
+ */
+function questionsHandoff(card: WorkboardCard): string | undefined {
+  const comments = card.metadata?.comments ?? [];
+  const at = comments.findLastIndex((comment) => comment.body.startsWith(QUESTIONS_PREFIX));
+  if (at < 0) {
+    return undefined;
+  }
+  return [
+    "The ticket session stopped with open questions, and the operator chose to grill them out instead of answering by comment. Its questions round, with its proposed defaults, and any comments since:",
+    "",
+    comments
+      .slice(at)
+      .map((comment) => comment.body.trim())
+      .join("\n\n---\n\n"),
+    "",
+    "Start with the question the others depend on, and settle every question in the round.",
+  ].join("\n");
+}
+
 /** Session keys compare as the Gateway canonicalizes them. */
 function sameSessionKey(left: string | undefined, right: string | undefined): boolean {
   return Boolean(left && right && left.toLowerCase() === right.toLowerCase());
@@ -93,6 +118,34 @@ export class WorkboardNodeTicketGrillStore extends WorkboardNodeTicketSampleStor
         handoff: { phase: "grilling", askedAt: now },
       };
     });
+  }
+
+  /**
+   * The operator's Grill this: a card waiting on a questions round hands the
+   * round to a grill session instead of a comment, as a grill report would.
+   */
+  async grillNodeQuestions(id: string): Promise<WorkboardCard> {
+    const card = await this.updateNodeGrill(id, undefined, (current, worktree, now) => {
+      const handoff = questionsHandoff(current);
+      if (
+        current.status !== "review" ||
+        current.metadata?.archivedAt ||
+        worktree.handoff?.phase !== "questions" ||
+        !handoff
+      ) {
+        throw new Error(NOT_ASKING);
+      }
+      const rounds = (worktree.grill?.rounds ?? 0) + 1;
+      return {
+        entries: [grillHandoffEntry(rounds, handoff)],
+        grill: { status: "open", rounds },
+        handoff: { phase: "grilling", askedAt: now },
+      };
+    });
+    if (!card) {
+      throw new Error(NOT_ASKING);
+    }
+    return card;
   }
 
   /** Records the grill session created for grilling `round`, and says on the card where it runs. */

@@ -866,6 +866,12 @@ report, address the findings, and report them (see **Report** below).
    `blocked`; after the grilling ended it only clears what is pending. The
    log stays on the card: the metadata budget and the 20-attachment cap drop
    other attachments first, and deleting `grilling.md` is refused.
+   A card waiting on a `needs_input` round shows **Grill this** beside its
+   stage. It calls `workboard.cards.grill.questions {id}`, which hands the
+   round to a grill session as a `grill` report would: the handoff is the
+   last `**Needs input:**` comment and every comment after it, and the card
+   continues exactly like a grilling the session started. The Gateway refuses
+   it unless the card waits in `review` on a questions round.
 3. **Import:** the node bundles the branch to `<worktreesRoot>/wb-<cardId>.bundle`
    and the Gateway fetches it with File Transfer, so the node's
    `allowReadPaths` must cover `<worktreesRoot>/*.bundle`. The host clone

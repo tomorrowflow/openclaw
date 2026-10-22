@@ -335,6 +335,10 @@ export function registerWorkboardGatewayMethods(params: {
     }
     return await redactCardResult(store.endNodeGrill(id, read.result));
   });
+  // Like a grill report, the change wakes the node handoff owner, which opens the grill session.
+  register("workboard.cards.grill.questions", WRITE_SCOPE, ({ params: input }) =>
+    redactCardResult(store.grillNodeQuestions(readId(input))),
+  );
   register("workboard.cards.move", WRITE_SCOPE, ({ params: input, sessionMutationCommitGuard }) =>
     redactCardResult(
       store.move(readId(input), input.status, input.position, undefined, {
