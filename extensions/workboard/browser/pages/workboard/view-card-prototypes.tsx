@@ -6,9 +6,12 @@ import type {
 } from "@openclaw/workboard-contract";
 import { createMemo, createSignal, For, Show } from "solid-js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
+import { HtmlPreview } from "../../components/host-components.tsx";
 import { icons } from "../../components/icons.tsx";
+import { workboardHost } from "../../host.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
+import { prototypePageTarget } from "../prototype/prototype-target.ts";
 import { type CardFileList, createCardFileList, type SettledList } from "./card-node-files.ts";
 import { RelativeTime } from "./view-card-time.tsx";
 
@@ -141,9 +144,8 @@ export function createCardPrototypes(
 }
 
 /**
- * The drawer's Prototype tab. The frame runs the prototype's scripts in an
- * opaque origin: no allow-same-origin, so it cannot read the Control UI's
- * storage or DOM, and no top navigation or escaping popups.
+ * The drawer's Prototype tab. The host renders the prototype with its scripts
+ * on the sandbox origin, apart from the Control UI's storage and DOM.
  */
 export function PrototypePanel(props: {
   prototypes: CardPrototypes;
@@ -167,6 +169,14 @@ export function PrototypePanel(props: {
   const frameHtml = () => {
     const state = html();
     return state?.status === "loaded" ? state.html : undefined;
+  };
+  const popoutHref = () => {
+    const ref = selected();
+    return ref
+      ? workboardHost().navigation.pageHref(
+          prototypePageTarget({ cardId: props.cardId, source: ref.source, path: ref.path }),
+        )
+      : undefined;
   };
   const placeholder = () => {
     const state = html();
@@ -232,6 +242,18 @@ export function PrototypePanel(props: {
                   </For>
                 </select>
               </Show>
+              <Show when={popoutHref()}>
+                {(href) => (
+                  <a
+                    class="workboard-prototypes__popout"
+                    href={href()}
+                    target="_blank"
+                    rel="noopener"
+                  >
+                    {t("workboard.prototypeOpenWindow")}
+                  </a>
+                )}
+              </Show>
               <span class="workboard-screens__listed">
                 <RelativeTime timestamp={listed().listedAt} now={Date.now()} format="listed" />
               </span>
@@ -263,12 +285,10 @@ export function PrototypePanel(props: {
               {(text) => <p class="workboard-prototypes__placeholder">{text()}</p>}
             </Show>
             <Show when={frameHtml() !== undefined}>
-              <iframe
+              <HtmlPreview
                 class="workboard-prototypes__frame"
-                sandbox="allow-scripts"
-                referrerpolicy="no-referrer"
+                html={frameHtml() ?? ""}
                 title={selected()?.path ?? ""}
-                srcdoc={frameHtml()}
               />
             </Show>
           </>

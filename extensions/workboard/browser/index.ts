@@ -7,6 +7,7 @@ import { t } from "./i18n/index.ts";
 import { workboardBoardName } from "./lib/workboard/board-presentation.ts";
 import { createWorkboardCapability } from "./lib/workboard/capability.ts";
 import { WORKBOARD_CHANGED_EVENT, type WorkboardBoardSummary } from "./lib/workboard/types.ts";
+import { PROTOTYPE_PAGE_ID } from "./pages/prototype/prototype-target.ts";
 import { createTranscriptsPage } from "./pages/transcripts/transcripts-page.tsx";
 import { createLazyWorkboardPage } from "./pages/workboard/lazy-page.ts";
 import { workboardPageTarget } from "./pages/workboard/page-target.ts";
@@ -204,6 +205,15 @@ export default defineControlUiPlugin({
         page: { id: "overview" },
         icon: "layoutDashboard",
         order: 11,
+      }),
+      // Opened only from the Prototype tab's link, so it has no navigation item.
+      host.ui.registerPage({
+        id: PROTOTYPE_PAGE_ID,
+        label: t("workboard.detailTabPrototype"),
+        mount: createLazyWorkboardPage(async () => {
+          const { createPrototypePage } = await import("./pages/prototype/prototype-page.tsx");
+          return createPrototypePage();
+        }),
       }),
       host.ui.registerPanel({
         id: "screens",

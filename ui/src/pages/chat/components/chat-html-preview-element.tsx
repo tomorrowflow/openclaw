@@ -25,6 +25,7 @@ import { defineSolidBridge, type SolidBridgeElement } from "../../../lit/solid-b
 import { prepareHtmlPreviewAssets } from "./chat-html-preview-assets.ts";
 import { prepareHtmlPreviewLinks } from "./chat-html-preview-links.ts";
 import type { SessionFileSource } from "./chat-sidebar-content-types.ts";
+import "./chat-html-preview.css";
 
 registerEnglishCatalog(registerFilePreviewEnglish);
 

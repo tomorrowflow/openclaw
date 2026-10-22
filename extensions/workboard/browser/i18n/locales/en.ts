@@ -515,6 +515,11 @@ export default {
     prototypeFailed: "Could not load this prototype: {error}",
     prototypePick: "Prototype file",
     prototypeLiveOption: "Live · {path}",
+    prototypeOpenWindow: "Open in new window",
+    prototypeLoading: "Loading prototype…",
+    prototypeReadFailed: "the Gateway gave no reason",
+    prototypeLinkInvalid:
+      "This prototype link needs a card, a source (live or a round number), and a file path. Open it again from the card's Prototype tab.",
     screens: "Screens",
     screensOpen: "Show this ticket's screenshots",
     screensLive: "Live from the node worktree",

@@ -55,9 +55,13 @@ function prototypesPage(handlers: { list: Handler; get: Handler }, card = nodeCa
     ...page,
     calls: (method: string) => page.request.mock.calls.filter(([name]) => name === method),
     tab: () => page.container.querySelector("#workboard-detail-tab-prototype"),
-    frame: () =>
-      page.container.querySelector<HTMLIFrameElement>(
-        "#workboard-detail-panel-prototype:not([hidden]) iframe",
+    preview: () =>
+      page.container.querySelector<HTMLElement>(
+        "#workboard-detail-panel-prototype:not([hidden]) [data-test-html-preview]",
+      ),
+    popout: () =>
+      page.container.querySelector<HTMLAnchorElement>(
+        "#workboard-detail-panel-prototype .workboard-prototypes__popout",
       ),
     picker: () => page.container.querySelector<HTMLSelectElement>(".workboard-prototypes__picker"),
   };
@@ -76,14 +80,29 @@ const bothSources = () => ({
 
 const echo = (params: Record<string, unknown>) => ({ html: `<p>${String(params.path)}</p>` });
 
-it("lists live and committed prototypes and renders the picked one in a script-only sandbox", async () => {
+it("lists live and committed prototypes and renders the picked one through the host preview", async () => {
   const page = prototypesPage({ list: bothSources, get: echo });
 
-  await vi.waitFor(() => expect(page.frame()).not.toBeNull());
+  await vi.waitFor(() => expect(page.preview()).not.toBeNull());
   expect(page.calls(LIST).map(([, params]) => params)).toEqual([{ id: "card-1", live: true }]);
-  const frame = expectDefined(page.frame(), "prototype frame");
-  expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
-  expect(frame.getAttribute("srcdoc")).toBe("<p>docs/prototypes/T-1/draft.html</p>");
+  expect(page.fixture.host.components.mountHtmlPreview).toHaveBeenLastCalledWith(
+    expect.any(HTMLElement),
+    {
+      html: "<p>docs/prototypes/T-1/draft.html</p>",
+      title: "docs/prototypes/T-1/draft.html",
+    },
+  );
+  expect(page.container.querySelector("#workboard-detail-panel-prototype iframe")).toBeNull();
+  const popout = expectDefined(page.popout(), "pop-out link");
+  expect(popout.target).toBe("_blank");
+  expect(popout.rel).toBe("noopener");
+  expect(new URL(popout.href, "http://ui.test").searchParams.toString()).toBe(
+    new URLSearchParams({
+      card: "card-1",
+      source: "live",
+      path: "docs/prototypes/T-1/draft.html",
+    }).toString(),
+  );
   expect(page.request).toHaveBeenCalledWith(GET, {
     id: "card-1",
     live: true,
@@ -98,8 +117,11 @@ it("lists live and committed prototypes and renders the picked one in a script-o
   picker.value = expectDefined(picker.options[1], "committed option").value;
   picker.dispatchEvent(new Event("change", { bubbles: true }));
   await vi.waitFor(() =>
-    expect(page.frame()?.getAttribute("srcdoc")).toBe("<p>docs/prototypes/T-1/flow.html</p>"),
+    expect(page.preview()?.dataset.html).toBe("<p>docs/prototypes/T-1/flow.html</p>"),
   );
+  expect(
+    new URL(expectDefined(page.popout(), "pop-out link").href).searchParams.get("source"),
+  ).toBe("0");
   expect(page.request).toHaveBeenCalledWith(GET, {
     id: "card-1",
     round: 0,
@@ -142,5 +164,5 @@ it("names a failed read instead of rendering an empty frame", async () => {
       "Could not load this prototype: prototype not found: live docs/prototypes/T-1/draft.html",
     ),
   );
-  expect(page.frame()).toBeNull();
+  expect(page.preview()).toBeNull();
 });

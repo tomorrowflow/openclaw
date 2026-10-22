@@ -295,5 +295,22 @@ export function createControlUiComponents(options: {
           element.markdown = next.markdown;
         },
       ),
+    mountHtmlPreview: (container, props) =>
+      mount(
+        container,
+        props,
+        async () => {
+          await import("../pages/chat/components/chat-html-preview-element.tsx");
+          return document.createElement("openclaw-chat-html-preview");
+        },
+        (element, next, current) => {
+          element.html = next.html;
+          element.title = next.title;
+          // The operator's embed policy still decides whether scripts run.
+          element.embedSandboxMode = current().config.current.embedSandboxMode;
+        },
+        undefined,
+        (context, refresh) => context.config.subscribe(refresh),
+      ),
   };
 }
