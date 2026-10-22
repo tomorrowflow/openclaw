@@ -17,6 +17,7 @@ const previewDocument: CanvasDocumentViewResult = {
 };
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   document.documentElement.removeAttribute(CONTROL_UI_BOOTSTRAP_CONFIG_ATTRIBUTE);
   document.body.replaceChildren();
 });
@@ -56,7 +57,7 @@ function mountPreview(embedSandbox: "scripts" | "strict") {
     onError,
   });
   const handle = components.mountHtmlPreview(container, { html, title: "Checklist" });
-  return { container, handle, request, onError };
+  return { container, context, handle, request, onError };
 }
 
 async function postedDocument(container: HTMLElement) {
@@ -98,6 +99,22 @@ it("renders the document on the sandbox origin with scripts allowed", async () =
 it("keeps the operator's strict embed policy", async () => {
   const { container } = mountPreview("strict");
 
+  const { params } = await postedDocument(container);
+  expect(params).toMatchObject({ allowScripts: false });
+});
+
+it("applies an embed policy change to an open preview", async () => {
+  const { container, context } = mountPreview("scripts");
+  await postedDocument(container);
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => Response.json({ basePath: "", embedSandbox: "strict" })),
+  );
+  await context.config.refresh();
+  await vi.waitFor(() =>
+    expect(container.querySelector("openclaw-chat-html-preview")?.embedSandboxMode).toBe("strict"),
+  );
   const { params } = await postedDocument(container);
   expect(params).toMatchObject({ allowScripts: false });
 });

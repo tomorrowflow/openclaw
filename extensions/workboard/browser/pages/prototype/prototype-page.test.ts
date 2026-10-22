@@ -62,7 +62,7 @@ it("waits for the connection before reading a live prototype", async () => {
   const page = mountPrototypePage({ card: "card-1", source: "live", path: PATH }, undefined, false);
 
   expect(page.reads()).toEqual([]);
-  expect(page.container.querySelector('[role="status"]')?.textContent).toBe("Loading…");
+  expect(page.container.querySelector('[role="status"]')?.textContent).toBe("Loading prototype…");
 
   page.fixture.connection.connected = true;
   page.fixture.notify();
@@ -95,6 +95,16 @@ it("names a failed read", async () => {
     expect(page.alert()).toBe(`Could not load this prototype: prototype not found: live ${PATH}`),
   );
   expect(page.preview()).toBeNull();
+});
+
+it("names a failed read without a reason", async () => {
+  const page = mountPrototypePage({ card: "card-1", source: "live", path: PATH }, async () => {
+    throw new Error("");
+  });
+
+  await vi.waitFor(() =>
+    expect(page.alert()).toBe("Could not load this prototype: the Gateway gave no reason"),
+  );
 });
 
 it("parses the address the Prototype tab builds", () => {

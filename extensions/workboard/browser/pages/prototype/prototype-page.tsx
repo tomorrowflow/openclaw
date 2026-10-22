@@ -27,6 +27,8 @@ export function createPrototypePage(): ControlUiView {
     let target: PrototypeTarget | null = null;
     // One read per address and connection; a reconnect retries a failed read.
     let requested = false;
+    // Only the newest read may settle the page, even after a reconnect overlaps one.
+    let attempt = 0;
     let disposed = false;
     // Plain state owns the page; the signal only tells the rendering to reread it.
     let current: PageState = { status: "loading" };
@@ -38,7 +40,7 @@ export function createPrototypePage(): ControlUiView {
     const [path, setPath] = createSignal("");
     const failure = () => {
       const shown = state();
-      return shown.status === "failed" ? shown.error : undefined;
+      return shown.status === "failed" ? shown.error : "";
     };
     const html = () => {
       const shown = state();
@@ -52,6 +54,7 @@ export function createPrototypePage(): ControlUiView {
         key = nextKey;
         target = next;
         requested = false;
+        attempt++;
         setPath(next?.path ?? "");
         show(next ? { status: "loading" } : { status: "invalid" });
       }
@@ -63,7 +66,7 @@ export function createPrototypePage(): ControlUiView {
         return;
       }
       requested = true;
-      const readKey = key;
+      const readAttempt = ++attempt;
       const { cardId, source, path: file } = target;
       show({ status: "loading" });
       void host
@@ -74,10 +77,13 @@ export function createPrototypePage(): ControlUiView {
         })
         .then(
           (result): PageState => ({ status: "loaded", html: result.html }),
-          (error: unknown): PageState => ({ status: "failed", error: formatUiError(error) }),
+          (error: unknown): PageState => ({
+            status: "failed",
+            error: formatUiError(error, t("workboard.prototypeReadFailed")),
+          }),
         )
         .then((settled) => {
-          if (!disposed && readKey === key) {
+          if (!disposed && readAttempt === attempt) {
             show(settled);
           }
         });
@@ -89,7 +95,7 @@ export function createPrototypePage(): ControlUiView {
           <Switch
             fallback={
               <p class="workboard-prototype-page__message" role="status">
-                {t("workboard.screenshotLoading")}
+                {t("workboard.prototypeLoading")}
               </p>
             }
           >
@@ -98,12 +104,10 @@ export function createPrototypePage(): ControlUiView {
                 {t("workboard.prototypeLinkInvalid")}
               </p>
             </Match>
-            <Match when={failure()}>
-              {(error) => (
-                <p class="workboard-prototype-page__message" role="alert">
-                  {t("workboard.prototypeFailed", { error: error() })}
-                </p>
-              )}
+            <Match when={state().status === "failed"}>
+              <p class="workboard-prototype-page__message" role="alert">
+                {t("workboard.prototypeFailed", { error: failure() })}
+              </p>
             </Match>
             <Match when={state().status === "loaded"}>
               <HtmlPreview class="workboard-prototype-page__frame" html={html()} title={path()} />
