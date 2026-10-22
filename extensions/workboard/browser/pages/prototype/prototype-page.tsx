@@ -1,5 +1,5 @@
-import type { WorkboardPrototypeResult } from "@openclaw/workboard-contract";
 /** @jsxImportSource @solidjs/web */
+import type { WorkboardPrototypeResult } from "@openclaw/workboard-contract";
 import { render } from "@solidjs/web";
 import type { ControlUiView } from "openclaw/plugin-sdk/control-ui";
 import { createSignal, Match, Switch } from "solid-js";
