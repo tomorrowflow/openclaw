@@ -754,7 +754,14 @@ not listed is at rung a:
 agent accepts at rung b (see **Accept** below). Saving replaces the whole map; `classRungs: null` or `{}` removes it. Saving
 refuses more than 50 classes, a name with the `class:` prefix or longer than 34
 characters, a rung other than `a` or `b`, and a `sampleEvery` that is not an
-integer from 1 to 100. Each start, rework, answer, or retry reads the rung from
+integer from 1 to 100.
+
+Each entry also carries `since`, the epoch ms when the class last changed rung.
+The store stamps it when a save moves the class to another rung (an unlisted
+class counts as rung a, so listing it at `a` is no change) and carries the
+stored value on every other save, including one that omits it. An explicit
+`since` overrides both, to backfill a change made before stamping; saving
+refuses one that is not an integer from 0 to now. Each start, rework, answer, or retry reads the rung from
 the board and records a rung b round as `rung: "b"` on the node worktree, so
 promoting or demoting a class applies from the next round on, never to one
 already running. A rung b round's brief asks the session to run a reviewer
@@ -1053,6 +1060,14 @@ no blind round there. A ticket counts as accepted in a rung when its first
 publish was decided there, so a class demoted from b to a keeps its rung b
 acceptances apart from the rung a ones. Rework, blocks, and attempts stay
 ticket-wide.
+
+**Since the rung changed:** on a one-board projection, a class whose rung
+entry has `since` also carries `rungSince` (that value) and `sinceRung`, the
+same counts over rounds published at or after it, scoped like `blind`. A
+class without `since` has neither. Checks that judge a class at its current
+rung read `sinceRung`: the demote check (`reworkedAccepts` of a rung b
+class) and the re-entry count after a demotion. A class promoted back to rung
+b then starts from zero instead of its old reworked accepts.
 
 Node tickets share one pool instead of their owner's single slot: up to
 `nodeTickets.maxConcurrent` (default 2) run at once across all nodes, even for

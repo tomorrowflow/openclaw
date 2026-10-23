@@ -106,12 +106,16 @@ function roundRung(review: WorkboardNodeReviewVerdict): WorkboardClassRung["rung
   return review.decidedBy === "agent" ? "b" : "a";
 }
 
-function blindAt(ticket: TicketFacts, rung: WorkboardClassRung["rung"]): TicketFacts | undefined {
+/**
+ * The ticket narrowed to published rounds `keep` selects, or undefined when
+ * none is left; it counts as accepted only when its first publish is among them.
+ */
+function scopeRounds(
+  ticket: TicketFacts,
+  keep: (review: WorkboardNodeReviewVerdict, publishedAt: number) => boolean,
+): TicketFacts | undefined {
   const reviews = ticket.reviews.filter(
-    (review) =>
-      review.publishedAt !== undefined &&
-      review.publishedAt >= BLIND_SINCE &&
-      roundRung(review) === rung,
+    (review) => review.publishedAt !== undefined && keep(review, review.publishedAt),
   );
   if (reviews.length === 0) {
     return undefined;
@@ -124,7 +128,13 @@ function blindAt(ticket: TicketFacts, rung: WorkboardClassRung["rung"]): TicketF
 function countBlind(tickets: readonly TicketFacts[]): WorkboardTrustBlind {
   const blind: WorkboardTrustBlind = {};
   for (const rung of ["a", "b"] as const) {
-    const scoped = tickets.flatMap((ticket) => blindAt(ticket, rung) ?? []);
+    const scoped = tickets.flatMap(
+      (ticket) =>
+        scopeRounds(
+          ticket,
+          (review, publishedAt) => publishedAt >= BLIND_SINCE && roundRung(review) === rung,
+        ) ?? [],
+    );
     if (scoped.length > 0) {
       blind[rung] = countTickets(scoped);
     }
@@ -286,14 +296,26 @@ export function projectWorkboardTrust(
     smartZoneTokens: SMART_ZONE_TOKENS,
     total: countTickets(tickets),
     classes: [...byClass]
-      .map(([taskClass, entries]) =>
-        Object.assign(
+      .map(([taskClass, entries]) => {
+        const classRung = board && workboardClassRung(board, [`class:${taskClass}`]);
+        const since = classRung?.since;
+        return Object.assign(
           { taskClass },
-          board ? { rung: workboardClassRung(board, [`class:${taskClass}`])?.rung ?? "a" } : {},
+          board ? { rung: classRung?.rung ?? "a" } : {},
           countTickets(entries),
           { blind: countBlind(entries) },
-        ),
-      )
+          since === undefined
+            ? {}
+            : {
+                rungSince: since,
+                sinceRung: countTickets(
+                  entries.flatMap(
+                    (ticket) => scopeRounds(ticket, (_, publishedAt) => publishedAt >= since) ?? [],
+                  ),
+                ),
+              },
+        );
+      })
       .toSorted((a, b) => a.taskClass.localeCompare(b.taskClass)),
     weeks,
   };

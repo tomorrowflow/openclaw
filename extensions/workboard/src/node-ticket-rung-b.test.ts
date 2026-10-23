@@ -122,12 +122,12 @@ describe("Workboard rung b", () => {
     ).toBe(false);
     await boardCreate.execute("call-board", { id: "app", orchestration: { autoDecompose: true } });
     await expect(rungs()).resolves.toEqual({
-      docs: { rung: "b" },
-      security: { rung: "b", sampleEvery: 1 },
+      docs: { rung: "b", since: expect.any(Number) },
+      security: { rung: "b", sampleEvery: 1, since: expect.any(Number) },
     });
 
     await store.upsertBoard({ id: "app", orchestration: { classRungs: { docs: { rung: "a" } } } });
-    await expect(rungs()).resolves.toEqual({ docs: { rung: "a" } });
+    await expect(rungs()).resolves.toEqual({ docs: { rung: "a", since: expect.any(Number) } });
     for (const [classRungs, error] of [
       [{ docs: { rung: "c" } }, "class rung docs needs rung a or b."],
       [
@@ -151,14 +151,52 @@ describe("Workboard rung b", () => {
         Object.fromEntries(Array.from({ length: 51 }, (_, index) => [`c${index}`, { rung: "b" }])),
         "class rungs must be an object of at most 50 classes.",
       ],
+      ...[-1, 1.5, Date.now() + 60_000].map(
+        (since) =>
+          [
+            { docs: { rung: "b", since } },
+            "class rung docs since must be an epoch ms integer from 0 to now.",
+          ] as const,
+      ),
     ] as const) {
       await expect(store.upsertBoard({ id: "app", orchestration: { classRungs } })).rejects.toThrow(
         error,
       );
     }
-    await expect(rungs()).resolves.toEqual({ docs: { rung: "a" } });
+    await expect(rungs()).resolves.toEqual({ docs: { rung: "a", since: expect.any(Number) } });
     await store.upsertBoard({ id: "app", orchestration: { classRungs: null } });
     await expect(rungs()).resolves.toBeUndefined();
+  });
+
+  it("stamps since when a class changes rung, carries it otherwise, and takes an explicit backfill", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const save = async (classRungs: Record<string, unknown>) =>
+      (await store.upsertBoard({ id: "app", orchestration: { classRungs } })).orchestration
+        ?.classRungs;
+    const before = Date.now();
+    const first = await save({ docs: { rung: "b" }, ios: { rung: "a" } });
+    const stamped = expectDefined(first?.docs?.since, "docs since");
+    expect(stamped).toBeGreaterThanOrEqual(before);
+    expect(stamped).toBeLessThanOrEqual(Date.now());
+    // Listing an unlisted class at rung a is not a change.
+    expect(first?.ios).toEqual({ rung: "a" });
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 5);
+    });
+    expect(await save({ docs: { rung: "b", sampleEvery: 1 }, ios: { rung: "a" } })).toEqual({
+      docs: { rung: "b", sampleEvery: 1, since: stamped },
+      ios: { rung: "a" },
+    });
+    await store.upsertBoard({ id: "app", orchestration: { autoDecompose: true } });
+    expect(await save({ docs: { rung: "b" } })).toEqual({ docs: { rung: "b", since: stamped } });
+
+    const demoted = expectDefined((await save({ docs: { rung: "a" } }))?.docs?.since, "demoted");
+    expect(demoted).toBeGreaterThan(stamped);
+    expect(await save({ docs: { rung: "b", since: 1_000 } })).toEqual({
+      docs: { rung: "b", since: 1_000 },
+    });
+    expect(await save({ docs: { rung: "b" } })).toEqual({ docs: { rung: "b", since: 1_000 } });
   });
 
   it("refuses an agent's acceptance at rung a through every tool that reaches done", async () => {

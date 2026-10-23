@@ -403,6 +403,45 @@ describe("projectWorkboardTrust", () => {
     });
   });
 
+  it("counts a class since its rung last changed, keeping older reworked accepts all-time only", () => {
+    const since = MONDAY + 24 * HOUR;
+    const reworkedAccept = (id: string, publishedAt: number) =>
+      ticket(id, {
+        createdAt: MONDAY,
+        labels: ["class:docs"],
+        worktree: {
+          ...published(publishedAt),
+          rework: { round: 1, pullRequestUrl: "u", acceptedAt: publishedAt, outsideCommits: 0 },
+          reviews: [
+            { round: 0, verdict: "accept", decidedBy: "agent", sampled: true, publishedAt },
+          ],
+        },
+      });
+    const cards = [
+      reworkedAccept("before", since - HOUR),
+      reworkedAccept("after", since + HOUR),
+      ticket("server", {
+        createdAt: MONDAY,
+        labels: ["class:server"],
+        worktree: { ...published(since), reviews: [{ round: 0, verdict: "accept" }] },
+      }),
+    ];
+
+    const [docs, server] = projectWorkboardTrust(cards, "app", since + 2 * HOUR, {
+      classRungs: { docs: { rung: "b", since }, server: { rung: "b" } },
+    }).classes;
+
+    expect(docs).toMatchObject({ rungSince: since, agentAccepts: 2, reworkedAccepts: 2 });
+    expect(docs?.sinceRung).toMatchObject({
+      tickets: 1,
+      accepted: 1,
+      agentAccepts: 1,
+      reworkedAccepts: 1,
+    });
+    expect(server).not.toHaveProperty("rungSince");
+    expect(server).not.toHaveProperty("sinceRung");
+  });
+
   it("counts missed verdicts among the newest 10 operator rounds by publish time", () => {
     const round = (id: string, verdict: "accept" | "missed", publishedAt?: number) =>
       ticket(id, {

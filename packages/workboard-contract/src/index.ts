@@ -681,6 +681,12 @@ export type WorkboardOrchestrationSettings = {
 export type WorkboardClassRung = {
   rung: "a" | "b";
   sampleEvery?: number;
+  /**
+   * Epoch ms when the class last changed rung. The store stamps it when a
+   * save changes the rung and carries it otherwise; an explicit value
+   * backfills it.
+   */
+  since?: number;
 };
 
 export type WorkboardTargetRoute = {
@@ -896,9 +902,18 @@ export type WorkboardTrustResult = {
    * `rung` is the board's rung for the class; only a one-board projection has it.
    * `blind` counts only rounds published since the blind verdict went live,
    * split by the rung each round was decided at; see {@link WorkboardTrustBlind}.
+   * `rungSince` is the class rung's `since`, and `sinceRung` counts only
+   * rounds published at or after it; both need a one-board projection and a
+   * rung with `since`.
    */
   classes: Array<
-    WorkboardTrustCounts & { taskClass: string; rung?: "a" | "b"; blind: WorkboardTrustBlind }
+    WorkboardTrustCounts & {
+      taskClass: string;
+      rung?: "a" | "b";
+      rungSince?: number;
+      sinceRung?: WorkboardTrustCounts;
+      blind: WorkboardTrustBlind;
+    }
   >;
   /** The last 8 weeks, oldest first, including the current one. */
   weeks: WorkboardTrustWeek[];
