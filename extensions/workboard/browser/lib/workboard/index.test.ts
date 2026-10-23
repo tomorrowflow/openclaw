@@ -81,6 +81,33 @@ describe("Workboard native owners", () => {
     ]);
   });
 
+  it("keeps a refused move's reason after the canonical reload", async () => {
+    const host = {};
+    const card = createWorkboardCard({ status: "review" });
+    const client = createWorkboardTestClient((method) => {
+      if (method === "workboard.cards.move") {
+        throw new Error("Move the card to done first.");
+      }
+      return { cards: [card], boards: [] };
+    });
+    const state = getWorkboardState(host);
+    state.cards = [card];
+    state.loaded = true;
+    state.loadAttempted = true;
+    // The page answers every update with an unforced load, as workboard-page does.
+    const requestUpdate = () => void loadWorkboard({ host, client });
+    await moveWorkboardCard({
+      host,
+      client,
+      requestUpdate,
+      cardId: card.id,
+      status: "todo",
+      position: 0,
+    });
+    expect(state.error).toBe("Move the card to done first.");
+    expect(state.cards).toEqual([card]);
+  });
+
   it.each([
     ["running", "running"],
     ["queued", "queued"],

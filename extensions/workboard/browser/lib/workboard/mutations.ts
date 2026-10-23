@@ -208,8 +208,9 @@ export async function moveWorkboardCard(
         if (!reconcileCardConflict(state, error)) {
           // Even a single move can commit before its acknowledgment is lost.
           state.mutationReadiness = "canonical_reload_required";
+          // loadAttempted stays set: the forced reload below owns this recovery, and a page
+          // update seeing an unattempted load would start its own and clear the move's error.
           state.loaded = false;
-          state.loadAttempted = false;
           reloadAfterFailure = true;
         }
       } finally {

@@ -161,7 +161,7 @@ export async function withImportedNodeTicketMove(params: {
   }
   if (next.status === "todo" || next.status === "ready") {
     throw new Error(
-      "This ticket's branch was imported but has no draft PR yet. Move the card to done to publish it, then move it to todo for rework.",
+      "This ticket's latest round was imported but isn't published yet. Move the card to done to push it to the draft PR, then move it to todo for rework.",
     );
   }
   if (next.status !== "done") {
@@ -399,7 +399,7 @@ export async function createNodeTicketWorktree(params: {
   const previous = target.worktree;
   if (previous?.handoff?.phase === "imported") {
     throw new Error(
-      "this ticket's branch was imported but has no draft PR yet; move the card to done to publish it, then reopen it for rework",
+      "this ticket's latest round was imported but isn't published yet; move the card to done to push it to the draft PR, then reopen it for rework",
     );
   }
   const published = previous?.handoff?.phase === "published" ? previous.handoff : undefined;
