@@ -11,9 +11,16 @@
 # into the dev workspace owned by openclaw. The digest holds card titles, so the
 # copies are 0640. It only reads the board; it never writes to it.
 #
+# When the factory repo's clone exists (the one factory-review.sh keeps), the
+# script fetches it and passes it as --repo-path, so the digest can tell whether
+# a skill that failed to load was in the repo at the card's base commit. The
+# container sees the clone read-only, so the fetch happens here. A failed fetch
+# only leaves the clone as it was.
+#
 # Overrides (for fixtures): WORKBOARD_CARDS_CMD, AGENTPLAY_DIGEST_CMD,
 # AGENTPLAY_DIGESTS (where the digest command writes), FACTORY_DIGEST_DEST,
-# FACTORY_DIGEST_INSTALL. Output is appended to $FACTORY_DIGEST_LOG.
+# FACTORY_DIGEST_INSTALL, FACTORY_REVIEW_REPO, FACTORY_REVIEW_CLONE. Output is
+# appended to $FACTORY_DIGEST_LOG.
 #
 # Runs nightly at 03:00, after the 02:30 transcript pull, from the systemd user
 # timer in scripts/systemd/:
@@ -27,15 +34,23 @@ DIGEST_CMD="${AGENTPLAY_DIGEST_CMD:-docker exec -i apverify-agentplay-1 agentpla
 DIGESTS="${AGENTPLAY_DIGESTS:-$HOME/.agentplay/digests}"
 DEST="${FACTORY_DIGEST_DEST:-/home/openclaw/.openclaw/workspace/factory/digests}"
 INSTALL="${FACTORY_DIGEST_INSTALL:-sudo -n install -D -o openclaw -g openclaw -m 0640}"
+REPO="${FACTORY_REVIEW_REPO:-tomorrowflow/voice-diary}"
+CLONE="${FACTORY_REVIEW_CLONE:-$HOME/factory-repos/${REPO##*/}}"
 LOG="${FACTORY_DIGEST_LOG:-$HOME/logs/factory-digest.log}"
 
 mkdir -p "$(dirname "$LOG")"
 exec >>"$LOG" 2>&1
 echo "== digest $(date -Is)"
 
+REPO_ARGS=()
+if [ -d "$CLONE/.git" ]; then
+  git -C "$CLONE" fetch -q origin || echo "fetch of $CLONE failed; using it as is"
+  REPO_ARGS=(--repo-path "$CLONE")
+fi
+
 # Word splitting of the command strings is intended: each is a command line.
 # shellcheck disable=SC2086
-$CARDS_CMD | $DIGEST_CMD --cards -
+$CARDS_CMD | $DIGEST_CMD --cards - "${REPO_ARGS[@]}"
 
 for ext in md json; do
   # shellcheck disable=SC2086
