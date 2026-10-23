@@ -1587,6 +1587,24 @@ describe("WorkboardStore", () => {
     });
   });
 
+  it("keeps a linked backlog card parked until it is started", async () => {
+    const store = createWorkboardSqliteTestStore({ createStores: createKernelStores });
+    const done = await store.create({ title: "Done parent", status: "running" });
+    await store.complete(done.id, { summary: "Done." });
+    const open = await store.create({ title: "Open parent" });
+    const ready = await store.create({ title: "Ready later", status: "backlog" });
+    const waiting = await store.create({ title: "Waiting", status: "backlog" });
+
+    await store.linkCards(done.id, ready.id);
+    await store.linkCards(open.id, waiting.id);
+    await store.dispatch();
+
+    await expect(store.get(ready.id)).resolves.toMatchObject({ status: "backlog" });
+    await expect(store.get(waiting.id)).resolves.toMatchObject({ status: "backlog" });
+    await expect(store.prepareStart(ready.id)).resolves.toMatchObject({ status: "ready" });
+    await expect(store.prepareStart(waiting.id)).resolves.toMatchObject({ status: "todo" });
+  });
+
   it("preserves dependency links across link caps and parent deletion", async () => {
     const store = createWorkboardSqliteTestStore({ createStores: createKernelStores });
     const parent = await store.create({ title: "Parent", status: "running" });

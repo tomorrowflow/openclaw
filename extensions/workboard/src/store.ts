@@ -443,7 +443,7 @@ export class WorkboardStore extends WorkboardNodeWorktreeStore {
     assertOwnerCurrent?: () => void,
   ): Promise<WorkboardCard> {
     return await this.enqueueMutation(
-      async () => await this.promoteDependencyReady(id, now),
+      async () => await this.promoteDependencyReady(id, now, { promoteBacklog: true }),
       assertOwnerCurrent,
     );
   }
