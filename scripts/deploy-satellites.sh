@@ -17,7 +17,8 @@
 # The node profile ($OPENCLAW_NODE_PROFILE_DIR, default
 # ~/.config/openclaw-deploy/node-profile; see its README) is what every node
 # user gets in ~/.claude: `provision` replaces settings.json with
-# claude/settings.<linux|macos>.json and skills/ with claude/skills, then runs
+# claude/settings.<linux|macos>.json, skills/ with claude/skills, and library/
+# with claude/library (removed when the profile has none), then runs
 # the profile's tools.manifest checks as the node user. A failed check installs
 # nothing: the satellite reports a WARNING and the script exits 3 (or 1 if a
 # satellite failed).
@@ -271,6 +272,11 @@ rm -rf ~/.claude/skills.next
 cp -R "$stage/claude/skills" ~/.claude/skills.next
 rm -rf ~/.claude/skills
 mv ~/.claude/skills.next ~/.claude/skills
+# library/ holds skills a brief names by path; outside skills/ they cost no listing line.
+rm -rf ~/.claude/library.next
+[ -d "$stage/claude/library" ] && cp -R "$stage/claude/library" ~/.claude/library.next
+rm -rf ~/.claude/library
+[ -d ~/.claude/library.next ] && mv ~/.claude/library.next ~/.claude/library
 # Rootless Docker listens on the user socket when no docker context names it.
 if [ -z "${DOCKER_HOST:-}" ] && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/docker.sock" ]; then
   export DOCKER_HOST="unix://$XDG_RUNTIME_DIR/docker.sock"
@@ -281,7 +287,7 @@ while IFS='|' read -r tool_os label check; do
   bash -c "$check" </dev/null >/dev/null 2>&1 || missing="$missing, $label"
 done <"$stage/tools.manifest"
 rm -rf "$stage"
-echo "settings.$OS.json, skills: $(ls ~/.claude/skills | tr '\n' ' ')"
+echo "settings.$OS.json, skills: $(ls ~/.claude/skills | tr '\n' ' ')library: $(ls ~/.claude/library 2>/dev/null | tr '\n' ' ')"
 if [ -n "$missing" ]; then
   echo "missing tools: ${missing#, }"
 fi
@@ -291,6 +297,7 @@ provision_one() {
   local name="$1" kind="$2" target="$3" os=linux
   [[ "$kind" == macos-source ]] && os=macos
   local pack=(tar -C "$PROFILE_DIR" -cf - "claude/settings.$os.json" claude/skills tools.manifest)
+  [[ -d "$PROFILE_DIR/claude/library" ]] && pack+=(claude/library)
   local land='umask 077 && mkdir -p ~/.cache && cat > ~/.cache/openclaw-node-profile.tar'
   local script="OS=$os
 $PROVISION_SCRIPT"
