@@ -199,9 +199,15 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
       nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree?.rung;
 
     expect((await dispatch()).startFailures).toEqual([]);
+    const baseCommit = nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree
+      ?.baseCommit;
     expect(briefs()[0]).toContain(
-      "run a reviewer subagent over your changes against the repository's CODING_STANDARDS.md",
+      `run the \`deslop\` skill over \`${baseCommit}..HEAD\`, then the \`code-review\` skill from \`${baseCommit}\` with this ticket as its spec. Its Standards axis reads the repository's CODING_STANDARDS.md.`,
     );
+    expect(briefs()[0]).toContain(
+      "the `rule` (the CODING_STANDARDS.md section it breaks, `spec: <quoted ticket line>`, or the baseline smell's name)",
+    );
+    expect(briefs()[0]).toContain("read `~/.claude/skills/implement/SKILL.md` and follow it");
     expect(briefs()[0]).toContain(
       "- Change files with your Edit and Write tools, not with shell redirection, `sed -i`, or scripts that rewrite files",
     );
@@ -212,8 +218,6 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
       '"review":{"items":[{"path":"…","line":1,"rule":"…","body":"…","fixed":true}],"note":"…"}',
     );
     await expect(rung()).resolves.toBe("b");
-    const baseCommit = nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree
-      ?.baseCommit;
     expect(briefs()[0]).toContain(
       `leave the worktree clean (\`git status --porcelain\` prints nothing) and make \`git diff --check ${baseCommit}..HEAD\` pass`,
     );

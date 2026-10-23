@@ -107,9 +107,12 @@ export function buildNodeTicketMessage(params: {
     `- Before a \`done\` report, leave the worktree clean (\`git status --porcelain\` prints nothing) and make \`git diff --check ${checkFrom}..HEAD\` pass: commit what belongs in the change, delete scratch files, and fix whitespace errors in a new commit. The import refuses either and blocks the card.`,
     "- Do not end the turn while a background job is still running; wait for it or stop it.",
     "- If something needs a decision you cannot make from the ticket and the repository, stop and ask; propose a default.",
+    // implement is user-invoked only (disable-model-invocation), so the session reads it; the
+    // node profile ships it with tdd and code-review in ~/.claude/skills.
+    `- To change code, read \`~/.claude/skills/implement/SKILL.md\` and follow it; it calls the \`tdd\` and \`code-review\` skills. This ticket is its spec; there is no issue tracker to fetch from or label. When \`code-review\` asks for a fixed point, it is \`${checkFrom}\`.`,
     ...(reviewed
       ? [
-          '- Before a `done` report, run a reviewer subagent over your changes against the repository\'s CODING_STANDARDS.md and have it return each finding as a repo-relative `path`, a 1-based `line`, the `rule` it breaks, and a one-line `body`. Address the findings and report every one in `review.items` with `fixed` true or false, plus a `note` on any you left. A review with no findings sends `"items":[]`. For a finding you left, `line` is its line number in the file at your final commit (HEAD): re-check it after the last commit. A `done` report without `review` blocks the card.',
+          `- Before a \`done\` report, run the \`deslop\` skill over \`${checkFrom}..HEAD\`, then the \`code-review\` skill from \`${checkFrom}\` with this ticket as its spec. Its Standards axis reads the repository's CODING_STANDARDS.md. Address the findings of both axes and report every one in \`review.items\`: a repo-relative \`path\`, a 1-based \`line\`, the \`rule\` (the CODING_STANDARDS.md section it breaks, \`spec: <quoted ticket line>\`, or the baseline smell's name), a one-line \`body\`, and \`fixed\` true or false, plus a \`note\` on any you left. A review with no findings sends \`"items":[]\`. For a finding you left, \`line\` is its line number in the file at your final commit (HEAD): re-check it after the last commit. A \`done\` report without \`review\` blocks the card.`,
         ]
       : []),
     "- End your final message with exactly one report block:",
