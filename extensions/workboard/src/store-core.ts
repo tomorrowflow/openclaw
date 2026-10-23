@@ -786,7 +786,11 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     return parentIds.every((id) => statusById.get(id) === "done");
   }
 
-  private async dependencyTargetStatus(card: WorkboardCard, now: number): Promise<WorkboardStatus> {
+  private async dependencyTargetStatus(
+    card: WorkboardCard,
+    now: number,
+    promoteBacklog: boolean,
+  ): Promise<WorkboardStatus> {
     const scheduledAt = card.metadata?.automation?.scheduledAt;
     const parents = cardParentIds(card);
     if (card.status === "scheduled" && !scheduledAt) {
@@ -798,10 +802,14 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       }
       return card.status === "scheduled" ? "ready" : card.status;
     }
-    const parentsDone = await this.parentsDone(parents.map((parentId) => parentId.trim()));
-    if (!isDependencyPromotableStatus(card.status)) {
+    // Backlog is parked work: a link or a dispatch pass leaves it there; only a start promotes it.
+    if (
+      !isDependencyPromotableStatus(card.status) ||
+      (card.status === "backlog" && !promoteBacklog)
+    ) {
       return card.status;
     }
+    const parentsDone = await this.parentsDone(parents.map((parentId) => parentId.trim()));
     if (scheduledAt && scheduledAt > now) {
       return "scheduled";
     }
@@ -852,12 +860,16 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     return result.card;
   }
 
-  protected async promoteDependencyReady(id: string, now = Date.now()): Promise<WorkboardCard> {
+  protected async promoteDependencyReady(
+    id: string,
+    now = Date.now(),
+    options: { promoteBacklog?: boolean } = {},
+  ): Promise<WorkboardCard> {
     const card = await this.requireCard(id);
     if (card.metadata?.archivedAt) {
       return card;
     }
-    const target = await this.dependencyTargetStatus(card, now);
+    const target = await this.dependencyTargetStatus(card, now, options.promoteBacklog === true);
     if (target === card.status) {
       return card;
     }
