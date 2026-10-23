@@ -1,8 +1,10 @@
+import { resolveSandboxHostPort } from "../agents/sandbox-host.js";
 import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { TailscaleServeDisabledError } from "../infra/tailscale-serve-disabled-error.js";
 import {
   claimTailscaleRoute,
+  claimTailscaleServePort,
   getTailnetHostname,
   getTailnetHostnameAfterServe,
   hasTailscaleFunnelRouteForPort,
@@ -11,12 +13,37 @@ import { resolveTailscalePublishedHost } from "../shared/tailscale-status.js";
 import type { GatewayTailscaleIngressEndpoint } from "./ingress-attribution.js";
 import { prepareTailscalePublishedOrigin } from "./tailscale-published-origin.js";
 
+/**
+ * The sandbox port the managed Serve route should cover, if any. A configured
+ * sandbox origin is the operator's route, a TLS sandbox listener needs a TLS
+ * backend this claim does not build, and update validation never starts the
+ * sandbox host.
+ */
+export function resolveManagedSandboxServePort(params: {
+  gatewayPort: number;
+  apps?: { sandboxOrigin?: string; sandboxPort?: number };
+  gatewayTls: boolean;
+  updateCanary: boolean;
+}): number | undefined {
+  if (params.apps?.sandboxOrigin || params.gatewayTls || params.updateCanary) {
+    return undefined;
+  }
+  try {
+    return resolveSandboxHostPort(params.gatewayPort, params.apps?.sandboxPort);
+  } catch {
+    // The sandbox host reports the invalid port when it starts.
+    return undefined;
+  }
+}
+
 export async function startGatewayTailscaleExposure(params: {
   tailscaleMode: "off" | "serve" | "funnel";
   port: number;
   backend?: GatewayTailscaleIngressEndpoint;
   preserveFunnel?: boolean;
   controlUiBasePath?: string;
+  /** Sandbox host port to serve on the same tailnet host; omitted when another origin serves it. */
+  sandboxPort?: number;
   logTailscale: { info: (msg: string) => void; warn: (msg: string) => void };
   signal?: AbortSignal;
 }): Promise<(() => Promise<void>) | null> {
@@ -118,6 +145,11 @@ export async function startGatewayTailscaleExposure(params: {
     throw err;
   }
 
+  const sandboxClaim =
+    params.sandboxPort === undefined
+      ? undefined
+      : await claimSandboxServeRoute(params.sandboxPort, params.logTailscale, params.signal);
+
   let stopping = false;
   void claim.exited.then(() => {
     if (stopping) {
@@ -128,9 +160,38 @@ export async function startGatewayTailscaleExposure(params: {
       `${params.tailscaleMode} route claim exited; managed Tailscale ingress is unavailable until the Gateway restarts`,
     );
   });
+  void sandboxClaim?.exited.then(() => {
+    if (!stopping) {
+      params.logTailscale.warn(
+        "sandbox route claim exited; HTML previews and MCP Apps are unavailable to remote browsers until the Gateway restarts",
+      );
+    }
+  });
   return async () => {
     stopping = true;
     clearPublishedOrigin?.();
-    await claim.stop();
+    await Promise.all([claim.stop(), sandboxClaim?.stop()]);
   };
+}
+
+// The Control UI frames HTML previews and MCP Apps from the Gateway host on the
+// sandbox port, so a remote browser needs that port routed too. Serve only, like
+// portals, and never fatal: a missing route degrades previews, not the Gateway.
+async function claimSandboxServeRoute(
+  port: number,
+  logTailscale: { info: (msg: string) => void; warn: (msg: string) => void },
+  signal?: AbortSignal,
+) {
+  try {
+    const claim = await claimTailscaleServePort(port, port, () => signal?.throwIfAborted());
+    logTailscale.info(`sandbox host served on tailnet HTTPS port ${port}`);
+    return claim;
+  } catch (error) {
+    if (!signal?.aborted) {
+      logTailscale.warn(
+        `sandbox host not served on tailnet HTTPS port ${port}; remote browsers cannot load HTML previews or MCP Apps. Free the port or set mcp.apps.sandboxOrigin: ${formatErrorMessage(error)}`,
+      );
+    }
+    return undefined;
+  }
 }
