@@ -139,6 +139,7 @@ This compatibility path does not grant managed Tailscale semantics. `gateway.aut
 - `gateway.bind: "tailnet"` uses a direct Tailnet bind (no HTTPS, no Serve/Funnel) plus required local `127.0.0.1` when a Tailnet IPv4 is available. Otherwise it falls back to loopback only.
 - `gateway.bind: "auto"` uses `0.0.0.0` in detected containers and prefers loopback otherwise. Use `tailnet` to limit direct network exposure to the Tailnet while retaining same-host loopback access.
 - The main Serve/Funnel route exposes the **Gateway Control UI + WS**. Nodes connect over that same WS endpoint. [Portals](/gateway/portals#managed-private-tailscale-serve) allocate separate private Serve HTTPS ports; they never inherit Funnel exposure. Tailnet grants or ACLs must allow the portal ports as well as the Gateway port. Externally managed routes do not automatically allocate portal ingress.
+- The Gateway also serves the sandbox listener (`mcp.apps.sandboxPort`, default Gateway port + 1) on the same tailnet HTTPS port, so remote browsers can load Canvas widgets, HTML previews, and MCP Apps. This route is Serve only, even in Funnel mode, and grants or ACLs must allow the port. It is skipped when `mcp.apps.sandboxOrigin` is set or Gateway TLS is enabled. If the port is taken, the Gateway logs a warning and keeps running without it.
 
 ### Tailscale prerequisites and limits
 

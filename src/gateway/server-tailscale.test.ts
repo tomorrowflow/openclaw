@@ -14,11 +14,18 @@ const mocks = vi.hoisted(() => {
     getTailnetHostname: vi.fn<() => Promise<string | null>>(async () => null),
     getTailnetHostnameAfterServe: vi.fn<() => Promise<string | null>>(async () => null),
     hasTailscaleFunnelRouteForPort: vi.fn(async (_port: number) => false),
+    stopSandboxClaim: vi.fn<() => Promise<void>>(async () => undefined),
+    claimTailscaleServePort: vi.fn(async (_target: number, _httpsPort: number) => ({
+      exited: new Promise<void>(() => {}),
+      isActive: (): boolean => true,
+      stop: mocks.stopSandboxClaim,
+    })),
   };
 });
 
 vi.mock("../infra/tailscale.js", () => ({
   claimTailscaleRoute: mocks.claimTailscaleRoute,
+  claimTailscaleServePort: mocks.claimTailscaleServePort,
   getTailnetHostname: mocks.getTailnetHostname,
   getTailnetHostnameAfterServe: mocks.getTailnetHostnameAfterServe,
   hasTailscaleFunnelRouteForPort: mocks.hasTailscaleFunnelRouteForPort,
@@ -27,7 +34,10 @@ vi.mock("../infra/tailscale.js", () => ({
 import { createDeferred } from "../../test/helpers/promise.js";
 import { resetSecretRedactionRegistryForTest } from "../logging/secret-redaction-registry.test-support.js";
 import { resolveControlUiIdentity } from "./control-ui-identity.js";
-import { startGatewayTailscaleExposure as startGatewayTailscaleExposureBase } from "./server-tailscale.js";
+import {
+  resolveManagedSandboxServePort,
+  startGatewayTailscaleExposure as startGatewayTailscaleExposureBase,
+} from "./server-tailscale.js";
 import {
   getTailscalePublishedOrigin,
   prepareTailscalePublishedOrigin,
@@ -68,9 +78,66 @@ afterEach(() => {
   mocks.getTailnetHostname.mockResolvedValue(null);
   mocks.getTailnetHostnameAfterServe.mockResolvedValue(null);
   mocks.hasTailscaleFunnelRouteForPort.mockResolvedValue(false);
+  mocks.claimTailscaleServePort.mockImplementation(async () => ({
+    exited: new Promise<void>(() => {}),
+    isActive: (): boolean => true,
+    stop: mocks.stopSandboxClaim,
+  }));
+  mocks.stopSandboxClaim.mockResolvedValue(undefined);
+});
+
+describe("resolveManagedSandboxServePort", () => {
+  const base = { gatewayPort: 18789, gatewayTls: false, updateCanary: false };
+
+  it("serves the default or configured sandbox port", () => {
+    expect(resolveManagedSandboxServePort(base)).toBe(18790);
+    expect(resolveManagedSandboxServePort({ ...base, apps: { sandboxPort: 19999 } })).toBe(19999);
+  });
+
+  it.each([
+    ["an operator-routed sandbox origin", { apps: { sandboxOrigin: "https://apps.example.com" } }],
+    ["Gateway TLS", { gatewayTls: true }],
+    ["update validation", { updateCanary: true }],
+    ["an invalid sandbox port", { apps: { sandboxPort: 18789 } }],
+  ])("skips the route for %s", (_label, overrides) => {
+    expect(resolveManagedSandboxServePort({ ...base, ...overrides })).toBeUndefined();
+  });
 });
 
 describe("startGatewayTailscaleExposure", () => {
+  it("serves the sandbox host on its own tailnet port for the Gateway lifecycle", async () => {
+    const stop = await startGatewayTailscaleExposure({
+      tailscaleMode: "serve",
+      port: 18789,
+      sandboxPort: 18790,
+      logTailscale: createLogger(),
+    });
+
+    expect(mocks.claimTailscaleServePort).toHaveBeenCalledWith(18790, 18790, expect.any(Function));
+    await stop?.();
+    expect(mocks.stopRouteClaim).toHaveBeenCalledOnce();
+    expect(mocks.stopSandboxClaim).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the Gateway route when the sandbox port cannot be served", async () => {
+    mocks.claimTailscaleServePort.mockRejectedValue(new Error("port 18790 in use"));
+    const logTailscale = createLogger();
+
+    const stop = await startGatewayTailscaleExposure({
+      tailscaleMode: "serve",
+      port: 18789,
+      sandboxPort: 18790,
+      logTailscale,
+    });
+
+    expect(stop).toBeTypeOf("function");
+    expect(logTailscale.warn).toHaveBeenCalledWith(
+      expect.stringContaining("set mcp.apps.sandboxOrigin: port 18790 in use"),
+    );
+    await stop?.();
+    expect(mocks.stopRouteClaim).toHaveBeenCalledOnce();
+  });
+
   it("does not require a backend or mutate Tailscale in off mode", async () => {
     await expect(
       startGatewayTailscaleExposureBase({

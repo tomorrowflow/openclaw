@@ -63,13 +63,20 @@ async function startGatewayServerWithSdkHost(
       ...(!gatewayKernel.minimalTestGateway && gatewayKernel.tailscaleMode !== "off"
         ? {
             prepareManagedTailscaleIngress: async (backend) => {
-              const { startGatewayTailscaleExposure } = await import("./server-tailscale.js");
+              const { resolveManagedSandboxServePort, startGatewayTailscaleExposure } =
+                await import("./server-tailscale.js");
               const cleanup = await startGatewayTailscaleExposure({
                 tailscaleMode: gatewayKernel.tailscaleMode,
                 preserveFunnel: gatewayKernel.tailscaleConfig.preserveFunnel ?? false,
                 port,
                 backend,
                 controlUiBasePath: gatewayKernel.controlUiBasePath,
+                sandboxPort: resolveManagedSandboxServePort({
+                  gatewayPort: port,
+                  apps: gatewayKernel.cfgAtStart.mcp?.apps,
+                  gatewayTls: gatewayKernel.gatewayTls.enabled,
+                  updateCanary: Boolean(opts.updateCanary),
+                }),
                 logTailscale,
                 signal,
               });
