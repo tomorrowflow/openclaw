@@ -64,7 +64,7 @@ export function normalizeBoardMetadata(
     ? normalizeWorkspace(input.defaultWorkspace, fallback?.defaultWorkspace)
     : fallback?.defaultWorkspace;
   const orchestration = Object.hasOwn(input, "orchestration")
-    ? normalizeOrchestration(input.orchestration, fallback?.orchestration)
+    ? normalizeOrchestration(input.orchestration, fallback?.orchestration, now)
     : fallback?.orchestration;
   const archivedAt = Object.hasOwn(input, "archived")
     ? input.archived === false
@@ -92,7 +92,8 @@ export function normalizeBoardMetadata(
 
 function normalizeOrchestration(
   value: unknown,
-  fallback?: WorkboardOrchestrationSettings,
+  fallback: WorkboardOrchestrationSettings | undefined,
+  now: number,
 ): WorkboardOrchestrationSettings | undefined {
   if (!isRecord(value)) {
     return fallback;
@@ -123,7 +124,7 @@ function normalizeOrchestration(
     ? normalizeTargetRoutes(record.targetRoutes)
     : fallback?.targetRoutes;
   const classRungs = Object.hasOwn(record, "classRungs")
-    ? normalizeClassRungs(record.classRungs)
+    ? normalizeClassRungs(record.classRungs, fallback?.classRungs, now)
     : fallback?.classRungs;
   const next: WorkboardOrchestrationSettings = {
     ...(autoDecompose !== undefined ? { autoDecompose } : {}),
@@ -141,7 +142,11 @@ const MAX_CLASS_RUNGS = 50;
 // A card label is at most 40 characters, so a class name after `class:` is at most 34.
 const MAX_CLASS_NAME_CHARS = 34;
 
-function normalizeClassRungs(value: unknown): Record<string, WorkboardClassRung> {
+function normalizeClassRungs(
+  value: unknown,
+  stored: Record<string, WorkboardClassRung> | undefined,
+  now: number,
+): Record<string, WorkboardClassRung> {
   if (value === null) {
     return {};
   }
@@ -162,14 +167,33 @@ function normalizeClassRungs(value: unknown): Record<string, WorkboardClassRung>
       if (!isRecord(entry) || (entry.rung !== "a" && entry.rung !== "b")) {
         throw new Error(`class rung ${name} needs rung a or b.`);
       }
-      if (entry.sampleEvery === undefined || entry.sampleEvery === null) {
-        return [name, { rung: entry.rung }];
+      let sampleEvery: number | undefined;
+      if (entry.sampleEvery !== undefined && entry.sampleEvery !== null) {
+        sampleEvery = resolveOptionalIntegerOption(entry.sampleEvery, { min: 1, max: 100 });
+        if (sampleEvery === undefined || sampleEvery !== entry.sampleEvery) {
+          throw new Error(`class rung ${name} sampleEvery must be an integer from 1 to 100.`);
+        }
       }
-      const sampleEvery = resolveOptionalIntegerOption(entry.sampleEvery, { min: 1, max: 100 });
-      if (sampleEvery === undefined || sampleEvery !== entry.sampleEvery) {
-        throw new Error(`class rung ${name} sampleEvery must be an integer from 1 to 100.`);
+      const previous = stored && Object.hasOwn(stored, name) ? stored[name] : undefined;
+      let since: number | undefined;
+      if (entry.since !== undefined && entry.since !== null) {
+        // An explicit value is the operator's backfill of a change made before stamping.
+        since = resolveOptionalIntegerOption(entry.since, { min: 0, max: now });
+        if (since === undefined || since !== entry.since) {
+          throw new Error(`class rung ${name} since must be an epoch ms integer from 0 to now.`);
+        }
+      } else {
+        // An unlisted class is at rung a, so listing it at a changes nothing.
+        since = entry.rung === (previous?.rung ?? "a") ? previous?.since : now;
       }
-      return [name, { rung: entry.rung, sampleEvery }];
+      return [
+        name,
+        {
+          rung: entry.rung,
+          ...(sampleEvery === undefined ? {} : { sampleEvery }),
+          ...(since === undefined ? {} : { since }),
+        },
+      ];
     }),
   );
 }
