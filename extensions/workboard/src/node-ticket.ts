@@ -456,6 +456,9 @@ export async function createNodeTicketWorktree(params: {
     ...(previous?.grill ? { grill: previous.grill } : {}),
     ...(previous?.reviews ? { reviews: previous.reviews } : {}),
     ...(previous?.rounds ? { rounds: previous.rounds } : {}),
+    // The previous round's verifier may still run on the node; the handoff
+    // pass settles it from this record once its session ends.
+    ...(previous?.verification?.phase === "running" ? { verification: previous.verification } : {}),
   };
   const git = (...args: string[]) =>
     runNodeCommand(runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);

@@ -557,7 +557,7 @@ export function createNodeTicketHandoffs(params: {
       return;
     }
     const current = step ? await params.store.get(card.id) : card;
-    if (current?.status === "review") {
+    if (current?.status === "review" && !current.metadata?.archivedAt) {
       await params.onReview?.(current);
     }
   };

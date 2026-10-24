@@ -886,6 +886,112 @@ describe("node ticket draft PR", () => {
     });
   });
 
+  it("settles a verification still running after the operator decided or archived the card", async () => {
+    const verifyPathOf = (ticket: {
+      repos: { target: { worktreesRoot: string } };
+      card: WorkboardCard;
+    }) => path.join(ticket.repos.target.worktreesRoot, `verify-${ticket.card.id.slice(0, 8)}-r0`);
+
+    const decided = await verifiedTicket();
+    await decided.handoffs.resume(decided.warn);
+    git(decided.repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
+    decided.github.tokens.set("acme/app", "token-app");
+    await decided.store.move(decided.card.id, "done", undefined);
+    await decided.handoffs.resume(decided.warn);
+    // The publish went ahead without the verification, which still holds the node slot.
+    const published = (await decided.store.get(decided.card.id))!;
+    expect(published.metadata?.automation?.target?.worktree?.handoff?.phase).toBe("published");
+    expect(published.metadata?.automation?.target?.worktree?.reviews?.[0]).not.toHaveProperty(
+      "verification",
+    );
+    expect(workboardCardConsumesNodeTicketSlot(published, Date.now())).toBe(true);
+    await expect(decided.verificationOf()).resolves.toMatchObject({ phase: "running" });
+
+    decided.verifier.running = false;
+    decided.verifier.history = verificationReply({ verdict: "pass", summary: "all green" });
+    await decided.handoffs.resume(decided.warn);
+    expect(decided.warn).not.toHaveBeenCalled();
+    expect(decided.onReview).not.toHaveBeenCalled();
+    await expect(decided.verificationOf()).resolves.toMatchObject({
+      phase: "done",
+      verdict: "pass",
+    });
+    expect(existsSync(verifyPathOf(decided))).toBe(false);
+    const settled = (await decided.store.get(decided.card.id))!;
+    expect(settled.metadata?.comments?.at(-1)?.body).toContain("**Verification:** pass");
+    expect(workboardCardConsumesNodeTicketSlot(settled, Date.now())).toBe(false);
+
+    const archived = await verifiedTicket();
+    await archived.handoffs.resume(archived.warn);
+    await archived.store.archive(archived.card.id, true);
+    expect(
+      workboardCardConsumesNodeTicketSlot(
+        (await archived.store.get(archived.card.id))!,
+        Date.now(),
+      ),
+    ).toBe(true);
+    archived.verifier.running = false;
+    archived.verifier.history = verificationReply({
+      verdict: "fail",
+      summary: "the parser still raises",
+      findings: [{ path: "parser.py", body: "raises on whitespace" }],
+    });
+    await archived.handoffs.resume(archived.warn);
+    expect(archived.warn).not.toHaveBeenCalled();
+    expect(archived.onReview).not.toHaveBeenCalled();
+    await expect(archived.verificationOf()).resolves.toMatchObject({
+      phase: "done",
+      verdict: "fail",
+    });
+    expect(existsSync(verifyPathOf(archived))).toBe(false);
+    expect(
+      (await archived.store.get(archived.card.id))?.metadata?.comments?.at(-1)?.body,
+    ).toContain("**Verification:** fail");
+  });
+
+  it("keeps a running verification across the rework launch and settles it on the new round", async () => {
+    const ticket = await verifiedTicket();
+    const { store, card, repos, handoffs, warn, onReview, verifier, github } = ticket;
+    const verifyPath = path.join(repos.target.worktreesRoot, `verify-${card.id.slice(0, 8)}-r0`);
+    await handoffs.resume(warn);
+    git(repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
+    github.tokens.set("acme/app", "token-app");
+    await store.addComment(
+      card.id,
+      { body: "Verdict: rework: whitespace input still raises" },
+      undefined,
+      "agent:dev",
+    );
+    await store.move(card.id, "done", undefined);
+    await handoffs.resume(warn);
+    expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.handoff?.phase).toBe(
+      "published",
+    );
+
+    // The reopen launches rework round 1 while round 0's verifier still runs.
+    await store.move(card.id, "todo", undefined);
+    await store.addComment(card.id, { body: "Handle whitespace-only input." });
+    await handoffs.resume(warn);
+    expect(warn).not.toHaveBeenCalled();
+    const launched = (await store.get(card.id))!;
+    expect(launched.status).toBe("running");
+    expect(launched.metadata?.automation?.target?.worktree?.rework?.round).toBe(1);
+    await expect(ticket.verificationOf()).resolves.toMatchObject({ phase: "running", round: 0 });
+
+    verifier.running = false;
+    verifier.history = verificationReply({ verdict: "pass", summary: "all green" });
+    await handoffs.resume(warn);
+    expect(warn).not.toHaveBeenCalled();
+    expect(onReview).not.toHaveBeenCalled();
+    await expect(ticket.verificationOf()).resolves.toMatchObject({
+      phase: "done",
+      round: 0,
+      verdict: "pass",
+    });
+    expect(existsSync(verifyPath)).toBe(false);
+    expect((await store.get(card.id))?.status).toBe("running");
+  });
+
   it("records a verifier session that cannot start as an error and wakes the review", async () => {
     const ticket = await verifiedTicket({ failCreate: "model not allowed: openai/gpt-6-sol" });
     const { store, card, repos, handoffs, warn, onReview } = ticket;

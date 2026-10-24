@@ -40,7 +40,7 @@ const MAX_VERIFICATION_SUMMARY_CHARS = 2000;
 // view lists the new run; until a reply exists, a young session is starting.
 const VERIFICATION_START_GRACE_MS = 2 * 60_000;
 
-/** A node ticket waiting in review on its imported round. */
+/** A node ticket waiting in review on its imported round: where a verification starts. */
 type ImportedReviewRound = {
   target: WorkboardExecutionTarget & { kind: "node-claude" };
   worktree: WorkboardNodeWorktree;
@@ -64,32 +64,50 @@ function importedReviewRound(card: WorkboardCard): ImportedReviewRound | undefin
   return { target, worktree, handoff, round: worktree.rework?.round ?? 0 };
 }
 
+/**
+ * A node ticket whose worktree record carries a running verification. The
+ * verifier session runs on the node whatever the card's status, so it settles
+ * after the operator decided the round, archived the card, or a rework round
+ * launched, and whether or not the record is the imported round's.
+ */
+type RunningVerification = {
+  target: ImportedReviewRound["target"];
+  worktree: WorkboardNodeWorktree;
+  verification: Extract<WorkboardNodeVerification, { phase: "running" }>;
+};
+
+function runningNodeVerification(card: WorkboardCard): RunningVerification | undefined {
+  const target = nodeTicketTarget(card);
+  const worktree = target?.worktree;
+  const verification = worktree?.verification;
+  return target && worktree && verification?.phase === "running"
+    ? { target, worktree, verification }
+    : undefined;
+}
+
 export type NodeVerificationStep =
   | { kind: "start"; round: ImportedReviewRound; verifier: WorkboardVerifierSettings }
-  | {
-      kind: "settle";
-      round: ImportedReviewRound;
-      verification: Extract<WorkboardNodeVerification, { phase: "running" }>;
-    };
+  | ({ kind: "settle" } & RunningVerification);
 
 /**
- * What the handoff pass owes a card's verification: start one when the board
- * has a verifier and the imported round has none yet, or settle the one that
- * runs. A running record settles even after the operator removed the verifier.
+ * What the handoff pass owes a card's verification: settle the one that runs,
+ * in any card status, or start one when the board has a verifier and the
+ * imported round in review has none yet. A running record settles even after
+ * the operator removed the verifier.
  */
 export function nodeVerificationStep(
   card: WorkboardCard,
   verifier: WorkboardVerifierSettings | undefined,
 ): NodeVerificationStep | undefined {
+  const running = runningNodeVerification(card);
+  if (running) {
+    return { kind: "settle", ...running };
+  }
   const round = importedReviewRound(card);
-  if (!round) {
+  if (!round || currentNodeVerification(round.worktree, round.handoff)) {
     return undefined;
   }
-  const verification = currentNodeVerification(round.worktree, round.handoff);
-  if (verification?.phase === "running") {
-    return { kind: "settle", round, verification };
-  }
-  return !verification && verifier ? { kind: "start", round, verifier } : undefined;
+  return verifier ? { kind: "start", round, verifier } : undefined;
 }
 
 /** The card's verify worktree and session name for a round: `verify-<card8>-r<round>`. */
@@ -292,13 +310,15 @@ type NodeVerificationParams = {
  */
 async function finishNodeVerification(
   params: NodeVerificationParams,
-  round: ImportedReviewRound,
+  place: Pick<RunningVerification, "target" | "worktree">,
   verification: Extract<WorkboardNodeVerification, { phase: "done" }>,
   verifyPath: string | undefined,
 ): Promise<boolean> {
   const { store, card } = params;
+  // Accepted edge: a crash between this write and the comment below loses the
+  // comment; the review cron's schedule is the nudge backstop.
   const recorded = await store.setNodeVerification(card.id, {
-    worktreePath: round.worktree.path,
+    worktreePath: place.worktree.path,
     verification,
   });
   if (!recorded) {
@@ -308,10 +328,10 @@ async function finishNodeVerification(
     return false;
   }
   if (verifyPath) {
-    await runNodeCommand(params.runtime, round.target.nodeId, [
+    await runNodeCommand(params.runtime, place.target.nodeId, [
       "git",
       "-C",
-      round.target.repoPath,
+      place.target.repoPath,
       "worktree",
       "remove",
       "--force",
@@ -426,7 +446,7 @@ async function settleNodeVerification(
   params: NodeVerificationParams,
   step: Extract<NodeVerificationStep, { kind: "settle" }>,
 ): Promise<"running" | "done"> {
-  const { verification, round } = step;
+  const { verification } = step;
   if (
     params.readSessions &&
     (await workboardSessionHasActiveRun(params.readSessions, verification.sessionKey))
@@ -446,7 +466,7 @@ async function settleNodeVerification(
   const { path: verifyPath, ...running } = verification;
   await finishNodeVerification(
     params,
-    round,
+    step,
     {
       ...running,
       phase: "done",
