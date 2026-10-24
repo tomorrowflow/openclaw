@@ -100,6 +100,29 @@ even without an interactive sender. This self-scoped `automations` tool does not
 grant administrator access or control over other jobs, and explicit tool-policy
 denials still apply.
 
+An authenticated operator turn can schedule an `agentTurn` back into its exact
+existing conversation with `sessionTarget: "session:<same session key>"`. New
+jobs retain the original authenticated source privately, so the continuation can
+finish authorized work, such as inspecting and merging that conversation's PR,
+without another message from the operator. Each occurrence revalidates the
+original operator scopes, role, device, access grant, model restrictions, and exact
+session identity under current policy. This preserves the original operator
+scope ceiling; it is not a new PR-only permission or a blanket grant to automations.
+The stored tool cap, sandbox, and current tool denials still apply. Scheduled
+automation management remains self-scoped.
+
+This source is not inferred for existing jobs, guests, isolated/current targets,
+scripts, or another conversation. Executable edits discard it unless an
+authenticated creator schedules a fresh continuation; display-only edits retain
+it. Disabling, removing, or replacing the job or session retires the active
+occurrence. Re-enabling the job does not revive a revoked occurrence.
+
+While an `at` agent-turn continuation in an explicitly named conversation waits
+for a result, it can call `automations` with `action: "next_check"` and `in: "3m"`
+to rearm that same job. It does not create a new job or change its task, target,
+or permissions. Without a next-check proposal, ordinary one-shot completion and
+`deleteAfterRun` behavior are unchanged.
+
 Manual runs use the same scheduled execution context as timer-fired runs after
 the request passes admission. Ending the chat turn or tool call that started a
 run does not expire the job's tool access. The job still uses its stored authority
@@ -339,7 +362,7 @@ With `announce`, agent, command, and script results belong to the chat or topic 
 
     `current` binds conversation context, not the original agent execution or its worktree; announce results belong to the resolved delivery destination. The detached run has its own session identity and uses the scheduled agent's workspace and captured tool restrictions. It does not inherit the conversation's cloud worker placement. Messages sent to the job's cron session address its latest detached run, independently of the bound conversation. In-flight turns sent through that stable cron key are canceled if the key is reassigned. A task-specific checkout path in the prompt does not grant access to it. Before using a job to continue repository work, verify that its execution environment can access the required checkout and tools; otherwise keep the work with its existing execution owner. A result committed to the conversation does not itself resume the original agent.
 
-    Custom-session agent turns wait for active work in that session before preparing or resetting its context, so a scheduled tick cannot invalidate an in-progress compaction.
+    Custom-session agent turns enter the session's ordinary turn queue and wait for active work before preparing context, so a scheduled tick cannot invalidate an in-progress compaction. The automation remains running until that turn settles; queue acceptance alone does not count as success. Saved authenticated continuations retain their original source and its current permissions through execution and delivery.
 
     To come back to this conversation later (for example, to recheck CI), add a one-shot `at` job with `payload: { kind: "agentTurn", message: "Instructions for your next turn" }` and `sessionTarget: "session:<your session key from Runtime>"`. It runs inside the existing conversation with the same history and saved workspace/worktree.
 

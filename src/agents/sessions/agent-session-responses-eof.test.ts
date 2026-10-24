@@ -10,6 +10,7 @@ import { expect, it, vi } from "vitest";
 import { processResponsesStream } from "../../../packages/ai/src/transports/openai-responses-stream-internal.js";
 import { failTransportStream } from "../../../packages/ai/src/transports/transport-stream-shared.js";
 import { createDeferred } from "../../../test/helpers/promise.js";
+import { createStubTool } from "../test-helpers/agent-tool-stubs.js";
 import {
   createAssistant,
   createAssistantResultStream,
@@ -245,6 +246,8 @@ it.each([
           parameters: Type.Object({}),
           execute,
         },
+        // Async tool calls need sessions_yield to collect their results.
+        { ...createStubTool("sessions_yield"), async: false },
       ],
     });
 
@@ -393,6 +396,8 @@ it.each(["recover", "exhaust", "cancel", "cancel-retry", "terminate"])(
           parameters: Type.Object({}),
           execute,
         },
+        // Async tool calls need sessions_yield to collect their results.
+        { ...createStubTool("sessions_yield"), async: false },
       ],
     });
     session.subscribe((event) => events.push(event));

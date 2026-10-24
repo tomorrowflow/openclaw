@@ -200,6 +200,24 @@ export type CronServiceDeps = {
         nextCheck?: CronNextCheckProposal;
       }
   >;
+  /** Shared-conversation work settles through the session controller's ordinary turn owner. */
+  runSessionEvent?: (params: {
+    admissionSource: NonNullable<AdmittedRunContext["admissionSource"]>;
+    deliveryAttemptFence: CronCompletionDeliveryFence | null;
+    onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
+    onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
+    onLaneWait?: (info?: { waiting?: boolean }) => void;
+    executionIdentity?: CronExecutionIdentityAdmission;
+    job: CronStoredJob;
+    text: string;
+    abortSignal?: AbortSignal;
+    prepare?: () => Promise<void>;
+    assertCurrent: () => void;
+  }) => Promise<
+    CronRunOutcome &
+      CronRunTelemetry &
+      CronRunDeliveryResult & { nextCheck?: CronNextCheckProposal }
+  >;
   runCommandJob?: (params: {
     deliveryAttemptFence: CronCompletionDeliveryFence | null;
     job: CronJob;
@@ -432,6 +450,7 @@ export type CronListResult = CronJob[];
 export type CronAddInput = CronJobCreate;
 /** Caller-specific declaration-key visibility and explicit enablement metadata. */
 export type CronAddOptions = {
+  operatorSource?: NonNullable<CronStoredJob["operatorSource"]>["source"];
   inferenceBinding?: CronStoredJob["inferenceBinding"];
   sourceConversation?: CronStoredJob["sourceConversation"];
   /** Selected revisions captured from a validated caller session, never public input. */

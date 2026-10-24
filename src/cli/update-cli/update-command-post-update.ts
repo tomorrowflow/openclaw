@@ -5,7 +5,6 @@ import { buildControlPlaneUpdateRestartHealthPendingResult } from "../../infra/u
 import { recordUpdateRunStep } from "../../infra/update-run-ledger.js";
 import { isUpdateGatewayReadinessPending } from "../../infra/update-run-step.js";
 import type { UpdateRunResult } from "../../infra/update-runner-types.js";
-import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import { defaultRuntime } from "../../runtime.js";
 import { classifyUpdateOutcome, isVerifiedUpdateRollback } from "../../shared/update-outcome.js";
 import { convergeUpdatePlugins } from "./update-command-convergence.js";
@@ -36,6 +35,7 @@ import {
   withUpdateStateRead,
 } from "./update-command-result.js";
 import { rollbackFailedUpdate } from "./update-command-rollback.js";
+import { GatewayRestartHealthError } from "./update-command-service-command.js";
 import type { UpdateServiceDefinitionRecovery } from "./update-command-service-context-types.js";
 import { withOwnedManagedUpdateEnv } from "./update-command-service-env.js";
 import { GatewayServiceUpdateOwnershipError } from "./update-command-service-plan.js";
@@ -50,8 +50,9 @@ import {
 import {
   completeUpdateCommandResult,
   captureUpdateFinalization,
-  createPostUpdateFailureResult,
+  createPostUpdateExceptionResult,
   publishSettledUpdateCommandResult,
+  shouldPropagatePostUpdateException,
   bindUpdateFinalizationFailure,
   withUpdateProgressSettlement,
 } from "./update-command-terminal-publication.js";
@@ -411,6 +412,8 @@ async function finishSettledUpdate(
       onFailure: (cause) => reportResult(result, false, { cause }),
     });
 
+  let resultWithPostUpdate = params.result;
+  let activationVerified = false;
   const runPostUpdate = async (): Promise<UpdateRunResult> => {
     try {
       if (params.coreAlreadyCurrent && params.deferredMaintenance) {
@@ -471,7 +474,6 @@ async function finishSettledUpdate(
         }
         return convergence;
       };
-      let resultWithPostUpdate = params.result;
       let postUpdateConfigSnapshot: Awaited<ReturnType<typeof readConfigFileSnapshot>> | undefined;
       if (!deferPluginConvergence) {
         ({ resultWithPostUpdate, postUpdateConfigSnapshot } = await convergePlugins());
@@ -538,7 +540,6 @@ async function finishSettledUpdate(
         await restoreWindowsAutoStart(resultWithPostUpdate);
       }
       let verificationFailure = "restart-unhealthy";
-      let activationVerified = false;
       const restart = async () => {
         const restarted = await forward(() =>
           maybeRestartService({
@@ -577,6 +578,9 @@ async function finishSettledUpdate(
         );
         if (restarted !== "failed" && restarted !== "restart-health-failed") {
           return restarted === "ok";
+        }
+        if (activationVerified && restarted === "restart-health-failed") {
+          throw new GatewayRestartHealthError(`Restart finalization: ${verificationFailure}.`);
         }
         const failure: UpdateRunResult = {
           ...resultWithPostUpdate,
@@ -685,7 +689,7 @@ async function finishSettledUpdate(
         params,
         resultWithPostUpdate,
         assertCurrent,
-        { root: postUpdateRoot, sentinel: sentinelOptions },
+        { root: postUpdateRoot, sentinel: sentinelOptions, activationVerified },
       );
       if (maintenanceFailure) {
         const reported = await reportResult(maintenanceFailure.result, false, undefined, false);
@@ -702,11 +706,20 @@ async function finishSettledUpdate(
           cause: error,
         });
       }
-      if (error instanceof UpdateCommandFailure || hasCommandProcessCleanupError(error)) {
+      if (shouldPropagatePostUpdateException(error, activationVerified)) {
         // Unsettled commands may still change files. Keep intent/material for fenced reconciliation.
         throw error;
       }
-      const { result, message } = createPostUpdateFailureResult(params, error);
+      const { result, message } = createPostUpdateExceptionResult(
+        { ...params, result: resultWithPostUpdate },
+        error,
+        activationVerified,
+      );
+      if (result.status === "ok") {
+        assertCurrent();
+        defaultRuntime.error(message);
+        return result;
+      }
       defaultRuntime.error(`Post-update verification failed: ${message}`);
       const reported = await reportResult(result);
       throw createFailure(reported, message, { cause: error });
