@@ -229,18 +229,6 @@ describe("node ticket handoff", () => {
     expect(existsSync(worktree)).toBe(true);
     expect(git(repos.hostRepo, "branch", "--list", `factory/${card.id}`)).toBe("");
   });
-
-  it("blocks a done report whose branch has no commits", async () => {
-    const { store, card, handoffs, warn } = await finishNodeTicket({ files: {} });
-
-    await handoffs.resume(warn);
-
-    const stored = await store.get(card.id);
-    expect(stored?.status).toBe("blocked");
-    expect(stored?.metadata?.comments?.at(-1)?.body).toMatch(
-      /^Bundle import failed: node mac-factory failed `git .* bundle create .*`: .*empty bundle/,
-    );
-  });
 });
 
 /** Makes the next sessions.create fail, as a launch that dies after its worktree record was prepared. */

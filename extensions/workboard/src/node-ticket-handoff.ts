@@ -100,12 +100,13 @@ type ImportedBundle = {
  * Bundles the ticket branch on the node and imports it into the host clone.
  * The bundle must carry exactly the ticket branch, descend from the recorded
  * base commit, and never move an existing host branch to another commit.
+ * Undefined for a first round that committed nothing, which has nothing to import.
  */
 async function importNodeBundle(
   runtime: WorkboardNodeTicketRuntime,
   item: HandoffCard,
   assertCurrent: () => Promise<void>,
-): Promise<ImportedBundle> {
+): Promise<ImportedBundle | undefined> {
   const { nodeId, worktree, bundlePath, hostRepoPath } = item;
   const git = (...args: string[]) =>
     runNodeCommand(runtime, nodeId, ["git", "-C", worktree.path, ...args]);
@@ -122,6 +123,13 @@ async function importNodeBundle(
     throw new Error(
       `the node worktree ${worktree.path} is not on ${worktree.branch} (HEAD is ${checkedOutRef || "unknown"})`,
     );
+  }
+  // A report-only round (say, it could not reproduce the bug): git refuses an
+  // empty bundle and GitHub a PR without commits. A rework round starts from
+  // its published commits, so it always has some beyond the base.
+  if (!worktree.rework && worktreeHead === worktree.baseCommit) {
+    await assertCurrent();
+    return undefined;
   }
   await git("bundle", "create", bundlePath, `${worktree.baseCommit}..${worktree.branch}`);
   const bundle = await fetchNodeFile(runtime, nodeId, bundlePath, BUNDLE_MAX_BYTES);
@@ -253,7 +261,7 @@ async function runNodeTicketHandoff(params: {
   const claim = card.metadata?.claim;
   const scope = claim ? { ownerId: claim.ownerId, token: claim.token } : undefined;
   if (worktree.handoff.phase === "pending") {
-    let imported: ImportedBundle;
+    let imported: ImportedBundle | undefined;
     try {
       imported = await importNodeBundle(runtime, item, async () => {
         // The card may have been cancelled or re-dispatched while the bundle travelled.
@@ -317,50 +325,68 @@ async function runNodeTicketHandoff(params: {
       );
       return;
     }
-    const { headCommit } = imported;
-    const range = `${worktree.baseCommit.slice(0, 12)}..${headCommit.slice(0, 12)}`;
-    await store.addProof(
-      card.id,
-      {
-        label: "bundle import",
-        status: "passed",
-        command: `git fetch wb-${card.id}.bundle ${worktree.branch}`,
-        note: `Imported ${worktree.branch} ${range} into ${item.hostRepoPath}`,
-      },
-      scope,
-    );
-    // The diffstat only informs the operator; the import stands without it.
-    const numstat = await hostGit(item.hostRepoPath, [
-      "diff",
-      "--numstat",
-      "-z",
-      "-M",
-      imported.from,
-      headCommit,
-    ]);
-    if (numstat.code === 0) {
-      await store.recordNodeRound(
+    if (!imported) {
+      await store.addProof(
         card.id,
         {
-          worktreePath: worktree.path,
-          changes: parseNumstat(numstat.stdout, imported.from, headCommit),
+          label: "bundle import",
+          status: "skipped",
+          note: `No commits beyond ${worktree.baseCommit.slice(0, 12)}: report-only round, nothing to import or publish`,
         },
         scope,
       );
+      // Without a handoff the card is a plain review card: done closes it
+      // without a PR, and trust KPIs count it neither imported nor accepted.
+      // Accepted edge case: a restart before the move to review leaves the
+      // card running without a handoff, so the idle sweep blocks it; a re-run
+      // settles it again.
+      await store.setNodeHandoff(card.id, { worktreePath: worktree.path }, scope);
     } else {
-      params.warn(
-        `workboard could not record the changed files of card ${card.id}: ${numstat.stderr.trim() || `exit ${numstat.code}`}`,
+      const { headCommit } = imported;
+      const range = `${worktree.baseCommit.slice(0, 12)}..${headCommit.slice(0, 12)}`;
+      await store.addProof(
+        card.id,
+        {
+          label: "bundle import",
+          status: "passed",
+          command: `git fetch wb-${card.id}.bundle ${worktree.branch}`,
+          note: `Imported ${worktree.branch} ${range} into ${item.hostRepoPath}`,
+        },
+        scope,
+      );
+      // The diffstat only informs the operator; the import stands without it.
+      const numstat = await hostGit(item.hostRepoPath, [
+        "diff",
+        "--numstat",
+        "-z",
+        "-M",
+        imported.from,
+        headCommit,
+      ]);
+      if (numstat.code === 0) {
+        await store.recordNodeRound(
+          card.id,
+          {
+            worktreePath: worktree.path,
+            changes: parseNumstat(numstat.stdout, imported.from, headCommit),
+          },
+          scope,
+        );
+      } else {
+        params.warn(
+          `workboard could not record the changed files of card ${card.id}: ${numstat.stderr.trim() || `exit ${numstat.code}`}`,
+        );
+      }
+      await store.setNodeHandoff(
+        card.id,
+        {
+          worktreePath: worktree.path,
+          handoff: { phase: "imported", headCommit, importedAt: params.now() },
+          ...(imported.reworkUnchanged ? { reworkUnchanged: true } : {}),
+        },
+        scope,
       );
     }
-    await store.setNodeHandoff(
-      card.id,
-      {
-        worktreePath: worktree.path,
-        handoff: { phase: "imported", headCommit, importedAt: params.now() },
-        ...(imported.reworkUnchanged ? { reworkUnchanged: true } : {}),
-      },
-      scope,
-    );
   }
   try {
     await cleanupNodeTicket(runtime, item);
