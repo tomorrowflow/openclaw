@@ -51,7 +51,8 @@ function median(values: number[]): number | undefined {
 
 function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
   const target = nodeTicketTarget(card);
-  if (!target) {
+  // A probe re-runs a past ticket to measure the harness, not the loop's work.
+  if (!target || card.metadata?.automation?.probe) {
     return undefined;
   }
   const worktree = target.worktree;
@@ -84,6 +85,20 @@ function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
     ),
     reviews: worktree?.reviews ?? [],
   };
+}
+
+/** How one node ticket fared by the trust KPIs' facts; undefined where they leave it out. */
+export function workboardTicketOutcome(
+  card: WorkboardCard,
+): { accepted: boolean; clean: boolean; reworkRounds: number } | undefined {
+  const ticket = ticketFacts(card);
+  return ticket
+    ? {
+        accepted: ticket.acceptedAt !== undefined,
+        clean: isClean(ticket),
+        reworkRounds: ticket.reworkRounds.length,
+      }
+    : undefined;
 }
 
 // A round that only merged the base branch, or added nothing, corrected nothing.

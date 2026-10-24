@@ -41,7 +41,7 @@ import type {
   WorkboardMutationScope,
   WorkboardOwnedCardPatch,
 } from "./store-inputs.js";
-import { WorkboardNodeWorktreeStore } from "./store-node-worktree.js";
+import { WorkboardNodeProbeStore } from "./store-node-probe.js";
 import { capText, normalizeBoardId, normalizeTimestamp } from "./store-normalizers.js";
 import { readCards } from "./store-read.js";
 
@@ -181,7 +181,7 @@ function lifecycleExecution(params: {
 }
 
 // Capability layers share persistence handles and the runtime's mutation ordering.
-export class WorkboardStore extends WorkboardNodeWorktreeStore {
+export class WorkboardStore extends WorkboardNodeProbeStore {
   async prepareExecutionLaunch(
     id: string,
     input: {

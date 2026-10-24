@@ -1,4 +1,8 @@
-import type { WorkboardLaunchState, WorkboardStartRequest } from "@openclaw/workboard-contract";
+import type {
+  WorkboardLaunchState,
+  WorkboardProbe,
+  WorkboardStartRequest,
+} from "@openclaw/workboard-contract";
 import {
   isRecord,
   normalizeBoundedOptionalString,
@@ -18,6 +22,19 @@ function normalizeLaunchTimestamp(value: unknown): number | undefined {
 export function normalizeStartRequest(value: unknown): WorkboardStartRequest | undefined {
   const requestedAt = isRecord(value) ? normalizeLaunchTimestamp(value.requestedAt) : undefined;
   return requestedAt === undefined ? undefined : { requestedAt };
+}
+
+/** A probe arm's name, as `probe:<arm>` labels and the probes listing show it. */
+export const PROBE_ARM_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+export function normalizeProbe(value: unknown): WorkboardProbe | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const of = normalizeBoundedOptionalString(value.of, 120);
+  const arm = typeof value.arm === "string" && PROBE_ARM_PATTERN.test(value.arm) ? value.arm : "";
+  const createdAt = normalizeLaunchTimestamp(value.createdAt);
+  return of && arm && createdAt !== undefined ? { of, arm, createdAt } : undefined;
 }
 
 export function normalizeLaunchState(value: unknown): WorkboardLaunchState | undefined {

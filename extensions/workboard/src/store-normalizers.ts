@@ -66,7 +66,11 @@ import type {
   WorkboardProofInput,
   WorkboardWorkerLogInput,
 } from "./store-inputs.js";
-import { normalizeLaunchState, normalizeStartRequest } from "./store-launch-normalizers.js";
+import {
+  normalizeLaunchState,
+  normalizeProbe,
+  normalizeStartRequest,
+} from "./store-launch-normalizers.js";
 import { capAttachments, isDependencyLink, trimMetadataToBudget } from "./store-metadata-budget.js";
 import { normalizeExecutionTarget } from "./store-target-normalizers.js";
 import {
@@ -308,6 +312,9 @@ export function normalizeAutomation(
       options.allowLaunchState && Object.hasOwn(record, "startRequest")
         ? record.startRequest
         : fallback.startRequest,
+    ),
+    probe: normalizeProbe(
+      options.allowLaunchState && Object.hasOwn(record, "probe") ? record.probe : fallback.probe,
     ),
     summary: normalizeBoundedString(record.summary, fallback.summary, 2000, "summary"),
     createdCardIds: strings("createdCardIds", "created card ids", 120),
