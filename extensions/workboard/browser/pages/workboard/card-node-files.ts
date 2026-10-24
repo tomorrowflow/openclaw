@@ -27,17 +27,21 @@ export type CardFileList = {
 };
 
 /**
- * Node tickets only; a new round's import lists again. Without live files, a
- * card that has imported no round has nothing to list.
+ * Node tickets only; a new round's import or a new `relates_to` link lists
+ * again. Without live files, a card with no imported round and no link has
+ * nothing to list.
  */
 function listKey(card: WorkboardCard, live: boolean): string | undefined {
   if (!isWorkboardNodeTicket(card)) {
     return undefined;
   }
-  const key = (card.rounds ?? [])
-    .flatMap((round) => (round.changes ? [round.changes.to] : []))
-    .join(",");
-  return key || live ? key : undefined;
+  const commits = (card.rounds ?? []).flatMap((round) => (round.changes ? [round.changes.to] : []));
+  const related = (card.metadata?.links ?? []).flatMap((link) =>
+    link.type === "relates_to" && link.targetCardId ? [link.targetCardId] : [],
+  );
+  return commits.length > 0 || related.length > 0 || live
+    ? `${commits.join(",")}|${related.join(",")}`
+    : undefined;
 }
 
 /**

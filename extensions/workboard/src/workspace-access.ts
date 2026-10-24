@@ -36,6 +36,7 @@ export const WORKBOARD_CARD_TOOL_NAMES = [
   "workboard_list",
   "workboard_create",
   "workboard_link",
+  "workboard_reference",
   "workboard_read",
   "workboard_claim",
   "workboard_heartbeat",

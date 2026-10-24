@@ -537,6 +537,7 @@ export default {
     changesDiffLoading: "Loading diff…",
     changesDiffFailed: "Could not load this diff: {error}",
     changesDiffTruncated: "The diff is cut short here.",
+    linkedFrom: "From {title}",
     roundFirst: "First run",
     roundRework: "Rework round {number}",
     roundDecisions: "Decisions",

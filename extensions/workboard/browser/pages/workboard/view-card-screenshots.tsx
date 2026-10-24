@@ -13,15 +13,20 @@ import { t } from "../../i18n/index.ts";
 import { type CardFileList, createCardFileList, type SettledList } from "./card-node-files.ts";
 import { RelativeTime } from "./view-card-time.tsx";
 
-/** One image to show: a round's committed file or a live file in the node worktree. */
+/**
+ * One image to show: a round's committed file or a live file in the node
+ * worktree. `ownerId` is the linked card a committed file belongs to; absent
+ * for the shown card's own files.
+ */
 type ScreenshotRef =
-  | { round: WorkboardNodeFileRound; path: string }
+  | { round: WorkboardNodeFileRound; path: string; ownerId?: string }
   | { live: WorkboardLiveNodeFile };
 
 function imageKey(ref: ScreenshotRef): string {
-  return "live" in ref
-    ? `live:${ref.live.mtimeMs}:${ref.live.bytes}:${ref.live.path}`
-    : `${ref.round.commit}:${ref.path}`;
+  if ("live" in ref) {
+    return `live:${ref.live.mtimeMs}:${ref.live.bytes}:${ref.live.path}`;
+  }
+  return `${ref.ownerId ? `linked:${ref.ownerId}:` : ""}${ref.round.commit}:${ref.path}`;
 }
 
 function refPath(ref: ScreenshotRef): string {
@@ -139,13 +144,14 @@ export function createCardScreenshots(
     },
     image(cardId, ref) {
       const key = imageKey(ref);
+      const owner = "live" in ref ? cardId : (ref.ownerId ?? cardId);
       const known = images.get(key);
       if (known) {
         return known;
       }
       const pending: ImageState = { status: "loading" };
       images.set(key, pending);
-      queue.push({ key, cardId, ref, pending });
+      queue.push({ key, cardId: owner, ref, pending });
       read();
       return pending;
     },
@@ -251,13 +257,20 @@ export function hasCommittedScreenshots(state: SettledList): boolean {
   return (
     state.status === "unavailable" ||
     state.result.committed.state === "unavailable" ||
-    state.result.committed.rounds.length > 0
+    state.result.committed.rounds.length > 0 ||
+    (state.result.linked?.length ?? 0) > 0
   );
 }
 
-/** Each round's committed images, newest round first. */
+/**
+ * Each round's committed images, newest round first. `from` names the linked
+ * card whose rounds these are; omitted for the shown card's own.
+ */
 export function ScreenshotRounds(
-  props: ScreenshotsView & { committed: WorkboardCommittedNodeFiles },
+  props: ScreenshotsView & {
+    committed: WorkboardCommittedNodeFiles;
+    from?: { cardId: string; title: string };
+  },
 ) {
   const rounds = () =>
     props.committed.state === "available" ? props.committed.rounds.toReversed() : undefined;
@@ -277,6 +290,7 @@ export function ScreenshotRounds(
           {(round) => (
             <section class="workboard-detail__section">
               <h3>
+                {props.from ? `${t("workboard.linkedFrom", { title: props.from.title })} · ` : ""}
                 {round().round === 0
                   ? t("workboard.roundFirst")
                   : t("workboard.roundRework", { number: String(round().round) })}
@@ -285,7 +299,11 @@ export function ScreenshotRounds(
                 screenshots={props.screenshots}
                 cardId={props.cardId}
                 revision={props.revision}
-                refs={round().paths.map((path) => ({ round: round(), path }))}
+                refs={round().paths.map((path): ScreenshotRef =>
+                  props.from
+                    ? { round: round(), path, ownerId: props.from.cardId }
+                    : { round: round(), path },
+                )}
               />
             </section>
           )}
@@ -348,7 +366,7 @@ export function LiveScreenshots(
   );
 }
 
-/** The drawer's Screenshots tab: each round's committed images. */
+/** The drawer's Screenshots tab: each round's committed images, then those of linked cards. */
 export function ScreenshotsPanel(
   props: ScreenshotsView & { listed: SettledList; active: boolean },
 ) {
@@ -380,6 +398,17 @@ export function ScreenshotsPanel(
               revision={props.revision}
               committed={result().committed}
             />
+            <For each={result().linked ?? []} keyed={(entry) => entry.cardId}>
+              {(entry) => (
+                <ScreenshotRounds
+                  screenshots={props.screenshots}
+                  cardId={props.cardId}
+                  revision={props.revision}
+                  committed={entry().committed}
+                  from={{ cardId: entry().cardId, title: entry().title }}
+                />
+              )}
+            </For>
           </Show>
         )}
       </Show>

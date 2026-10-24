@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type {
   WorkboardCard,
+  WorkboardLink,
   WorkboardNodeRound,
   WorkboardNodeWorktree,
   WorkboardNodeFileRound,
@@ -11,7 +12,11 @@ import type {
 } from "@openclaw/workboard-contract";
 import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { listNodeTicketArtifacts, readNodeTicketArtifact } from "./node-ticket-artifacts.js";
+import {
+  listNodeTicketArtifacts,
+  readNodeTicketArtifact,
+  relatedCardIds,
+} from "./node-ticket-artifacts.js";
 import type { WorkboardNodeTicketRuntime } from "./node-ticket.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -61,7 +66,7 @@ function nodeRuntime(
 const listScreenshots = (
   runtime: WorkboardNodeTicketRuntime,
   card: WorkboardCard,
-  options: { live: boolean; now?: () => number },
+  options: { live: boolean; linked?: readonly WorkboardCard[]; now?: () => number },
 ) => listNodeTicketArtifacts(runtime, card, "screenshot", options);
 
 async function readScreenshot(
@@ -98,13 +103,20 @@ function committed(rounds: WorkboardNodeFileRound[]) {
 
 function nodeCard(
   rounds: WorkboardNodeRound[],
-  options: { handoff?: WorkboardNodeWorktree["handoff"]; screenshotDirs?: string[] } = {
+  options: {
+    handoff?: WorkboardNodeWorktree["handoff"];
+    screenshotDirs?: string[];
+    baseCommit?: string;
+    id?: string;
+    title?: string;
+    links?: WorkboardLink[];
+  } = {
     handoff: imported,
   },
 ): WorkboardCard {
   return {
-    id: "card-1",
-    title: "Ticket",
+    id: options.id ?? "card-1",
+    title: options.title ?? "Ticket",
     status: "review",
     priority: "normal",
     labels: [],
@@ -112,6 +124,7 @@ function nodeCard(
     createdAt: 0,
     updatedAt: 0,
     metadata: {
+      ...(options.links ? { links: options.links } : {}),
       automation: {
         target: {
           kind: "node-claude",
@@ -123,7 +136,7 @@ function nodeCard(
           worktree: {
             path: "/wt/card-1",
             branch: "factory/card-1",
-            baseCommit: "",
+            baseCommit: options.baseCommit ?? "a".repeat(40),
             rounds,
             ...(options.handoff ? { handoff: options.handoff } : {}),
           },
@@ -279,13 +292,31 @@ type FakeNodeFile = { bytes: Buffer; mtime: number };
 /**
  * The file-transfer node commands over an in-memory worktree: `dir.list`
  * pages one directory, `file.fetch` returns base64 with its sha256. Paths
- * outside `allowed` answer like a policy denial.
+ * outside `allowed` answer like a policy denial. `system.run` answers through
+ * `runGit`; by default every file counts as changed by the round.
  */
-function fakeNode(files: Record<string, FakeNodeFile>, allowed = (_path: string) => true) {
+function fakeNode(
+  files: Record<string, FakeNodeFile>,
+  allowed = (_path: string) => true,
+  runGit: (argv: string[]) => string = (argv) =>
+    argv.includes("diff")
+      ? Object.keys(files)
+          .map((file) => `${file.replace("/wt/card-1/", "")}\0`)
+          .join("")
+      : "",
+) {
   const calls: Array<{ command: string; path: string }> = [];
   const runtime = nodeRuntime((method, params) => {
     expect(method).toBe("node.invoke");
     const command = String(params.command);
+    if (command === "system.run") {
+      const argv = (params.params as { command: string[] }).command;
+      try {
+        return { payload: { success: true, stdout: runGit(argv) } };
+      } catch (error) {
+        return { payload: { success: false, error: String(error) } };
+      }
+    }
     const target = (params.params as { path: string }).path;
     calls.push({ command, path: target });
     if (!allowed(target)) {
@@ -380,6 +411,9 @@ it("walks no node worktree when the list does not ask for live shots", async () 
 it("bounds the whole live walk by one deadline, shortening the last call's timeout", async () => {
   const timeouts: unknown[] = [];
   const runtime = nodeRuntime((_method, params) => {
+    if (params.command === "system.run") {
+      return { payload: { success: true, stdout: "" } };
+    }
     timeouts.push(params.timeoutMs);
     return {
       payload: {
@@ -430,7 +464,7 @@ it("reports live unavailable with the grants to add, keeping the committed round
     });
     expect(listed.live).toMatchObject({
       reason: expect.stringContaining(
-        "gateway.nodes.commands.allow includes dir.list and file.fetch",
+        "gateway.nodes.commands.allow includes dir.list, file.fetch, and system.run",
       ),
     });
   }
@@ -486,8 +520,11 @@ it("refuses live reads outside the target's screenshot dirs before reaching the 
 
 it("refuses a live image whose bytes do not match the node's sha256", async () => {
   const card = nodeCard([], running);
-  const runtime = nodeRuntime(() => ({
-    payload: { ok: true, base64: Buffer.from([1]).toString("base64"), sha256: "0".repeat(64) },
+  const runtime = nodeRuntime((_method, params) => ({
+    payload:
+      params.command === "system.run"
+        ? { success: true, stdout: "docs/screenshots/a.png\0" }
+        : { ok: true, base64: Buffer.from([1]).toString("base64"), sha256: "0".repeat(64) },
   }));
 
   await expect(
@@ -579,4 +616,179 @@ it("walks only docs/prototypes for a running ticket's live prototypes, whatever 
       readNodeTicketArtifact(node.runtime, card, "prototype", { live: true }, escape),
     ).rejects.toThrow(`prototype not found: live ${escape}`);
   }
+});
+
+/** The git commands the node runs, executed against the test repo standing in for the worktree. */
+function realGit(argv: string[]): string {
+  const [binary, ...args] = argv.map((arg) => (arg === "/wt/card-1" ? repo : arg));
+  return execFileSync(binary!, args, { encoding: "utf8" });
+}
+
+/**
+ * A running card whose worktree repo holds an inherited, a committed, an
+ * edited, an untracked, and a gitignored prototype (evidence dirs are ignored
+ * until a run force-adds them).
+ */
+function runningPrototypeWorktree() {
+  const inherited = "docs/prototypes/PROTO-1/old.html";
+  const edited = "docs/prototypes/PROTO-1/edited.html";
+  const base = commit({ "README.md": "base", [inherited]: "<p>old</p>", [edited]: "<p>v1</p>" });
+  commit({ "docs/prototypes/T-1/committed.html": "<p>committed</p>" });
+  fs.writeFileSync(path.join(repo, edited), "<p>v2</p>");
+  fs.writeFileSync(path.join(repo, "docs/prototypes/T-1/untracked.html"), "<p>new</p>");
+  fs.writeFileSync(path.join(repo, ".gitignore"), "ignored.html\n");
+  fs.writeFileSync(path.join(repo, "docs/prototypes/T-1/ignored.html"), "<p>ignored</p>");
+  const files = Object.fromEntries(
+    [
+      inherited,
+      edited,
+      "docs/prototypes/T-1/committed.html",
+      "docs/prototypes/T-1/untracked.html",
+      "docs/prototypes/T-1/ignored.html",
+    ].map((name, index): [string, FakeNodeFile] => [
+      `/wt/card-1/${name}`,
+      { bytes: fs.readFileSync(path.join(repo, name)), mtime: index + 1 },
+    ]),
+  );
+  return {
+    node: fakeNode(files, () => true, realGit),
+    card: nodeCard([], { baseCommit: base }),
+    inherited,
+  };
+}
+
+it("lists only the prototypes the running round changed, not those the base branch carries", async () => {
+  const { node, card } = runningPrototypeWorktree();
+
+  const listed = await listNodeTicketArtifacts(node.runtime, card, "prototype", { live: true });
+
+  expect(listed.live).toMatchObject({ state: "available" });
+  expect(
+    listed.live?.state === "available" ? listed.live.files.map((file) => file.path).toSorted() : [],
+  ).toEqual([
+    "docs/prototypes/PROTO-1/edited.html",
+    "docs/prototypes/T-1/committed.html",
+    "docs/prototypes/T-1/ignored.html",
+    "docs/prototypes/T-1/untracked.html",
+  ]);
+});
+
+it("refuses a live read of a file the base branch already had", async () => {
+  const { node, card, inherited } = runningPrototypeWorktree();
+
+  await expect(
+    readNodeTicketArtifact(node.runtime, card, "prototype", { live: true }, inherited),
+  ).rejects.toThrow(`prototype not found: live ${inherited}`);
+  const read = await readNodeTicketArtifact(
+    node.runtime,
+    card,
+    "prototype",
+    { live: true },
+    "docs/prototypes/T-1/untracked.html",
+  );
+  expect(read.bytes.toString()).toBe("<p>new</p>");
+});
+
+it("reports live unavailable, naming system.run, when the node's git fails", async () => {
+  const node = fakeNode(
+    {},
+    () => true,
+    () => {
+      throw new Error("git: not a repository");
+    },
+  );
+
+  const listed = await listScreenshots(node.runtime, nodeCard([], running), { live: true });
+
+  expect(listed.live).toEqual({
+    state: "unavailable",
+    reason: expect.stringContaining("system.run"),
+  });
+});
+
+it("refuses a round start that is not a commit id before running git on the node", async () => {
+  const node = fakeNode(
+    {},
+    () => true,
+    () => {
+      throw new Error("git must not run");
+    },
+  );
+
+  const listed = await listScreenshots(
+    node.runtime,
+    nodeCard([], { ...running, baseCommit: "-x" }),
+    {
+      live: true,
+    },
+  );
+
+  expect(listed.live).toEqual({
+    state: "unavailable",
+    reason: expect.stringContaining("is not a commit id"),
+  });
+});
+
+function linkedCard(id: string, title: string, rounds: WorkboardNodeRound[]) {
+  return nodeCard(rounds, { id, title });
+}
+
+const relates = (targetCardId: string): WorkboardLink => ({
+  id: `link-${targetCardId}`,
+  type: "relates_to",
+  createdAt: 0,
+  targetCardId,
+});
+
+it("lists the committed files of cards linked with relates_to, in link order", async () => {
+  const base = commit({ "README.md": "base" });
+  const first = commit({ "docs/screenshots/PROTO-1/a.png": Buffer.from([1]) });
+  const second = commit({ "docs/screenshots/PROTO-2/b.png": Buffer.from([2]) });
+  const proto1 = linkedCard("p1", "Proto one", [{ round: 0, changes: changes(base, first) }]);
+  const proto2 = linkedCard("p2", "Proto two", [{ round: 0, changes: changes(first, second) }]);
+  const empty = linkedCard("p3", "Nothing", []);
+  const card = nodeCard([], {
+    links: [
+      relates("p2"),
+      relates("p1"),
+      relates("p2"),
+      relates("card-1"),
+      relates("gone"),
+      { id: "l", type: "parent", createdAt: 0, targetCardId: "p3" },
+      { id: "m", type: "blocked_by", createdAt: 0, targetCardId: "p3" },
+      { id: "n", type: "blocks", createdAt: 0, targetCardId: "p3" },
+      { id: "o", type: "relates_to", createdAt: 0, url: "https://example.com" },
+    ],
+  });
+
+  expect(relatedCardIds(card)).toEqual(["p2", "p1", "gone"]);
+  const listed = await listScreenshots(noNode, card, {
+    ...COMMITTED,
+    linked: [proto2, proto1, empty],
+  });
+
+  expect(listed).toEqual({
+    committed: { state: "available", rounds: [] },
+    linked: [
+      {
+        cardId: "p2",
+        title: "Proto two",
+        committed: {
+          state: "available",
+          rounds: [{ round: 0, commit: second, paths: ["docs/screenshots/PROTO-2/b.png"] }],
+        },
+      },
+      {
+        cardId: "p1",
+        title: "Proto one",
+        committed: {
+          state: "available",
+          rounds: [{ round: 0, commit: first, paths: ["docs/screenshots/PROTO-1/a.png"] }],
+        },
+      },
+    ],
+  });
+  expect(
+    await readScreenshot(noNode, proto1, { round: 0 }, "docs/screenshots/PROTO-1/a.png"),
+  ).toEqual({ mimeType: "image/png", contentBase64: Buffer.from([1]).toString("base64") });
 });

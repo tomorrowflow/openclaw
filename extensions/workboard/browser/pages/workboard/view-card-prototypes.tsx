@@ -15,8 +15,18 @@ import { prototypePageTarget } from "../prototype/prototype-target.ts";
 import { type CardFileList, createCardFileList, type SettledList } from "./card-node-files.ts";
 import { RelativeTime } from "./view-card-time.tsx";
 
-/** One prototype file: a round's committed HTML or a live file in the node worktree. */
-type PrototypeRef = { key: string; source: WorkboardNodeFileSource; path: string; label: string };
+/**
+ * One prototype file: a round's committed HTML or a live file in the node
+ * worktree. `ownerId` is the linked card the file belongs to; absent for the
+ * shown card's own files.
+ */
+type PrototypeRef = {
+  key: string;
+  source: WorkboardNodeFileSource;
+  path: string;
+  label: string;
+  ownerId?: string;
+};
 
 type HtmlState =
   | { status: "loading" }
@@ -37,7 +47,16 @@ function shortPath(path: string): string {
   return path.startsWith(PROTOTYPE_DIR) ? path.slice(PROTOTYPE_DIR.length) : path;
 }
 
-/** Live files first, newest first, then each round's committed files, newest round first. */
+function roundLabel(round: number): string {
+  return round === 0
+    ? t("workboard.roundFirst")
+    : t("workboard.roundRework", { number: String(round) });
+}
+
+/**
+ * Live files first, newest first, then each round's committed files, newest
+ * round first, then the files of linked cards in link order.
+ */
 function prototypeRefs(result: WorkboardNodeFileListResult): PrototypeRef[] {
   const live =
     result.live?.state === "available"
@@ -55,15 +74,24 @@ function prototypeRefs(result: WorkboardNodeFileListResult): PrototypeRef[] {
             key: `${round.commit}:${path}`,
             source: { round: round.round },
             path,
-            label: `${
-              round.round === 0
-                ? t("workboard.roundFirst")
-                : t("workboard.roundRework", { number: String(round.round) })
-            } · ${shortPath(path)}`,
+            label: `${roundLabel(round.round)} · ${shortPath(path)}`,
           })),
         )
       : [];
-  return [...live, ...committed];
+  const linked = (result.linked ?? []).flatMap((entry) =>
+    entry.committed.state === "available"
+      ? entry.committed.rounds.toReversed().flatMap((round) =>
+          round.paths.map((path): PrototypeRef => ({
+            key: `linked:${entry.cardId}:${round.commit}:${path}`,
+            source: { round: round.round },
+            path,
+            label: `${t("workboard.linkedFrom", { title: entry.title })} · ${roundLabel(round.round)} · ${shortPath(path)}`,
+            ownerId: entry.cardId,
+          })),
+        )
+      : [],
+  );
+  return [...live, ...committed, ...linked];
 }
 
 /** Whether the drawer offers its Prototype tab: a file is listed, or listing failed. */
@@ -123,7 +151,7 @@ export function createCardPrototypes(
       reads.set(ref.key, pending);
       void client
         .request<WorkboardPrototypeResult>("workboard.cards.prototypes.get", {
-          id: cardId,
+          id: ref.ownerId ?? cardId,
           path: ref.path,
           ...ref.source,
         })
@@ -174,7 +202,11 @@ export function PrototypePanel(props: {
     const ref = selected();
     return ref
       ? workboardHost().navigation.pageHref(
-          prototypePageTarget({ cardId: props.cardId, source: ref.source, path: ref.path }),
+          prototypePageTarget({
+            cardId: ref.ownerId ?? props.cardId,
+            source: ref.source,
+            path: ref.path,
+          }),
         )
       : undefined;
   };

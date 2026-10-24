@@ -17,7 +17,6 @@ import {
   grillSessionName,
   nodeGrillIsLive,
 } from "./node-ticket-grill.js";
-import { cutReportText } from "./node-ticket-report.js";
 import { appendComment, assertCanMutateClaimedCard } from "./store-card-helpers.js";
 import { WorkboardCardConflictError } from "./store-core.js";
 import type { WorkboardMutationScope } from "./store-inputs.js";
@@ -27,8 +26,6 @@ const NOT_GRILLING = "This card is not grilling; refresh it to see where it stan
 const NOT_ASKING =
   "This card does not wait on a questions round; refresh it to see where it stands.";
 const QUESTIONS_PREFIX = "**Needs input:**";
-// The result a resumed round's brief carries; the full text is in the grill session.
-const MAX_RESULT_CHARS = 8000;
 
 /** One write to a node ticket's grilling: the log entries, if any, and the state it leaves. */
 type GrillStep = {
@@ -42,8 +39,8 @@ type GrillStep = {
 /**
  * Ends the grilling: the log gets its result, the grill closes, and the card
  * moves to todo, which resumes the ticket session through the grilling reopen
- * with the end pending for its brief. A full log cuts the result, never
- * refuses the end.
+ * with the end pending for its brief. The log bounds the result itself
+ * (`appendGrillLog`): a full log cuts it, never refuses the end.
  */
 function endGrillStep(
   grill: WorkboardNodeGrill,
@@ -52,7 +49,7 @@ function endGrillStep(
   now: number,
 ): GrillStep {
   return {
-    entries: [grillEndEntry(by, cutReportText(result, MAX_RESULT_CHARS), now)],
+    entries: [grillEndEntry(by, result, now)],
     grill: {
       status: "closed",
       rounds: grill.rounds,

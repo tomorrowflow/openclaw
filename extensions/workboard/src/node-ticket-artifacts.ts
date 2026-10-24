@@ -5,6 +5,7 @@ import type {
   WorkboardCard,
   WorkboardCommittedNodeFiles,
   WorkboardExecutionTarget,
+  WorkboardLinkedNodeFiles,
   WorkboardLiveNodeFile,
   WorkboardLiveNodeFiles,
   WorkboardNodeFileListResult,
@@ -17,6 +18,7 @@ import {
   COMMIT_ID,
   hostGit,
   nodeTicketTarget,
+  runNodeCommand,
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
 
@@ -82,28 +84,64 @@ function isUnder(dirs: readonly string[], path: string): boolean {
 }
 
 /**
+ * Ids of the cards whose files this card shows besides its own: the targets of
+ * its outgoing `relates_to` links, in link order. Parent, child, and blocking
+ * links schedule work and pull in no content.
+ */
+export function relatedCardIds(card: WorkboardCard): string[] {
+  const ids = (card.metadata?.links ?? []).flatMap((link) =>
+    link.type === "relates_to" && link.targetCardId && link.targetCardId !== card.id
+      ? [link.targetCardId]
+      : [],
+  );
+  return [...new Set(ids)];
+}
+
+/**
  * A node ticket's files of one kind: those its rounds committed, for example
  * under `docs/screenshots/<ID>/` or `docs/prototypes/<ID>/`, and those the
- * running agent has written into its node worktree so far. The host clone
- * holds every imported round, so those are listed and read from git rather
- * than copied into card state. The node worktree is walked only when `live`
- * is asked for.
+ * running agent has added or changed in its node worktree since the round
+ * started. The node worktree is a checkout of the base branch, so the walk
+ * keeps only what git reports as changed since the round's start commit.
+ * `linked` are the cards `relatedCardIds` names, already resolved by the
+ * caller; only their committed rounds are listed. The host clone holds every
+ * imported round, so those are listed and read from git rather than copied
+ * into card state. The node worktree is walked only when `live` is asked for.
  */
 export async function listNodeTicketArtifacts(
   runtime: WorkboardNodeTicketRuntime,
   card: WorkboardCard,
   kindName: NodeTicketArtifactKind,
-  options: { live: boolean; now?: () => number },
+  options: { live: boolean; linked?: readonly WorkboardCard[]; now?: () => number },
 ): Promise<WorkboardNodeFileListResult> {
   const kind = KINDS[kindName];
-  if (!options.live) {
-    return { committed: await listCommitted(card, kind) };
-  }
-  const [committed, live] = await Promise.all([
+  const [committed, live, linked] = await Promise.all([
     listCommitted(card, kind),
-    listLive(runtime, card, kind, options.now ?? Date.now),
+    options.live ? listLive(runtime, card, kind, options.now ?? Date.now) : undefined,
+    listLinked(options.linked ?? [], kind),
   ]);
-  return { committed, live };
+  return {
+    committed,
+    ...(live ? { live } : {}),
+    ...(linked.length > 0 ? { linked } : {}),
+  };
+}
+
+// A linked card whose host clone cannot list is left out rather than reported: the
+// card's own committed listing names a host clone problem, and a dangling link is not an error.
+async function listLinked(
+  cards: readonly WorkboardCard[],
+  kind: ArtifactKind,
+): Promise<WorkboardLinkedNodeFiles[]> {
+  const listed = await Promise.all(
+    cards.map(async (linked): Promise<WorkboardLinkedNodeFiles | undefined> => {
+      const committed = await listCommitted(linked, kind);
+      return committed.state === "available" && committed.rounds.length > 0
+        ? { cardId: linked.id, title: linked.title, committed }
+        : undefined;
+    }),
+  );
+  return listed.filter((entry) => entry !== undefined);
 }
 
 async function listCommitted(
@@ -239,7 +277,7 @@ async function readRound(
   return { mimeType, bytes: stdout };
 }
 
-/** Where the agent writes this kind; undefined once its round was imported and the worktree removed. */
+/** Where the agent writes this kind, and the commit its round started from; undefined once its round was imported and the worktree removed. */
 function liveWorktree(card: WorkboardCard, kind: ArtifactKind) {
   const target = nodeTicketTarget(card);
   const worktree = target?.worktree;
@@ -251,6 +289,7 @@ function liveWorktree(card: WorkboardCard, kind: ArtifactKind) {
     nodeId: target.nodeId,
     root: worktree.path,
     dirs: kind.liveDirs(target),
+    from: worktree.rework?.startCommit ?? worktree.baseCommit,
   };
 }
 
@@ -260,7 +299,67 @@ function liveUnavailableReason(
   root: string,
   error: unknown,
 ): string {
-  return `${formatErrorMessage(error)}. Check that node ${nodeId} is connected, that gateway.nodes.commands.allow includes dir.list and file.fetch, and that its file-transfer allowReadPaths cover the ${kind.noun} dirs under ${root}.`;
+  return `${formatErrorMessage(error)}. Check that node ${nodeId} is connected, that gateway.nodes.commands.allow includes dir.list, file.fetch, and system.run, and that its file-transfer allowReadPaths cover the ${kind.noun} dirs under ${root}.`;
+}
+
+/**
+ * The worktree files of these dirs the round added or changed: committed or
+ * not, tracked or new. Everything else there is inherited from the base branch.
+ * Ignored files count: evidence dirs stay gitignored until a run force-adds
+ * them, and an untracked file never comes from the base branch.
+ */
+async function ownedLivePaths(
+  runtime: WorkboardNodeTicketRuntime,
+  nodeId: string,
+  root: string,
+  from: string,
+  dirs: readonly string[],
+): Promise<Set<string>> {
+  if (!COMMIT_ID.test(from)) {
+    throw new Error(`round start ${from} is not a commit id`);
+  }
+  const git = (...args: string[]) => runNodeCommand(runtime, nodeId, ["git", "-C", root, ...args]);
+  const [changed, untracked] = await Promise.all([
+    git("diff", "--name-only", "-z", "--no-renames", "--diff-filter=AM", from, "--", ...dirs),
+    git("ls-files", "-z", "--others", "--", ...dirs),
+  ]);
+  return new Set([...changed.split("\0"), ...untracked.split("\0")].filter(Boolean));
+}
+
+/** The kind's files in the live dirs, two levels deep; undefined once the walk is over the deadline. */
+async function walkLive(
+  runtime: WorkboardNodeTicketRuntime,
+  kind: ArtifactKind,
+  nodeId: string,
+  root: string,
+  dirs: readonly string[],
+  deadline: number,
+  now: () => number,
+): Promise<WorkboardLiveNodeFile[] | undefined> {
+  const files: WorkboardLiveNodeFile[] = [];
+  const pending = dirs.map((dir) => ({ dir, depth: 0 }));
+  for (let listings = 0; listings < LIVE_MAX_LISTINGS; listings += 1) {
+    const next = pending.shift();
+    if (!next) {
+      break;
+    }
+    const remaining = deadline - now();
+    if (remaining <= 0) {
+      return undefined;
+    }
+    for (const entry of await listNodeDir(runtime, nodeId, posix.join(root, next.dir), {
+      maxEntries: LIVE_LIST_ENTRIES,
+      timeoutMs: Math.min(DIR_LIST_TIMEOUT_MS, remaining),
+    })) {
+      const relative = `${next.dir}/${entry.name}`;
+      if (entry.isDir && next.depth < LIVE_MAX_DEPTH) {
+        pending.push({ dir: relative, depth: next.depth + 1 });
+      } else if (entry.isFile && mediaType(kind, entry.name)) {
+        files.push({ path: relative, bytes: entry.size, mtimeMs: entry.mtime });
+      }
+    }
+  }
+  return files;
 }
 
 async function listLive(
@@ -273,49 +372,34 @@ async function listLive(
   if (!worktree) {
     return { state: "none" };
   }
-  const { nodeId, root, dirs } = worktree;
-  const files: WorkboardLiveNodeFile[] = [];
-  const pending = dirs.map((dir) => ({ dir, depth: 0 }));
+  const { nodeId, root, dirs, from } = worktree;
   const deadline = now() + LIVE_LIST_DEADLINE_MS;
   const overDeadline = {
     state: "unavailable",
     reason: `listing the ${kind.noun} dirs under ${root} on node ${nodeId} took over ${LIVE_LIST_DEADLINE_MS / 1000} seconds. Check that the node is responsive and that the ${kind.noun} dirs hold few files.`,
   } as const;
   try {
-    for (let listings = 0; listings < LIVE_MAX_LISTINGS; listings += 1) {
-      const next = pending.shift();
-      if (!next) {
-        break;
-      }
-      const remaining = deadline - now();
-      if (remaining <= 0) {
-        return overDeadline;
-      }
-      for (const entry of await listNodeDir(runtime, nodeId, posix.join(root, next.dir), {
-        maxEntries: LIVE_LIST_ENTRIES,
-        timeoutMs: Math.min(DIR_LIST_TIMEOUT_MS, remaining),
-      })) {
-        const relative = `${next.dir}/${entry.name}`;
-        if (entry.isDir && next.depth < LIVE_MAX_DEPTH) {
-          pending.push({ dir: relative, depth: next.depth + 1 });
-        } else if (entry.isFile && mediaType(kind, entry.name)) {
-          files.push({ path: relative, bytes: entry.size, mtimeMs: entry.mtime });
-        }
-      }
+    const [owned, files] = await Promise.all([
+      ownedLivePaths(runtime, nodeId, root, from, dirs),
+      walkLive(runtime, kind, nodeId, root, dirs, deadline, now),
+    ]);
+    if (!files) {
+      return overDeadline;
     }
+    return {
+      state: "available",
+      files: files
+        .filter((file) => owned.has(file.path))
+        .toSorted(
+          (left, right) => right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path),
+        )
+        .slice(0, MAX_LISTED_FILES),
+    };
   } catch (error) {
     return now() >= deadline
       ? overDeadline
       : { state: "unavailable", reason: liveUnavailableReason(kind, nodeId, root, error) };
   }
-  return {
-    state: "available",
-    files: files
-      .toSorted(
-        (left, right) => right.mtimeMs - left.mtimeMs || left.path.localeCompare(right.path),
-      )
-      .slice(0, MAX_LISTED_FILES),
-  };
 }
 
 /** A live path must sit inside one of the kind's live dirs, at most as deep as the listing walks. */
@@ -338,6 +422,17 @@ async function readLive(
   const worktree = liveWorktree(card, kind);
   const mimeType = mediaType(kind, path);
   if (!worktree || !mimeType || !isLivePath(worktree.dirs, path)) {
+    throw new Error(`${kind.noun} not found: live ${path}`);
+  }
+  // Same rule as the listing: a file the base branch already had is not this card's.
+  const owned = await ownedLivePaths(
+    runtime,
+    worktree.nodeId,
+    worktree.root,
+    worktree.from,
+    worktree.dirs,
+  );
+  if (!owned.has(path)) {
     throw new Error(`${kind.noun} not found: live ${path}`);
   }
   const bytes = await fetchNodeFile(
