@@ -400,6 +400,71 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     );
   });
 
+  it("keeps a probe on its source's node, with the source's base and the arm's model", async () => {
+    const store = createWorkboardSqliteTestStore();
+    store.nodeTicketConcurrency = 4;
+    const big = { ...TARGET, nodeId: "linux-3090" };
+    const small = { ...TARGET, nodeId: "linux-790" };
+    await store.upsertBoard({
+      id: "app",
+      orchestration: {
+        defaultAssignee: "dev",
+        targetRoutes: [
+          {
+            labels: ["class:server-fix"],
+            target: big,
+            alternateTargets: [small],
+            maxConcurrent: 1,
+          },
+        ],
+      },
+    });
+    const create = async (title: string) =>
+      await store.create({ title, boardId: "app", status: "ready", labels: ["class:server-fix"] });
+    const first = await create("Fix the upload");
+    const source = await create("Fix the retry");
+    const nodeTickets = createNodeGateway();
+    const dispatch = async (cardId?: string) =>
+      await dispatchAndStartWorkboardCards({
+        store,
+        subagent: { run: vi.fn() },
+        nodeTickets,
+        options: { now: Date.now(), maxStarts: 2, ...(cardId ? { cardId } : {}) },
+      });
+    await dispatch();
+    expect(nodeTicketTarget(expectDefined(await store.get(source.id), "source"))?.nodeId).toBe(
+      "linux-790",
+    );
+    const claim = (await store.get(first.id))?.metadata?.claim;
+    await store.releaseClaim(first.id, {
+      ownerId: claim?.ownerId,
+      token: claim?.token,
+      status: "review",
+    });
+    const { card: probe } = await store.createNodeProbe(source.id, {
+      arm: "base",
+      model: "anthropic/claude-opus-5-5",
+    });
+
+    // The 3090 is free, but only the 790 is the source's node.
+    await expect(dispatch(probe.id)).resolves.toMatchObject({
+      startFailures: [expect.objectContaining({ cardId: probe.id })],
+    });
+    const sourceClaim = (await store.get(source.id))?.metadata?.claim;
+    await store.releaseClaim(source.id, {
+      ownerId: sourceClaim?.ownerId,
+      token: sourceClaim?.token,
+      status: "review",
+    });
+    await expect(dispatch(probe.id)).resolves.toMatchObject({ startFailures: [] });
+
+    expect(nodeTicketTarget(expectDefined(await store.get(probe.id), "probe"))).toMatchObject({
+      nodeId: "linux-790",
+      baseRef: BASE_COMMIT,
+      model: "anthropic/claude-opus-5-5",
+    });
+  });
+
   it("blocks the card with the node's error when the worktree cannot be created", async () => {
     const store = createWorkboardSqliteTestStore();
     const card = await createNodeCard(store);

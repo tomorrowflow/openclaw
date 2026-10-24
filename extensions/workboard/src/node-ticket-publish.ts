@@ -64,7 +64,9 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
     !worktree ||
     handoff?.phase !== "imported" ||
     card.status !== "done" ||
-    card.metadata?.archivedAt
+    card.metadata?.archivedAt ||
+    // A probe only measures the harness; the handoff pass archives it instead.
+    card.metadata?.automation?.probe
   ) {
     return undefined;
   }

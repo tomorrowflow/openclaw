@@ -60,7 +60,7 @@ type WorkboardOwnerSlotCard = Pick<WorkboardCard, "status" | "agentId"> & {
   labels?: readonly string[];
   execution?: Pick<WorkboardExecution, "status">;
   metadata?: Pick<WorkboardMetadata, "claim" | "archivedAt"> & {
-    automation?: Pick<WorkboardAutomation, "target" | "boardId">;
+    automation?: Pick<WorkboardAutomation, "target" | "boardId" | "probe">;
   };
 };
 
@@ -237,10 +237,12 @@ export function workboardNodeTicketRoute(
     return undefined;
   }
   // A ticket without a worktree may start on any of the route's nodes; once
-  // it has one, it stays on its node.
+  // it has one, it stays on its node. A probe stays on its source's node: its
+  // target carries the source's base commit and the arm's model, which
+  // another node's route target would replace.
   return {
     boardId: card.metadata?.automation?.boardId ?? "default",
-    targets: target.worktree ? [own] : pool,
+    targets: target.worktree || card.metadata?.automation?.probe ? [own] : pool,
     nodes: pool.length,
     limit: route.maxConcurrent,
     routes,

@@ -179,9 +179,9 @@ export function nodeTicketAcceptance(params: {
 }
 
 /**
- * An imported round's move. The move to done records who accepted it; the
- * board's rung for an agent's move is read in the queued write, so a demotion
- * applies to the next move. A move to todo or ready is refused until that
+ * An imported round's move; no agent moves a probe card. The move to done
+ * records who accepted it; the board's rung for an agent's move is read in
+ * the queued write, so a demotion applies to the next move. A move to todo or ready is refused until that
  * move published the draft PR: the next session starts from the PR branch,
  * so the dispatcher would only block the card.
  */
@@ -192,6 +192,10 @@ export async function withImportedNodeTicketMove(params: {
   board: () => Promise<Pick<WorkboardOrchestrationSettings, "classRungs" | "verifier"> | undefined>;
 }): Promise<WorkboardCard> {
   const { existing, next, actor } = params;
+  // Only the handoff pass ends a probe: it archives it once its round ended.
+  if (actor && next.status !== existing.status && existing.metadata?.automation?.probe) {
+    throw new Error("Probe cards are not reviewed.");
+  }
   const target = nodeTicketTarget(next);
   const worktree = target?.worktree;
   if (
@@ -506,14 +510,24 @@ export async function createNodeTicketWorktree(params: {
       };
     } else {
       const baseRef = target.baseRef ?? "origin/HEAD";
-      start = await git("rev-parse", "--verify", "--quiet", `${baseRef}^{commit}`).catch(() => {
+      const resolveBase = () => git("rev-parse", "--verify", "--quiet", `${baseRef}^{commit}`);
+      // A commit base (a probe's) may be gone from every origin branch after a
+      // force-push; origin still serves it by id while it keeps the object.
+      let resolved = await resolveBase().catch(() => undefined);
+      if (resolved === undefined && COMMIT_ID.test(baseRef)) {
+        resolved = await git("fetch", "--quiet", "origin", baseRef)
+          .then(resolveBase)
+          .catch(() => undefined);
+      }
+      if (resolved === undefined) {
         throw new Error(
           `node ${target.nodeId} cannot resolve base ${baseRef} in ${target.repoPath}; ` +
             (target.baseRef
               ? "fix the target baseRef"
               : "run `git remote set-head origin --auto` there or set the target baseRef"),
         );
-      });
+      }
+      start = resolved;
     }
     // A commit start point creates the branch without upstream tracking.
     await git("worktree", "add", "-b", branch, worktreePath, start);

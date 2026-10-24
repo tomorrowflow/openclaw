@@ -6,6 +6,7 @@ import type {
   WorkboardDeleteResult,
   WorkboardLink,
   WorkboardMetadata,
+  WorkboardProbe,
   WorkboardStatus,
 } from "@openclaw/workboard-contract";
 import { resolveNonNegativeIntegerOption } from "openclaw/plugin-sdk/number-runtime";
@@ -227,13 +228,15 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
   protected async createDirect(
     input: WorkboardLinkedCreateInput,
     scope?: WorkboardMutationScope,
-    options: { cardId?: string; insertIfAbsent?: boolean } = {},
+    options: { cardId?: string; insertIfAbsent?: boolean; probe?: WorkboardProbe } = {},
   ): Promise<WorkboardCard> {
     const now = Date.now();
     const requestedStatus = normalizeStatus(input.status, "todo");
     const cards = await this.list();
     const parents = normalizeStringList(input.parents, "parents", 120);
-    const automation = normalizeCardAutomation(input);
+    const cardAutomation = normalizeCardAutomation(input);
+    // Host-issued like the launch state: raw metadata cannot declare a probe.
+    const automation = options.probe ? { ...cardAutomation, probe: options.probe } : cardAutomation;
     const heldBySchedule =
       Boolean(automation?.scheduledAt && automation.scheduledAt > now) &&
       requestedStatus !== "blocked";

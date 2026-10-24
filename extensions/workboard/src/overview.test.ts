@@ -261,6 +261,27 @@ describe("projectWorkboardOverview", () => {
     expect(result.inFlight[0]).not.toHaveProperty("nodeId");
   });
 
+  it("leaves probes out of what waits on the operator, showing one only while it runs or verifies", () => {
+    const probe = { automation: { probe: { of: "source", arm: "base", createdAt: NOW - DAY } } };
+    const result = overview([
+      card("blocked-probe", { status: "blocked", node: true, metadata: probe }),
+      card("asking-probe", {
+        status: "review",
+        worktree: { handoff: { phase: "questions", askedAt: NOW - HOUR } },
+        metadata: probe,
+      }),
+      card("verifying-probe", {
+        status: "review",
+        worktree: imported(NOW - HOUR),
+        metadata: probe,
+      }),
+      card("running-probe", { status: "running", node: true, metadata: probe }),
+    ]);
+
+    expect(result.needsYou).toEqual([]);
+    expect(result.inFlight.map((row) => row.cardId)).toEqual(["running-probe", "verifying-probe"]);
+  });
+
   it("ships only the last 7 days, with the shadow verdict on a round the operator accepted", () => {
     const result = overview([
       card("this-week", {

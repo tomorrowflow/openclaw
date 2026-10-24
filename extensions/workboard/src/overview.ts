@@ -94,6 +94,18 @@ function place(
   now: number,
 ): void {
   const stage = card.stage;
+  // A probe is the operator's own experiment, read through workboard.cards.probes;
+  // the overview shows it only while it runs or waits on its verification.
+  if (card.metadata?.automation?.probe) {
+    if (
+      stage?.kind === "queued" ||
+      stage?.kind === "running" ||
+      stage?.kind === "awaiting_review"
+    ) {
+      result.inFlight.push(inFlight(card));
+    }
+    return;
+  }
   switch (stage?.kind) {
     case "blocked":
       result.needsYou.push(waiting(card, "blocked", stage.since));
