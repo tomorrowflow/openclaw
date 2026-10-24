@@ -1,6 +1,11 @@
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { describe, expect, it } from "vitest";
-import { HIDDEN_VERDICT_NOTICE, redactClaimToken, redactOperatorCard } from "./card-redaction.js";
+import {
+  HIDDEN_VERDICT_NOTICE,
+  HIDDEN_VERIFICATION_NOTICE,
+  redactClaimToken,
+  redactOperatorCard,
+} from "./card-redaction.js";
 
 type NodeTarget = NonNullable<
   NonNullable<NonNullable<WorkboardCard["metadata"]>["automation"]>["target"]
@@ -261,5 +266,92 @@ describe("redactOperatorCard", () => {
     expect(
       bodies(reviewCard("blocked", [{ id: "e", kind: "moved", at: 30, toStatus: "done" }])),
     ).toEqual(["Verdict: rework", "Verdict: accept"]);
+  });
+
+  it("hides a rung a round's finished verification until the operator decides, shows a rung b one", () => {
+    const done = {
+      phase: "done" as const,
+      round: 0,
+      headCommit: "b".repeat(40),
+      startedAt: 11,
+      endedAt: 12,
+      sessionKey: "agent:verifier:verify-card-1-r0",
+      model: "openai/gpt-6-sol",
+      verdict: "fail" as const,
+      summary: "pytest fails on empty input",
+      findings: [{ path: "parser.py", line: 4, body: "returns None" }],
+    };
+    const running = {
+      phase: "running" as const,
+      round: 0,
+      headCommit: "b".repeat(40),
+      startedAt: 11,
+      sessionKey: "agent:verifier:verify-card-1-r0",
+      path: "/wt/verify-card-1-r0",
+    };
+    const verifiedCard = (
+      verification: typeof done | typeof running,
+      options: { rung?: "b"; status?: WorkboardCard["status"] } = {},
+    ): WorkboardCard => ({
+      ...createCard({
+        automation: {
+          target: {
+            kind: "node-claude",
+            nodeId: "node",
+            repoPath: "/repo",
+            worktreesRoot: "/wt",
+            hostRepoPath: "/host",
+            worktree: {
+              path: "/wt/wb-card-1",
+              branch: "factory/card-1",
+              baseCommit: "a".repeat(40),
+              handoff: { phase: "imported", headCommit: "b".repeat(40), importedAt: 10 },
+              verification,
+              ...(options.rung ? { rung: options.rung } : {}),
+            },
+          },
+        },
+        comments: [
+          {
+            id: "v",
+            body: "**Verification:** fail (openai/gpt-6-sol)\n\npytest fails on empty input",
+            createdAt: 12,
+            source: "agent:verifier",
+          },
+          {
+            id: "n",
+            body: "Verification: I will run it tonight.",
+            createdAt: 13,
+            source: "operator",
+          },
+        ],
+      }),
+      status: options.status ?? "review",
+    });
+    const view = (card: WorkboardCard) => {
+      const redacted = redactOperatorCard(card);
+      return {
+        bodies: redacted.metadata?.comments?.map((entry) => entry.body),
+        verification: redacted.metadata?.automation?.target?.worktree?.verification,
+      };
+    };
+
+    expect(view(verifiedCard(done))).toEqual({
+      bodies: [HIDDEN_VERIFICATION_NOTICE, "Verification: I will run it tonight."],
+      verification: undefined,
+    });
+    expect(view(verifiedCard(running))).toEqual({
+      bodies: [
+        "**Verification:** fail (openai/gpt-6-sol)\n\npytest fails on empty input",
+        "Verification: I will run it tonight.",
+      ],
+      verification: running,
+    });
+    expect(view(verifiedCard(done, { rung: "b" })).verification).toEqual(done);
+    expect(view(verifiedCard(done, { status: "done" })).verification).toEqual(done);
+    expect(view(verifiedCard(done, { status: "done" })).bodies?.[0]).toContain(
+      "**Verification:** fail",
+    );
+    expect(view(verifiedCard({ ...done, round: 1 })).verification).toEqual({ ...done, round: 1 });
   });
 });

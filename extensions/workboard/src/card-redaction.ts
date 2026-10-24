@@ -4,10 +4,13 @@ import type {
   WorkboardOperatorCard,
 } from "@openclaw/workboard-contract";
 import { workboardCardPullRequest, workboardCardStage } from "./card-stage.js";
-import { nodeTicketTarget, reviewVerdictOf } from "./node-ticket.js";
+import { currentNodeVerification, nodeTicketTarget, reviewVerdictOf } from "./node-ticket.js";
 import type { WorkboardDispatchResult } from "./store-inputs.js";
 
 export const HIDDEN_VERDICT_NOTICE = "Verdict posted. It stays hidden until you decide this round.";
+export const HIDDEN_VERIFICATION_NOTICE =
+  "Verification finished. Its result stays hidden until you decide this round.";
+const VERIFICATION_LINE = /^\*\*Verification:\*\* (pass|fail|error)\b/;
 
 export function redactClaimToken(card: WorkboardCard): WorkboardCard {
   const claim = card.metadata?.claim;
@@ -65,10 +68,18 @@ export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
   };
 }
 
+/**
+ * Hides what could prime the operator's decision on an undecided imported
+ * round: dev's shadow verdict, and at rung a the verification's verdict too
+ * (its comment and its `done` record; a `running` record stays, it holds a
+ * slot). A round that ran at rung b is the agent's to decide, so its
+ * verification stays visible.
+ */
 function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): WorkboardCard {
-  const handoff = nodeTicketTarget(card)?.worktree?.handoff;
-  const comments = redacted.metadata?.comments;
-  if (handoff?.phase !== "imported" || !comments) {
+  const target = nodeTicketTarget(card);
+  const worktree = target?.worktree;
+  const handoff = worktree?.handoff;
+  if (!target || !worktree || handoff?.phase !== "imported") {
     return redacted;
   }
   // A failed publish blocks the card in phase "imported"; the operator already decided.
@@ -78,19 +89,50 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
   if (decided) {
     return redacted;
   }
-  if (!comments.some((comment) => isPendingVerdict(comment, handoff.importedAt))) {
+  const hideVerification =
+    worktree.rung !== "b" && currentNodeVerification(worktree, handoff)?.phase === "done";
+  const isHidden = (comment: WorkboardComment) =>
+    comment.createdAt >= handoff.importedAt &&
+    (reviewVerdictOf(comment) !== undefined ||
+      (hideVerification && isVerificationComment(comment)));
+  const comments = redacted.metadata?.comments;
+  if (!hideVerification && !comments?.some(isHidden)) {
     return redacted;
   }
-  const shown = comments.map((comment) =>
-    isPendingVerdict(comment, handoff.importedAt)
-      ? { ...comment, body: HIDDEN_VERDICT_NOTICE }
-      : comment,
-  );
-  return { ...redacted, metadata: { ...redacted.metadata, comments: shown } };
+  const { verification: _verification, ...visible } = worktree;
+  return {
+    ...redacted,
+    metadata: {
+      ...redacted.metadata,
+      ...(comments
+        ? {
+            comments: comments.map((comment) =>
+              isHidden(comment)
+                ? {
+                    ...comment,
+                    body: isVerificationComment(comment)
+                      ? HIDDEN_VERIFICATION_NOTICE
+                      : HIDDEN_VERDICT_NOTICE,
+                  }
+                : comment,
+            ),
+          }
+        : {}),
+      ...(hideVerification
+        ? {
+            automation: {
+              ...redacted.metadata?.automation,
+              target: { ...target, worktree: visible },
+            },
+          }
+        : {}),
+    },
+  };
 }
 
-function isPendingVerdict(comment: WorkboardComment, importedAt: number): boolean {
-  return comment.createdAt >= importedAt && reviewVerdictOf(comment) !== undefined;
+/** The verifier's comment on a round starts with the verdict line `**Verification:** ...`. */
+function isVerificationComment(comment: WorkboardComment): boolean {
+  return comment.source?.startsWith("agent:") === true && VERIFICATION_LINE.test(comment.body);
 }
 
 export function redactDispatchResult<T extends WorkboardDispatchResult>(result: T): T {
