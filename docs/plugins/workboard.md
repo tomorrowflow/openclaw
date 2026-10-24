@@ -794,6 +794,25 @@ differ from the ticket model so the proof is re-executed by another model.
 Saving refuses an empty `agentId` or a model that is not `provider/model`;
 `verifier: null` removes it. Without it no round is verified.
 
+The plugin passes the session no tool restriction: the agent's own tools are
+the boundary. `agentId` must name a dedicated agent that has only `exec` and
+`process`, runs its commands on the node, and never falls back to another
+model, so a verdict always comes from the configured one:
+
+```json5
+// openclaw.json
+{
+  agents: {
+    entries: {
+      verifier: {
+        model: { primary: "openai/gpt-6-sol", fallbacks: [] },
+        tools: { allow: ["exec", "process"], exec: { host: "node" } },
+      },
+    },
+  },
+}
+```
+
 1. **Start:** the dispatcher fetches `origin` in the node clone, creates branch
    `factory/<cardId>` at `baseRef` (default `origin/HEAD`) in
    `<worktreesRoot>/wb-<cardId>`, and starts the session there.
@@ -979,11 +998,18 @@ Saving refuses an empty `agentId` or a model that is not `provider/model`;
    round's is stale: it gates nothing and the next import replaces it.
    `workboard.cards.verify {id}` (`operator.write`) drops a finished
    verification of a card in review on an imported round, and the next pass
-   verifies it again: the way back from `error`. At rung a the verification
-   is blind like the shadow verdict (see [Trust KPIs](#trust-kpis)):
-   operator reads replace its comment with a notice and leave the finished
-   record out until the round is decided; a running record stays visible, and
-   agents read the card whole.
+   verifies it again in a fresh session: the way back from `error`. A
+   verification still running when the round is decided, the card archived,
+   or a rework round launched settles the same way once its session ends,
+   and holds the card's node-ticket slot until then; a round published before
+   its verification finished carries none. At rung a the verification is
+   blind like the shadow verdict (see [Trust KPIs](#trust-kpis)): operator
+   reads replace every verification comment since the import with a notice
+   and leave the finished record out until the round is decided; a running
+   record stays visible, and agents read the card whole. The verifier session
+   itself is listed in the Gateway's sessions under the **Verification**
+   group and is readable there, so an operator who wants a blind decision at
+   rung a does not open it before deciding.
 4. **Accept:** moving the card from `review` to `done` pushes the imported
    commit from the host clone to its GitHub origin and opens a draft PR, or
    reuses an open one for the branch. When the branch has no open PR but a
