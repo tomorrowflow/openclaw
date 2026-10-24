@@ -719,7 +719,7 @@ describe("node ticket draft PR", () => {
     expect((await store.get(card.id))?.status).toBe("review");
     expect(verifier.creates).toEqual([
       expect.objectContaining({
-        key: `agent:verifier:verify-${card.id.slice(0, 8)}-r0`,
+        key: `agent:verifier:verify-${card.id.slice(0, 8)}-r0-v0`,
         agentId: "verifier",
         model: "openai/gpt-6-sol",
         execNode: repos.target.nodeId,
@@ -740,7 +740,7 @@ describe("node ticket draft PR", () => {
       phase: "running",
       round: 0,
       headCommit: head,
-      sessionKey: `agent:verifier:verify-${card.id.slice(0, 8)}-r0`,
+      sessionKey: `agent:verifier:verify-${card.id.slice(0, 8)}-r0-v0`,
       path: verifyPath,
       model: "openai/gpt-6-sol",
     });
@@ -771,7 +771,7 @@ describe("node ticket draft PR", () => {
       headCommit: head,
       startedAt: expect.any(Number),
       endedAt: expect.any(Number),
-      sessionKey: `agent:verifier:verify-${card.id.slice(0, 8)}-r0`,
+      sessionKey: `agent:verifier:verify-${card.id.slice(0, 8)}-r0-v0`,
       model: "openai/gpt-6-sol",
       verdict: "fail",
       summary: 'pytest passes, but `parse("")` raises on a whitespace-only input.',
@@ -791,12 +791,20 @@ describe("node ticket draft PR", () => {
     });
     expect(workboardCardConsumesNodeTicketSlot(stored!, Date.now())).toBe(false);
 
-    // The operator's re-run drops the result; the next pass verifies the round again.
+    // The operator's re-run drops the result; the next pass verifies the round
+    // again in a fresh session, numbered by the comments the round's runs posted.
     await store.dropNodeVerification(card.id);
     verifier.history = verificationReply({ verdict: "pass", summary: "all green" });
     await handoffs.resume(warn);
     expect(verifier.creates).toHaveLength(2);
-    await expect(ticket.verificationOf()).resolves.toMatchObject({ phase: "running" });
+    expect(verifier.creates[1]).toMatchObject({
+      key: `agent:verifier:verify-${card.id.slice(0, 8)}-r0-v1`,
+      cwd: verifyPath,
+    });
+    await expect(ticket.verificationOf()).resolves.toMatchObject({
+      phase: "running",
+      sessionKey: `agent:verifier:verify-${card.id.slice(0, 8)}-r0-v1`,
+    });
     verifier.running = false;
     await handoffs.resume(warn);
     await expect(ticket.verificationOf()).resolves.toMatchObject({
@@ -828,7 +836,7 @@ describe("node ticket draft PR", () => {
     expect(verifier.creates).toHaveLength(1);
     await expect(ticket.verificationOf()).resolves.toMatchObject({
       phase: "running",
-      sessionKey: `agent:verifier:verify-${card.id.slice(0, 8)}-r0`,
+      sessionKey: `agent:verifier:verify-${card.id.slice(0, 8)}-r0-v0`,
     });
 
     // A reply without the block, or with two, cannot finish: an error verdict that does not hold the card.

@@ -950,7 +950,8 @@ Saving refuses an empty `agentId` or a model that is not `provider/model`;
    does not nudge the automation yet. The handoff pass first creates a
    detached worktree of the imported head in the node clone,
    `<worktreesRoot>/verify-<card8>-r<round>`, and a session of the verifier
-   agent on the verifier model (key `agent:<agentId>:verify-<card8>-r<round>`,
+   agent on the verifier model (key `agent:<agentId>:verify-<card8>-r<round>-v<n>`,
+   where `n` counts the round's earlier runs, so each run is a fresh session;
    session group **Verification**) with the node as exec host and that
    worktree as working directory, so its commands run on the node. The
    session's brief is blind to the author: the ticket title, the card notes

@@ -4,13 +4,17 @@ import type {
   WorkboardOperatorCard,
 } from "@openclaw/workboard-contract";
 import { workboardCardPullRequest, workboardCardStage } from "./card-stage.js";
-import { currentNodeVerification, nodeTicketTarget, reviewVerdictOf } from "./node-ticket.js";
+import {
+  currentNodeVerification,
+  isVerificationComment,
+  nodeTicketTarget,
+  reviewVerdictOf,
+} from "./node-ticket.js";
 import type { WorkboardDispatchResult } from "./store-inputs.js";
 
 export const HIDDEN_VERDICT_NOTICE = "Verdict posted. It stays hidden until you decide this round.";
 export const HIDDEN_VERIFICATION_NOTICE =
   "Verification finished. Its result stays hidden until you decide this round.";
-const VERIFICATION_LINE = /^\*\*Verification:\*\* (pass|fail|error)\b/;
 
 export function redactClaimToken(card: WorkboardCard): WorkboardCard {
   const claim = card.metadata?.claim;
@@ -128,11 +132,6 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
         : {}),
     },
   };
-}
-
-/** The verifier's comment on a round starts with the verdict line `**Verification:** ...`. */
-function isVerificationComment(comment: WorkboardComment): boolean {
-  return comment.source?.startsWith("agent:") === true && VERIFICATION_LINE.test(comment.body);
 }
 
 export function redactDispatchResult<T extends WorkboardDispatchResult>(result: T): T {

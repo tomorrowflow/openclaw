@@ -16,6 +16,7 @@ import { normalizeVerificationFindings } from "./node-ticket-rounds.js";
 import {
   currentNodeVerification,
   type ImportedHandoff,
+  isVerificationComment,
   nodeTicketTarget,
   runNodeCommand,
   sessionCreateRunError,
@@ -112,9 +113,28 @@ export async function nodeVerificationStep(
   return verifier ? { kind: "start", round, verifier } : undefined;
 }
 
-/** The card's verify worktree and session name for a round: `verify-<card8>-r<round>`. */
+/** The card's verify worktree name for a round: `verify-<card8>-r<round>`. */
 function verificationName(card: WorkboardCard, round: number): string {
   return `verify-${sanitizeSessionSegment(card.id.slice(0, 8), "card")}-r${round}`;
+}
+
+/**
+ * The session key of the round's next verification run: `agent:<agentId>:
+ * verify-<card8>-r<round>-v<n>`, where `n` counts the verification comments
+ * the round's earlier runs posted. Each run gets a fresh session, so a re-run
+ * never settles on a previous reply. The count is durable: a crash between
+ * create and record computes the same key and adopts the session it created.
+ */
+function verificationSessionKey(
+  card: WorkboardCard,
+  round: ImportedReviewRound,
+  verifier: WorkboardVerifierSettings,
+): string {
+  const runs = (card.metadata?.comments ?? []).filter(
+    (comment) => comment.createdAt >= round.handoff.importedAt && isVerificationComment(comment),
+  ).length;
+  const agent = sanitizeSessionSegment(verifier.agentId, "agent");
+  return `agent:${agent}:${verificationName(card, round.round)}-v${runs}`;
 }
 
 export function verificationMessage(params: {
@@ -358,15 +378,11 @@ async function finishNodeVerification(
 /**
  * Opens the verification of an imported round: a detached worktree of its
  * head on the node and a session of the board's verifier agent, on its model,
- * with the node as exec host and the worktree as working directory. The key
- * names the card and the round, so a pass after a create whose record was
- * lost adopts the session while it still runs, instead of sending the brief
- * again. A session that already finished gets the brief as a new turn: that
- * is how the operator's re-run (`workboard.cards.verify`) verifies again, at
- * the cost of one repeated run after a crash in the moment between create
- * and record. A worktree or create failure ends the verification with an
- * `error` verdict so the card is not held, and removes the worktree the
- * failed start had already added.
+ * with the node as exec host and the worktree as working directory. A pass
+ * after a create whose record was lost adopts the session under the same key
+ * while it still runs, instead of sending the brief again. A worktree or
+ * create failure ends the verification with an `error` verdict so the card is
+ * not held, and removes the worktree the failed start had already added.
  */
 async function startNodeVerification(
   params: NodeVerificationParams,
@@ -374,9 +390,11 @@ async function startNodeVerification(
 ): Promise<"running" | "done"> {
   const { card } = params;
   const { round, verifier } = step;
-  const name = verificationName(card, round.round);
-  const key = `agent:${sanitizeSessionSegment(verifier.agentId, "agent")}:${name}`;
-  const verifyPath = path.posix.join(round.target.worktreesRoot, name);
+  const key = verificationSessionKey(card, round, verifier);
+  const verifyPath = path.posix.join(
+    round.target.worktreesRoot,
+    verificationName(card, round.round),
+  );
   const startedAt = params.now();
   const facts = { round: round.round, headCommit: round.handoff.headCommit, startedAt };
   let session: { sessionKey: string; model?: string };

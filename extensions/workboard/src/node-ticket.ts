@@ -87,6 +87,13 @@ export function reviewVerdictOf(comment: WorkboardComment): "accept" | "rework" 
   return match === "accept" || match === "rework" ? match : undefined;
 }
 
+const VERIFICATION_LINE = /^\*\*Verification:\*\* (pass|fail|error)\b/;
+
+/** The verifier's comment on a round starts with the verdict line `**Verification:** ...`. */
+export function isVerificationComment(comment: WorkboardComment): boolean {
+  return comment.source?.startsWith("agent:") === true && VERIFICATION_LINE.test(comment.body);
+}
+
 export type ImportedHandoff = Extract<WorkboardNodeHandoff, { phase: "imported" }>;
 
 /**
