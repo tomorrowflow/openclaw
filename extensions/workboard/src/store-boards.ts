@@ -6,6 +6,7 @@ import type {
   WorkboardListResult,
   WorkboardMetadata,
   WorkboardOperatorCard,
+  WorkboardOrchestrationSettings,
   WorkboardOverviewResult,
   WorkboardSessionPlacement,
   WorkboardSessionsBoard,
@@ -207,11 +208,14 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
     };
   }
 
+  /** A board's live orchestration settings, read where a rung or verifier decision is made. */
+  async boardOrchestration(boardId: string): Promise<WorkboardOrchestrationSettings | undefined> {
+    return (await this.boardStore.lookup(boardId))?.board.orchestration;
+  }
+
   async trust(input: WorkboardListOptions = {}, now = Date.now()): Promise<WorkboardTrustResult> {
     const boardId = normalizeBoardId(input.boardId);
-    const board = boardId
-      ? ((await this.boardStore.lookup(boardId))?.board.orchestration ?? {})
-      : undefined;
+    const board = boardId ? ((await this.boardOrchestration(boardId)) ?? {}) : undefined;
     return projectWorkboardTrust(await this.list({ boardId }), boardId ?? "all", now, board);
   }
 
