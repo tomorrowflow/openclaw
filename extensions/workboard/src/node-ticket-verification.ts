@@ -343,7 +343,8 @@ async function finishNodeVerification(
  * is how the operator's re-run (`workboard.cards.verify`) verifies again, at
  * the cost of one repeated run after a crash in the moment between create
  * and record. A worktree or create failure ends the verification with an
- * `error` verdict so the card is not held.
+ * `error` verdict so the card is not held, and removes the worktree the
+ * failed start had already added.
  */
 async function startNodeVerification(
   params: NodeVerificationParams,
@@ -357,6 +358,7 @@ async function startNodeVerification(
   const startedAt = params.now();
   const facts = { round: round.round, headCommit: round.handoff.headCommit, startedAt };
   let session: { sessionKey: string; model?: string };
+  let prepared = false;
   try {
     const existing = params.readSessions
       ? (await params.readSessions({ includeUnknown: false, sessionKey: key })).sessions[0]
@@ -370,6 +372,7 @@ async function startNodeVerification(
         verifyPath,
         round.handoff.headCommit,
       );
+      prepared = true;
       session = await createVerificationSession({
         runtime: params.runtime,
         card,
@@ -392,7 +395,7 @@ async function startNodeVerification(
         summary: `The verification could not start: ${formatErrorMessage(error)}`,
         findings: [],
       },
-      undefined,
+      prepared ? verifyPath : undefined,
     );
     return "done";
   }

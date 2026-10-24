@@ -888,7 +888,7 @@ describe("node ticket draft PR", () => {
 
   it("records a verifier session that cannot start as an error and wakes the review", async () => {
     const ticket = await verifiedTicket({ failCreate: "model not allowed: openai/gpt-6-sol" });
-    const { store, card, handoffs, warn, onReview } = ticket;
+    const { store, card, repos, handoffs, warn, onReview } = ticket;
 
     await handoffs.resume(warn);
 
@@ -902,6 +902,10 @@ describe("node ticket draft PR", () => {
       findings: [],
     });
     expect((await store.get(card.id))?.status).toBe("review");
+    // The worktree the failed start added does not outlive it.
+    expect(
+      existsSync(path.join(repos.target.worktreesRoot, `verify-${card.id.slice(0, 8)}-r0`)),
+    ).toBe(false);
   });
 
   it("reworks a published ticket on its PR branch, keeping a reviewer's commit", async () => {
