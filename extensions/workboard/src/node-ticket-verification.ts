@@ -92,13 +92,14 @@ export type NodeVerificationStep =
 /**
  * What the handoff pass owes a card's verification: settle the one that runs,
  * in any card status, or start one when the board has a verifier and the
- * imported round in review has none yet. A running record settles even after
- * the operator removed the verifier.
+ * imported round in review has none yet. The board is read only for a round
+ * that could start one, so a sweep over the board's cards costs no lookup per
+ * card. A running record settles even after the operator removed the verifier.
  */
-export function nodeVerificationStep(
+export async function nodeVerificationStep(
   card: WorkboardCard,
-  verifier: WorkboardVerifierSettings | undefined,
-): NodeVerificationStep | undefined {
+  verifierOf: () => Promise<WorkboardVerifierSettings | undefined>,
+): Promise<NodeVerificationStep | undefined> {
   const running = runningNodeVerification(card);
   if (running) {
     return { kind: "settle", ...running };
@@ -107,6 +108,7 @@ export function nodeVerificationStep(
   if (!round || currentNodeVerification(round.worktree, round.handoff)) {
     return undefined;
   }
+  const verifier = await verifierOf();
   return verifier ? { kind: "start", round, verifier } : undefined;
 }
 

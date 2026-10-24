@@ -531,7 +531,7 @@ export function createNodeTicketHandoffs(params: {
 }) {
   const inFlight = new Set<string>();
   const now = params.now ?? Date.now;
-  const verifierOf = async (card: WorkboardCard) =>
+  const verifierOf = (card: WorkboardCard) => async () =>
     (await params.store.boardOrchestration(cardBoardId(card)))?.verifier;
   /**
    * The review a card in review waits on: its verification where the board
@@ -539,7 +539,7 @@ export function createNodeTicketHandoffs(params: {
    * verification is done or when there is none.
    */
   const reviewReached = async (card: WorkboardCard, warn: (message: string) => void) => {
-    const step = nodeVerificationStep(card, await verifierOf(card));
+    const step = await nodeVerificationStep(card, verifierOf(card));
     if (
       step &&
       (await runNodeVerification(
@@ -576,7 +576,7 @@ export function createNodeTicketHandoffs(params: {
         const verifying =
           item || publish || reopen || unanswered || grilling
             ? undefined
-            : nodeVerificationStep(card, await verifierOf(card));
+            : await nodeVerificationStep(card, verifierOf(card));
         if (
           (!item && !publish && !reopen && !unanswered && !grilling && !verifying) ||
           inFlight.has(card.id)

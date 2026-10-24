@@ -886,6 +886,23 @@ describe("node ticket draft PR", () => {
     });
   });
 
+  it("reads the board only for a round whose verification could start", async () => {
+    const ticket = await verifiedTicket();
+    const { store, repos, handoffs, warn, verifier } = ticket;
+    const boardReads = vi.spyOn(store, "boardOrchestration");
+    await handoffs.resume(warn);
+    expect(boardReads).toHaveBeenCalledTimes(1);
+    expect(verifier.creates).toHaveLength(1);
+
+    // A plain card, a ticket in the pool, and a running verification need no board read.
+    await store.create({ title: "Write the release notes", status: "todo" });
+    await startNodeCard(store, ticket.gateway, repos.target);
+    boardReads.mockClear();
+    await handoffs.resume(warn);
+    expect(boardReads).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("settles a verification still running after the operator decided or archived the card", async () => {
     const verifyPathOf = (ticket: {
       repos: { target: { worktreesRoot: string } };
