@@ -5,6 +5,7 @@ import type {
   WorkboardNodeFinding,
   WorkboardNodeReview,
   WorkboardNodeRound,
+  WorkboardNodeVerificationFinding,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
 import {
@@ -224,6 +225,30 @@ function normalizeFinding(entry: unknown): WorkboardNodeFinding | undefined {
   }
   const rule = cell(entry.rule, FINDING_CELL_CHARS.rule);
   return { path, line, body, ...(rule ? { rule } : {}), fixed: entry.fixed === true };
+}
+
+/**
+ * Verifier-written findings, within the standards review's count and
+ * character caps; one without a repo-relative path or a body is dropped, and
+ * a line that is not a positive integer is left out.
+ */
+export function normalizeVerificationFindings(value: unknown): WorkboardNodeVerificationFinding[] {
+  const kept: WorkboardNodeVerificationFinding[] = [];
+  let chars = 0;
+  for (const entry of Array.isArray(value) ? value : []) {
+    const path = isRecord(entry) ? findingPath(entry.path) : undefined;
+    const body = isRecord(entry) ? cell(entry.body, FINDING_CELL_CHARS.body) : undefined;
+    if (!path || !body) {
+      continue;
+    }
+    chars += path.length + body.length;
+    if (kept.length === MAX_FINDINGS || chars > MAX_FINDINGS_CHARS) {
+      break;
+    }
+    const line = parseStrictPositiveInteger(entry.line);
+    kept.push({ path, ...(line === undefined ? {} : { line }), body });
+  }
+  return kept;
 }
 
 /** Session-written findings; one without a repo-relative path, a 1-based line, or a body is dropped. */

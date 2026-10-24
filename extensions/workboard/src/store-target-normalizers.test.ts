@@ -88,3 +88,71 @@ it("drops the recorded worktree when the target moves to another node", () => {
     normalizeExecutionTarget({ ...NODE_TARGET, nodeId: "linux-factory", worktree }, recorded),
   ).not.toHaveProperty("worktree");
 });
+
+it("keeps a round's verification record and a review's verification, dropping malformed ones", () => {
+  const base = {
+    path: "/Users/factory/worktrees/c1",
+    branch: "factory/c1",
+    baseCommit: "a".repeat(40),
+  };
+  const normalize = (worktree: Record<string, unknown>) =>
+    normalizeExecutionTarget({ ...NODE_TARGET, worktree: { ...base, ...worktree } }, undefined, {
+      allowLaunchState: true,
+    })?.worktree;
+  const running = {
+    phase: "running",
+    round: 1,
+    headCommit: "b".repeat(40),
+    startedAt: 10,
+    sessionKey: "agent:verifier:verify-c1-r1",
+    path: "/Users/factory/worktrees/verify-c1-r1",
+    model: "openai/gpt-6-sol",
+  };
+  const done = {
+    phase: "done",
+    round: 0,
+    headCommit: "b".repeat(40),
+    startedAt: 10,
+    endedAt: 20,
+    sessionKey: "agent:verifier:verify-c1-r0",
+    model: "openai/gpt-6-sol",
+    verdict: "fail",
+    summary: "pytest fails on empty input",
+    findings: [
+      { path: "src/parser.py", line: 4, body: "returns None on empty input" },
+      { path: "docs/parser.md", body: "says [] is returned" },
+    ],
+  };
+
+  expect(normalize({ verification: running })?.verification).toEqual(running);
+  expect(normalize({ verification: done })?.verification).toEqual(done);
+  expect(
+    normalize({ verification: { ...done, findings: [{ path: "/abs", body: "x" }, { line: 2 }] } })
+      ?.verification,
+  ).toMatchObject({ findings: [] });
+  for (const broken of [
+    { ...running, path: undefined },
+    { ...done, verdict: "maybe" },
+    { ...done, endedAt: undefined },
+    { ...done, phase: "pending" },
+  ]) {
+    expect(normalize({ verification: broken })).not.toHaveProperty("verification");
+  }
+  expect(
+    normalize({
+      reviews: [
+        {
+          round: 0,
+          verdict: "accept",
+          verification: { verdict: "pass", model: "openai/gpt-6-sol" },
+        },
+        { round: 1, verdict: "rework", verification: { verdict: "nope" }, rung: "b" },
+        { round: 2, verdict: "accept", rung: "a" },
+      ],
+    })?.reviews,
+  ).toEqual([
+    { round: 0, verdict: "accept", verification: { verdict: "pass", model: "openai/gpt-6-sol" } },
+    { round: 1, verdict: "rework", rung: "b" },
+    { round: 2, verdict: "accept" },
+  ]);
+});

@@ -2,14 +2,15 @@ import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
   WorkboardCard,
-  WorkboardClassRung,
   WorkboardComment,
   WorkboardExecutionTarget,
   WorkboardNodeFeedback,
   WorkboardNodeHandoff,
   WorkboardNodeQuestions,
   WorkboardNodeRework,
+  WorkboardNodeVerification,
   WorkboardNodeWorktree,
+  WorkboardOrchestrationSettings,
 } from "@openclaw/workboard-contract";
 import { isFutureDateTimestampMs } from "openclaw/plugin-sdk/number-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
@@ -31,6 +32,7 @@ import {
   MAX_BLOCK_REASON_CHARS,
   MAX_COMMENT_BODY_CHARS,
   MAX_PROOF_NOTE_CHARS,
+  workboardClassRung,
   workboardTaskClass,
 } from "./store-constants.js";
 import type { WorkboardAgentActor } from "./store-inputs.js";
@@ -85,12 +87,36 @@ export function reviewVerdictOf(comment: WorkboardComment): "accept" | "rework" 
   return match === "accept" || match === "rework" ? match : undefined;
 }
 
-type ImportedHandoff = Extract<WorkboardNodeHandoff, { phase: "imported" }>;
+const VERIFICATION_LINE = /^\*\*Verification:\*\* (pass|fail|error)\b/;
+
+/** The verifier's comment on a round starts with the verdict line `**Verification:** ...`. */
+export function isVerificationComment(comment: WorkboardComment): boolean {
+  return comment.source?.startsWith("agent:") === true && VERIFICATION_LINE.test(comment.body);
+}
+
+export type ImportedHandoff = Extract<WorkboardNodeHandoff, { phase: "imported" }>;
+
+/**
+ * The verification of the imported round the card waits on. A record of
+ * another head or round is stale: it is ignored and the next import replaces it.
+ */
+export function currentNodeVerification(
+  worktree: WorkboardNodeWorktree,
+  handoff: ImportedHandoff,
+): WorkboardNodeVerification | undefined {
+  const verification = worktree.verification;
+  return verification &&
+    verification.headCommit === handoff.headCommit &&
+    verification.round === (worktree.rework?.round ?? 0)
+    ? verification
+    : undefined;
+}
 
 /**
  * Who accepts an imported node ticket on its move to done. The operator does
  * unless an agent moves it; an agent may only for a class at rung b on the
- * board whose round also ran at rung b, after posting its verdict. An accept
+ * board whose round also ran at rung b, after posting its verdict, and, on a
+ * board with a verifier, once the round's verification passed. An accept
  * verdict then picks whether a person reads the PR: every reworked ticket,
  * and 1 in `sampleEvery` others, chosen by the card id so the sample is not
  * the reader's choice. Throws the refusal an agent gets.
@@ -100,13 +126,14 @@ export function nodeTicketAcceptance(params: {
   worktree: WorkboardNodeWorktree;
   handoff: ImportedHandoff;
   actor?: WorkboardAgentActor;
-  classRung?: WorkboardClassRung;
+  board?: Pick<WorkboardOrchestrationSettings, "classRungs" | "verifier">;
 }): ImportedHandoff {
-  const { card, worktree, actor, classRung } = params;
+  const { card, worktree, actor, board } = params;
   const { decidedBy: _decidedBy, sampled: _sampled, ...imported } = params.handoff;
   if (!actor) {
     return imported;
   }
+  const classRung = workboardClassRung(board, card.labels);
   const askForVerdict = "Post `Verdict: accept` or `Verdict: rework: <finding>` as a comment";
   if (classRung?.rung !== "b") {
     throw new Error(
@@ -128,6 +155,22 @@ export function nodeTicketAcceptance(params: {
   if (verdict === "rework") {
     return { ...imported, decidedBy: actor };
   }
+  if (board?.verifier) {
+    const verification = currentNodeVerification(worktree, imported);
+    if (verification?.phase !== "done") {
+      throw new Error("Verification is still running; wait for its comment.");
+    }
+    if (verification.verdict === "fail") {
+      throw new Error(
+        `The verification failed: ${verification.summary || "see its comment"}. Post \`Verdict: rework: …\` and rework it.`,
+      );
+    }
+    if (verification.verdict === "error") {
+      throw new Error(
+        `The verification could not finish (${verification.summary || "no reason recorded"}). Leave the card in review; the operator decides or re-runs it.`,
+      );
+    }
+  }
   const sampleEvery = classRung.sampleEvery ?? DEFAULT_SAMPLE_EVERY;
   const sampled =
     (worktree.rework?.round ?? 0) > 0 ||
@@ -146,7 +189,7 @@ export async function withImportedNodeTicketMove(params: {
   existing: WorkboardCard;
   next: WorkboardCard;
   actor?: WorkboardAgentActor;
-  classRung: () => Promise<WorkboardClassRung | undefined>;
+  board: () => Promise<Pick<WorkboardOrchestrationSettings, "classRungs" | "verifier"> | undefined>;
 }): Promise<WorkboardCard> {
   const { existing, next, actor } = params;
   const target = nodeTicketTarget(next);
@@ -172,7 +215,7 @@ export async function withImportedNodeTicketMove(params: {
     worktree,
     handoff: worktree.handoff,
     actor,
-    classRung: actor ? await params.classRung() : undefined,
+    board: actor ? await params.board() : undefined,
   });
   return {
     ...next,
@@ -420,6 +463,9 @@ export async function createNodeTicketWorktree(params: {
     ...(previous?.grill ? { grill: previous.grill } : {}),
     ...(previous?.reviews ? { reviews: previous.reviews } : {}),
     ...(previous?.rounds ? { rounds: previous.rounds } : {}),
+    // The previous round's verifier may still run on the node; the handoff
+    // pass settles it from this record once its session ends.
+    ...(previous?.verification?.phase === "running" ? { verification: previous.verification } : {}),
   };
   const git = (...args: string[]) =>
     runNodeCommand(runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);

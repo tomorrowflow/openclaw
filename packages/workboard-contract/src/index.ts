@@ -1,4 +1,11 @@
 import type { WorkboardSessionsBoardSpec } from "./sessions-board.js";
+import type {
+  WorkboardNodeVerification,
+  WorkboardVerificationVerdict,
+  WorkboardVerifierSettings,
+} from "./verification.js";
+
+export type * from "./verification.js";
 
 export type WorkboardDatabasePortApi<Database, Input> = {
   inspectWorkboardPortSource(db: Database): {
@@ -415,6 +422,13 @@ export type WorkboardNodeReviewVerdict = {
   decidedBy?: "agent";
   sampled?: boolean;
   readAt?: number;
+  /** The round's verification result, when the board ran one before the publish. */
+  verification?: { verdict: WorkboardVerificationVerdict; model?: string };
+  /**
+   * The round ran at rung b (`WorkboardNodeWorktree.rung`), so its
+   * verification was visible to whoever decided it. Absent = rung a.
+   */
+  rung?: "b";
 };
 
 /**
@@ -556,6 +570,7 @@ export type WorkboardNodeWorktree = {
   reviews?: WorkboardNodeReviewVerdict[];
   /** Recent rounds, oldest first; kept across rework rounds. */
   rounds?: WorkboardNodeRound[];
+  verification?: WorkboardNodeVerification;
   /**
    * The round runs at rung b: its class was at b on the board when it
    * launched, so its brief asked for the standards review. Absent = rung a.
@@ -687,6 +702,13 @@ export type WorkboardOrchestrationSettings = {
    * prefix). A class not listed is at rung a. Operator-set only.
    */
   classRungs?: Record<string, WorkboardClassRung>;
+  /**
+   * The independent verification run on each imported round: a session of
+   * `agentId` on `model` (`provider/model`) that re-runs the ticket's proof on
+   * its node and tries to break the change. Absent = no verification.
+   * Operator-set only.
+   */
+  verifier?: WorkboardVerifierSettings;
 };
 
 /**
@@ -878,6 +900,23 @@ export type WorkboardTrustCounts = {
   /** Runs with a recorded turn-end context, and those whose context passed the smart zone. */
   contextMeasured: number;
   smartZoneBreaches: number;
+  /** Published rounds with a verification, and those whose verdict was `fail`. */
+  verifiedRounds: number;
+  verifierFailed: number;
+  /**
+   * Verified rounds a person decided without seeing the verification
+   * (operator rounds that ran at rung a, and sampled agent accepts), those
+   * where the verification matched that person (`pass` and no rework after
+   * the publish, or not `pass` and a rework), the escapes (`pass` verdicts a
+   * person then reworked), and the catches (`fail` or `error` verdicts a
+   * person then reworked). An agent's rework after a `fail` agrees with
+   * itself and is not scored; nor is an operator's decision on a rung b
+   * round, where the verification was in view.
+   */
+  verifierScoredRounds: number;
+  verifierAgreedRounds: number;
+  verifierEscapes: number;
+  verifierCatches: number;
 };
 
 /** Accepted tickets in one UTC week (Monday 00:00), by acceptance time. */

@@ -7,6 +7,7 @@ import type {
   WorkboardCard,
   WorkboardClassRung,
   WorkboardExecutionTarget,
+  WorkboardNodeVerification,
 } from "@openclaw/workboard-contract";
 import { Value } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -168,6 +169,40 @@ describe("Workboard rung b", () => {
     await expect(rungs()).resolves.toBeUndefined();
   });
 
+  it("keeps the operator-set verifier whole: saved, carried, refused when invalid, cleared", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const verifier = async () =>
+      (await store.listBoards()).boards.find((board) => board.id === "app")?.orchestration
+        ?.verifier;
+    await store.upsertBoard({
+      id: "app",
+      orchestration: { verifier: { agentId: "verifier", model: "openai/gpt-6-sol" } },
+    });
+    await expect(verifier()).resolves.toEqual({ agentId: "verifier", model: "openai/gpt-6-sol" });
+    await store.upsertBoard({ id: "app", orchestration: { autoDecompose: true } });
+    await expect(verifier()).resolves.toEqual({ agentId: "verifier", model: "openai/gpt-6-sol" });
+    for (const [input, error] of [
+      [
+        { agentId: "", model: "openai/gpt-6-sol" },
+        "verifier needs a non-empty agentId and a model.",
+      ],
+      [{ agentId: "verifier" }, "verifier needs a non-empty agentId and a model."],
+      ["verifier", "verifier needs a non-empty agentId and a model."],
+      [
+        { agentId: "verifier", model: "gpt-6-sol" },
+        "verifier model gpt-6-sol must be provider/model.",
+      ],
+      [{ agentId: "verifier", model: "openai/ gpt" }, "must be provider/model."],
+    ] as const) {
+      await expect(
+        store.upsertBoard({ id: "app", orchestration: { verifier: input } }),
+      ).rejects.toThrow(error);
+    }
+    await expect(verifier()).resolves.toEqual({ agentId: "verifier", model: "openai/gpt-6-sol" });
+    await store.upsertBoard({ id: "app", orchestration: { verifier: null } });
+    await expect(verifier()).resolves.toBeUndefined();
+  });
+
   it("stamps since when a class changes rung, carries it otherwise, and takes an explicit backfill", async () => {
     const store = createWorkboardSqliteTestStore();
     const save = async (classRungs: Record<string, unknown>) =>
@@ -260,6 +295,86 @@ describe("Workboard rung b", () => {
     );
   });
 
+  it("gates an agent's rung b accept on a passed verification, never a rework verdict or an operator", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({
+      id: "default",
+      orchestration: { verifier: { agentId: "verifier", model: "openai/gpt-6-sol" } },
+    });
+    const card = await importedDocsTicket(store, { classRungs: { docs: { rung: "b" } } });
+    const worktreePath = expectDefined(
+      nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree?.path,
+      "worktree path",
+    );
+    const head = "b".repeat(40);
+    const facts = { round: 0, headCommit: head, startedAt: 1, endedAt: 2, findings: [] };
+    const verified = async (verification: WorkboardNodeVerification | undefined) =>
+      verification
+        ? await store.setNodeVerification(card.id, { worktreePath, verification })
+        : undefined;
+    await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
+    const move = agentTools(store)("workboard_move");
+    const accept = () => move.execute("accept", { id: card.id, status: "done" });
+
+    await expect(accept()).rejects.toThrow("Verification is still running; wait for its comment.");
+    await verified({
+      phase: "running",
+      round: 0,
+      headCommit: head,
+      startedAt: 1,
+      sessionKey: "agent:verifier:verify-x-r0",
+      path: "/wt/verify",
+    });
+    await expect(accept()).rejects.toThrow("Verification is still running; wait for its comment.");
+    await verified({
+      phase: "done",
+      ...facts,
+      verdict: "fail",
+      summary: "pytest fails on empty input",
+    });
+    await expect(accept()).rejects.toThrow(
+      "The verification failed: pytest fails on empty input. Post `Verdict: rework: …` and rework it.",
+    );
+    await verified({ phase: "done", ...facts, verdict: "error", summary: "no report block" });
+    await expect(accept()).rejects.toThrow(
+      "The verification could not finish (no report block). Leave the card in review; the operator decides or re-runs it.",
+    );
+    // A stale pass from another head gates like a missing one.
+    await verified({
+      phase: "done",
+      ...facts,
+      headCommit: "c".repeat(40),
+      verdict: "pass",
+      summary: "",
+    });
+    await expect(accept()).rejects.toThrow("Verification is still running; wait for its comment.");
+
+    // A rework verdict is never gated: the agent moves the card on to publish the draft.
+    await verified({ phase: "done", ...facts, verdict: "fail", summary: "broken" });
+    await store.addComment(card.id, { body: "Verdict: rework: broken" }, undefined, "agent:dev");
+    await accept();
+    await expect(handoffOf(store, card)).resolves.toMatchObject({ decidedBy: "agent:dev" });
+    await store.move(card.id, "review", undefined);
+
+    await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
+    await verified({ phase: "done", ...facts, verdict: "pass", summary: "pytest green" });
+    await accept();
+    await expect(handoffOf(store, card)).resolves.toMatchObject({
+      decidedBy: "agent:dev",
+      sampled: expect.any(Boolean),
+    });
+
+    // The operator is never gated.
+    await store.move(card.id, "review", undefined);
+    await verified({ phase: "done", ...facts, verdict: "fail", summary: "broken" });
+    await store.move(card.id, "done", undefined);
+    await expect(handoffOf(store, card)).resolves.toEqual({
+      phase: "imported",
+      headCommit: head,
+      importedAt: expect.any(Number),
+    });
+  });
+
   it("lets an agent accept at rung b after its verdict, and an operator retry decides again", async () => {
     const store = createWorkboardSqliteTestStore();
     const card = await importedDocsTicket(store, {
@@ -335,7 +450,7 @@ describe("Workboard rung b", () => {
         },
         handoff: { phase: "imported", headCommit: "b", importedAt: 0 },
         actor: "agent:dev",
-        classRung,
+        board: { classRungs: { docs: classRung } },
       }).sampled;
     const ids = Array.from({ length: 300 }, (_, index) => `card-${index}`);
     const picks = ids.map((id) => accept(id, { rung: "b" }));
@@ -405,12 +520,14 @@ describe("Workboard rung b", () => {
     const operator = await publish(async (card) => await store.move(card.id, "done", undefined));
     expect(operator.opened).toMatchObject({ draft: true });
     expect(operator.opened.body).not.toContain("Sampled");
+    // The round ran at rung b, so the operator saw its verification: the KPIs do not score it.
     expect(operator.reviews).toEqual([
       {
         round: 0,
         verdict: "accept",
         importedAt: expect.any(Number),
         publishedAt: expect.any(Number),
+        rung: "b",
       },
     ]);
     expect((await store.trust({ boardId: "default" })).classes).toEqual([
