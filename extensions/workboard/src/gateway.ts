@@ -519,7 +519,9 @@ export function registerWorkboardGatewayMethods(params: {
   };
   // operator.read suffices for the node walk: live paths stay inside the dispatcher-owned
   // worktree.path and normalized screenshotDirs or docs/prototypes, and the node's
-  // allowReadPaths bound them again.
+  // allowReadPaths bound them again. The walk also runs git on the node through
+  // system.run, but with a fixed argv (checked commit id, normalized dirs after `--`)
+  // in the worktree the ticket's agent already runs in, so a reader chooses nothing.
   const listArtifacts = async (kind: NodeTicketArtifactKind, input: Record<string, unknown>) => {
     const card = await requireCard(readId(input));
     const linked = (await Promise.all(relatedCardIds(card).map((id) => store.get(id)))).filter(

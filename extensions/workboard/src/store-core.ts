@@ -688,7 +688,11 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     });
   }
 
-  async addLink(id: string, input: WorkboardLinkInput): Promise<WorkboardCard> {
+  async addLink(
+    id: string,
+    input: WorkboardLinkInput,
+    scope?: WorkboardMutationScope,
+  ): Promise<WorkboardCard> {
     const now = Date.now();
     const targetCardId = normalizeBoundedString(input.targetCardId, undefined, 120, "link target");
     const url = normalizeBoundedString(input.url, undefined, 2000, "link URL");
@@ -708,10 +712,18 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       ...(title ? { title } : {}),
       ...(url ? { url } : {}),
     };
-    return await this.updateMetadata(id, (existing) => ({
-      ...existing.metadata,
-      links: appendLinkPreservingDependencies(existing.metadata?.links ?? [], link),
-    }));
+    return await this.updateMetadata(id, (existing) => {
+      assertCanMutateClaimedCard(existing, scope);
+      const links = existing.metadata?.links ?? [];
+      // A second link of the same type to the same card adds nothing.
+      if (
+        targetCardId &&
+        links.some((entry) => entry.type === type && entry.targetCardId === targetCardId)
+      ) {
+        return { ...existing.metadata };
+      }
+      return { ...existing.metadata, links: appendLinkPreservingDependencies(links, link) };
+    });
   }
 
   async linkCards(

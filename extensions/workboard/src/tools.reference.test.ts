@@ -22,7 +22,8 @@ describe("workboard_reference", () => {
     const reference = referenceTool(store);
 
     await reference.execute("first", { id: spec.id, targetCardId: prototype.id });
-    await reference.execute("again", { id: spec.id, targetCardId: prototype.id });
+    const again = await reference.execute("again", { id: spec.id, targetCardId: prototype.id });
+    expect(again.details).toMatchObject({ references: [prototype.id] });
 
     const linked = await store.get(spec.id);
     expect(linked?.metadata?.links).toEqual([
@@ -34,6 +35,34 @@ describe("workboard_reference", () => {
     ]);
     expect(relatedCardIds(linked!)).toEqual([prototype.id]);
     expect(linked?.status).toBe(spec.status);
+  });
+
+  it("refuses a card another agent holds the claim on, unless given its token", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const prototype = await store.create({ title: "[PROTO-1] Pick a recovery flow" });
+    const spec = await store.create({ title: "[SPEC-3] Specify recovery" });
+    await store.claim(spec.id, { ownerId: "node-worker", token: "worker-token" });
+
+    await expect(
+      referenceTool(store).execute("other", { id: spec.id, targetCardId: prototype.id }),
+    ).rejects.toThrow("card is claimed by node-worker.");
+    expect((await store.get(spec.id))?.metadata?.links).toBeUndefined();
+
+    await referenceTool(store).execute("owner", {
+      id: spec.id,
+      targetCardId: prototype.id,
+      token: "worker-token",
+    });
+    expect(relatedCardIds((await store.get(spec.id))!)).toEqual([prototype.id]);
+  });
+
+  it("refuses a card referencing itself", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const spec = await store.create({ title: "[SPEC-3] Specify recovery" });
+
+    await expect(
+      referenceTool(store).execute("self", { id: spec.id, targetCardId: spec.id }),
+    ).rejects.toThrow("a card cannot reference itself.");
   });
 
   it("refuses a target card that does not exist", async () => {

@@ -624,7 +624,11 @@ function realGit(argv: string[]): string {
   return execFileSync(binary!, args, { encoding: "utf8" });
 }
 
-/** A running card whose worktree repo holds an inherited, a committed, an edited, an untracked, and an ignored prototype. */
+/**
+ * A running card whose worktree repo holds an inherited, a committed, an
+ * edited, an untracked, and a gitignored prototype (evidence dirs are ignored
+ * until a run force-adds them).
+ */
 function runningPrototypeWorktree() {
   const inherited = "docs/prototypes/PROTO-1/old.html";
   const edited = "docs/prototypes/PROTO-1/edited.html";
@@ -664,6 +668,7 @@ it("lists only the prototypes the running round changed, not those the base bran
   ).toEqual([
     "docs/prototypes/PROTO-1/edited.html",
     "docs/prototypes/T-1/committed.html",
+    "docs/prototypes/T-1/ignored.html",
     "docs/prototypes/T-1/untracked.html",
   ]);
 });

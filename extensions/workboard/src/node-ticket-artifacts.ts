@@ -305,6 +305,8 @@ function liveUnavailableReason(
 /**
  * The worktree files of these dirs the round added or changed: committed or
  * not, tracked or new. Everything else there is inherited from the base branch.
+ * Ignored files count: evidence dirs stay gitignored until a run force-adds
+ * them, and an untracked file never comes from the base branch.
  */
 async function ownedLivePaths(
   runtime: WorkboardNodeTicketRuntime,
@@ -319,7 +321,7 @@ async function ownedLivePaths(
   const git = (...args: string[]) => runNodeCommand(runtime, nodeId, ["git", "-C", root, ...args]);
   const [changed, untracked] = await Promise.all([
     git("diff", "--name-only", "-z", "--no-renames", "--diff-filter=AM", from, "--", ...dirs),
-    git("ls-files", "-z", "--others", "--exclude-standard", "--", ...dirs),
+    git("ls-files", "-z", "--others", "--", ...dirs),
   ]);
   return new Set([...changed.split("\0"), ...untracked.split("\0")].filter(Boolean));
 }

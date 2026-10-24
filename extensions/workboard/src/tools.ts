@@ -4,6 +4,7 @@ import { resolveIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import type { AnyAgentTool, OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "typebox";
 import { redactClaimToken } from "./card-redaction.js";
+import { relatedCardIds } from "./node-ticket-artifacts.js";
 import { normalizeCappedStringList } from "./store-string-lists.js";
 import { normalizeCommentSource } from "./store-value-normalizers.js";
 import type { WorkboardStore } from "./store.js";
@@ -198,32 +199,28 @@ export function createWorkboardTools(params: {
       name: "workboard_reference",
       label: "Workboard Reference",
       description:
-        "Reference another card from a card with a relates_to link, without a dependency. The card's Prototype and Screenshots tabs then also show the referenced card's committed files, for example an accepted prototype on the card that builds its decision.",
+        "Reference another card from a card with a relates_to link, without a dependency. The card's Prototype and Screenshots tabs then also show the referenced card's committed files, for example an accepted prototype on the card that builds its decision. Returns the card's referenced card ids.",
       parameters: strictObject({
         id: cardIdField(),
         targetCardId: Type.String({ description: "Id of the card to reference." }),
+        token: ScopedClaimTokenField,
       }),
       execute: async (_toolCallId, rawParams) => {
-        const record = rawParams as Record<string, unknown>;
-        const id = readStringParam(record, "id", { required: true });
+        const { record, id, scope } = await readScopedCardToolParams(rawParams);
         const targetCardId = readStringParam(record, "targetCardId", { required: true });
-        const [card, target] = await Promise.all([store.get(id), store.get(targetCardId)]);
-        if (!card) {
-          throw new Error(`card not found: ${id}`);
+        if (targetCardId === id) {
+          throw new Error("a card cannot reference itself.");
         }
+        const target = await store.get(targetCardId);
         if (!target) {
           throw new Error(`card not found: ${targetCardId}`);
         }
-        const referenced = card.metadata?.links?.some(
-          (link) => link.type === "relates_to" && link.targetCardId === targetCardId,
+        const card = await store.addLink(
+          id,
+          { type: "relates_to", targetCardId, title: target.title },
+          scope,
         );
-        return jsonResult({
-          card: summarizeCard(
-            referenced
-              ? card
-              : await store.addLink(id, { type: "relates_to", targetCardId, title: target.title }),
-          ),
-        });
+        return jsonResult({ card: summarizeCard(card), references: relatedCardIds(card) });
       },
     },
     {
