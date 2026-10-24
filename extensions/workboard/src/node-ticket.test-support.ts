@@ -1,12 +1,16 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import type { WorkboardExecutionTarget } from "@openclaw/workboard-contract";
-import { vi } from "vitest";
+import type { WorkboardCard, WorkboardExecutionTarget } from "@openclaw/workboard-contract";
+import { expect, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
+import { syncWorkboardAgentEnded, type WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
+import { createNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import type { WorkboardNodeTicketRuntime } from "./node-ticket.js";
 import type { WorkboardStore } from "./store.js";
+import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 
 export const BASE_COMMIT = "a".repeat(40);
 export const NODE_TARGET = {
@@ -268,5 +272,134 @@ export function createFakeGitHub(remote: string) {
       fetch: fetchImpl as unknown as typeof fetch,
       remoteUrl: () => remote,
     },
+  };
+}
+
+const tempRoots: string[] = [];
+
+/** A temp dir that `removeTempRoots`, called from the suite's `afterEach`, removes. */
+export function tempRoot(prefix: string): string {
+  const root = mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempRoots.push(root);
+  return root;
+}
+
+export function removeTempRoots(): void {
+  for (const root of tempRoots.splice(0)) {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+export function reportMessages(report: Record<string, unknown>) {
+  return [
+    {
+      role: "assistant",
+      content: `Done.\n\n\`\`\`workboard-report\n${JSON.stringify(report)}\n\`\`\``,
+    },
+  ];
+}
+
+export const doneReport = reportMessages({
+  outcome: "done",
+  summary: "Parser accepts empty input",
+  proof: [{ command: "pytest", status: "passed" }],
+});
+
+export const questionsReport = reportMessages({
+  outcome: "needs_input",
+  summary: "Empty input handling is ambiguous",
+  questions: ["Should empty input return [] or raise? Default: return []."],
+});
+
+/** Starts a node card on local repos and lets it commit `files` in its worktree. */
+export async function finishNodeTicket(params: {
+  files?: Record<string, string>;
+  uncommitted?: boolean;
+  originCommits?: number;
+  messages?: unknown[];
+  onReview?: (card: WorkboardCard) => Promise<void>;
+  readSessions?: WorkboardLifecycleSessionReader;
+}) {
+  const root = tempRoot("workboard-handoff-");
+  const repos = createNodeRepos(root);
+  for (let index = 0; index < (params.originCommits ?? 0); index += 1) {
+    git(repos.origin, "commit", "-q", "--allow-empty", "-m", `merged ${index}`);
+  }
+  const store = createWorkboardSqliteTestStore();
+  const gateway = createLocalNodeGateway();
+  const { card, sessionKey, runId } = await startNodeCard(store, gateway, repos.target);
+  const worktree = path.join(repos.target.worktreesRoot, `wb-${card.id}`);
+  const files = Object.entries(params.files ?? { "parser.py": "ok\n" });
+  for (const [name, body] of files) {
+    writeFileSync(path.join(worktree, name), body);
+  }
+  if (files.length > 0 && !params.uncommitted) {
+    git(worktree, "add", "-A");
+    git(worktree, "commit", "-q", "-m", "fix parser");
+  }
+  await syncWorkboardAgentEnded({
+    store,
+    event: { runId, success: true, messages: params.messages ?? doneReport },
+    context: { runId, sessionKey },
+    readSessions: endedSession(),
+  });
+  const warn = vi.fn();
+  const github = createFakeGitHub(repos.origin);
+  const handoffs = createNodeTicketHandoffs({
+    store,
+    runtime: gateway,
+    github: github.access,
+    start: async (cardId, queue) =>
+      await dispatchAndStartWorkboardCards({
+        store,
+        subagent: { run: vi.fn() },
+        nodeTickets: gateway,
+        options: { cardId, queue },
+      }),
+    ...(params.onReview ? { onReview: params.onReview } : {}),
+    ...(params.readSessions ? { readSessions: params.readSessions } : {}),
+  });
+  // The handoff sweep runs on every card change, so it fires while a start
+  // that claimed the card still carries the previous worktree record.
+  const sweepingNodes = {
+    request: (async (method, requestParams) => {
+      const argv = (requestParams?.params as { command?: string[] } | undefined)?.command ?? [];
+      if (argv.includes("worktree") && argv.includes("add")) {
+        await handoffs.resume(warn);
+      }
+      return await gateway.request(method, requestParams);
+    }) satisfies typeof gateway.request,
+  };
+  /** Re-runs the blocked card as an operator does; `work` is the session's turn. */
+  const rerunDone = async (work?: () => void) => {
+    const ready = await store.move(card.id, "ready", undefined);
+    const { started } = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets: sweepingNodes,
+      options: { now: ready.updatedAt, maxStarts: 1 },
+    });
+    expect(started[0]).toBeDefined();
+    expect((await store.get(card.id))?.status).toBe("running");
+    work?.();
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId: started[0]?.runId, success: true, messages: doneReport },
+      context: { runId: started[0]?.runId, sessionKey: started[0]?.sessionKey },
+      readSessions: endedSession(),
+    });
+    await handoffs.resume(warn);
+  };
+  return {
+    store,
+    card,
+    repos,
+    worktree,
+    handoffs,
+    warn,
+    gateway,
+    github,
+    rerunDone,
+    sweepingNodes,
   };
 }

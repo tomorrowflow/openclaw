@@ -786,6 +786,33 @@ already running. A rung b round's brief asks the session to run a reviewer
 subagent against the repository's `CODING_STANDARDS.md` before its `done`
 report, address the findings, and report them (see **Report** below).
 
+A board's `orchestration.verifier`, operator-set the same way, runs an
+independent verification of every imported round (see **Verification**
+below): `{ agentId: "verifier", model: "openai/gpt-6-sol" }` names the agent
+whose session verifies and the `provider/model` it runs on, which should
+differ from the ticket model so the proof is re-executed by another model.
+Saving refuses an empty `agentId` or a model that is not `provider/model`;
+`verifier: null` removes it. Without it no round is verified.
+
+The plugin passes the session no tool restriction: the agent's own tools are
+the boundary. `agentId` must name a dedicated agent that has only `exec` and
+`process`, runs its commands on the node, and never falls back to another
+model, so a verdict always comes from the configured one:
+
+```json5
+// openclaw.json
+{
+  agents: {
+    entries: {
+      verifier: {
+        model: { primary: "openai/gpt-6-sol", fallbacks: [] },
+        tools: { allow: ["exec", "process"], exec: { host: "node" } },
+      },
+    },
+  },
+}
+```
+
 1. **Start:** the dispatcher fetches `origin` in the node clone, creates branch
    `factory/<cardId>` at `baseRef` (default `origin/HEAD`) in
    `<worktreesRoot>/wb-<cardId>`, and starts the session there.
@@ -938,6 +965,51 @@ report, address the findings, and report them (see **Report** below).
    findings outlast its decision trail. When the board has an
    automation job, reaching `review` nudges it, so the assignee agent can
    give a shadow verdict (see [Trust KPIs](#trust-kpis)).
+   **Verification:** on a board with an `orchestration.verifier`, the import
+   does not nudge the automation yet. The handoff pass first creates a
+   detached worktree of the imported head in the node clone,
+   `<worktreesRoot>/verify-<card8>-r<round>`, and a session of the verifier
+   agent on the verifier model (key `agent:<agentId>:verify-<card8>-r<round>-v<n>`,
+   where `n` counts the round's earlier runs, so each run is a fresh session;
+   session group **Verification**) with the node as exec host and that
+   worktree as working directory, so its commands run on the node. The
+   session's brief is blind to the author: the ticket title, the card notes
+   (the spec and its Proof section), the round's range, node, and working
+   directory, and never the ticket session's summary, proof, decisions,
+   review, or verdict. It tells the verifier to re-run the proof the notes
+   name, then try to break the change (acceptance criteria with a `file:line`
+   or a command, sibling entry points, async/cancel/restart state, interface
+   boundaries, drift against docs or ADRs), that throwaway probes in the
+   worktree are fine but committing, pushing, or touching other worktrees is
+   not, that `Operator-run` proof and style preferences are not failures, and
+   to end with exactly one `workboard-verification` block:
+   `{"verdict": "pass|fail", "summary": "…", "findings": [{"path": "…", "line": 1, "body": "…"}]}`.
+   The card holds its node-ticket slot while the verification runs (one build
+   at a time on the node). Once the session has no active run, the pass reads
+   the block from its last reply; a missing, doubled, or invalid block is the
+   verdict `error`. It records the result on the node worktree as
+   `verification` (`phase: "done"`, the verdict, summary, up to 12 findings,
+   the model), removes the verify worktree (a failure only warns), posts one
+   card comment from `agent:<agentId>` whose first line is
+   `**Verification:** pass|fail|error (<model>)` followed by the summary and
+   findings, and only then nudges the automation. A session that cannot be
+   created records `error` right away, so the card is never held by a
+   verifier that cannot run. A record whose head or round is not the imported
+   round's is stale: it gates nothing and the next import replaces it.
+   `workboard.cards.verify {id}` (`operator.write`) drops a finished
+   verification of a card in review on an imported round, and the next pass
+   verifies it again in a fresh session: the way back from `error`. A
+   verification still running when the round is decided, the card archived,
+   or a rework round launched settles the same way once its session ends,
+   and holds the card's node-ticket slot until then; a round published before
+   its verification finished carries none. At rung a the verification is
+   blind like the shadow verdict (see [Trust KPIs](#trust-kpis)): operator
+   reads replace every verification comment since the import with a notice
+   and leave the finished record out until the round is decided; a running
+   record stays visible, and agents read the card whole. The verifier session
+   itself is listed in the Gateway's sessions under the **Verification**
+   group and is readable there, so an operator who wants a blind decision at
+   rung a does not open it before deciding.
 4. **Accept:** moving the card from `review` to `done` pushes the imported
    commit from the host clone to its GitHub origin and opens a draft PR, or
    reuses an open one for the branch. When the branch has no open PR but a
@@ -955,7 +1027,14 @@ report, address the findings, and report them (see **Report** below).
    status, and `workboard_complete`) can move an imported ticket to `done` only when the
    card's class is at rung b on the board at that moment, the round itself
    ran at rung b, and an agent posted `Verdict: accept` or
-   `Verdict: rework: <finding>` since the import. Otherwise the move fails and
+   `Verdict: rework: <finding>` since the import. On a board with a
+   `verifier`, an accept also needs the round's verification to have passed:
+   the move is refused while it runs ("Verification is still running; wait
+   for its comment."), after a `fail` ("The verification failed: <summary>.
+   Post `Verdict: rework: …` and rework it."), and after an `error` ("The
+   verification could not finish (<summary>). Leave the card in review; the
+   operator decides or re-runs it."). A rework verdict and an operator's move
+   are never gated. Otherwise the move fails and
    names the next step: at rung a, post the verdict and let the operator
    decide. The move records `decidedBy` on the imported handoff; any later
    move to done by the operator, such as a retry after a failed publish,
@@ -1069,6 +1148,21 @@ person disagreed), `sampledRounds`, and `sampledAgreed` (sampled and never
 reworked). Whether a person merged an unsampled PR without reading it needs
 GitHub state that the projection does not have. On a one-board projection
 (`boardId` set), each class row carries the board's `rung` for that class.
+
+**Verification:** a publish copies the round's finished verification into its
+`reviews` entry as `verification: {verdict, model}`, and the round's rung as
+`rung: "b"` when it ran at rung b. The counts report `verifiedRounds` and
+`verifierFailed` (verdict `fail`), then score the verifier against the person
+who decided without seeing it: `verifierScoredRounds` are verified rounds an
+operator decided at rung a (a rung b round shows the operator its
+verification, so their decision is not independent of it) plus sampled agent
+accepts (an agent's rework after a `fail` agrees with itself and is not
+scored), `verifierAgreedRounds` those where `pass` met no later rework or a
+non-pass (`fail` or `error`) met one, `verifierEscapes` the `pass` verdicts a
+person then reworked, and `verifierCatches` the non-pass verdicts a person
+then reworked. These flow through `blind` and `sinceRung` like every other
+count, so a class's verifier agreement at its current rung is read from
+`sinceRung`.
 
 **Blind counts:** each class row also carries `blind`, the same counts over
 rounds published since the blind verdict went live (2026-10-11 13:01 CEST),
@@ -1382,12 +1476,12 @@ Diagnostics are computed from local card metadata. Built-in checks flag:
 Gateway RPC methods live under `workboard.*`. Sessions board methods use the same
 read/write scopes as boards:
 
-| Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `overview`, `transcriptViewer`                                                                                                                                                                                                                                 |
-| `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.sampleRead`, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
-| `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                                                |
+| Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `overview`, `transcriptViewer`                                                                                                                                                                                                                                                 |
+| `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.sampleRead`, `cards.verify`, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
+| `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                                                                |
 
 `workboard.cards.update`, `workboard.cards.move`, `workboard.cards.archive`, and
 `workboard.cards.delete` accept an optional `expectedUpdatedAt` request field.

@@ -36,7 +36,6 @@ import {
   POSITION_STEP,
   withWorkboardRouteTarget,
   withoutStaleStartRequest,
-  workboardClassRung,
 } from "./store-constants.js";
 import type {
   WorkboardCardPatch,
@@ -548,11 +547,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       existing,
       next: moved,
       actor: options.actor,
-      classRung: async () =>
-        workboardClassRung(
-          (await this.boardStore.lookup(cardBoardId(moved)))?.board.orchestration,
-          moved.labels,
-        ),
+      board: async () => await this.boardOrchestration(cardBoardId(moved)),
     });
     next.events = appendEvent(
       next,

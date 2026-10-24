@@ -4,6 +4,7 @@ import {
   type WorkboardClassRung,
   type WorkboardOrchestrationSettings,
   type WorkboardTargetRoute,
+  type WorkboardVerifierSettings,
 } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
@@ -126,6 +127,9 @@ function normalizeOrchestration(
   const classRungs = Object.hasOwn(record, "classRungs")
     ? normalizeClassRungs(record.classRungs, fallback?.classRungs, now)
     : fallback?.classRungs;
+  const verifier = Object.hasOwn(record, "verifier")
+    ? normalizeVerifier(record.verifier)
+    : fallback?.verifier;
   const next: WorkboardOrchestrationSettings = {
     ...(autoDecompose !== undefined ? { autoDecompose } : {}),
     ...(autoDecomposePerDispatch ? { autoDecomposePerDispatch } : {}),
@@ -134,8 +138,31 @@ function normalizeOrchestration(
     ...(defaultTarget ? { defaultTarget } : {}),
     ...(targetRoutes?.length ? { targetRoutes } : {}),
     ...(classRungs && Object.keys(classRungs).length ? { classRungs } : {}),
+    ...(verifier ? { verifier } : {}),
   };
   return Object.keys(next).length ? next : undefined;
+}
+
+// The same `provider/model` shape a session's `model` takes; `verifier: null` removes it.
+const VERIFIER_MODEL_PATTERN = /^[^\s/]+\/\S+$/;
+
+function normalizeVerifier(value: unknown): WorkboardVerifierSettings | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  const agentId = isRecord(value)
+    ? normalizeBoundedString(value.agentId, undefined, 120, "verifier agentId")
+    : undefined;
+  const model = isRecord(value)
+    ? normalizeBoundedString(value.model, undefined, 160, "verifier model")
+    : undefined;
+  if (!agentId || !model) {
+    throw new Error("verifier needs a non-empty agentId and a model.");
+  }
+  if (!VERIFIER_MODEL_PATTERN.test(model)) {
+    throw new Error(`verifier model ${model} must be provider/model.`);
+  }
+  return { agentId, model };
 }
 
 const MAX_CLASS_RUNGS = 50;

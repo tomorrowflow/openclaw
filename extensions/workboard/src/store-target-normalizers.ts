@@ -6,11 +6,13 @@ import type {
   WorkboardNodeQuestions,
   WorkboardNodeReviewVerdict,
   WorkboardNodeRework,
+  WorkboardNodeVerification,
   WorkboardNodeWorktree,
+  WorkboardVerificationVerdict,
 } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { normalizeNodeRounds } from "./node-ticket-rounds.js";
+import { normalizeNodeRounds, normalizeVerificationFindings } from "./node-ticket-rounds.js";
 import { MAX_NODE_REVIEW_VERDICTS } from "./store-constants.js";
 import { normalizeBoundedString, normalizeCommentSource } from "./store-value-normalizers.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
@@ -206,6 +208,9 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
       const importedAt = resolveOptionalIntegerOption(entry.importedAt, { min: 0 });
       const publishedAt = resolveOptionalIntegerOption(entry.publishedAt, { min: 0 });
       const readAt = resolveOptionalIntegerOption(entry.readAt, { min: 0 });
+      const verification = isRecord(entry.verification)
+        ? verificationVerdict(entry.verification.verdict)
+        : undefined;
       return [
         {
           round,
@@ -215,10 +220,83 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
           ...(entry.decidedBy === "agent" ? { decidedBy: "agent" as const } : {}),
           ...(typeof entry.sampled === "boolean" ? { sampled: entry.sampled } : {}),
           ...(readAt === undefined ? {} : { readAt }),
+          ...(entry.rung === "b" ? { rung: "b" as const } : {}),
+          ...(verification && isRecord(entry.verification)
+            ? {
+                verification: {
+                  verdict: verification,
+                  ...verificationModel(entry.verification.model),
+                },
+              }
+            : {}),
         },
       ];
     })
     .slice(-MAX_NODE_REVIEW_VERDICTS);
+}
+
+function verificationVerdict(value: unknown): WorkboardVerificationVerdict | undefined {
+  return value === "pass" || value === "fail" || value === "error" ? value : undefined;
+}
+
+function verificationModel(value: unknown): { model?: string } {
+  const model = normalizeBoundedString(value, undefined, 160, "node verification model");
+  return model ? { model } : {};
+}
+
+const MAX_VERIFICATION_SUMMARY_CHARS = 2000;
+
+function normalizeNodeVerification(value: unknown): WorkboardNodeVerification | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const round = resolveOptionalIntegerOption(value.round, { min: 0 });
+  const headCommit = normalizeBoundedString(
+    value.headCommit,
+    undefined,
+    64,
+    "node verification head commit",
+  );
+  const startedAt = resolveOptionalIntegerOption(value.startedAt, { min: 0 });
+  const sessionKey = normalizeBoundedString(
+    value.sessionKey,
+    undefined,
+    500,
+    "node verification session key",
+  );
+  if (round === undefined || !headCommit || startedAt === undefined) {
+    return undefined;
+  }
+  const model = verificationModel(value.model);
+  if (value.phase === "running") {
+    const path = normalizeBoundedString(value.path, undefined, 2000, "node verification path");
+    return sessionKey && path
+      ? { phase: "running", round, headCommit, startedAt, sessionKey, path, ...model }
+      : undefined;
+  }
+  const endedAt = resolveOptionalIntegerOption(value.endedAt, { min: 0 });
+  const verdict = verificationVerdict(value.verdict);
+  if (value.phase !== "done" || endedAt === undefined || !verdict) {
+    return undefined;
+  }
+  return {
+    phase: "done",
+    round,
+    headCommit,
+    startedAt,
+    endedAt,
+    ...(sessionKey ? { sessionKey } : {}),
+    ...model,
+    verdict,
+    summary:
+      normalizeBoundedString(
+        value.summary,
+        undefined,
+        MAX_VERIFICATION_SUMMARY_CHARS,
+        "node verification summary",
+      ) ?? "",
+    findings: normalizeVerificationFindings(value.findings),
+  };
 }
 
 function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefined {
@@ -240,6 +318,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
   const grill = normalizeNodeGrill(value.grill);
   const reviews = normalizeNodeReviews(value.reviews);
   const rounds = normalizeNodeRounds(value.rounds);
+  const verification = normalizeNodeVerification(value.verification);
   const stopRequestedAt = resolveOptionalIntegerOption(value.stopRequestedAt, { min: 0 });
   return worktreePath && branch && baseCommit
     ? {
@@ -253,6 +332,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         ...(grill ? { grill } : {}),
         ...(reviews.length > 0 ? { reviews } : {}),
         ...(rounds.length > 0 ? { rounds } : {}),
+        ...(verification ? { verification } : {}),
         ...(value.rung === "b" ? { rung: "b" as const } : {}),
         ...(stopRequestedAt !== undefined ? { stopRequestedAt } : {}),
       }

@@ -20,6 +20,7 @@ describe("workboard gateway method registry", () => {
       "workboard.cards.start",
       "workboard.cards.stop",
       "workboard.cards.sampleRead",
+      "workboard.cards.verify",
       "workboard.cards.grill.end",
       "workboard.cards.grill.questions",
       "workboard.cards.move",

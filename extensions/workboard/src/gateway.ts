@@ -320,6 +320,10 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.sampleRead", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(store.readNodeTicketSample(readId(input))),
   );
+  // The card change wakes the node handoff owner, which starts a fresh verification.
+  register("workboard.cards.verify", WRITE_SCOPE, ({ params: input }) =>
+    redactCardResult(store.dropNodeVerification(readId(input))),
+  );
   // The move to todo an end makes wakes the node handoff owner, which resumes the session.
   register("workboard.cards.grill.end", WRITE_SCOPE, async ({ params: input }) => {
     const id = readId(input);

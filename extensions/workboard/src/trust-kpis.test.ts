@@ -343,6 +343,86 @@ describe("projectWorkboardTrust", () => {
     expect(projectWorkboardTrust(cards, "all", MONDAY).classes[0]).not.toHaveProperty("rung");
   });
 
+  it("scores verifications against the person who decided, leaving an agent's own rework out", () => {
+    const at = MONDAY + HOUR;
+    const reworked = { round: 1, pullRequestUrl: "u", acceptedAt: at, outsideCommits: 0 };
+    const verified = (verdict: "pass" | "fail" | "error") => ({
+      verification: { verdict, model: "openai/gpt-6-sol" },
+    });
+    const cards = [
+      // The operator reworked a passed round (an escape), then accepted a failed one (disagreed).
+      ticket("operator", {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(at),
+          rework: reworked,
+          reviews: [
+            { round: 0, verdict: "accept", ...verified("pass") },
+            { round: 1, verdict: "missed", ...verified("fail") },
+          ],
+        },
+      }),
+      // An agent reworked after a fail (not scored), then a sampled accept of a pass held.
+      ticket("agent", {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(at),
+          rework: reworked,
+          reviews: [
+            { round: 0, verdict: "rework", decidedBy: "agent", ...verified("fail") },
+            { round: 1, verdict: "accept", decidedBy: "agent", sampled: true, ...verified("pass") },
+          ],
+        },
+      }),
+      // An unsampled agent accept is nobody's decision to score; an error counts as not pass.
+      ticket("unsampled", {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(at),
+          reviews: [
+            {
+              round: 0,
+              verdict: "accept",
+              decidedBy: "agent",
+              sampled: false,
+              ...verified("error"),
+            },
+          ],
+        },
+      }),
+      // The operator reworked a failed round: a catch.
+      ticket("caught", {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(at),
+          rework: reworked,
+          reviews: [{ round: 0, verdict: "rework", ...verified("fail") }],
+        },
+      }),
+      // The operator decided a rung b round with the verification in view: not scored.
+      ticket("seen", {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(at),
+          reviews: [{ round: 0, verdict: "accept", rung: "b", ...verified("fail") }],
+        },
+      }),
+      ticket("unverified", {
+        createdAt: MONDAY,
+        worktree: { ...published(at), reviews: [{ round: 0, verdict: "accept" }] },
+      }),
+    ];
+
+    expect(projectWorkboardTrust(cards, "app", MONDAY).total).toMatchObject({
+      verifiedRounds: 7,
+      verifierFailed: 4,
+      verifierScoredRounds: 4,
+      verifierAgreedRounds: 2,
+      verifierEscapes: 1,
+      verifierCatches: 1,
+    });
+  });
+
   it("counts blind rounds by the rung that decided them, leaving out rounds the operator saw", () => {
     const blindSince = Date.parse("2026-10-11T13:01:00+02:00");
     const before = blindSince - HOUR;
