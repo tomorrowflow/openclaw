@@ -70,10 +70,11 @@ export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
 
 /**
  * Hides what could prime the operator's decision on an undecided imported
- * round: dev's shadow verdict, and at rung a the verification's verdict too
- * (its comment and its `done` record; a `running` record stays, it holds a
- * slot). A round that ran at rung b is the agent's to decide, so its
- * verification stays visible.
+ * round: dev's shadow verdict, and at rung a the verification's verdict too:
+ * every verification comment since the import, record or not (a re-run drops
+ * the record before its comment is replaced), and the round's `done` record;
+ * a `running` record stays, it holds a slot. A round that ran at rung b is
+ * the agent's to decide, so its verification stays visible.
  */
 function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): WorkboardCard {
   const target = nodeTicketTarget(card);
@@ -89,14 +90,13 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
   if (decided) {
     return redacted;
   }
-  const hideVerification =
-    worktree.rung !== "b" && currentNodeVerification(worktree, handoff)?.phase === "done";
+  const rungA = worktree.rung !== "b";
+  const hideRecord = rungA && currentNodeVerification(worktree, handoff)?.phase === "done";
   const isHidden = (comment: WorkboardComment) =>
     comment.createdAt >= handoff.importedAt &&
-    (reviewVerdictOf(comment) !== undefined ||
-      (hideVerification && isVerificationComment(comment)));
+    (reviewVerdictOf(comment) !== undefined || (rungA && isVerificationComment(comment)));
   const comments = redacted.metadata?.comments;
-  if (!hideVerification && !comments?.some(isHidden)) {
+  if (!hideRecord && !comments?.some(isHidden)) {
     return redacted;
   }
   const { verification: _verification, ...visible } = worktree;
@@ -118,7 +118,7 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
             ),
           }
         : {}),
-      ...(hideVerification
+      ...(hideRecord
         ? {
             automation: {
               ...redacted.metadata?.automation,

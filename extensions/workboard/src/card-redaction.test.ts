@@ -290,7 +290,7 @@ describe("redactOperatorCard", () => {
       path: "/wt/verify-card-1-r0",
     };
     const verifiedCard = (
-      verification: typeof done | typeof running,
+      verification: typeof done | typeof running | undefined,
       options: { rung?: "b"; status?: WorkboardCard["status"] } = {},
     ): WorkboardCard => ({
       ...createCard({
@@ -306,7 +306,7 @@ describe("redactOperatorCard", () => {
               branch: "factory/card-1",
               baseCommit: "a".repeat(40),
               handoff: { phase: "imported", headCommit: "b".repeat(40), importedAt: 10 },
-              verification,
+              ...(verification ? { verification } : {}),
               ...(options.rung ? { rung: options.rung } : {}),
             },
           },
@@ -340,14 +340,20 @@ describe("redactOperatorCard", () => {
       bodies: [HIDDEN_VERIFICATION_NOTICE, "Verification: I will run it tonight."],
       verification: undefined,
     });
+    // A re-run keeps the previous run's comment hidden; its running record holds a slot and stays.
     expect(view(verifiedCard(running))).toEqual({
-      bodies: [
-        "**Verification:** fail (openai/gpt-6-sol)\n\npytest fails on empty input",
-        "Verification: I will run it tonight.",
-      ],
+      bodies: [HIDDEN_VERIFICATION_NOTICE, "Verification: I will run it tonight."],
       verification: running,
     });
+    // The operator's re-run drops the record; the comment of the hidden result stays hidden.
+    expect(view(verifiedCard(undefined))).toEqual({
+      bodies: [HIDDEN_VERIFICATION_NOTICE, "Verification: I will run it tonight."],
+      verification: undefined,
+    });
     expect(view(verifiedCard(done, { rung: "b" })).verification).toEqual(done);
+    expect(view(verifiedCard(undefined, { rung: "b" })).bodies?.[0]).toContain(
+      "**Verification:** fail",
+    );
     expect(view(verifiedCard(done, { status: "done" })).verification).toEqual(done);
     expect(view(verifiedCard(done, { status: "done" })).bodies?.[0]).toContain(
       "**Verification:** fail",
