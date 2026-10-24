@@ -937,7 +937,13 @@ report, address the findings, and report them (see **Report** below).
    trail, then its review items, and goes only after that, so its review
    findings outlast its decision trail. When the board has an
    automation job, reaching `review` nudges it, so the assignee agent can
-   give a shadow verdict (see [Trust KPIs](#trust-kpis)).
+   give a shadow verdict (see [Trust KPIs](#trust-kpis)). A first round that
+   reports done without committing anything (a report-only round, such as
+   "could not reproduce") has nothing to bundle: the import adds a skipped
+   `bundle import` proof entry, clears the handoff, removes the node worktree
+   and branch, and moves the card to `review` with its report. Moving it to
+   `done` closes it without a PR, and the trust KPIs count it neither
+   imported nor accepted.
 4. **Accept:** moving the card from `review` to `done` pushes the imported
    commit from the host clone to its GitHub origin and opens a draft PR, or
    reuses an open one for the branch. When the branch has no open PR but a

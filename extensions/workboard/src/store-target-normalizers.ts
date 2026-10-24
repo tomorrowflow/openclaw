@@ -261,7 +261,8 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
 
 export type WorkboardNodeHandoffInput = {
   worktreePath: string;
-  handoff: WorkboardNodeHandoff;
+  /** Absent clears the handoff: a report-only round left nothing to import. */
+  handoff?: WorkboardNodeHandoff;
   /** The shadow verdict on the round a publish closes; appended to the worktree's reviews. */
   review?: WorkboardNodeReviewVerdict;
   /** A done report's headline; replaces the card's `automation.summary` in the same write. */
@@ -282,9 +283,10 @@ export function withNodeHandoff(
     input.reworkUnchanged && rework && !rework.unchangedRounds?.includes(rework.round)
       ? { ...rework, unchangedRounds: [...(rework.unchangedRounds ?? []), rework.round] }
       : rework;
+  const { handoff: _replaced, ...kept } = worktree;
   return {
-    ...worktree,
-    handoff: input.handoff,
+    ...kept,
+    ...(input.handoff ? { handoff: input.handoff } : {}),
     ...(unchanged ? { rework: unchanged } : {}),
     ...(reviews ? { reviews } : {}),
   };
