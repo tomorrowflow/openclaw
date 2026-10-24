@@ -485,6 +485,7 @@ do not need it: each worker run is granted `workboard_heartbeat`,
 | `workboard_read`                                                                                                                                 | Return one card plus bounded worker context from the same card read (notes, attempts, comments, links, proof, artifacts, parent results, recent assignee work, active diagnostics).       |
 | `workboard_create`                                                                                                                               | Create a card with optional parents, tenant, skills, board, workspace metadata, idempotency key, runtime limit, retry budget, operator summary.                                           |
 | `workboard_link`                                                                                                                                 | Link a parent to a child card. Queued children stay `todo` until every parent is `done`, then move to `ready`; backlog children wait until started.                                       |
+| `workboard_reference`                                                                                                                            | Reference another card with a `relates_to` link (no dependency), so the card's Prototype and Screenshots tabs also show its committed files                                               |
 | `workboard_claim`                                                                                                                                | Claim a card for the calling agent; moves `backlog`/`todo`/`ready` into `running`.                                                                                                        |
 | `workboard_heartbeat`                                                                                                                            | Refresh the claim heartbeat during a longer run.                                                                                                                                          |
 | `workboard_release`                                                                                                                              | Release the claim after completion, pause, or handoff; can move the card to a next status.                                                                                                |
@@ -642,7 +643,8 @@ Both tabs show a card's own files plus those of the cards it links with a
 `relates_to` link, each labeled "From <card title>" with its round. Only the
 card's own outgoing `relates_to` links count; parent, child, and blocking
 links schedule work and pull in no files, and a linked card contributes its
-committed rounds only. Link a card to the one whose files it should show:
+committed rounds only. An agent links a card to the one whose files it should
+show with `workboard_reference`; an operator uses the Gateway method:
 
 ```bash
 openclaw gateway call workboard.cards.link \

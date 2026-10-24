@@ -195,6 +195,38 @@ export function createWorkboardTools(params: {
       },
     },
     {
+      name: "workboard_reference",
+      label: "Workboard Reference",
+      description:
+        "Reference another card from a card with a relates_to link, without a dependency. The card's Prototype and Screenshots tabs then also show the referenced card's committed files, for example an accepted prototype on the card that builds its decision.",
+      parameters: strictObject({
+        id: cardIdField(),
+        targetCardId: Type.String({ description: "Id of the card to reference." }),
+      }),
+      execute: async (_toolCallId, rawParams) => {
+        const record = rawParams as Record<string, unknown>;
+        const id = readStringParam(record, "id", { required: true });
+        const targetCardId = readStringParam(record, "targetCardId", { required: true });
+        const [card, target] = await Promise.all([store.get(id), store.get(targetCardId)]);
+        if (!card) {
+          throw new Error(`card not found: ${id}`);
+        }
+        if (!target) {
+          throw new Error(`card not found: ${targetCardId}`);
+        }
+        const referenced = card.metadata?.links?.some(
+          (link) => link.type === "relates_to" && link.targetCardId === targetCardId,
+        );
+        return jsonResult({
+          card: summarizeCard(
+            referenced
+              ? card
+              : await store.addLink(id, { type: "relates_to", targetCardId, title: target.title }),
+          ),
+        });
+      },
+    },
+    {
       name: "workboard_read",
       label: "Workboard Read",
       description:

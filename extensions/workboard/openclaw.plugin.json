@@ -90,6 +90,7 @@
       "workboard_list",
       "workboard_create",
       "workboard_link",
+      "workboard_reference",
       "workboard_read",
       "workboard_claim",
       "workboard_heartbeat",
@@ -142,6 +143,9 @@
       "optional": true
     },
     "workboard_link": {
+      "optional": true
+    },
+    "workboard_reference": {
       "optional": true
     },
     "workboard_read": {
