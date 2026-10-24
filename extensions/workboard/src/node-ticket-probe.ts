@@ -9,7 +9,7 @@ import type {
 } from "@openclaw/workboard-contract";
 import { currentNodeVerification, nodeTicketTarget } from "./node-ticket.js";
 import { cardBoardId } from "./store-card-helpers.js";
-import type { WorkboardLinkedCreateInput } from "./store-inputs.js";
+import type { WorkboardAgentActor, WorkboardLinkedCreateInput } from "./store-inputs.js";
 import { PROBE_ARM_PATTERN } from "./store-launch-normalizers.js";
 import { workboardTicketOutcome } from "./trust-kpis.js";
 
@@ -235,4 +235,15 @@ export function projectWorkboardProbes(
       )
       .map(({ card, probe }) => probeRow(card, probe, byId.get(probe.of))),
   };
+}
+
+/** Only the handoff pass ends a probe, archiving it once its round ended; no agent moves one. */
+export function assertAgentMayMoveCard(
+  existing: WorkboardCard,
+  next: WorkboardCard,
+  actor: WorkboardAgentActor | undefined,
+): void {
+  if (actor && next.status !== existing.status && existing.metadata?.automation?.probe) {
+    throw new Error("Probe cards are not reviewed.");
+  }
 }
