@@ -534,6 +534,18 @@ describe("grilling result from the grill session", () => {
     expect(worktreeOf(done)?.grill?.pending).toBeUndefined();
   });
 
+  it("hands a result over 8000 characters to the resumed ticket whole", async () => {
+    const ticket = await grillingTicket();
+    const long = `${"Decision line.\n".repeat(700)}Last line of the result.`;
+    expect(long.length).toBeGreaterThan(9000);
+
+    await ticket.grillDone(await ticket.grillSessionKey(), { handoff: long });
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect(ticket.brief()).toContain(`Result:\n\n${long}\n\nNow carry out the ticket`);
+    expect(ticket.brief()).not.toContain("chars dropped");
+  });
+
   it("refuses a result from any session but the card's grill session", async () => {
     const ticket = await grillingTicket();
     const { store, card } = ticket;

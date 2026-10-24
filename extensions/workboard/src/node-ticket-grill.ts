@@ -9,7 +9,7 @@ import { MAX_ATTACHMENT_BYTES } from "./store-constants.js";
 export const GRILL_LOG_FILE_NAME = "grilling.md";
 export const GRILL_LOG_MIME_TYPE = "text/markdown";
 const GRILL_LOG_FULL_NOTE =
-  "(The grilling log reached its size limit, so this entry is cut. The full text is in the session.)";
+  "(The grilling log reached its size limit, so this entry is cut. The full text is in the ticket session for a handoff and in the grill session for a result.)";
 
 /** The attachment id of the card's grilling log, which trims and deletes must keep. */
 export function grillLogAttachmentId(metadata: WorkboardMetadata | undefined): string | undefined {
