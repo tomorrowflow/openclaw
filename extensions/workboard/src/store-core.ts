@@ -12,6 +12,7 @@ import type {
 import { resolveNonNegativeIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { definedFields } from "../record-fields.js";
+import { assertAgentMayMoveCard } from "./node-ticket-probe.js";
 import { withImportedNodeTicketMove } from "./node-ticket.js";
 import type { PersistedWorkboardCard } from "./persistence-types.js";
 import { normalizeAutomationPatch, normalizeCardAutomation } from "./store-automation.js";
@@ -545,6 +546,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       options,
     );
     next = withoutStaleStartRequest(next, now);
+    assertAgentMayMoveCard(existing, next, options.actor);
     const moved = next;
     next = await withImportedNodeTicketMove({
       existing,
