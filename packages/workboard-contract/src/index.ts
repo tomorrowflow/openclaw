@@ -466,12 +466,28 @@ export type WorkboardLiveNodeFiles =
   | { state: "none" };
 
 /**
- * Each source fails on its own, so a node outage still shows the committed
- * rounds. `live` is present only when the list asked for it with `live: true`.
+ * Committed files of a card the listed card references with a `relates_to`
+ * link. Read one with that card's own id and the round and path listed here.
+ */
+export type WorkboardLinkedNodeFiles = {
+  cardId: string;
+  title: string;
+  committed: WorkboardCommittedNodeFiles;
+};
+
+/**
+ * The card's own files: `committed` rounds, and `live` files the running round
+ * added or changed in its node worktree (files inherited from the base branch
+ * are not listed). Each source fails on its own, so a node outage still shows
+ * the committed rounds. `live` is present only when the list asked for it with
+ * `live: true`. `linked` holds the committed files of the cards this one
+ * references through `relates_to` links, in link order; it is absent when no
+ * linked card has any.
  */
 export type WorkboardNodeFileListResult = {
   committed: WorkboardCommittedNodeFiles;
   live?: WorkboardLiveNodeFiles;
+  linked?: WorkboardLinkedNodeFiles[];
 };
 
 /** One file: a round's committed file, or a live file in the node worktree. */

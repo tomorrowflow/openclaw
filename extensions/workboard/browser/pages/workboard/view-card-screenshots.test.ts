@@ -34,11 +34,19 @@ const NODE_TARGET = {
   hostRepoPath: "/host",
 } as const;
 
-function nodeCard(commits: string[], id = "card-1") {
+function nodeCard(commits: string[], id = "card-1", linkedIds: string[] = []) {
   return createWorkboardCard({
     id,
     status: "review",
-    metadata: { automation: { target: NODE_TARGET } },
+    metadata: {
+      links: linkedIds.map((targetCardId) => ({
+        id: `link-${targetCardId}`,
+        type: "relates_to" as const,
+        createdAt: 1,
+        targetCardId,
+      })),
+      automation: { target: NODE_TARGET },
+    },
     rounds: commits.map((commit, round) => ({ round, changes: changes(commit) })),
   });
 }
@@ -334,4 +342,32 @@ it("keeps the tab open on a manual refresh and retries a failed image", async ()
   expect(page.tab()?.getAttribute("aria-selected")).toBe("true");
   relisted.resolve(roundOf(["docs/a.png"]));
   await vi.waitFor(() => expect(page.images()).toBe(1));
+});
+
+it("lists a card that has only a relates_to link and shows the linked card's images after its own", async () => {
+  const page = screenshotsPage(
+    {
+      list: () => ({
+        committed: { state: "available", rounds: [] },
+        linked: [
+          {
+            cardId: "proto-1",
+            title: "Proto one",
+            committed: roundOf(["docs/screenshots/PROTO-1/home.png"]).committed,
+          },
+        ],
+      }),
+      get: image,
+    },
+    [nodeCard([], "card-1", ["proto-1"])],
+  );
+
+  await vi.waitFor(() => expect(page.images()).toBe(1));
+  expect(page.tab()).not.toBeNull();
+  expect(page.panel()?.querySelector("h3")?.textContent).toBe("From Proto one · First run");
+  expect(page.request).toHaveBeenCalledWith(GET, {
+    id: "proto-1",
+    round: 0,
+    path: "docs/screenshots/PROTO-1/home.png",
+  });
 });

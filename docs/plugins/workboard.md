@@ -608,22 +608,24 @@ targets.
 screenshots into (default `["docs/screenshots"]`; at most 8, no `..` or
 absolute paths). A node ticket's session header shows a **Screens** button
 that opens a session panel with the images under those directories in the
-node worktree right now (two levels deep, newest first) and each round's
-committed images. The panel lists again every 20 seconds while it is open and
+node worktree right now that the running round added or changed (two levels
+deep, newest first; files the base branch already had are left out, using
+`git diff` and `git ls-files` through `system.run`) and each round's committed
+images. The panel lists again every 20 seconds while it is open and
 the card is running, skipping a tick while the previous list is still loading;
 a node walk that takes over 30 seconds shows as unavailable. The card drawer's
 **Screenshots** tab shows only committed rounds and never walks the node. Live
-listing uses File Transfer's `dir.list` and
-`file.fetch`, so it needs the grants in
+listing uses File Transfer's `dir.list`, `file.fetch`, and the node's
+`system.run`, so it needs the grants in
 [Workboard node setup](/plugins/workboard-node-setup#gateway-side); without
 them the panel names the denial and still shows the committed rounds.
 
 A node ticket's throwaway prototypes are self-contained HTML files the agent
 writes under `docs/prototypes/` (for example `docs/prototypes/<ID>/flow.html`).
 The card drawer's **Prototype** tab lists the `.html` and `.htm` files under
-that directory in the node worktree right now (newest first, same walk and
-grants as live screenshots) and those each round committed there, and appears
-once at least one exists. A picker switches between files, and the chosen one
+that directory in the node worktree that the running round added or changed
+(newest first, same walk and grants as live screenshots) and those each round
+committed there, and appears once at least one exists. A picker switches between files, and the chosen one
 renders through the Control UI's HTML preview, the same one chat uses for HTML
 files: the prototype runs on the Gateway's isolated sandbox origin, so its
 scripts work but it cannot reach the Control UI, and the operator's
@@ -635,6 +637,20 @@ link, so the link also works on another device signed in to the same Control
 UI. The tab lists when the drawer opens, when the card imports a round, and on
 **List again** or a board refresh; a ticket with no prototype yet shows the tab
 once a later list finds one. Files over 2 MiB are refused.
+
+Both tabs show a card's own files plus those of the cards it links with a
+`relates_to` link, each labeled "From <card title>" with its round. Only the
+card's own outgoing `relates_to` links count; parent, child, and blocking
+links schedule work and pull in no files, and a linked card contributes its
+committed rounds only. Link a card to the one whose files it should show:
+
+```bash
+openclaw gateway call workboard.cards.link \
+  --params '{"id":"<card>","targetCardId":"<other card>"}'
+```
+
+`type` defaults to `relates_to`. A link to a card that was deleted, or that has
+no files of that kind, shows nothing.
 
 A project board can carry the target once as
 `orchestration.defaultTarget` through `workboard.boards.upsert`. New cards on

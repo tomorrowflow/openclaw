@@ -8,11 +8,17 @@ const LIST = "workboard.cards.prototypes.list";
 const GET = "workboard.cards.prototypes.get";
 const COMMIT = "b".repeat(40);
 
-function nodeCard(commits: string[]) {
+function nodeCard(commits: string[], linkedIds: string[] = []) {
   return createWorkboardCard({
     id: "card-1",
     status: "running",
     metadata: {
+      links: linkedIds.map((targetCardId) => ({
+        id: `link-${targetCardId}`,
+        type: "relates_to" as const,
+        createdAt: 1,
+        targetCardId,
+      })),
       automation: {
         target: {
           kind: "node-claude",
@@ -165,4 +171,43 @@ it("names a failed read instead of rendering an empty frame", async () => {
     ),
   );
   expect(page.preview()).toBeNull();
+});
+
+it("lists a card that has only a relates_to link and offers the linked card's prototype", async () => {
+  const page = prototypesPage(
+    {
+      list: () => ({
+        committed: { state: "available", rounds: [] },
+        live: { state: "available", files: [] },
+        linked: [
+          {
+            cardId: "proto-1",
+            title: "Proto one",
+            committed: {
+              state: "available",
+              rounds: [{ round: 0, commit: COMMIT, paths: ["docs/prototypes/PROTO-1/flow.html"] }],
+            },
+          },
+        ],
+      }),
+      get: echo,
+    },
+    nodeCard([], ["proto-1"]),
+  );
+
+  await vi.waitFor(() => expect(page.preview()).not.toBeNull());
+  expect(page.tab()).not.toBeNull();
+  expect(page.container.querySelector(".workboard-prototypes__name")?.textContent).toBe(
+    "From Proto one · First run · PROTO-1/flow.html",
+  );
+  expect(page.request).toHaveBeenCalledWith(GET, {
+    id: "proto-1",
+    round: 0,
+    path: "docs/prototypes/PROTO-1/flow.html",
+  });
+  expect(
+    new URL(expectDefined(page.popout(), "pop-out link").href, "http://ui.test").searchParams.get(
+      "card",
+    ),
+  ).toBe("proto-1");
 });

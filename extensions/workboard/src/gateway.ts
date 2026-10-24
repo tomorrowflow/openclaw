@@ -21,6 +21,7 @@ import {
   listNodeTicketArtifacts,
   type NodeTicketArtifactKind,
   readNodeTicketArtifact,
+  relatedCardIds,
 } from "./node-ticket-artifacts.js";
 import { readNodeTicketChangeDiff } from "./node-ticket-changes.js";
 import { readNodeGrillResult } from "./node-ticket-grill-session.js";
@@ -519,10 +520,16 @@ export function registerWorkboardGatewayMethods(params: {
   // operator.read suffices for the node walk: live paths stay inside the dispatcher-owned
   // worktree.path and normalized screenshotDirs or docs/prototypes, and the node's
   // allowReadPaths bound them again.
-  const listArtifacts = async (kind: NodeTicketArtifactKind, input: Record<string, unknown>) =>
-    listNodeTicketArtifacts(api.runtime.gateway, await requireCard(readId(input)), kind, {
+  const listArtifacts = async (kind: NodeTicketArtifactKind, input: Record<string, unknown>) => {
+    const card = await requireCard(readId(input));
+    const linked = (await Promise.all(relatedCardIds(card).map((id) => store.get(id)))).filter(
+      (entry) => entry !== undefined,
+    );
+    return listNodeTicketArtifacts(api.runtime.gateway, card, kind, {
       live: input.live === true,
+      linked,
     });
+  };
   const readArtifact = async (kind: NodeTicketArtifactKind, input: Record<string, unknown>) => {
     const { round, live, path } = input;
     const source =
