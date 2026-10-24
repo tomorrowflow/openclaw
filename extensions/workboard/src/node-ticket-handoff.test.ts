@@ -859,6 +859,33 @@ describe("node ticket draft PR", () => {
     ]);
   });
 
+  it("keeps a just-started verification running until its session replies or the start grace ends", async () => {
+    const ticket = await verifiedTicket();
+    const { store, card, handoffs, warn, onReview, verifier } = ticket;
+    await handoffs.resume(warn);
+
+    // The session view does not list the new run yet and nothing has replied.
+    verifier.running = false;
+    await handoffs.resume(warn);
+    expect(onReview).not.toHaveBeenCalled();
+    const running = await ticket.verificationOf();
+    if (running?.phase !== "running") {
+      throw new Error(`expected a running verification, got ${running?.phase}`);
+    }
+
+    const worktreePath = (await store.get(card.id))!.metadata!.automation!.target!.worktree!.path;
+    await store.setNodeVerification(card.id, {
+      worktreePath,
+      verification: { ...running, startedAt: Date.now() - 3 * 60_000 },
+    });
+    await handoffs.resume(warn);
+    expect(onReview).toHaveBeenCalledOnce();
+    await expect(ticket.verificationOf()).resolves.toMatchObject({
+      phase: "done",
+      verdict: "error",
+    });
+  });
+
   it("records a verifier session that cannot start as an error and wakes the review", async () => {
     const ticket = await verifiedTicket({ failCreate: "model not allowed: openai/gpt-6-sol" });
     const { store, card, handoffs, warn, onReview } = ticket;

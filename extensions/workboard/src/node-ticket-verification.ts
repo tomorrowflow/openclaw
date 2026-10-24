@@ -36,6 +36,9 @@ const VERIFICATION_SESSION_GROUP = "Verification";
 // The verifier's last messages hold its last reply; earlier ones are not read.
 const VERIFICATION_HISTORY_LIMIT = 20;
 const MAX_VERIFICATION_SUMMARY_CHARS = 2000;
+// The record's own write wakes the sweep at once, possibly before the session
+// view lists the new run; until a reply exists, a young session is starting.
+const VERIFICATION_START_GRACE_MS = 2 * 60_000;
 
 /** A node ticket waiting in review on its imported round. */
 type ImportedReviewRound = {
@@ -433,6 +436,10 @@ async function settleNodeVerification(
     { scopes: ["operator.read"] },
   );
   const messages = isRecord(history) && Array.isArray(history.messages) ? history.messages : [];
+  const reply = lastAssistantReply(messages);
+  if (!reply.trim() && params.now() - verification.startedAt < VERIFICATION_START_GRACE_MS) {
+    return "running";
+  }
   const { path: verifyPath, ...running } = verification;
   await finishNodeVerification(
     params,
@@ -441,7 +448,7 @@ async function settleNodeVerification(
       ...running,
       phase: "done",
       endedAt: params.now(),
-      ...parseVerificationReply(lastAssistantReply(messages)),
+      ...parseVerificationReply(reply),
     },
     verifyPath,
   );
