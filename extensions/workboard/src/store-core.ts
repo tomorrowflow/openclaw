@@ -6,11 +6,13 @@ import type {
   WorkboardDeleteResult,
   WorkboardLink,
   WorkboardMetadata,
+  WorkboardProbe,
   WorkboardStatus,
 } from "@openclaw/workboard-contract";
 import { resolveNonNegativeIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { definedFields } from "../record-fields.js";
+import { assertAgentMayMoveCard } from "./node-ticket-probe.js";
 import { withImportedNodeTicketMove } from "./node-ticket.js";
 import type { PersistedWorkboardCard } from "./persistence-types.js";
 import { normalizeAutomationPatch, normalizeCardAutomation } from "./store-automation.js";
@@ -227,13 +229,15 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
   protected async createDirect(
     input: WorkboardLinkedCreateInput,
     scope?: WorkboardMutationScope,
-    options: { cardId?: string; insertIfAbsent?: boolean } = {},
+    options: { cardId?: string; insertIfAbsent?: boolean; probe?: WorkboardProbe } = {},
   ): Promise<WorkboardCard> {
     const now = Date.now();
     const requestedStatus = normalizeStatus(input.status, "todo");
     const cards = await this.list();
     const parents = normalizeStringList(input.parents, "parents", 120);
-    const automation = normalizeCardAutomation(input);
+    const cardAutomation = normalizeCardAutomation(input);
+    // Host-issued like the launch state: raw metadata cannot declare a probe.
+    const automation = options.probe ? { ...cardAutomation, probe: options.probe } : cardAutomation;
     const heldBySchedule =
       Boolean(automation?.scheduledAt && automation.scheduledAt > now) &&
       requestedStatus !== "blocked";
@@ -542,6 +546,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       options,
     );
     next = withoutStaleStartRequest(next, now);
+    assertAgentMayMoveCard(existing, next, options.actor);
     const moved = next;
     next = await withImportedNodeTicketMove({
       existing,

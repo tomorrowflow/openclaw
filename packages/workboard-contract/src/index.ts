@@ -1,3 +1,4 @@
+import type { WorkboardProbe } from "./probes.js";
 import type { WorkboardSessionsBoardSpec } from "./sessions-board.js";
 import type {
   WorkboardNodeVerification,
@@ -649,6 +650,7 @@ export type WorkboardAutomation = {
   maxRetries?: number;
   scheduledAt?: number;
   startRequest?: WorkboardStartRequest;
+  probe?: WorkboardProbe;
   summary?: string;
   createdCardIds?: string[];
   dispatchCount?: number;
@@ -859,6 +861,7 @@ export type {
   WorkboardSessionsColumnMatch,
   WorkboardSessionsObserverHealth,
 } from "./sessions-board.js";
+export type * from "./probes.js";
 
 /** Trust KPI counts for one task class or for all node tickets (dev loop D9/D53). */
 export type WorkboardTrustCounts = {

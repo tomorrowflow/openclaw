@@ -1227,6 +1227,47 @@ creates cannot. To cancel a queued start, move the card to `backlog`. Moving it
 away from `todo` or `ready`, archiving it, or a claim drops the request, and
 moving the card back does not restore it; start it again to requeue.
 
+#### Probes
+
+A probe re-runs a past node ticket under a named harness arm, so a harness
+change (a brief line, a model, a skill) is judged on the same task instead of
+on different cards before and after the change. Create one with
+`workboard.cards.probe {id, arm, model?, note?, start?}` (`operator.admin`),
+where `id` is a node ticket that ran (it records a base commit) and `arm`
+matches `^[a-z0-9][a-z0-9-]{0,31}$`. The probe card is a new `todo` card on
+the same board with the same assignee, titled `[PROBE:<arm>] <source title>`.
+Its notes are the source's notes, with `note` as a last paragraph when given,
+so a trial's `**Mode:** …` line reaches one arm only. Its labels are the
+source's minus any `trial:*` label, plus `probe` and `probe:<arm>`. Its
+target is the source's node target with `baseRef` set to the source's base
+commit and `model` set when given; the dispatcher fetches that commit from
+origin when the node clone lacks it, as after a force-push. A probe stays on
+its source's node even on a pooled route. One unarchived probe exists per
+source and arm: a repeat returns it (`created: false`), and with `start: true`
+starts it while it is still in `todo`, queued like any start when the slots
+are full. The probe is recorded as `metadata.automation.probe`
+(`{of, arm, createdAt}`), which only this method sets.
+
+A probe runs like any node ticket through its import and, on a board with a
+verifier, its verification. Then the handoff pass archives it with a notice
+naming the outcome and the verification verdict instead of nudging the
+automation. A probe that stops with questions or a grilling is archived with
+that outcome, since nobody answers a probe, and its node worktree is removed.
+A blocked probe stays blocked for the operator. A probe never publishes, even
+when the operator moves it to `done`; moved there while its verification
+runs, it is archived once the verification settles. No agent can move it ("Probe cards are
+not reviewed."); its verification is never hidden, since nobody decides its
+round; the trust KPIs leave it out; and the Factory overview shows it only in
+flight, never as waiting on the operator.
+
+`workboard.cards.probes {boardId?, of?}` (`operator.read`) lists the probe
+cards, archived ones included, the arms of one source together: for each, the
+source card and how it fared by the trust KPIs' facts (`accepted`, `clean`,
+counted `reworkRounds`), the arm, status, outcome
+(`done|needs_input|grill|blocked|running`), verification verdict and finding
+count, attempts, the largest turn-end context, the run time from the first
+start to the last run's end, and the model.
+
 ### Worker selection
 
 Each pass starts **at most 3 workers by default**. Ready cards are ordered by
@@ -1484,10 +1525,11 @@ read/write scopes as boards:
 
 | Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `overview`, `transcriptViewer`                                                                                                                                                                                                                                                 |
+| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `cards.probes`, `overview`, `transcriptViewer`                                                                                                                                                                                                                                 |
 | `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.sampleRead`, `cards.verify`, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
 | `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                                                                |
+| `operator.admin` | `cards.probe`                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 `workboard.cards.update`, `workboard.cards.move`, `workboard.cards.archive`, and
 `workboard.cards.delete` accept an optional `expectedUpdatedAt` request field.
@@ -1501,7 +1543,8 @@ Control UI bulk actions use each card's observed revision and stop on a conflict
 Remaining cards stay selected for review and retry; the batch does not silently
 retry against newer revisions or overwrite another client's changes.
 
-No RPC method requires `operator.admin`. Browsers connected with read-only
+Only `cards.probe` requires `operator.admin`: a probe starts code on a node,
+which needs unrestricted dispatch. Browsers connected with read-only
 operator access can inspect the board but cannot mutate cards. An admin scope
 widens accepted Workboard host paths. It does not change the methods available.
 
