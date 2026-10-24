@@ -941,6 +941,19 @@ export type WorkboardTrustCounts = {
   /** Runs with a recorded turn-end context, and those whose context passed the smart zone. */
   contextMeasured: number;
   smartZoneBreaches: number;
+  /** Published rounds with a verification, and those whose verdict was `fail`. */
+  verifiedRounds: number;
+  verifierFailed: number;
+  /**
+   * Verified rounds a person decided (operator rounds and sampled agent
+   * accepts), those where the verification matched that person (`pass` and
+   * no rework after the publish, or not `pass` and a rework), and the escapes:
+   * `pass` verdicts a person then reworked. An agent's rework after a `fail`
+   * agrees with itself and is not scored.
+   */
+  verifierScoredRounds: number;
+  verifierAgreedRounds: number;
+  verifierEscapes: number;
 };
 
 /** Accepted tickets in one UTC week (Monday 00:00), by acceptance time. */

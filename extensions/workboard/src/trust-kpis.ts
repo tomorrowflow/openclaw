@@ -154,6 +154,19 @@ function isAgentAccept(review: WorkboardNodeReviewVerdict): boolean {
   return review.decidedBy === "agent" && review.verdict === "accept";
 }
 
+// A person decided the round: the operator, or the reader of a sampled agent accept.
+function personDecided(review: WorkboardNodeReviewVerdict): boolean {
+  return review.decidedBy === undefined || (isAgentAccept(review) && review.sampled === true);
+}
+
+// A verification agrees when `pass` met no rework after the publish; `fail` and `error` count as not pass.
+function verificationAgrees(ticket: TicketFacts, review: WorkboardNodeReviewVerdict): boolean {
+  return (
+    (review.verification?.verdict !== "pass") ===
+    ticket.reworkRounds.some((round) => round > review.round)
+  );
+}
+
 function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
   const counts: WorkboardTrustCounts = {
     tickets: tickets.length,
@@ -178,8 +191,27 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
     sampledAgreed: 0,
     contextMeasured: 0,
     smartZoneBreaches: 0,
+    verifiedRounds: 0,
+    verifierFailed: 0,
+    verifierScoredRounds: 0,
+    verifierAgreedRounds: 0,
+    verifierEscapes: 0,
   };
   for (const ticket of tickets) {
+    const verified = ticket.reviews.filter((review) => review.verification !== undefined);
+    // An agent's rework after a failed verification agrees with itself; only a person's decision scores it.
+    const scored = verified.filter(personDecided);
+    counts.verifiedRounds += verified.length;
+    counts.verifierFailed += verified.filter(
+      (review) => review.verification?.verdict === "fail",
+    ).length;
+    counts.verifierScoredRounds += scored.length;
+    counts.verifierAgreedRounds += scored.filter((review) =>
+      verificationAgrees(ticket, review),
+    ).length;
+    counts.verifierEscapes += scored.filter(
+      (review) => review.verification?.verdict === "pass" && !verificationAgrees(ticket, review),
+    ).length;
     // Shadow agreement scores the operator's decisions only; an agent's own accept agrees with itself.
     const shadow = ticket.reviews.filter((review) => review.decidedBy === undefined);
     const rounds = shadow.filter((review) => review.verdict !== "missed");
