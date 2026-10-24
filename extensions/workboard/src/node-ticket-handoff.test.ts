@@ -5,7 +5,7 @@ import path from "node:path";
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
-import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
+import { syncWorkboardAgentEnded, type WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import { createNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import { hostGit } from "./node-ticket.js";
 import {
@@ -17,6 +17,7 @@ import {
   endedSession,
 } from "./node-ticket.test-support.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
+import { workboardCardConsumesNodeTicketSlot } from "./store-constants.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 import { createWorkboardTools } from "./tools.js";
 
@@ -64,6 +65,7 @@ async function finishNodeTicket(params: {
   originCommits?: number;
   messages?: unknown[];
   onReview?: (card: WorkboardCard) => Promise<void>;
+  readSessions?: WorkboardLifecycleSessionReader;
 }) {
   const root = mkdtempSync(path.join(os.tmpdir(), "workboard-handoff-"));
   roots.push(root);
@@ -103,6 +105,7 @@ async function finishNodeTicket(params: {
         options: { cardId, queue },
       }),
     ...(params.onReview ? { onReview: params.onReview } : {}),
+    ...(params.readSessions ? { readSessions: params.readSessions } : {}),
   });
   // The handoff sweep runs on every card change, so it fires while a start
   // that claimed the card still carries the previous worktree record.
@@ -163,6 +166,73 @@ async function acceptImportedTicket(params: { sourceUrl?: string; verdict?: stri
   git(ticket.repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
   await ticket.store.move(ticket.card.id, "done", undefined);
   return ticket;
+}
+
+const VERIFIER = { agentId: "verifier", model: "openai/gpt-6-sol" };
+
+function verificationReply(block: unknown) {
+  return [
+    { role: "user", content: "Verify this" },
+    {
+      role: "assistant",
+      content: `Ran it.\n\n\`\`\`workboard-verification\n${typeof block === "string" ? block : JSON.stringify(block)}\n\`\`\``,
+    },
+  ];
+}
+
+/**
+ * A finished node ticket on a board with a verifier. The fake Gateway records
+ * the verifier session's create, answers `chat.history` with `history`, and
+ * the session owner's view says whether that session still runs.
+ */
+async function verifiedTicket(params: { notes?: string; failCreate?: string } = {}) {
+  const onReview = vi.fn(async (_card: WorkboardCard) => {});
+  const verifier = { running: false, history: [] as unknown[], creates: [] as unknown[] };
+  const readSessions: WorkboardLifecycleSessionReader = async (options) => {
+    const key = options.sessionKey;
+    const created = key !== undefined && verifier.creates.length > 0 && key.includes(":verify-");
+    return {
+      sessions: created
+        ? [{ key, hasActiveRun: verifier.running, updatedAt: Date.now() }]
+        : key
+          ? [{ key, hasActiveRun: false, status: "done" as const, updatedAt: Date.now() }]
+          : [],
+      complete: true,
+    };
+  };
+  const ticket = await finishNodeTicket({ onReview, readSessions });
+  await ticket.store.upsertBoard({ id: "default", orchestration: { verifier: VERIFIER } });
+  if (params.notes) {
+    await ticket.store.update(ticket.card.id, { notes: params.notes });
+  }
+  const answer = ticket.gateway.respond.getMockImplementation()!;
+  ticket.gateway.respond.mockImplementation((method, requestParams) => {
+    if (method === "chat.history") {
+      return { messages: verifier.history };
+    }
+    if (method === "sessions.create" && String(requestParams?.key).includes(":verify-")) {
+      verifier.creates.push(requestParams);
+      verifier.running = !params.failCreate;
+      return params.failCreate
+        ? {
+            ok: true,
+            key: requestParams?.key,
+            runStarted: false,
+            runError: { message: params.failCreate },
+          }
+        : {
+            ok: true,
+            key: requestParams?.key,
+            runId: "run-verify",
+            runStarted: true,
+            resolved: { modelProvider: "openai", model: "gpt-6-sol" },
+          };
+    }
+    return answer(method, requestParams);
+  });
+  const verificationOf = async () =>
+    (await ticket.store.get(ticket.card.id))?.metadata?.automation?.target?.worktree?.verification;
+  return { ...ticket, onReview, verifier, verificationOf };
 }
 
 describe("node ticket handoff", () => {
@@ -632,6 +702,179 @@ describe("node ticket draft PR", () => {
     await store.move(card.id, "todo", undefined);
     await handoffs.resume(warn);
     expect((await store.get(card.id))?.status).toBe("backlog");
+  });
+
+  it("verifies an imported round on the node before waking the board automation, then settles it", async () => {
+    const notes = "Spec: empty input returns [].\n\nProof: `pytest tests/test_parser.py`.";
+    const ticket = await verifiedTicket({ notes });
+    const { store, card, repos, handoffs, warn, onReview, verifier } = ticket;
+    const head = git(ticket.worktree, "rev-parse", "HEAD");
+    const base = git(repos.target.repoPath, "rev-parse", "main");
+    const verifyPath = path.join(repos.target.worktreesRoot, `verify-${card.id.slice(0, 8)}-r0`);
+
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(onReview).not.toHaveBeenCalled();
+    expect((await store.get(card.id))?.status).toBe("review");
+    expect(verifier.creates).toEqual([
+      expect.objectContaining({
+        key: `agent:verifier:verify-${card.id.slice(0, 8)}-r0`,
+        agentId: "verifier",
+        model: "openai/gpt-6-sol",
+        execNode: repos.target.nodeId,
+        cwd: verifyPath,
+        category: "Verification",
+      }),
+    ]);
+    const message = String((verifier.creates[0] as { message: string }).message);
+    expect(message).toContain(card.title);
+    expect(message).toContain(notes);
+    expect(message).toContain(`${base}..${head}`);
+    // Blind to the author: the done report's summary and proof stay out of the brief.
+    expect(message).not.toContain("Parser accepts empty input");
+    expect(message).not.toContain('pytest"');
+    expect(git(verifyPath, "rev-parse", "HEAD")).toBe(head);
+    expect(git(verifyPath, "rev-parse", "--abbrev-ref", "HEAD")).toBe("HEAD");
+    const running = expect.objectContaining({
+      phase: "running",
+      round: 0,
+      headCommit: head,
+      sessionKey: `agent:verifier:verify-${card.id.slice(0, 8)}-r0`,
+      path: verifyPath,
+      model: "openai/gpt-6-sol",
+    });
+    await expect(ticket.verificationOf()).resolves.toEqual(running);
+    expect(workboardCardConsumesNodeTicketSlot((await store.get(card.id))!, Date.now())).toBe(true);
+
+    // The verifier is still at work: the pass neither creates again nor wakes the review.
+    await handoffs.resume(warn);
+    expect(verifier.creates).toHaveLength(1);
+    expect(onReview).not.toHaveBeenCalled();
+    await expect(ticket.verificationOf()).resolves.toEqual(running);
+
+    verifier.running = false;
+    verifier.history = verificationReply({
+      verdict: "fail",
+      summary: 'pytest passes, but `parse("")` raises on a whitespace-only input.',
+      findings: [{ path: "parser.py", line: 1, body: "whitespace-only input raises" }],
+    });
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(onReview).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: card.id, status: "review" }),
+    );
+    await expect(ticket.verificationOf()).resolves.toEqual({
+      phase: "done",
+      round: 0,
+      headCommit: head,
+      startedAt: expect.any(Number),
+      endedAt: expect.any(Number),
+      sessionKey: `agent:verifier:verify-${card.id.slice(0, 8)}-r0`,
+      model: "openai/gpt-6-sol",
+      verdict: "fail",
+      summary: 'pytest passes, but `parse("")` raises on a whitespace-only input.',
+      findings: [{ path: "parser.py", line: 1, body: "whitespace-only input raises" }],
+    });
+    expect(existsSync(verifyPath)).toBe(false);
+    const stored = await store.get(card.id);
+    expect(stored?.metadata?.comments?.at(-1)).toMatchObject({
+      source: "agent:verifier",
+      body: [
+        "**Verification:** fail (openai/gpt-6-sol)",
+        "",
+        'pytest passes, but `parse("")` raises on a whitespace-only input.',
+        "",
+        "- `parser.py:1` whitespace-only input raises",
+      ].join("\n"),
+    });
+    expect(workboardCardConsumesNodeTicketSlot(stored!, Date.now())).toBe(false);
+
+    // The operator's re-run drops the result; the next pass verifies the round again.
+    await store.dropNodeVerification(card.id);
+    verifier.history = verificationReply({ verdict: "pass", summary: "all green" });
+    await handoffs.resume(warn);
+    expect(verifier.creates).toHaveLength(2);
+    await expect(ticket.verificationOf()).resolves.toMatchObject({ phase: "running" });
+    verifier.running = false;
+    await handoffs.resume(warn);
+    await expect(ticket.verificationOf()).resolves.toMatchObject({
+      phase: "done",
+      verdict: "pass",
+      summary: "all green",
+      findings: [],
+    });
+    expect(onReview).toHaveBeenCalledTimes(2);
+    await expect(store.dropNodeVerification(card.id)).resolves.toMatchObject({ id: card.id });
+    await expect(ticket.verificationOf()).resolves.toBeUndefined();
+  });
+
+  it("adopts a running verifier session whose record was lost, and copies the verdict to the publish", async () => {
+    const ticket = await verifiedTicket();
+    const { store, card, repos, handoffs, warn, onReview, verifier, github } = ticket;
+    const lost = vi
+      .spyOn(store, "setNodeVerification")
+      .mockImplementationOnce(async () => undefined);
+
+    await handoffs.resume(warn);
+    expect(verifier.creates).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("was not recorded"));
+    await expect(ticket.verificationOf()).resolves.toBeUndefined();
+    lost.mockRestore();
+    warn.mockClear();
+
+    await handoffs.resume(warn);
+    expect(verifier.creates).toHaveLength(1);
+    await expect(ticket.verificationOf()).resolves.toMatchObject({
+      phase: "running",
+      sessionKey: `agent:verifier:verify-${card.id.slice(0, 8)}-r0`,
+    });
+
+    // A reply without the block, or with two, cannot finish: an error verdict that does not hold the card.
+    verifier.running = false;
+    verifier.history = [{ role: "assistant", content: "I ran the tests and they pass." }];
+    await handoffs.resume(warn);
+    expect(warn).not.toHaveBeenCalled();
+    expect(onReview).toHaveBeenCalledOnce();
+    await expect(ticket.verificationOf()).resolves.toMatchObject({
+      phase: "done",
+      verdict: "error",
+      summary: "The verifier's last reply has no workboard-verification block.",
+    });
+    expect((await store.get(card.id))?.metadata?.comments?.at(-1)?.body).toContain(
+      "**Verification:** error (openai/gpt-6-sol)",
+    );
+
+    git(repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
+    github.tokens.set("acme/app", "token-app");
+    await store.move(card.id, "done", undefined);
+    await handoffs.resume(warn);
+    expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.reviews).toEqual([
+      expect.objectContaining({
+        round: 0,
+        verdict: "missed",
+        verification: { verdict: "error", model: "openai/gpt-6-sol" },
+      }),
+    ]);
+  });
+
+  it("records a verifier session that cannot start as an error and wakes the review", async () => {
+    const ticket = await verifiedTicket({ failCreate: "model not allowed: openai/gpt-6-sol" });
+    const { store, card, handoffs, warn, onReview } = ticket;
+
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(onReview).toHaveBeenCalledOnce();
+    await expect(ticket.verificationOf()).resolves.toMatchObject({
+      phase: "done",
+      verdict: "error",
+      model: "openai/gpt-6-sol",
+      summary: "The verification could not start: model not allowed: openai/gpt-6-sol",
+      findings: [],
+    });
+    expect((await store.get(card.id))?.status).toBe("review");
   });
 
   it("reworks a published ticket on its PR branch, keeping a reviewer's commit", async () => {

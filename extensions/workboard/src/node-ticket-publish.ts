@@ -7,6 +7,7 @@ import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { readResponseWithLimit } from "openclaw/plugin-sdk/response-limit-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
+  currentNodeVerification,
   HandoffSupersededError,
   nodeTicketTarget,
   requireHostGit,
@@ -48,6 +49,8 @@ type PublishCard = {
   /** An agent accepted the round at rung b; `sampled` is set for its accept verdict. */
   decidedByAgent: boolean;
   sampled?: boolean;
+  /** The round's finished verification, copied into its review entry. */
+  verification?: NonNullable<WorkboardNodeReviewVerdict["verification"]>;
 };
 
 export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
@@ -63,6 +66,7 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
   ) {
     return undefined;
   }
+  const verification = currentNodeVerification(worktree, handoff);
   return {
     card,
     hostRepoPath: target.hostRepoPath,
@@ -73,6 +77,14 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
     ...(worktree.rework ? { rework: worktree.rework } : {}),
     decidedByAgent: handoff.decidedBy !== undefined,
     ...(handoff.sampled === undefined ? {} : { sampled: handoff.sampled }),
+    ...(verification?.phase === "done"
+      ? {
+          verification: {
+            verdict: verification.verdict,
+            ...(verification.model ? { model: verification.model } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -94,6 +106,7 @@ function reviewVerdict(item: PublishCard): WorkboardNodeReviewVerdict {
     verdict: verdict ?? "missed",
     ...(item.decidedByAgent ? { decidedBy: "agent" as const } : {}),
     ...(item.sampled === undefined ? {} : { sampled: item.sampled }),
+    ...(item.verification ? { verification: item.verification } : {}),
   };
 }
 

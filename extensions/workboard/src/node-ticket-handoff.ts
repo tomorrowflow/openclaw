@@ -16,6 +16,7 @@ import {
   type WorkboardGitHubAccess,
 } from "./node-ticket-publish.js";
 import { parseNumstat } from "./node-ticket-rounds.js";
+import { nodeVerificationStep, runNodeVerification } from "./node-ticket-verification.js";
 import {
   HandoffSupersededError,
   hostGit,
@@ -26,7 +27,7 @@ import {
   runNodeCommand,
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
-import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
+import { cardBoardId, cardRunId, cardSessionKey } from "./store-card-helpers.js";
 import { MAX_BLOCK_REASON_CHARS, MAX_PROOF_NOTE_CHARS } from "./store-constants.js";
 import { capText } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
@@ -510,25 +511,56 @@ function unansweredDone(
 
 /**
  * Owns moving finished node tickets from a pending handoff to review,
- * accepted ones from done to a draft PR, reopened published ones into
- * their next rework round, answered ones back into their session, and
- * handed-off grillings into their grill session. The agent_end report and
- * card changes start it right away and the lifecycle sweep resumes it after
- * a restart; each card runs at most once at a time.
+ * verifying imported rounds on a board with a verifier, accepted ones from
+ * done to a draft PR, reopened published ones into their next rework round,
+ * answered ones back into their session, and handed-off grillings into their
+ * grill session. The agent_end report and card changes start it right away
+ * and the lifecycle sweep resumes it after a restart; each card runs at most
+ * once at a time.
  */
 export function createNodeTicketHandoffs(params: {
   store: WorkboardStore;
   runtime: WorkboardNodeTicketRuntime;
   github: WorkboardGitHubAccess;
   start: WorkboardNodeTicketStart;
-  /** Wakes the board automation once an import moved the card to review. */
+  /** Wakes the board automation once a card in review is ready for its review. */
   onReview?: (card: WorkboardCard) => Promise<void>;
-  /** The session owner's view, which says whether a grill session is still replying. */
+  /** The session owner's view, which says whether a grill or verifier session is still replying. */
   readSessions?: WorkboardLifecycleSessionReader;
   now?: () => number;
 }) {
   const inFlight = new Set<string>();
   const now = params.now ?? Date.now;
+  const verifierOf = async (card: WorkboardCard) =>
+    (await params.store.boardOrchestration(cardBoardId(card)))?.verifier;
+  /**
+   * The review a card in review waits on: its verification where the board
+   * has a verifier, and the board automation's review (`onReview`) once that
+   * verification is done or when there is none.
+   */
+  const reviewReached = async (card: WorkboardCard, warn: (message: string) => void) => {
+    const step = nodeVerificationStep(card, await verifierOf(card));
+    if (
+      step &&
+      (await runNodeVerification(
+        {
+          store: params.store,
+          runtime: params.runtime,
+          readSessions: params.readSessions,
+          card,
+          now,
+          warn,
+        },
+        step,
+      )) === "running"
+    ) {
+      return;
+    }
+    const current = step ? await params.store.get(card.id) : card;
+    if (current?.status === "review") {
+      await params.onReview?.(current);
+    }
+  };
   return {
     async resume(warn: (message: string) => void): Promise<void> {
       for (const card of await params.store.list()) {
@@ -541,7 +573,14 @@ export function createNodeTicketHandoffs(params: {
             : nodeTicketReopen(card, now());
         const unanswered = unansweredDone(card);
         const grilling = nodeGrillSessionToOpen(card);
-        if ((!item && !publish && !reopen && !unanswered && !grilling) || inFlight.has(card.id)) {
+        const verifying =
+          item || publish || reopen || unanswered || grilling
+            ? undefined
+            : nodeVerificationStep(card, await verifierOf(card));
+        if (
+          (!item && !publish && !reopen && !unanswered && !grilling && !verifying) ||
+          inFlight.has(card.id)
+        ) {
           continue;
         }
         inFlight.add(card.id);
@@ -556,8 +595,10 @@ export function createNodeTicketHandoffs(params: {
             });
             const current = await params.store.get(card.id);
             if (current?.status === "review") {
-              await params.onReview?.(current);
+              await reviewReached(current, warn);
             }
+          } else if (verifying) {
+            await reviewReached(card, warn);
           } else if (publish) {
             await publishNodeTicket({
               store: params.store,
