@@ -1,7 +1,11 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { WorkboardCard, WorkboardNodeWorktree } from "@openclaw/workboard-contract";
+import type {
+  WorkboardCard,
+  WorkboardNodeWorktree,
+  WorkboardVerifierSettings,
+} from "@openclaw/workboard-contract";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import { fetchNodeFile } from "./node-files.js";
@@ -10,6 +14,7 @@ import {
   openNodeGrillSession,
   readNodeGrillResult,
 } from "./node-ticket-grill-session.js";
+import { type NodeProbeEnd, nodeProbeEnd, nodeProbeNotice } from "./node-ticket-probe.js";
 import {
   publishCandidate,
   publishNodeTicket,
@@ -510,8 +515,44 @@ function unansweredDone(
 }
 
 /**
+ * Archives an ended probe with its notice. A probe that stopped to ask keeps
+ * a node worktree nobody resumes, so it goes too; an imported one's import
+ * already removed it.
+ */
+async function endNodeProbe(params: {
+  store: WorkboardStore;
+  runtime: WorkboardNodeTicketRuntime;
+  card: WorkboardCard;
+  end: NodeProbeEnd;
+  verifier: WorkboardVerifierSettings | undefined;
+  warn: (message: string) => void;
+}): Promise<void> {
+  const { card, end } = params;
+  const archived = await params.store.archiveNodeProbe(card.id, {
+    body: nodeProbeNotice(card, end),
+    applies: (current) =>
+      nodeProbeEnd(current, params.verifier)?.worktree.path === end.worktree.path,
+  });
+  const target = nodeTicketTarget(card);
+  if (!archived || !target || end.outcome === "done") {
+    return;
+  }
+  const git = (...args: string[]) =>
+    runNodeCommand(params.runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);
+  try {
+    await git("worktree", "remove", "--force", end.worktree.path);
+    await git("branch", "-D", end.worktree.branch);
+  } catch (error) {
+    params.warn(
+      `workboard: could not remove the node worktree ${end.worktree.path} of probe ${card.id}: ${formatErrorMessage(error)}`,
+    );
+  }
+}
+
+/**
  * Owns moving finished node tickets from a pending handoff to review,
- * verifying imported rounds on a board with a verifier, accepted ones from
+ * verifying imported rounds on a board with a verifier, archiving ended
+ * probes instead of waking their review, accepted ones from
  * done to a draft PR, reopened published ones into their next rework round,
  * answered ones back into their session, and handed-off grillings into their
  * grill session. The agent_end report and card changes start it right away
@@ -539,7 +580,8 @@ export function createNodeTicketHandoffs(params: {
    * verification is done or when there is none.
    */
   const reviewReached = async (card: WorkboardCard, warn: (message: string) => void) => {
-    const step = await nodeVerificationStep(card, verifierOf(card));
+    const readVerifier = verifierOf(card);
+    const step = await nodeVerificationStep(card, readVerifier);
     if (
       step &&
       (await runNodeVerification(
@@ -557,6 +599,22 @@ export function createNodeTicketHandoffs(params: {
       return;
     }
     const current = step ? await params.store.get(card.id) : card;
+    // A probe is archived when its round ended; nobody reviews it.
+    if (current?.metadata?.automation?.probe) {
+      const verifier = await readVerifier();
+      const probeEnd = nodeProbeEnd(current, verifier);
+      if (probeEnd) {
+        await endNodeProbe({
+          store: params.store,
+          runtime: params.runtime,
+          card: current,
+          end: probeEnd,
+          verifier,
+          warn,
+        });
+      }
+      return;
+    }
     if (current?.status === "review" && !current.metadata?.archivedAt) {
       await params.onReview?.(current);
     }
@@ -566,19 +624,23 @@ export function createNodeTicketHandoffs(params: {
       for (const card of await params.store.list()) {
         const item = handoffCard(card);
         const publish = item ? undefined : publishCandidate(card);
+        // A probe never gets answers, a grill session, or a review.
+        const probing = !item && !publish && card.metadata?.automation?.probe !== undefined;
+        const probeVerifier = probing ? await verifierOf(card)() : undefined;
+        const probeEnd = probing ? nodeProbeEnd(card, probeVerifier) : undefined;
         // The queue drain below owns a queued reopen's start.
         const reopen =
-          item || publish || card.metadata?.automation?.startRequest
+          item || publish || probeEnd || card.metadata?.automation?.startRequest
             ? undefined
             : nodeTicketReopen(card, now());
-        const unanswered = unansweredDone(card);
-        const grilling = nodeGrillSessionToOpen(card);
+        const unanswered = probeEnd ? undefined : unansweredDone(card);
+        const grilling = probeEnd ? undefined : nodeGrillSessionToOpen(card);
         const verifying =
-          item || publish || reopen || unanswered || grilling
+          item || publish || probeEnd || reopen || unanswered || grilling
             ? undefined
             : await nodeVerificationStep(card, verifierOf(card));
         if (
-          (!item && !publish && !reopen && !unanswered && !grilling && !verifying) ||
+          (!item && !publish && !probeEnd && !reopen && !unanswered && !grilling && !verifying) ||
           inFlight.has(card.id)
         ) {
           continue;
@@ -597,6 +659,15 @@ export function createNodeTicketHandoffs(params: {
             if (current?.status === "review") {
               await reviewReached(current, warn);
             }
+          } else if (probeEnd) {
+            await endNodeProbe({
+              store: params.store,
+              runtime: params.runtime,
+              card,
+              end: probeEnd,
+              verifier: probeVerifier,
+              warn,
+            });
           } else if (verifying) {
             await reviewReached(card, warn);
           } else if (publish) {

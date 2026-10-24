@@ -21,6 +21,8 @@ describe("workboard gateway method registry", () => {
       "workboard.cards.stop",
       "workboard.cards.sampleRead",
       "workboard.cards.verify",
+      "workboard.cards.probe",
+      "workboard.cards.probes",
       "workboard.cards.grill.end",
       "workboard.cards.grill.questions",
       "workboard.cards.move",
@@ -88,6 +90,7 @@ describe("workboard gateway method registry", () => {
           "cards.diagnostics",
           "cards.export",
           "cards.runs",
+          "cards.probes",
           "overview",
           "transcriptViewer",
           "cards.attachments.get",
@@ -113,6 +116,7 @@ describe("workboard gateway method registry", () => {
           "notifications.advance",
         ],
       ],
+      ["operator.admin", ["cards.probe"]],
     ] as const) {
       for (const name of names) {
         expect(methods.get(`workboard.${name}`)?.opts).toEqual({ scope });

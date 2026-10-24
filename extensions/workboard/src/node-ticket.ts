@@ -19,6 +19,7 @@ import {
   type PluginCommandRunResult,
 } from "openclaw/plugin-sdk/run-command";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { resolveNodeBaseCommit } from "./node-ticket-base.js";
 import {
   cutReportText,
   type NodeTicketStopReport,
@@ -506,14 +507,20 @@ export async function createNodeTicketWorktree(params: {
       };
     } else {
       const baseRef = target.baseRef ?? "origin/HEAD";
-      start = await git("rev-parse", "--verify", "--quiet", `${baseRef}^{commit}`).catch(() => {
+      const resolved = await resolveNodeBaseCommit({
+        git,
+        baseRef,
+        isCommitId: COMMIT_ID.test(baseRef),
+      });
+      if (resolved === undefined) {
         throw new Error(
           `node ${target.nodeId} cannot resolve base ${baseRef} in ${target.repoPath}; ` +
             (target.baseRef
               ? "fix the target baseRef"
               : "run `git remote set-head origin --auto` there or set the target baseRef"),
         );
-      });
+      }
+      start = resolved;
     }
     // A commit start point creates the branch without upstream tracking.
     await git("worktree", "add", "-b", branch, worktreePath, start);

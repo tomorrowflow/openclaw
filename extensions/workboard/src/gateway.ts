@@ -39,6 +39,7 @@ import {
 
 const READ_SCOPE = "operator.read" as const;
 const WRITE_SCOPE = "operator.write" as const;
+const ADMIN_SCOPE = "operator.admin" as const;
 const cardsListFilterSchema = z.object({ sessionKey: z.string().trim().min(1).optional() });
 const CLI_OWNER_METHODS = new Set([
   "workboard.cards.list",
@@ -150,7 +151,7 @@ export function registerWorkboardGatewayMethods(params: {
   }
   const register = (
     method: string,
-    scope: typeof READ_SCOPE | typeof WRITE_SCOPE,
+    scope: typeof READ_SCOPE | typeof WRITE_SCOPE | typeof ADMIN_SCOPE,
     handler: (request: GatewayMethodContext) => unknown,
   ) => {
     const requestHandler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1] = async (
@@ -324,6 +325,37 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.verify", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(store.dropNodeVerification(readId(input))),
   );
+  // A repeat returns the source's unarchived probe of the arm; `start` then starts it if still todo.
+  register("workboard.cards.probe", ADMIN_SCOPE, async (request) => {
+    const input = request.params;
+    const optional = (key: "model" | "note") => {
+      const value = input[key];
+      if (value !== undefined && typeof value !== "string") {
+        throw new Error(`${key} must be a string.`);
+      }
+      return value?.trim() || undefined;
+    };
+    if (typeof input.arm !== "string") {
+      throw new Error("arm is required.");
+    }
+    const model = optional("model");
+    const note = optional("note");
+    const { card, created } = await store.createNodeProbe(readId(input), {
+      arm: input.arm.trim(),
+      ...(model ? { model } : {}),
+      ...(note ? { note } : {}),
+    });
+    if (input.start !== true || card.status !== "todo" || card.metadata?.automation?.startRequest) {
+      return { card: redactOperatorCard(card), created };
+    }
+    // The operator's Start: queued while the node-ticket slots are full.
+    const started = await dispatchCards(
+      { ...request, params: { id: card.id } },
+      { supportsMaxStarts: false, directCard: true },
+    );
+    return { ...started, created };
+  });
+  register("workboard.cards.probes", READ_SCOPE, ({ params: input }) => store.probes(input));
   // The move to todo an end makes wakes the node handoff owner, which resumes the session.
   register("workboard.cards.grill.end", WRITE_SCOPE, async ({ params: input }) => {
     const id = readId(input);

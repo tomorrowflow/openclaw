@@ -183,8 +183,12 @@ export function createWorkboardAutomationNudgeService(params: {
     async nudge(input) {
       const state = getWorkboardAutomationNudgeState();
       const owner = state.owner;
-      // Only the operator answers a grilling question, so it gives the automation nothing to do.
-      const cards = input.cards.filter((card) => workboardCardStage(card)?.kind !== "grilling");
+      // Only the operator answers a grilling question, and nobody reviews a probe,
+      // so neither gives the automation anything to do.
+      const cards = input.cards.filter(
+        (card) =>
+          workboardCardStage(card)?.kind !== "grilling" && !card.metadata?.automation?.probe,
+      );
       if (!owner || isCronOriginSession(input.sessionKey) || cards.length === 0) {
         return;
       }

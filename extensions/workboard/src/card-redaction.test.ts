@@ -359,5 +359,14 @@ describe("redactOperatorCard", () => {
       "**Verification:** fail",
     );
     expect(view(verifiedCard({ ...done, round: 1 })).verification).toEqual({ ...done, round: 1 });
+    // Nobody decides a probe's round, so its verification shows at rung a too.
+    const round = verifiedCard(done);
+    const probe = { of: "source", arm: "base", createdAt: 1 };
+    expect(
+      view({
+        ...round,
+        metadata: { ...round.metadata, automation: { ...round.metadata?.automation, probe } },
+      }).verification,
+    ).toEqual(done);
   });
 });

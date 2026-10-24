@@ -84,7 +84,8 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
   const target = nodeTicketTarget(card);
   const worktree = target?.worktree;
   const handoff = worktree?.handoff;
-  if (!target || !worktree || handoff?.phase !== "imported") {
+  // Nobody decides a probe's round, so nothing it shows can prime a decision.
+  if (!target || !worktree || handoff?.phase !== "imported" || card.metadata?.automation?.probe) {
     return redacted;
   }
   // A failed publish blocks the card in phase "imported"; the operator already decided.
