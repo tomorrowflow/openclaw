@@ -220,6 +220,7 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
           ...(entry.decidedBy === "agent" ? { decidedBy: "agent" as const } : {}),
           ...(typeof entry.sampled === "boolean" ? { sampled: entry.sampled } : {}),
           ...(readAt === undefined ? {} : { readAt }),
+          ...(entry.rung === "b" ? { rung: "b" as const } : {}),
           ...(verification && isRecord(entry.verification)
             ? {
                 verification: {

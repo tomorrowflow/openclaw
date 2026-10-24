@@ -41,6 +41,7 @@ function trustResult(accepted: number, autonomous: number): WorkboardTrustResult
     verifierScoredRounds: 0,
     verifierAgreedRounds: 0,
     verifierEscapes: 0,
+    verifierCatches: 0,
   };
   return {
     boardId: "app",

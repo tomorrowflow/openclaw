@@ -51,6 +51,8 @@ type PublishCard = {
   sampled?: boolean;
   /** The round's finished verification, copied into its review entry. */
   verification?: NonNullable<WorkboardNodeReviewVerdict["verification"]>;
+  /** The round ran at rung b; copied into its review entry. */
+  rung?: "b";
 };
 
 export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
@@ -77,6 +79,7 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
     ...(worktree.rework ? { rework: worktree.rework } : {}),
     decidedByAgent: handoff.decidedBy !== undefined,
     ...(handoff.sampled === undefined ? {} : { sampled: handoff.sampled }),
+    ...(worktree.rung ? { rung: worktree.rung } : {}),
     ...(verification?.phase === "done"
       ? {
           verification: {
@@ -107,6 +110,7 @@ function reviewVerdict(item: PublishCard): WorkboardNodeReviewVerdict {
     ...(item.decidedByAgent ? { decidedBy: "agent" as const } : {}),
     ...(item.sampled === undefined ? {} : { sampled: item.sampled }),
     ...(item.verification ? { verification: item.verification } : {}),
+    ...(item.rung ? { rung: item.rung } : {}),
   };
 }
 

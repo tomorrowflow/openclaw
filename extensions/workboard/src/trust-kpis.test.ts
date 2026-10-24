@@ -390,6 +390,23 @@ describe("projectWorkboardTrust", () => {
           ],
         },
       }),
+      // The operator reworked a failed round: a catch.
+      ticket("caught", {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(at),
+          rework: reworked,
+          reviews: [{ round: 0, verdict: "rework", ...verified("fail") }],
+        },
+      }),
+      // The operator decided a rung b round with the verification in view: not scored.
+      ticket("seen", {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(at),
+          reviews: [{ round: 0, verdict: "accept", rung: "b", ...verified("fail") }],
+        },
+      }),
       ticket("unverified", {
         createdAt: MONDAY,
         worktree: { ...published(at), reviews: [{ round: 0, verdict: "accept" }] },
@@ -397,11 +414,12 @@ describe("projectWorkboardTrust", () => {
     ];
 
     expect(projectWorkboardTrust(cards, "app", MONDAY).total).toMatchObject({
-      verifiedRounds: 5,
-      verifierFailed: 2,
-      verifierScoredRounds: 3,
-      verifierAgreedRounds: 1,
+      verifiedRounds: 7,
+      verifierFailed: 4,
+      verifierScoredRounds: 4,
+      verifierAgreedRounds: 2,
       verifierEscapes: 1,
+      verifierCatches: 1,
     });
   });
 

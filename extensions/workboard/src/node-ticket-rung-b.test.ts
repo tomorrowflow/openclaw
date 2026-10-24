@@ -520,12 +520,14 @@ describe("Workboard rung b", () => {
     const operator = await publish(async (card) => await store.move(card.id, "done", undefined));
     expect(operator.opened).toMatchObject({ draft: true });
     expect(operator.opened.body).not.toContain("Sampled");
+    // The round ran at rung b, so the operator saw its verification: the KPIs do not score it.
     expect(operator.reviews).toEqual([
       {
         round: 0,
         verdict: "accept",
         importedAt: expect.any(Number),
         publishedAt: expect.any(Number),
+        rung: "b",
       },
     ]);
     expect((await store.trust({ boardId: "default" })).classes).toEqual([

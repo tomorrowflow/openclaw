@@ -146,11 +146,13 @@ it("keeps a round's verification record and a review's verification, dropping ma
           verdict: "accept",
           verification: { verdict: "pass", model: "openai/gpt-6-sol" },
         },
-        { round: 1, verdict: "rework", verification: { verdict: "nope" } },
+        { round: 1, verdict: "rework", verification: { verdict: "nope" }, rung: "b" },
+        { round: 2, verdict: "accept", rung: "a" },
       ],
     })?.reviews,
   ).toEqual([
     { round: 0, verdict: "accept", verification: { verdict: "pass", model: "openai/gpt-6-sol" } },
-    { round: 1, verdict: "rework" },
+    { round: 1, verdict: "rework", rung: "b" },
+    { round: 2, verdict: "accept" },
   ]);
 });

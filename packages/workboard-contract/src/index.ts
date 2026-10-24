@@ -417,6 +417,11 @@ export type WorkboardNodeReviewVerdict = {
   readAt?: number;
   /** The round's verification result, when the board ran one before the publish. */
   verification?: { verdict: WorkboardVerificationVerdict; model?: string };
+  /**
+   * The round ran at rung b (`WorkboardNodeWorktree.rung`), so its
+   * verification was visible to whoever decided it. Absent = rung a.
+   */
+  rung?: "b";
 };
 
 /**
@@ -945,15 +950,19 @@ export type WorkboardTrustCounts = {
   verifiedRounds: number;
   verifierFailed: number;
   /**
-   * Verified rounds a person decided (operator rounds and sampled agent
-   * accepts), those where the verification matched that person (`pass` and
-   * no rework after the publish, or not `pass` and a rework), and the escapes:
-   * `pass` verdicts a person then reworked. An agent's rework after a `fail`
-   * agrees with itself and is not scored.
+   * Verified rounds a person decided without seeing the verification
+   * (operator rounds that ran at rung a, and sampled agent accepts), those
+   * where the verification matched that person (`pass` and no rework after
+   * the publish, or not `pass` and a rework), the escapes (`pass` verdicts a
+   * person then reworked), and the catches (`fail` or `error` verdicts a
+   * person then reworked). An agent's rework after a `fail` agrees with
+   * itself and is not scored; nor is an operator's decision on a rung b
+   * round, where the verification was in view.
    */
   verifierScoredRounds: number;
   verifierAgreedRounds: number;
   verifierEscapes: number;
+  verifierCatches: number;
 };
 
 /** Accepted tickets in one UTC week (Monday 00:00), by acceptance time. */

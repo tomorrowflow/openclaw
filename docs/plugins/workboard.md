@@ -1124,15 +1124,19 @@ GitHub state that the projection does not have. On a one-board projection
 (`boardId` set), each class row carries the board's `rung` for that class.
 
 **Verification:** a publish copies the round's finished verification into its
-`reviews` entry as `verification: {verdict, model}`. The counts report
-`verifiedRounds` and `verifierFailed` (verdict `fail`), then score the verifier
-against the person who decided: `verifierScoredRounds` are verified rounds an
-operator decided plus sampled agent accepts (an agent's rework after a `fail`
-agrees with itself and is not scored), `verifierAgreedRounds` those where
-`pass` met no later rework or a non-pass (`fail` or `error`) met one, and
-`verifierEscapes` the `pass` verdicts a person then reworked. These flow
-through `blind` and `sinceRung` like every other count, so a class's verifier
-agreement at its current rung is read from `sinceRung`.
+`reviews` entry as `verification: {verdict, model}`, and the round's rung as
+`rung: "b"` when it ran at rung b. The counts report `verifiedRounds` and
+`verifierFailed` (verdict `fail`), then score the verifier against the person
+who decided without seeing it: `verifierScoredRounds` are verified rounds an
+operator decided at rung a (a rung b round shows the operator its
+verification, so their decision is not independent of it) plus sampled agent
+accepts (an agent's rework after a `fail` agrees with itself and is not
+scored), `verifierAgreedRounds` those where `pass` met no later rework or a
+non-pass (`fail` or `error`) met one, `verifierEscapes` the `pass` verdicts a
+person then reworked, and `verifierCatches` the non-pass verdicts a person
+then reworked. These flow through `blind` and `sinceRung` like every other
+count, so a class's verifier agreement at its current rung is read from
+`sinceRung`.
 
 **Blind counts:** each class row also carries `blind`, the same counts over
 rounds published since the blind verdict went live (2026-10-11 13:01 CEST),
