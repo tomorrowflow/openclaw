@@ -964,7 +964,13 @@ model, so a verdict always comes from the configured one:
    trail, then its review items, and goes only after that, so its review
    findings outlast its decision trail. When the board has an
    automation job, reaching `review` nudges it, so the assignee agent can
-   give a shadow verdict (see [Trust KPIs](#trust-kpis)).
+   give a shadow verdict (see [Trust KPIs](#trust-kpis)). A first round that
+   reports done without committing anything (a report-only round, such as
+   "could not reproduce") has nothing to bundle: the import adds a skipped
+   `bundle import` proof entry, clears the handoff, removes the node worktree
+   and branch, and moves the card to `review` with its report. Moving it to
+   `done` closes it without a PR, and the trust KPIs count it neither
+   imported nor accepted. No verification runs for it.
    **Verification:** on a board with an `orchestration.verifier`, the import
    does not nudge the automation yet. The handoff pass first creates a
    detached worktree of the imported head in the node clone,
