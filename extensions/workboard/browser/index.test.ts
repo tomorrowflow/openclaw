@@ -93,6 +93,7 @@ it("keeps reassigned session cards current through events without polling", asyn
     await vi.advanceTimersByTimeAsync(15 * 60_000);
     expect(request.mock.calls).toEqual([
       ["workboard.transcriptViewer", {}],
+      ["workboard.officeViewer", {}],
       ["workboard.boards.list", {}],
       ["workboard.cards.list", { sessionKey: session.key }],
     ]);
@@ -672,4 +673,46 @@ it("ignores a transcript viewer port that arrives after the activation ends", as
   viewer.resolve({ port: 17317 });
   await vi.advanceTimersByTimeAsync(0);
   expect(fixture.transcripts()).toEqual([false, false]);
+});
+
+it("shows the Office page only while the operator can write, and embeds a portal frame", async () => {
+  vi.useFakeTimers();
+  const { host, connection, registrations, notify } = workboardTestHost();
+  connection.connected = true;
+  connection.canWrite = false;
+  const request = vi.fn(async (method: string) =>
+    method === "workboard.officeViewer"
+      ? { port: 17320 }
+      : method === "portal.open"
+        ? { tokenQuery: "openclaw_portal=token", publicUrl: "https://gateway.example:35535/" }
+        : { cards: [], boards: [] },
+  );
+  host.request = request as typeof host.request;
+  const dispose = await workboardPlugin.activate(host);
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(registrations.has("navigation/office")).toBe(false);
+
+    connection.canWrite = true;
+    notify();
+    expect(registrations.get("navigation/office")).toMatchObject({
+      parent: "workboard",
+      label: "Office",
+      page: { id: "office" },
+    });
+    const page = registrations.get("page/office") as ControlUiPage;
+    const container = document.createElement("div");
+    page.mount(container, createViewContext(host, {}));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledWith("portal.open", { port: 17320, title: "Office" });
+    expect(container.querySelector("iframe")?.getAttribute("src")).toBe(
+      "https://gateway.example:35535/?openclaw_portal=token",
+    );
+
+    connection.canWrite = false;
+    notify();
+    expect(registrations.has("navigation/office")).toBe(false);
+  } finally {
+    dispose?.();
+  }
 });

@@ -117,6 +117,11 @@ export function createWorkboardPage(
     let redirectedBoard = "";
     const client = host;
     const state = workboard.state;
+    // `?card=<id>` links in from outside the Control UI (the Office viewer); revealed once the card list has it.
+    const linkedCardId = new URLSearchParams(window.location.search).get("card");
+    if (linkedCardId) {
+      state.revealCardId = linkedCardId;
+    }
     const requestUpdate = () => {
       if (disposed || queued) {
         return;

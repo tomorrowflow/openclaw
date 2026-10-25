@@ -64,6 +64,8 @@ GitHub token map for their draft PRs) and an optional transcript viewer:
           nodeTickets: { maxConcurrent: 2 },
           // Optional transcript viewer listening on this loopback port of the Gateway host.
           transcriptViewer: { port: 17317 },
+          // Optional office viewer (Habblaud) on this loopback port of the Gateway host.
+          officeViewer: { port: 17320 },
           github: {
             repos: {
               // Keyed by the owner/name of the host clone's origin.
@@ -97,6 +99,24 @@ opens its `/card/<cardId>`. Opening a portal needs the `operator.write` scope, s
 operators without it see neither the Transcripts page nor the card button. The portal proxy rewrites
 `Host` to `localhost:<port>`, so the viewer must accept that host. Portals close
 when the Gateway restarts; the next click opens a new one.
+
+`officeViewer.port` is the loopback port of an office viewer, such as
+[Habblaud](https://github.com/tomorrowflow/habblaud), a pixel-art live office of
+your agents. It follows the same rules as `transcriptViewer.port`: an integer
+from 1 to 65535, validated at
+`plugins.entries.workboard.config.officeViewer.port`. When it is set, the
+Control UI adds an **Office** page under Workboard that embeds the viewer in a
+frame through an [OpenClaw Portal](/gateway/portals), with an **Open in new tab**
+button. Opening a portal needs the `operator.write` scope, so operators without
+it do not see the page.
+
+To run Habblaud as the office viewer:
+
+1. On the Gateway host, start Habblaud on loopback in read-only portal mode with
+   `HABBLAUD_PORTAL=1`, `HABBLAUD_WORKBOARD_URL=ws://127.0.0.1:<gateway port>`,
+   and `HABBLAUD_WORKBOARD_TOKEN` set to a Gateway token.
+2. Approve its device pairing once with `openclaw devices approve <requestId>`.
+3. Set `officeViewer.port` to the port Habblaud listens on.
 
 ```bash
 openclaw plugins disable workboard
@@ -1525,7 +1545,7 @@ read/write scopes as boards:
 
 | Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `cards.probes`, `overview`, `transcriptViewer`                                                                                                                                                                                                                                 |
+| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `cards.probes`, `overview`, `transcriptViewer`, `officeViewer`                                                                                                                                                                                                                 |
 | `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.sampleRead`, `cards.verify`, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
 | `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                                                                |

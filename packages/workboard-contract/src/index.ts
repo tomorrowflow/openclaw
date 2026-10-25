@@ -1068,3 +1068,6 @@ export type WorkboardOverviewResult = {
 
 /** `workboard.transcriptViewer`: the transcript viewer's loopback port on the Gateway host, or null when unset. */
 export type WorkboardTranscriptViewerResult = { port: number | null };
+
+/** `workboard.officeViewer`: the office viewer's loopback port on the Gateway host, or null when unset. */
+export type WorkboardOfficeViewerResult = { port: number | null };
