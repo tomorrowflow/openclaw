@@ -171,6 +171,33 @@ function parseReview(value: unknown): WorkboardNodeReview | undefined {
   });
 }
 
+// Sessions close the one-line report with a stray `}` after `decisions` and repeat it when resumed
+// with the parser's position, so up to two trailing braces are dropped. Only an object counts then,
+// so a cut-off or wrong-shaped block still fails.
+const MAX_STRAY_BRACES = 2;
+
+function parseReportJson(
+  block: string,
+): { ok: true; value: unknown } | { ok: false; error: unknown } {
+  try {
+    return { ok: true, value: JSON.parse(block) };
+  } catch (error) {
+    let trimmed = block.trimEnd();
+    for (let stray = 0; stray < MAX_STRAY_BRACES && trimmed.endsWith("}"); stray += 1) {
+      trimmed = trimmed.slice(0, -1).trimEnd();
+      try {
+        const value: unknown = JSON.parse(trimmed);
+        if (isRecord(value)) {
+          return { ok: true, value };
+        }
+      } catch {
+        // The next trailing brace may be stray too.
+      }
+    }
+    return { ok: false, error };
+  }
+}
+
 /** Reads the last report block of the final assistant message; anything else is a contract miss. */
 export function parseNodeTicketReport(
   messages: readonly unknown[],
@@ -184,16 +211,15 @@ export function parseNodeTicketReport(
       missing: true,
     };
   }
-  let value: unknown;
-  try {
-    value = JSON.parse(block);
-  } catch (error) {
+  const parsed = parseReportJson(block);
+  if (!parsed.ok) {
     // The parser's position is what lets the resumed session fix its own block.
     return {
       ok: false,
-      reason: `The ticket session's workboard-report block is not valid JSON: ${formatErrorMessage(error)}.`,
+      reason: `The ticket session's workboard-report block is not valid JSON: ${formatErrorMessage(parsed.error)}.`,
     };
   }
+  const value = parsed.value;
   if (!isRecord(value)) {
     return { ok: false, reason: "The ticket session's workboard-report block is not an object." };
   }
