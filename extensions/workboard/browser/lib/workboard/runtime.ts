@@ -104,6 +104,7 @@ function createDefaultState(): WorkboardUiState {
     attentionFilter: new Set(),
     donePeriod: "all",
     agentFilter: "all",
+    scopeAgentId: null,
     boardFilter: "__all__",
     showArchived: false,
     layout: "comfortable",

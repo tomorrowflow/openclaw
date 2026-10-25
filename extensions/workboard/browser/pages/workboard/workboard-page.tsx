@@ -131,7 +131,11 @@ export function createWorkboardPage(
     };
     const sessionResolver = createWorkboardSessionResolver(host, requestUpdate);
     const runningSessionResolvers = createWorkboardSessionResolverPool(host, requestUpdate);
-    const sessionsBoard = createSessionsBoardController(host, requestUpdate);
+    const sessionsBoard = createSessionsBoardController(
+      host,
+      requestUpdate,
+      () => state.scopeAgentId,
+    );
     const stop = () => {
       // A paused page no longer owns shared loads started by session actions.
       if (!refreshActive) {
@@ -201,6 +205,10 @@ export function createWorkboardPage(
         stop();
       }
     };
+    const setBoardScope = (scopeAgentId: string | null) => {
+      state.scopeAgentId = scopeAgentId;
+      requestUpdate();
+    };
     const update = () => {
       synchronizeConnection();
       const agents = host.agents.rows;
@@ -209,7 +217,7 @@ export function createWorkboardPage(
       const agentsList = defaultId === null ? null : { defaultId, agents: [...agents] };
       const boardId =
         context.props.boardId || context.props.boardFilter || WORKBOARD_ALL_BOARDS_FILTER;
-      const scope = host.agents.scopeId;
+      const scope = state.scopeAgentId;
       if (observedScope !== scope) {
         observedScope = scope;
         state.agentFilter = "all";
@@ -271,7 +279,7 @@ export function createWorkboardPage(
       if (revealed) {
         state.revealCardId = null;
         if (!matchesAgentScope(revealed, defaultAgentId, scope)) {
-          host.agents.setScope(null);
+          state.scopeAgentId = null;
         }
         openCardDetails(state, revealed);
       }
@@ -384,7 +392,7 @@ export function createWorkboardPage(
         sessions,
         sessionResolution,
         scopeAgentId: scope,
-        onClearAgentScope: () => host.agents.setScope(null),
+        onClearAgentScope: () => setBoardScope(null),
         showAgentFilter: false,
         onOpenSession: host.sessions.open,
         onRefresh: () => {
@@ -492,7 +500,7 @@ export function createWorkboardPage(
             value={scope() ?? ""}
             variant="compact"
             accessibleLabel={t("workboard.agentFilter")}
-            onSelect={(value) => host.agents.setScope(value || null)}
+            onSelect={(value) => setBoardScope(value || null)}
           />
         </Show>
       );
@@ -532,6 +540,7 @@ export function createWorkboardPage(
                   controller={sessionsBoard}
                   host={host}
                   revision={current().revision}
+                  scopeAgentId={current().workboardProps.scopeAgentId ?? null}
                   heading={<PageHeading />}
                   scopeControl={<ScopeControl />}
                   pageError={current().workboardProps.pageError ?? undefined}

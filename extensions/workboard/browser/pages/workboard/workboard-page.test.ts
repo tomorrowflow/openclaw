@@ -80,7 +80,7 @@ it.each(["writer"])(
     await afterWorkboardUpdate(() =>
       expect(page.container.querySelectorAll(".workboard-card")).toHaveLength(2),
     );
-    page.fixture.host.agents.setScope(scope);
+    page.scope(scope);
     page.agents([{ id: "main" }]);
     await page.fixture.host.agents.refresh();
     await afterWorkboardUpdate(() =>
@@ -108,7 +108,7 @@ it.each(["writer"])(
     );
     expect(page.container.textContent).toContain("Main agent task");
     expect(page.container.textContent).toContain("Writer agent task");
-    expect(page.fixture.host.agents.scopeId).toBeNull();
+    expect(page.workboard.state.scopeAgentId).toBeNull();
     expect(page.container.querySelector(".workboard-scope")).toBeNull();
   },
 );
@@ -175,7 +175,7 @@ it("clears filters without changing the global agent context", async () => {
     page.container.querySelector<HTMLButtonElement>(".workboard-filter-clear"),
     "clear filters",
   ).click();
-  expect(page.fixture.host.agents.setScope).toHaveBeenLastCalledWith("main");
+  expect(page.workboard.state.scopeAgentId).toBe("main");
   await afterWorkboardUpdate(() => {
     expect(page.container.querySelectorAll(".workboard-card")).toHaveLength(1);
     expect(page.container.querySelector(".workboard-board")?.textContent).toContain(
@@ -201,7 +201,7 @@ it("clears filters without changing the global agent context", async () => {
     ),
     "remove mobile agent scope",
   ).click();
-  expect(page.fixture.host.agents.setScope).toHaveBeenLastCalledWith(null);
+  expect(page.workboard.state.scopeAgentId).toBeNull();
   await afterWorkboardUpdate(() => {
     expect(page.container.querySelectorAll(".workboard-card")).toHaveLength(3);
     expect(page.container.querySelector(".workboard-filter-chip--mobile")).toBeNull();
@@ -652,7 +652,7 @@ describe("selection reconciliation", () => {
         metadata: { automation: { boardId: "ops" } },
       });
       page.cards([card]);
-      page.fixture.host.agents.setScope("writer");
+      page.scope("writer");
       page.fixture.connection.connected = true;
       page.fixture.notify();
       await afterWorkboardUpdate(() => expect(page.workboard.state.loaded).toBe(true));
@@ -704,7 +704,7 @@ describe("selection reconciliation", () => {
         }),
       );
       if (change === "scope") {
-        page.fixture.host.agents.setScope("main");
+        page.scope("main");
       } else {
         page.navigate("product");
       }
@@ -789,14 +789,14 @@ describe("selection reconciliation", () => {
       input.value = "Keep this draft";
       input.dispatchEvent(new InputEvent("input", { bubbles: true }));
       expect(page.fixture.host.agents.defaultId).toBeNull();
-      page.fixture.host.agents.setScope("research");
+      page.scope("research");
       await Promise.resolve();
 
       expect(
         page.container.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)?.value,
       ).toBe("Keep this draft");
       expect(page.container.querySelector(".workboard-board")?.textContent).toContain(card.title);
-      expect(page.fixture.host.agents.scopeId).toBe("research");
+      expect(page.workboard.state.scopeAgentId).toBe("research");
     },
   );
 
@@ -805,7 +805,7 @@ describe("selection reconciliation", () => {
     async ({ scope, visible }) => {
       const page = mountPage();
       page.workboard.state.cards = [createWorkboardCard({ id: "writer-card", agentId: "writer" })];
-      page.fixture.host.agents.setScope("writer");
+      page.scope("writer");
       await Promise.resolve();
       Object.assign(page.workboard.state, {
         detailCardId: "writer-card",
@@ -813,7 +813,7 @@ describe("selection reconciliation", () => {
         draftOpen: true,
         editingCardId: "writer-card",
       });
-      page.fixture.host.agents.setScope(scope);
+      page.scope(scope);
       await Promise.resolve();
       expect(page.workboard.state.detailCardId).toBe(visible ? "writer-card" : null);
       expect(page.workboard.state.detailCommentBody).toBe(visible ? "Draft comment" : "");

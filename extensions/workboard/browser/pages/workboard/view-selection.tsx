@@ -120,7 +120,7 @@ async function applySelection(
   const owner = workboardHost();
   const selection = state.selectedCardIds;
   const board = state.boardFilter;
-  const agentScope = owner.agents.scopeId;
+  const agentScope = state.scopeAgentId;
   const localAgent = state.agentFilter;
   const observations = new Map(observedCards.map((card) => [card.id, card]));
   state.bulkSaving = true;
@@ -133,7 +133,7 @@ async function applySelection(
       if (
         selection !== state.selectedCardIds ||
         board !== state.boardFilter ||
-        agentScope !== owner.agents.scopeId ||
+        agentScope !== state.scopeAgentId ||
         localAgent !== state.agentFilter ||
         owner.signal.aborted ||
         !owner.connection.connected ||
