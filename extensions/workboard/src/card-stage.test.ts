@@ -1,10 +1,12 @@
 import type {
   WorkboardCard,
+  WorkboardComment,
   WorkboardMetadata,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
 import { describe, expect, it } from "vitest";
 import { workboardCardStage } from "./card-stage.js";
+import { REVIEW_READINESS_DEADLINE_MS } from "./review-readiness.js";
 
 function card(
   status: WorkboardCard["status"],
@@ -50,6 +52,22 @@ function nodeTicket(worktree?: Partial<WorkboardNodeWorktree>): WorkboardMetadat
 }
 
 const pr = "https://github.com/acme/app/pull/7";
+const PROBE = { of: "source", arm: "base", createdAt: 1 };
+
+function imported(importedAt: number) {
+  return {
+    handoff: { phase: "imported" as const, headCommit: "b".repeat(40), importedAt },
+  };
+}
+
+function verdict(createdAt: number): WorkboardComment {
+  return {
+    id: `verdict-${createdAt}`,
+    body: "Verdict: accept",
+    createdAt,
+    source: "agent:dev" as const,
+  };
+}
 
 describe("workboardCardStage", () => {
   it.each([
@@ -108,11 +126,66 @@ describe("workboardCardStage", () => {
       stage: { kind: "questions", since: 70, escalatedAt: 75 },
     },
     {
-      name: "an imported round waiting for the operator",
+      name: "an imported round with its verdict, waiting for the operator",
       card: card(
         "review",
         nodeTicket({ handoff: { phase: "imported", headCommit: "b".repeat(40), importedAt: 80 } }),
+        { metadata: { ...nodeTicket(imported(80)), comments: [verdict(80)] } },
       ),
+      stage: { kind: "awaiting_review", since: 80 },
+    },
+    {
+      name: "an imported round still waiting for the board automation's verdict",
+      card: card("review", nodeTicket(imported(80))),
+      stage: { kind: "reviewing", since: 80 },
+    },
+    {
+      name: "an earlier round's verdict does not count for a re-imported round",
+      card: card("review", {
+        ...nodeTicket(imported(80)),
+        comments: [verdict(79)],
+      }),
+      stage: { kind: "reviewing", since: 80 },
+    },
+    {
+      name: "an imported round on a verifier board before its verification is done",
+      card: card("review", {
+        ...nodeTicket({ handoff: { ...imported(80).handoff, verify: true } }),
+        comments: [verdict(81)],
+      }),
+      stage: { kind: "verifying", since: 80 },
+    },
+    {
+      name: "a verified round with its verdict",
+      card: card("review", {
+        ...nodeTicket({
+          handoff: { ...imported(80).handoff, verify: true },
+          verification: {
+            phase: "done",
+            headCommit: "b".repeat(40),
+            round: 0,
+            verdict: "pass",
+            summary: "green",
+            findings: [],
+            startedAt: 81,
+            endedAt: 82,
+          },
+        }),
+        comments: [verdict(83)],
+      }),
+      stage: { kind: "awaiting_review", since: 80 },
+    },
+    {
+      name: "a round that never got its verification or verdict within the deadline",
+      card: card("review", nodeTicket({ handoff: { ...imported(80).handoff, verify: true } })),
+      now: 80 + REVIEW_READINESS_DEADLINE_MS,
+      stage: { kind: "review_incomplete", since: 80, missing: ["verification", "verdict"] },
+    },
+    {
+      name: "a probe round, which is never reviewed",
+      card: card("review", {
+        automation: { ...nodeTicket(imported(80)).automation, probe: PROBE },
+      }),
       stage: { kind: "awaiting_review", since: 80 },
     },
     {
@@ -194,7 +267,7 @@ describe("workboardCardStage", () => {
       card: card("review"),
       stage: { kind: "review" },
     },
-  ])("derives $name", ({ card: input, stage }) => {
-    expect(workboardCardStage(input)).toEqual(stage);
+  ])("derives $name", ({ card: input, stage, now }) => {
+    expect(workboardCardStage(input, now ?? 100)).toEqual(stage);
   });
 });

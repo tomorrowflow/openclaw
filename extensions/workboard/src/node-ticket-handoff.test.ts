@@ -11,6 +11,8 @@ import {
   doneReport,
   finishNodeTicket,
   git,
+  moveDoneAfterReviewDeadline,
+  postVerdict,
   questionsReport,
   removeTempRoots,
   reportMessages,
@@ -40,9 +42,7 @@ async function acceptImportedTicket(params: { sourceUrl?: string; verdict?: stri
   if (params.sourceUrl) {
     await ticket.store.update(ticket.card.id, { sourceUrl: params.sourceUrl });
   }
-  if (params.verdict) {
-    await ticket.store.addComment(ticket.card.id, { body: params.verdict }, undefined, "agent:dev");
-  }
+  await postVerdict(ticket.store, ticket.card.id, params.verdict);
   git(ticket.repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
   await ticket.store.move(ticket.card.id, "done", undefined);
   return ticket;
@@ -66,6 +66,8 @@ describe("node ticket handoff", () => {
       phase: "imported",
       headCommit: head,
     });
+    // No verifier on the board: nothing to wait for besides the verdict.
+    expect(stored?.metadata?.automation?.target?.worktree?.handoff).not.toHaveProperty("verify");
     expect(stored?.metadata?.proof?.at(-1)).toMatchObject({
       label: "bundle import",
       status: "passed",
@@ -592,7 +594,8 @@ describe("node ticket draft PR", () => {
     expect((await store.get(card.id))?.status).toBe("review");
     expect(git(repos.hostRepo, "rev-parse", branch)).toBe(reworked);
 
-    await store.move(card.id, "done", undefined);
+    // The round got no verdict, so it is decided after the readiness deadline.
+    await moveDoneAfterReviewDeadline(store, card.id);
     await handoffs.resume(warn);
 
     expect(warn).not.toHaveBeenCalled();
@@ -717,6 +720,7 @@ describe("node ticket draft PR", () => {
       readSessions: endedSession(),
     });
     await handoffs.resume(warn);
+    await postVerdict(store, card.id);
     await store.move(card.id, "done", undefined);
     github.failComments.value = true;
 
@@ -1000,6 +1004,7 @@ describe("node ticket draft PR", () => {
 
     github.tokens.set("acme/app", "token-app");
     github.openPulls.push("https://github.com/acme/app/pull/3");
+    await postVerdict(store, card.id);
     await store.move(card.id, "done", undefined);
     await handoffs.resume(warn);
 

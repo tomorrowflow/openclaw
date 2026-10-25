@@ -382,11 +382,17 @@ async function runNodeTicketHandoff(params: {
           `workboard could not record the changed files of card ${card.id}: ${numstat.stderr.trim() || `exit ${numstat.code}`}`,
         );
       }
+      const verifier = (await store.boardOrchestration(cardBoardId(card)))?.verifier;
       await store.setNodeHandoff(
         card.id,
         {
           worktreePath: worktree.path,
-          handoff: { phase: "imported", headCommit, importedAt: params.now() },
+          handoff: {
+            phase: "imported",
+            headCommit,
+            importedAt: params.now(),
+            ...(verifier ? { verify: true as const } : {}),
+          },
           ...(imported.reworkUnchanged ? { reworkUnchanged: true } : {}),
         },
         scope,

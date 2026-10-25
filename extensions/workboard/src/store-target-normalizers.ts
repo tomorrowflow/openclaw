@@ -70,6 +70,7 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
       phase: "imported",
       headCommit,
       importedAt,
+      ...(value.verify === true ? { verify: true as const } : {}),
       ...(decidedBy && decidedBy !== "operator" ? { decidedBy } : {}),
       ...(typeof value.sampled === "boolean" ? { sampled: value.sampled } : {}),
     };

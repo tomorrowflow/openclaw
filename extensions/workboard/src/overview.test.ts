@@ -3,7 +3,7 @@ import type {
   WorkboardCard,
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { redactOperatorCard } from "./card-redaction.js";
 import { NODE_TARGET } from "./node-ticket.test-support.js";
 import { projectWorkboardOverview } from "./overview.js";
@@ -93,7 +93,22 @@ const rungB = board("default", {
   orchestration: { classRungs: { docs: { rung: "b" } } },
 });
 
+const VERDICT = {
+  id: "verdict",
+  body: "Verdict: accept",
+  createdAt: NOW,
+  source: "agent:dev",
+} as const;
+
 describe("projectWorkboardOverview", () => {
+  // The stage reads the clock for the review deadline.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"], now: NOW });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("asks the operator to decide a rung a review without leaking the agent's pending verdict", () => {
     const pending = card("pending", {
       status: "review",
@@ -130,7 +145,12 @@ describe("projectWorkboardOverview", () => {
   it("leaves a rung b review to the agent unless its class was demoted or no automation job reviews it", () => {
     const labels = ["class:docs"];
     const cards = [
-      card("agent-review", { status: "review", labels, worktree: { ...imported(NOW), rung: "b" } }),
+      card("agent-review", {
+        status: "review",
+        labels,
+        worktree: { ...imported(NOW), rung: "b" },
+        metadata: { comments: [VERDICT] },
+      }),
     ];
 
     expect(overview(cards, [rungB])).toMatchObject({
@@ -146,6 +166,30 @@ describe("projectWorkboardOverview", () => {
         inFlight: [],
       });
     }
+  });
+
+  it("keeps a round in flight until its verdict lands, then asks the operator, or after the deadline for a decision anyway", () => {
+    const withVerdict = card("posted", {
+      status: "review",
+      worktree: imported(NOW - HOUR),
+      metadata: { comments: [{ ...VERDICT, createdAt: NOW - HOUR + 1 }] },
+    });
+    const waiting = card("waiting", { status: "review", worktree: imported(NOW - 60_000) });
+    const overdue = card("overdue", { status: "review", worktree: imported(NOW - HOUR) });
+
+    const result = overview([withVerdict, waiting, overdue]);
+
+    expect(result.inFlight).toEqual([expect.objectContaining({ cardId: "waiting" })]);
+    expect(result.needsYou).toEqual([
+      expect.objectContaining({
+        cardId: "posted",
+        stage: { kind: "awaiting_review", since: NOW - HOUR },
+      }),
+      expect.objectContaining({
+        cardId: "overdue",
+        stage: { kind: "review_incomplete", since: NOW - HOUR, missing: ["verdict"] },
+      }),
+    ]);
   });
 
   it("shows a sampled agent-accepted PR as waiting for a read until marked read, and an unsampled one only as shipped", () => {

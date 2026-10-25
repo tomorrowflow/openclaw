@@ -552,6 +552,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       existing,
       next: moved,
       actor: options.actor,
+      now,
       board: async () => await this.boardOrchestration(cardBoardId(moved)),
     });
     next.events = appendEvent(

@@ -104,8 +104,16 @@ function normalizeStage(value: unknown): WorkboardCardStage | undefined {
   const kind = value.kind;
   switch (kind) {
     case "queued":
+    case "verifying":
+    case "reviewing":
     case "awaiting_review":
       return since === undefined ? undefined : { kind, since };
+    case "review_incomplete": {
+      const missing = Array.isArray(value.missing)
+        ? value.missing.filter((item) => item === "verification" || item === "verdict")
+        : [];
+      return since === undefined ? undefined : { kind, since, missing };
+    }
     case "questions": {
       const escalatedAt = finiteNumber(value.escalatedAt);
       return since === undefined

@@ -5,10 +5,8 @@ import type {
   WorkboardComment,
   WorkboardExecutionTarget,
   WorkboardNodeFeedback,
-  WorkboardNodeHandoff,
   WorkboardNodeQuestions,
   WorkboardNodeRework,
-  WorkboardNodeVerification,
   WorkboardNodeWorktree,
   WorkboardOrchestrationSettings,
 } from "@openclaw/workboard-contract";
@@ -26,6 +24,12 @@ import {
   parseNodeTicketReport,
   reportComments,
 } from "./node-ticket-report.js";
+import {
+  currentNodeVerification,
+  type ImportedHandoff,
+  nodeReviewReadiness,
+  reviewVerdictOf,
+} from "./review-readiness.js";
 import {
   type WorkboardNodeTicketRouteSlot,
   workboardRouteName,
@@ -74,43 +78,11 @@ export const STANDARDS_REVIEW_LABEL = "standards review";
 // One in this many agent-accepted PRs is read by a person when the class sets no sampleEvery.
 const DEFAULT_SAMPLE_EVERY = 3;
 
-// Agents write comments in Markdown, so the label and the value may be
-// emphasized: `**Verdict:** accept`, `__Verdict: rework__: why`,
-// `Verdict: **accept**`. `_` is a word character, so `\b` cannot end the value.
-const REVIEW_VERDICT_PATTERN =
-  /^(\*{1,2}|_{1,2})?Verdict\1?:\1?\s*(?:\*{1,2}|_{1,2})?(accept|rework)(?![a-z0-9])/i;
-
-/** An agent's shadow verdict on a review round (`Verdict: accept|rework`), if the comment is one. */
-export function reviewVerdictOf(comment: WorkboardComment): "accept" | "rework" | undefined {
-  const match = comment.source?.startsWith("agent:")
-    ? REVIEW_VERDICT_PATTERN.exec(comment.body.trim())?.[2]?.toLowerCase()
-    : undefined;
-  return match === "accept" || match === "rework" ? match : undefined;
-}
-
 const VERIFICATION_LINE = /^\*\*Verification:\*\* (pass|fail|error)\b/;
 
 /** The verifier's comment on a round starts with the verdict line `**Verification:** ...`. */
 export function isVerificationComment(comment: WorkboardComment): boolean {
   return comment.source?.startsWith("agent:") === true && VERIFICATION_LINE.test(comment.body);
-}
-
-export type ImportedHandoff = Extract<WorkboardNodeHandoff, { phase: "imported" }>;
-
-/**
- * The verification of the imported round the card waits on. A record of
- * another head or round is stale: it is ignored and the next import replaces it.
- */
-export function currentNodeVerification(
-  worktree: WorkboardNodeWorktree,
-  handoff: ImportedHandoff,
-): WorkboardNodeVerification | undefined {
-  const verification = worktree.verification;
-  return verification &&
-    verification.headCommit === handoff.headCommit &&
-    verification.round === (worktree.rework?.round ?? 0)
-    ? verification
-    : undefined;
 }
 
 /**
@@ -182,7 +154,8 @@ export function nodeTicketAcceptance(params: {
 /**
  * An imported round's move. The move to done records who accepted it; the
  * board's rung for an agent's move is read in the queued write, so a demotion
- * applies to the next move. A move to todo or ready is refused until that
+ * applies to the next move. The operator's move to done waits for the
+ * round's verification and verdict (see `nodeReviewReadiness`). A move to todo or ready is refused until that
  * move published the draft PR: the next session starts from the PR branch,
  * so the dispatcher would only block the card.
  */
@@ -190,6 +163,7 @@ export async function withImportedNodeTicketMove(params: {
   existing: WorkboardCard;
   next: WorkboardCard;
   actor?: WorkboardAgentActor;
+  now: number;
   board: () => Promise<Pick<WorkboardOrchestrationSettings, "classRungs" | "verifier"> | undefined>;
 }): Promise<WorkboardCard> {
   const { existing, next, actor } = params;
@@ -210,6 +184,22 @@ export async function withImportedNodeTicketMove(params: {
   }
   if (next.status !== "done") {
     return next;
+  }
+  // An agent's move passes nodeTicketAcceptance, which already demands both.
+  // A probe is never reviewed, so it has no verdict to wait for.
+  const readiness =
+    actor || next.metadata?.automation?.probe
+      ? undefined
+      : nodeReviewReadiness(next, worktree, worktree.handoff, params.now);
+  if (readiness?.kind === "verifying") {
+    throw new Error(
+      "This round's verification is still running; wait for its comment before deciding.",
+    );
+  }
+  if (readiness?.kind === "reviewing") {
+    throw new Error(
+      "The board automation hasn't posted its verdict on this round yet; wait for its comment before deciding.",
+    );
   }
   const handoff = nodeTicketAcceptance({
     card: next,
