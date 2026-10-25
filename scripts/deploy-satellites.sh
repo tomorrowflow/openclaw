@@ -108,6 +108,10 @@ prepare-source_one() {
     # Shallow: the fork's full history is many GB; the build needs one commit.
     [ -d \$SRC/.git ] || git init --quiet \$SRC
     cd \$SRC
+    # Each fetch would start git's background auto-maintenance repack, which
+    # release-stale-dist-lock.mjs then reports as a live process in the tree.
+    git config maintenance.auto false
+    git config gc.auto 0
     # One retry: a shallow fetch cut off mid-transfer fails with
     # \"fetch-pack: invalid index-pack output\" and has always worked on the next deploy.
     git fetch --quiet --depth 1 $FORK_REMOTE_URL $SHA || git fetch --quiet --depth 1 $FORK_REMOTE_URL $SHA
