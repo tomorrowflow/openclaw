@@ -92,6 +92,10 @@ export function mountPage(
     agents(next: typeof agents) {
       agents = next;
     },
+    scope(agentId: string | null) {
+      workboard.state.scopeAgentId = agentId;
+      fixture.notify();
+    },
     navigate(boardId: string) {
       context = { ...context, props: { boardId } };
       mounted?.update?.(context);

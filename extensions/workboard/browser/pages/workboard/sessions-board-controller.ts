@@ -24,7 +24,11 @@ type BoardDockHost = ControlUiHost & {
   };
 };
 
-export function createSessionsBoardController(host: BoardDockHost, notify: () => void) {
+export function createSessionsBoardController(
+  host: BoardDockHost,
+  notify: () => void,
+  boardScope: () => string | null,
+) {
   let boardId: string | undefined;
   let active = false;
   let generation = 0;
@@ -291,7 +295,7 @@ export function createSessionsBoardController(host: BoardDockHost, notify: () =>
             snapshot.sessions.find((session) => session.key === sessionKey)?.agentId ??
             host.agents.rows.find((agent) => sessionKey?.startsWith(`agent:${agent.id}:`))?.id)
           : (spec.scope?.agentIds?.[0] ??
-            host.agents.scopeId ??
+            boardScope() ??
             host.agents.selectedId ??
             host.agents.defaultId ??
             host.connection.assistantAgentId ??

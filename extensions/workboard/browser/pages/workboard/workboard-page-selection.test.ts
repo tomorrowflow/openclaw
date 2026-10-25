@@ -85,7 +85,7 @@ it("drops a selected card made ineligible by agent scope while bulk work is pend
     method === "workboard.cards.archive" ? pending.promise : request(method, params),
   );
   page.cards([first, second]);
-  page.fixture.host.agents.setScope("writer");
+  page.scope("writer");
   page.fixture.connection.connected = true;
   page.fixture.notify();
   await vi.waitFor(() => expect(state.loaded).toBe(true));

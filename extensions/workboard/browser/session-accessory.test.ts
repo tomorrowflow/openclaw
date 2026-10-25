@@ -35,6 +35,7 @@ it("reveals a reassigned linked card without changing the selected chat agent", 
   );
   host.request = request as typeof host.request;
   const workboard = createWorkboardCapability();
+  workboard.state.scopeAgentId = "writer";
   const container = document.createElement("div");
   const destination = document.createElement("div");
   document.body.append(container, destination);
@@ -48,7 +49,7 @@ it("reveals a reassigned linked card without changing the selected chat agent", 
     )(destination, createViewContext(host, { boardId: path?.[0] ?? "__all__" }));
     disposeDestination = () => mounted?.dispose?.();
   });
-  const mounted = createWorkboardSessionAccessory()(
+  const mounted = createWorkboardSessionAccessory(workboard)(
     container,
     createViewContext(host, { sessionKey }),
   );
@@ -59,7 +60,8 @@ it("reveals a reassigned linked card without changing the selected chat agent", 
     await vi.waitFor(() =>
       expect(destination.querySelector(".workboard-board")?.textContent).toContain(card.title),
     );
-    expect(host.agents.scopeId).toBeNull();
+    expect(workboard.state.scopeAgentId).toBeNull();
+    expect(host.agents.scopeId).toBe("writer");
     expect(host.agents.selectedId).toBe("writer");
   } finally {
     mounted?.dispose?.();
@@ -76,7 +78,7 @@ it.each(["global", "unknown"])(
     const fixture = workboardTestHost();
     fixture.connection.connected = true;
     const container = document.createElement("div");
-    const mounted = createWorkboardSessionAccessory()(
+    const mounted = createWorkboardSessionAccessory(createWorkboardCapability())(
       container,
       createViewContext(fixture.host, { sessionKey, agentId: "writer" }),
     );
@@ -108,7 +110,7 @@ it("refreshes only the visible session and ignores stale lookups after navigatio
   })) as typeof fixture.host.request;
   const container = document.createElement("div");
   const context = createViewContext(fixture.host, { sessionKey });
-  const mounted = createWorkboardSessionAccessory()(container, context);
+  const mounted = createWorkboardSessionAccessory(createWorkboardCapability())(container, context);
   try {
     await vi.advanceTimersByTimeAsync(0);
     expect(container.textContent).toContain(card.title);
@@ -164,7 +166,10 @@ it("offers a node ticket's session its Screens panel, and no other session", asy
   host.request = vi.fn(async () => ({ cards: [nodeTicket, plain] })) as typeof host.request;
   const container = document.createElement("div");
   const mount = (sessionKey: string) =>
-    createWorkboardSessionAccessory()(container, createViewContext(host, { sessionKey }));
+    createWorkboardSessionAccessory(createWorkboardCapability())(
+      container,
+      createViewContext(host, { sessionKey }),
+    );
 
   const plainChip = mount("agent:dev:workboard:plain");
   await vi.waitFor(() => expect(container.querySelector(".workboard-session-chip")).not.toBeNull());
@@ -203,7 +208,7 @@ it("says where a grilling card's grilling runs and opens its grill session", asy
   });
   fixture.host.request = vi.fn(async () => ({ cards: [card] })) as typeof fixture.host.request;
   const container = document.createElement("div");
-  const mounted = createWorkboardSessionAccessory()(
+  const mounted = createWorkboardSessionAccessory(createWorkboardCapability())(
     container,
     createViewContext(fixture.host, { sessionKey }),
   );

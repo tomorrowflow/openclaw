@@ -85,6 +85,8 @@ export type WorkboardUiState = {
   attentionFilter: Set<WorkboardHealthKey>;
   donePeriod: "all" | "week";
   agentFilter: string;
+  /** Board-owned agent scope; null shows every agent. Not persisted, so each load starts unscoped. */
+  scopeAgentId: string | null;
   boardFilter: string;
   showArchived: boolean;
   layout: "comfortable" | "compact";

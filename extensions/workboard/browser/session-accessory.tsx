@@ -6,6 +6,7 @@ import { createMemo, createSignal, Show } from "solid-js";
 import { icons } from "./components/icons.tsx";
 import { t } from "./i18n/index.ts";
 import { workboardCardBoardId } from "./lib/workboard/board-filter.ts";
+import type { WorkboardCapability } from "./lib/workboard/capability.ts";
 import { isActiveWorkboardCard, workboardGrillSessionName } from "./lib/workboard/card-state.ts";
 import { normalizeWorkboardChange } from "./lib/workboard/change-payload.ts";
 import { isWorkboardNodeTicket } from "./lib/workboard/execution.ts";
@@ -15,7 +16,9 @@ import { WORKBOARD_CHANGED_EVENT, type WorkboardCard } from "./lib/workboard/typ
 import { matchesAgentScope } from "./pages/workboard/agent-filter.ts";
 import { workboardPageTarget } from "./pages/workboard/page-target.ts";
 
-export function createWorkboardSessionAccessory(): ControlUiAccessory["mount"] {
+export function createWorkboardSessionAccessory(
+  workboard: WorkboardCapability,
+): ControlUiAccessory["mount"] {
   return (container, initialContext) => {
     let context = initialContext;
     let disposed = false;
@@ -150,10 +153,10 @@ export function createWorkboardSessionAccessory(): ControlUiAccessory["mount"] {
                     !matchesAgentScope(
                       activeCard,
                       host.agents.defaultId ?? host.connection.assistantAgentId,
-                      host.agents.scopeId,
+                      workboard.state.scopeAgentId,
                     )
                   ) {
-                    host.agents.setScope(null);
+                    workboard.state.scopeAgentId = null;
                   }
                   const grillKey = grillSessionKey(activeCard);
                   if (grillKey) {

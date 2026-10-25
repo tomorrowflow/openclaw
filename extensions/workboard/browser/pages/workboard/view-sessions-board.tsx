@@ -52,6 +52,7 @@ export type SessionsBoardProps = {
   controller: SessionsBoardController;
   host: ControlUiHost;
   revision: number;
+  scopeAgentId: string | null;
   heading: JSX.Element;
   scopeControl?: JSX.Element;
   pageError?: string;
@@ -88,7 +89,7 @@ export function SessionsBoard(props: SessionsBoardProps) {
     }
     const agents = listSelectableAgents(host.agents.rows);
     const sessions = (snapshot?.sessions ?? [])
-      .filter((session) => !host.agents.scopeId || session.agentId === host.agents.scopeId)
+      .filter((session) => !props.scopeAgentId || session.agentId === props.scopeAgentId)
       .map((session) => ({
         key: session.key,
         agentId: session.agentId,

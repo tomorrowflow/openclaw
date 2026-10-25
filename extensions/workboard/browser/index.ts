@@ -226,7 +226,7 @@ export default defineControlUiPlugin({
       host.ui.registerAccessory({
         id: "linked-card",
         placement: "session-header",
-        mount: createWorkboardSessionAccessory(),
+        mount: createWorkboardSessionAccessory(workboard),
       }),
       ...(["mini", "card", "board"] as const).map((id) =>
         host.ui.registerWidget({
