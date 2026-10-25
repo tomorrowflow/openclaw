@@ -1,0 +1,9 @@
+[Unit]
+Description=Fetch the architecture viewer's board clones every 10 minutes, off the factory-digest and factory-review starts
+
+[Timer]
+OnCalendar=*-*-* *:07/10
+Persistent=true
+
+[Install]
+WantedBy=timers.target
