@@ -172,6 +172,7 @@ export function verificationMessage(params: {
     "2. Then try to break the change: check each acceptance criterion with a `file:line` or a command that shows it; try the sibling entry points of what changed; async, cancel, and restart state; the boundaries against the other side of each interface; and drift between the code and its docs or ADRs.",
     "3. Throwaway probe tests and scratch files are fine inside this worktree. Never commit, push, or touch other worktrees or branches.",
     "4. A proof the notes mark `Operator-run` is not a failure when you cannot run it. A style preference is not a failure.",
+    "5. Judge each failure you find against the failure scope: the notes' `Failure scope:` line, or else one fault at a time, a client cancellation, or a restart. A failure that needs two simultaneous faults, or a destructive admin operation (a reset, wipe, or delete) racing the operation under test, is beyond scope and not a finding: name it in the summary under `Beyond scope:` with a proposed follow-up card.",
     "",
     "End your final message with exactly one block:",
     "",
@@ -179,7 +180,7 @@ export function verificationMessage(params: {
     '{"verdict":"pass|fail","summary":"what you ran and what you found, in plain words","findings":[{"path":"repo/relative/file","line":1,"body":"what is wrong and how you showed it"}]}',
     "```",
     "",
-    "`fail` needs at least one finding that names a defect. `pass` means the proof re-ran and nothing you tried broke the change. At most 12 findings are kept; `line` may be left out when a finding has no line.",
+    "`fail` needs at least one in-scope finding that names a defect. `pass` means the proof re-ran and nothing you tried broke the change. At most 12 findings are kept; `line` may be left out when a finding has no line.",
   ].join("\n");
 }
 
