@@ -80,9 +80,35 @@ describe("Workboard node ticket lifecycle", () => {
       comment: "The ticket session ended without a workboard-report block.",
     },
     {
+      name: "a done report closed with a stray brace still counts",
+      success: true,
+      messages: [
+        {
+          role: "assistant",
+          content: `\`\`\`workboard-report\n${JSON.stringify({
+            outcome: "done",
+            summary: "Parser accepts empty input",
+            proof: [{ command: "pytest", status: "passed" }],
+            decisions: [
+              {
+                ts: "2026-10-25",
+                phase: "verify",
+                decision: "Full suite, ruff and diff check on the final commit",
+                why: "Required proof",
+                evidence: "949 passed, 11 skipped; ruff clean; git diff --check clean",
+                result: "Passed",
+              },
+            ],
+          })}}\n\`\`\``,
+        },
+      ],
+      status: "running",
+      comment: "Parser accepts empty input",
+    },
+    {
       name: "a report that is not valid JSON names the parse error",
       success: true,
-      messages: [{ role: "assistant", content: '```workboard-report\n{"outcome":"done"}}\n```' }],
+      messages: [{ role: "assistant", content: '```workboard-report\n{"outcome":"done"}}}}\n```' }],
       status: "blocked",
       comment:
         "The ticket session's workboard-report block is not valid JSON: Unexpected non-whitespace character after JSON at position 18 (line 1 column 19).",
