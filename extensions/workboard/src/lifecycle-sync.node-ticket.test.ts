@@ -80,6 +80,14 @@ describe("Workboard node ticket lifecycle", () => {
       comment: "The ticket session ended without a workboard-report block.",
     },
     {
+      name: "a report that is not valid JSON names the parse error",
+      success: true,
+      messages: [{ role: "assistant", content: '```workboard-report\n{"outcome":"done"}}\n```' }],
+      status: "blocked",
+      comment:
+        "The ticket session's workboard-report block is not valid JSON: Unexpected non-whitespace character after JSON at position 18 (line 1 column 19).",
+    },
+    {
       name: "a failed run without a report blocks the card",
       success: false,
       messages: [],
