@@ -7,13 +7,12 @@ import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { readResponseWithLimit } from "openclaw/plugin-sdk/response-limit-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
-  currentNodeVerification,
   HandoffSupersededError,
   nodeTicketTarget,
   requireHostGit,
-  reviewVerdictOf,
   STANDARDS_REVIEW_LABEL,
 } from "./node-ticket.js";
+import { currentNodeVerification, reviewVerdictOf } from "./review-readiness.js";
 import type { WorkboardStore } from "./store.js";
 
 const GITHUB_API_URL = "https://api.github.com";

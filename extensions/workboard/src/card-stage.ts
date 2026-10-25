@@ -3,6 +3,7 @@ import type {
   WorkboardCardStage,
   WorkboardStatus,
 } from "@openclaw/workboard-contract";
+import { nodeReviewReadiness } from "./review-readiness.js";
 
 function enteredAt(card: WorkboardCard, status: WorkboardStatus): number | undefined {
   return card.events?.findLast((event) => event.toStatus === status)?.at;
@@ -45,10 +46,13 @@ export function workboardCardPullRequest(
 /**
  * The stage an operator sees for a card, from its status, its queued start,
  * and its node ticket handoff. Pure, so list reads and the board overview
- * derive the same answer. Never reads comments, so a pending agent verdict
- * cannot surface here.
+ * derive the same answer. Reads comments only for whether a verdict exists,
+ * never its content, which stays hidden until the operator decides.
  */
-export function workboardCardStage(card: WorkboardCard): WorkboardCardStage | undefined {
+export function workboardCardStage(
+  card: WorkboardCard,
+  now = Date.now(),
+): WorkboardCardStage | undefined {
   if (card.metadata?.archivedAt) {
     return undefined;
   }
@@ -95,7 +99,21 @@ export function workboardCardStage(card: WorkboardCard): WorkboardCardStage | un
       return { kind: "grilling", since: handoff.askedAt, round: worktree?.grill?.rounds ?? 1 };
     case "imported":
       if (card.status !== "done") {
-        return { kind: "awaiting_review", since: handoff.importedAt };
+        // A probe is never reviewed, so it has no verdict to wait for.
+        const readiness =
+          worktree && !card.metadata?.automation?.probe
+            ? nodeReviewReadiness(card, worktree, handoff, now)
+            : { kind: "ready" as const };
+        const at = handoff.importedAt;
+        switch (readiness.kind) {
+          case "verifying":
+          case "reviewing":
+            return { kind: readiness.kind, since: at };
+          case "incomplete":
+            return { kind: "review_incomplete", since: at, missing: [...readiness.missing] };
+          case "ready":
+            return { kind: "awaiting_review", since: at };
+        }
       }
       break;
     case "published":

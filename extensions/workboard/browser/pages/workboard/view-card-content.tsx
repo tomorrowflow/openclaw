@@ -79,6 +79,8 @@ export function CardAlertView(input: { alerts: CardAlert[]; descriptionId: strin
 }
 const STAGE_LABEL_KEYS = {
   queued: "workboard.stageQueued",
+  verifying: "workboard.stageVerifying",
+  reviewing: "workboard.stageReviewing",
   awaiting_review: "workboard.stageAwaitingReview",
   blocked: "workboard.stageBlocked",
   review: "workboard.stageReview",
@@ -114,6 +116,15 @@ function stageText(stage: WorkboardCardStage): string {
   }
   if (stage.kind === "grilling") {
     return t("workboard.stageGrilling", { round: String(stage.round) });
+  }
+  if (stage.kind === "review_incomplete") {
+    return t(
+      stage.missing.length > 1
+        ? "workboard.stageReviewIncompleteBoth"
+        : stage.missing[0] === "verification"
+          ? "workboard.stageReviewIncompleteVerification"
+          : "workboard.stageReviewIncompleteVerdict",
+    );
   }
   if (stage.kind === "published") {
     return stage.reworkRound

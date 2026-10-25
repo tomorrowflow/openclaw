@@ -9,6 +9,7 @@ import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { syncWorkboardAgentEnded, type WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import { createNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import type { WorkboardNodeTicketRuntime } from "./node-ticket.js";
+import { REVIEW_READINESS_DEADLINE_MS } from "./review-readiness.js";
 import type { WorkboardStore } from "./store.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 
@@ -310,6 +311,24 @@ export const questionsReport = reportMessages({
   summary: "Empty input handling is ambiguous",
   questions: ["Should empty input return [] or raise? Default: return []."],
 });
+
+/** The board automation's shadow verdict on the card's imported round, which an imported round waits for. */
+export async function postVerdict(store: WorkboardStore, cardId: string, body = "Verdict: accept") {
+  await store.addComment(cardId, { body }, undefined, "agent:dev");
+}
+
+/**
+ * The operator deciding a round whose verification or verdict never came: only
+ * allowed once the readiness deadline has passed.
+ */
+export async function moveDoneAfterReviewDeadline(store: WorkboardStore, cardId: string) {
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + REVIEW_READINESS_DEADLINE_MS });
+  try {
+    return await store.move(cardId, "done", undefined);
+  } finally {
+    vi.useRealTimers();
+  }
+}
 
 /** Starts a node card on local repos and lets it commit `files` in its worktree. */
 export async function finishNodeTicket(params: {

@@ -7,6 +7,7 @@ import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import {
   finishNodeTicket,
   git,
+  moveDoneAfterReviewDeadline,
   removeTempRoots,
   startNodeCard,
 } from "./node-ticket.test-support.js";
@@ -97,6 +98,12 @@ describe("node ticket verification", () => {
     expect(warn).not.toHaveBeenCalled();
     expect(onReview).not.toHaveBeenCalled();
     expect((await store.get(card.id))?.status).toBe("review");
+    expect(
+      (await store.get(card.id))?.metadata?.automation?.target?.worktree?.handoff,
+    ).toMatchObject({
+      phase: "imported",
+      verify: true,
+    });
     expect(verifier.creates).toEqual([
       expect.objectContaining({
         key: `agent:verifier:verify-${card.id.slice(0, 8)}-r0-v0`,
@@ -236,7 +243,7 @@ describe("node ticket verification", () => {
 
     git(repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
     github.tokens.set("acme/app", "token-app");
-    await store.move(card.id, "done", undefined);
+    await moveDoneAfterReviewDeadline(store, card.id);
     await handoffs.resume(warn);
     expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.reviews).toEqual([
       expect.objectContaining({
@@ -279,7 +286,8 @@ describe("node ticket verification", () => {
     const { store, repos, handoffs, warn, verifier } = ticket;
     const boardReads = vi.spyOn(store, "boardOrchestration");
     await handoffs.resume(warn);
-    expect(boardReads).toHaveBeenCalledTimes(1);
+    // One read stamps the import, one starts the verification.
+    expect(boardReads).toHaveBeenCalledTimes(2);
     expect(verifier.creates).toHaveLength(1);
 
     // A plain card, a ticket in the pool, and a running verification need no board read.
@@ -301,7 +309,7 @@ describe("node ticket verification", () => {
     await decided.handoffs.resume(decided.warn);
     git(decided.repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
     decided.github.tokens.set("acme/app", "token-app");
-    await decided.store.move(decided.card.id, "done", undefined);
+    await moveDoneAfterReviewDeadline(decided.store, decided.card.id);
     await decided.handoffs.resume(decided.warn);
     // The publish went ahead without the verification, which still holds the node slot.
     const published = (await decided.store.get(decided.card.id))!;
@@ -367,7 +375,7 @@ describe("node ticket verification", () => {
       undefined,
       "agent:dev",
     );
-    await store.move(card.id, "done", undefined);
+    await moveDoneAfterReviewDeadline(store, card.id);
     await handoffs.resume(warn);
     expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.handoff?.phase).toBe(
       "published",

@@ -84,8 +84,8 @@ function shippedTicket(
 
 /**
  * Adds one unarchived card to the bands it belongs in. Reads only the derived
- * stage and recorded handoff facts, never comments, so an agent's pending
- * verdict cannot move a card between bands.
+ * stage and recorded handoff facts, never comments; the stage itself says
+ * whether the round's verification and verdict are still pending.
  */
 function place(
   result: WorkboardOverviewResult,
@@ -111,6 +111,13 @@ function place(
       result.needsYou.push(waiting(card, "blocked", stage.since));
       return;
     case "review":
+      result.needsYou.push(waiting(card, "decide", stage.since));
+      return;
+    case "verifying":
+    case "reviewing":
+      result.inFlight.push(inFlight(card));
+      return;
+    case "review_incomplete":
       result.needsYou.push(waiting(card, "decide", stage.since));
       return;
     case "awaiting_review": {

@@ -14,14 +14,13 @@ import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import { lastAssistantReply } from "./node-ticket-report.js";
 import { normalizeVerificationFindings } from "./node-ticket-rounds.js";
 import {
-  currentNodeVerification,
-  type ImportedHandoff,
   isVerificationComment,
   nodeTicketTarget,
   runNodeCommand,
   sessionCreateRunError,
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
+import { currentNodeVerification, type ImportedHandoff } from "./review-readiness.js";
 import { sanitizeSessionSegment, workboardSessionHasActiveRun } from "./session-link.js";
 import { MAX_COMMENT_BODY_CHARS } from "./store-constants.js";
 import { capText } from "./store-normalizers.js";

@@ -7,7 +7,8 @@ import type {
   WorkboardProbesResult,
   WorkboardVerifierSettings,
 } from "@openclaw/workboard-contract";
-import { currentNodeVerification, nodeTicketTarget } from "./node-ticket.js";
+import { nodeTicketTarget } from "./node-ticket.js";
+import { currentNodeVerification } from "./review-readiness.js";
 import { cardBoardId } from "./store-card-helpers.js";
 import type { WorkboardAgentActor, WorkboardLinkedCreateInput } from "./store-inputs.js";
 import { PROBE_ARM_PATTERN } from "./store-launch-normalizers.js";

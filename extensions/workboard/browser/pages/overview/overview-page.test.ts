@@ -118,7 +118,7 @@ describe("Factory overview page", () => {
     );
 
     expect(bandText(container, "needs-you")).toContain("Your decision");
-    expect(bandText(container, "needs-you")).toContain("Ready for your review");
+    expect(bandText(container, "needs-you")).toContain("Ready for your decision");
     expect(fixture.host.components.mountMarkdown).toHaveBeenCalledWith(expect.any(HTMLElement), {
       markdown: "Empty input crashes the parser.",
     });

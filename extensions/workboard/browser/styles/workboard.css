@@ -2203,6 +2203,7 @@
 }
 
 .workboard-card__stage--questions,
+.workboard-card__stage--review_incomplete,
 .workboard-card__stage--awaiting_review {
   color: var(--warn);
 }

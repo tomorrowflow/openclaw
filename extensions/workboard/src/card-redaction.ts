@@ -4,12 +4,8 @@ import type {
   WorkboardOperatorCard,
 } from "@openclaw/workboard-contract";
 import { workboardCardPullRequest, workboardCardStage } from "./card-stage.js";
-import {
-  currentNodeVerification,
-  isVerificationComment,
-  nodeTicketTarget,
-  reviewVerdictOf,
-} from "./node-ticket.js";
+import { isVerificationComment, nodeTicketTarget } from "./node-ticket.js";
+import { currentNodeVerification, reviewVerdictOf } from "./review-readiness.js";
 import type { WorkboardDispatchResult } from "./store-inputs.js";
 
 export const HIDDEN_VERDICT_NOTICE = "Verdict posted. It stays hidden until you decide this round.";

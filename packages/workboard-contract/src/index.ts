@@ -317,6 +317,8 @@ export type WorkboardNodeHandoff =
       phase: "imported";
       headCommit: string;
       importedAt: number;
+      /** The board had a verifier at import, so the round waits for its verification before it can be decided. */
+      verify?: true;
       /**
        * The agent whose move to done accepted the round at rung b; absent when
        * an operator did. `sampled` is set when that agent's verdict was
@@ -807,14 +809,19 @@ export type WorkboardCard = {
  * Where a card stands, for an operator who does not follow each step.
  * Derived from recorded facts on operator reads and never stored. `since` is
  * when the card entered the stage; stages read from card events lack it once
- * the event aged out. A pending agent verdict never shows: an imported round
- * stays `awaiting_review` until the card moves to done.
+ * the event aged out. An imported round is `verifying` or `reviewing` while
+ * its verification or the board automation's verdict is outstanding, and
+ * `awaiting_review` once the operator can decide it. `review_incomplete` is a
+ * round that never got them within the deadline; the operator may decide it.
  */
 export type WorkboardCardStage =
   | { kind: "queued"; since: number }
   | { kind: "running"; since?: number; nodeId?: string; reworkRound?: number; attempt?: number }
   | { kind: "questions"; since: number; escalatedAt?: number }
   | { kind: "grilling"; since: number; round: number }
+  | { kind: "verifying"; since: number }
+  | { kind: "reviewing"; since: number }
+  | { kind: "review_incomplete"; since: number; missing: Array<"verification" | "verdict"> }
   | { kind: "awaiting_review"; since: number }
   | { kind: "published"; since: number; pullRequestUrl: string; reworkRound: number }
   | { kind: "blocked"; since?: number }
