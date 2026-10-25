@@ -22,6 +22,7 @@ const GITHUB_API_MAX_BYTES = 1024 * 1024;
 const REWORK_COMMENT_MAX_CHARS = 1500;
 const REWORK_COMMENT_MAX_ENTRIES = 10;
 const GITHUB_ISSUE_URL_PATTERN = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)\/?$/;
+const GITHUB_PULL_URL_PATTERN = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/;
 const GITHUB_ORIGIN_PATTERN =
   /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/;
 
@@ -161,7 +162,7 @@ function pullRequestBody(item: PublishCard): string {
 async function githubApi(
   access: WorkboardGitHubAccess,
   token: string,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PATCH",
   path: string,
   body?: Record<string, unknown>,
 ): Promise<unknown> {
@@ -209,7 +210,14 @@ type DraftPullRequest = {
   url: string;
   /** The branch's PR already merged this exact commit, so none was opened. */
   merged?: true;
-  reused?: { repo: string; token: string; number: number; draftId?: string };
+  reused?: {
+    repo: string;
+    token: string;
+    number: number;
+    draftId?: string;
+    title?: string;
+    body?: string;
+  };
 };
 
 /**
@@ -234,16 +242,11 @@ async function markReadyForReview(
   }
 }
 
-/**
- * Pushes the imported commit and returns the open PR for it, creating one
- * when needed: a draft, or ready for review when an agent accepted it.
- */
-async function pushAndOpenDraft(
+/** The host clone's GitHub repository and the operator's token for it. */
+async function githubRepo(
   access: WorkboardGitHubAccess,
-  item: PublishCard,
-  assertCurrent: () => Promise<void>,
-): Promise<DraftPullRequest> {
-  const { hostRepoPath, branch, headCommit, card } = item;
+  hostRepoPath: string,
+): Promise<{ repo: string; token: string }> {
   const origin = await requireHostGit(hostRepoPath, ["remote", "get-url", "origin"]);
   const repo = GITHUB_ORIGIN_PATTERN.exec(origin)?.[1];
   if (!repo) {
@@ -255,6 +258,20 @@ async function pushAndOpenDraft(
       `no GitHub token for ${repo}; set plugins.entries.workboard.config.github.repos["${repo}"].token to a SecretRef, then run \`openclaw secrets reload\``,
     );
   }
+  return { repo, token };
+}
+
+/**
+ * Pushes the imported commit and returns the open PR for it, creating one
+ * when needed: a draft, or ready for review when an agent accepted it.
+ */
+async function pushAndOpenDraft(
+  access: WorkboardGitHubAccess,
+  item: PublishCard,
+  assertCurrent: () => Promise<void>,
+): Promise<DraftPullRequest> {
+  const { hostRepoPath, branch, headCommit, card } = item;
+  const { repo, token } = await githubRepo(access, hostRepoPath);
   const local = await requireHostGit(hostRepoPath, [
     "rev-parse",
     "--verify",
@@ -320,10 +337,21 @@ async function pushAndOpenDraft(
       isRecord(first) && first.draft === true && typeof first.node_id === "string"
         ? first.node_id
         : undefined;
+    const title = isRecord(first) && typeof first.title === "string" ? first.title : undefined;
+    const body = isRecord(first) && typeof first.body === "string" ? first.body : undefined;
     return {
       url: existing,
       ...(typeof number === "number"
-        ? { reused: { repo, token, number, ...(draftId ? { draftId } : {}) } }
+        ? {
+            reused: {
+              repo,
+              token,
+              number,
+              ...(draftId ? { draftId } : {}),
+              ...(title === undefined ? {} : { title }),
+              ...(body === undefined ? {} : { body }),
+            },
+          }
         : {}),
     };
   }
@@ -345,6 +373,71 @@ async function pushAndOpenDraft(
     throw new Error(`GitHub created no pull request URL for ${repo} ${branch}`);
   }
   return { url: created };
+}
+
+// A rework decision is a publish followed by a reopen (D56), so the PR the
+// publish opened reads as accepted until the reopen marks it here; the next
+// publish an operator or an agent's accept decided takes the marker off.
+const REWORK_TITLE_PATTERN = /^\[not accepted, rework round \d+\] /;
+// A body edited on github.com comes back with CRLF line ends.
+const REWORK_BODY_PATTERN = /^\*\*Not accepted\.\*\*[^\r\n]*(?:\r?\n\r?\n|$)/;
+
+function withoutReworkMarker(pull: { title: string; body: string }): {
+  title: string;
+  body: string;
+} {
+  return {
+    title: pull.title.replace(REWORK_TITLE_PATTERN, ""),
+    body: pull.body.replace(REWORK_BODY_PATTERN, ""),
+  };
+}
+
+/**
+ * Marks the card's open PR as not accepted when a published round goes back
+ * for rework, so the PR alone tells nobody should merge it. Returns what
+ * failed instead of throwing, so the rework round starts regardless.
+ */
+export async function markPullRequestRework(params: {
+  github: WorkboardGitHubAccess;
+  card: WorkboardCard;
+  round: number;
+}): Promise<string | undefined> {
+  const { card, round } = params;
+  const target = nodeTicketTarget(card);
+  const handoff = target?.worktree?.handoff;
+  if (!target || handoff?.phase !== "published") {
+    return undefined;
+  }
+  const url = GITHUB_PULL_URL_PATTERN.exec(handoff.pullRequestUrl);
+  try {
+    const { repo, token } = await githubRepo(params.github, target.hostRepoPath);
+    // A re-pointed origin must not retitle an unrelated PR with the same number.
+    if (url?.[1]?.toLowerCase() !== repo.toLowerCase()) {
+      return undefined;
+    }
+    const path = `/repos/${repo}/pulls/${url[2]}`;
+    const pull = await githubApi(params.github, token, "GET", path);
+    if (!isRecord(pull) || pull.state !== "open") {
+      return undefined;
+    }
+    const clean = withoutReworkMarker({
+      title: typeof pull.title === "string" ? pull.title : card.title,
+      body: typeof pull.body === "string" ? pull.body : "",
+    });
+    const title = `[not accepted, rework round ${round}] ${clean.title}`;
+    const body = [
+      `**Not accepted.** The Workboard sent round ${round - 1} back for rework; don't merge until the card is done again.`,
+      clean.body,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    if (title !== pull.title || body !== pull.body) {
+      await githubApi(params.github, token, "PATCH", path, { title, body });
+    }
+    return undefined;
+  } catch (error) {
+    return `Rework round ${round} goes ahead, but ${handoff.pullRequestUrl} could not be marked as not accepted: ${formatErrorMessage(error)}. Don't merge it until the card is done again.`;
+  }
 }
 
 function quote(text: string): string {
@@ -472,6 +565,33 @@ export async function publishNodeTicket(params: {
         {
           worktreePath: item.worktreePath,
           body: `The accepted round was pushed to ${pullRequestUrl}, but that PR is still a draft: ${formatErrorMessage(error)}. Mark it ready for review on GitHub.`,
+          applies: () => true,
+        },
+        scope,
+      );
+    }
+  }
+  const marked =
+    REWORK_TITLE_PATTERN.test(reused?.title ?? "") || REWORK_BODY_PATTERN.test(reused?.body ?? "");
+  // An agent's rework verdict publishes before it reopens the ticket, and that
+  // reopen marks the PR again, so its publish leaves the marker alone.
+  const verdict = reviewVerdict(item);
+  const agentRework = verdict.decidedBy === "agent" && verdict.verdict === "rework";
+  if (reused && marked && !agentRework) {
+    try {
+      await githubApi(
+        params.github,
+        reused.token,
+        "PATCH",
+        `/repos/${reused.repo}/pulls/${reused.number}`,
+        withoutReworkMarker({ title: reused.title ?? card.title, body: reused.body ?? "" }),
+      );
+    } catch (error) {
+      await store.addNodeTicketNotice(
+        card.id,
+        {
+          worktreePath: item.worktreePath,
+          body: `The accepted round was pushed to ${pullRequestUrl}, but its title still says it is not accepted: ${formatErrorMessage(error)}. Remove the marker on GitHub.`,
           applies: () => true,
         },
         scope,
