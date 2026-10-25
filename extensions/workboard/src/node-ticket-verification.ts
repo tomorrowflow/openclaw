@@ -208,8 +208,10 @@ export function parseVerificationReply(text: string): ParsedVerification {
   let value: unknown;
   try {
     value = JSON.parse(blocks[0]?.[1] ?? "");
-  } catch {
-    return error(`The verifier's ${VERIFICATION_FENCE} block is not valid JSON.`);
+  } catch (parseError) {
+    return error(
+      `The verifier's ${VERIFICATION_FENCE} block is not valid JSON: ${formatErrorMessage(parseError)}.`,
+    );
   }
   if (!isRecord(value) || (value.verdict !== "pass" && value.verdict !== "fail")) {
     return error(`The verifier's ${VERIFICATION_FENCE} block needs a verdict of pass or fail.`);

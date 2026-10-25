@@ -1,4 +1,5 @@
 import type { WorkboardNodeDecision, WorkboardNodeReview } from "@openclaw/workboard-contract";
+import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import {
@@ -186,8 +187,12 @@ export function parseNodeTicketReport(
   let value: unknown;
   try {
     value = JSON.parse(block);
-  } catch {
-    return { ok: false, reason: "The ticket session's workboard-report block is not valid JSON." };
+  } catch (error) {
+    // The parser's position is what lets the resumed session fix its own block.
+    return {
+      ok: false,
+      reason: `The ticket session's workboard-report block is not valid JSON: ${formatErrorMessage(error)}.`,
+    };
   }
   if (!isRecord(value)) {
     return { ok: false, reason: "The ticket session's workboard-report block is not an object." };
