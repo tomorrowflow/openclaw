@@ -987,8 +987,13 @@ model, so a verdict always comes from the configured one:
    or a command, sibling entry points, async/cancel/restart state, interface
    boundaries, drift against docs or ADRs), that throwaway probes in the
    worktree are fine but committing, pushing, or touching other worktrees is
-   not, that `Operator-run` proof and style preferences are not failures, and
-   to end with exactly one `workboard-verification` block:
+   not, that `Operator-run` proof and style preferences are not failures,
+   that a failure beyond the failure scope (the notes' `Failure scope:` line,
+   else one fault at a time, a client cancellation, or a restart; two
+   simultaneous faults or a destructive admin operation racing the change are
+   beyond it) goes in the summary under `Beyond scope:` with a proposed
+   follow-up card instead of a finding, and to end with exactly one
+   `workboard-verification` block:
    `{"verdict": "pass|fail", "summary": "…", "findings": [{"path": "…", "line": 1, "body": "…"}]}`.
    The card holds its node-ticket slot while the verification runs (one build
    at a time on the node). Once the session has no active run, the pass reads
