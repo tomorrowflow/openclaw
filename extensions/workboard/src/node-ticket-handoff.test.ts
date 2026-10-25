@@ -507,6 +507,77 @@ describe("node ticket draft PR", () => {
     expect((await store.get(card.id))?.status).toBe("backlog");
   });
 
+  it("marks the PR as not accepted when its round goes back for rework", async () => {
+    const { store, card, handoffs, warn, github } = await acceptImportedTicket({
+      verdict: "Verdict: rework: the flag name is unclear",
+    });
+    const pullRequestUrl = "https://github.com/acme/app/pull/7";
+    github.tokens.set("acme/app", "token-app");
+    await handoffs.resume(warn);
+    github.openPulls.push(pullRequestUrl);
+    github.pullTexts.set(pullRequestUrl, { title: card.title, body: "Fixes the parser." });
+
+    await store.addComment(card.id, { body: "Rename the flag to --strict." });
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(github.requests.filter((request) => request.method === "PATCH")).toHaveLength(1);
+    expect(github.pullTexts.get(pullRequestUrl)).toEqual({
+      title: `[not accepted, rework round 1] ${card.title}`,
+      body: "**Not accepted.** The Workboard sent round 0 back for rework; don't merge until the card is done again.\n\nFixes the parser.",
+    });
+  });
+
+  it("starts the rework round with its feedback when the PR cannot be marked", async () => {
+    const { store, card, handoffs, warn, github, gateway } = await acceptImportedTicket({
+      verdict: "Verdict: rework: the flag name is unclear",
+    });
+    const pullRequestUrl = "https://github.com/acme/app/pull/7";
+    github.tokens.set("acme/app", "token-app");
+    await handoffs.resume(warn);
+    github.openPulls.push(pullRequestUrl);
+    github.failPullEdits.value = true;
+
+    await store.addComment(card.id, { body: "Rename the flag to --strict." });
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    const started = await store.get(card.id);
+    expect(started?.status).toBe("running");
+    expect(gateway.respond).toHaveBeenLastCalledWith(
+      "sessions.create",
+      expect.objectContaining({
+        message: expect.stringContaining("Rename the flag to --strict."),
+      }),
+    );
+    expect(started?.metadata?.comments?.at(-1)?.body).toMatch(
+      /^Rework round 1 goes ahead, but https:\/\/github\.com\/acme\/app\/pull\/7 could not be marked as not accepted: GitHub PATCH \/repos\/acme\/app\/pulls\/7 returned 403/,
+    );
+  });
+
+  it("takes the rework marker off the PR when a round is accepted", async () => {
+    const { card, handoffs, warn, github } = await acceptImportedTicket();
+    const pullRequestUrl = "https://github.com/acme/app/pull/7";
+    github.tokens.set("acme/app", "token-app");
+    github.openPulls.push(pullRequestUrl);
+    github.pullTexts.set(pullRequestUrl, {
+      title: `[not accepted, rework round 1] ${card.title}`,
+      // Edited on github.com, so CRLF line ends.
+      body: "**Not accepted.** The Workboard sent round 0 back for rework; don't merge until the card is done again.\r\n\r\nFixes the parser.",
+    });
+
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(github.pullTexts.get(pullRequestUrl)).toEqual({
+      title: card.title,
+      body: "Fixes the parser.",
+    });
+  });
+
   it("reworks a published ticket on its PR branch, keeping a reviewer's commit", async () => {
     const { store, card, repos, worktree, handoffs, warn, github, gateway, sweepingNodes } =
       await acceptImportedTicket({ verdict: "Verdict: rework: the flag name is unclear" });

@@ -205,12 +205,15 @@ export function settledSession(key: string) {
 export function createFakeGitHub(remote: string) {
   const tokens = new Map<string, string>();
   const openPulls: string[] = [];
+  // Title and body of an open PR by its URL; a PATCH replaces them.
+  const pullTexts = new Map<string, { title: string; body: string }>();
   // Closed PRs on the branch, newest first, by their head commit.
   const closedPulls: Array<{ html_url: string; sha: string; merged: boolean }> = [];
   const rejectCreate: { value?: { message: string; errors: Array<{ message: string }> } } = {};
   // Open PRs still in draft; the GraphQL ready mutation removes one by its node id.
   const draftPulls = new Set<string>();
   const failComments = { value: false };
+  const failPullEdits = { value: false };
   const failReady = { value: false };
   const requests: Array<{ method: string; url: string; auth?: string; body?: unknown }> = [];
   const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
@@ -237,6 +240,22 @@ export function createFakeGitHub(remote: string) {
         { status: 200 },
       );
     }
+    const single = /\/pulls\/(\d+)$/.exec(url)?.[1];
+    if (single && method === "PATCH" && failPullEdits.value) {
+      return new Response(JSON.stringify({ message: "Resource not accessible" }), { status: 403 });
+    }
+    if (single) {
+      const html_url = openPulls.find((open) => open.endsWith(`/pull/${single}`));
+      if (html_url && method === "PATCH") {
+        pullTexts.set(html_url, body);
+      }
+      return new Response(
+        JSON.stringify(
+          html_url ? { html_url, state: "open", ...pullTexts.get(html_url) } : { state: "closed" },
+        ),
+        { status: 200 },
+      );
+    }
     if (url.endsWith("/pulls") && method === "POST" && rejectCreate.value) {
       return new Response(JSON.stringify(rejectCreate.value), { status: 422 });
     }
@@ -253,6 +272,7 @@ export function createFakeGitHub(remote: string) {
             number: Number(html_url.split("/").at(-1)),
             node_id: `PR_${html_url}`,
             draft: draftPulls.has(html_url),
+            ...pullTexts.get(html_url),
           }))
         : method === "POST"
           ? { html_url: "https://github.com/acme/app/pull/7" }
@@ -262,10 +282,12 @@ export function createFakeGitHub(remote: string) {
   return {
     tokens,
     openPulls,
+    pullTexts,
     closedPulls,
     rejectCreate,
     draftPulls,
     failComments,
+    failPullEdits,
     failReady,
     requests,
     access: {

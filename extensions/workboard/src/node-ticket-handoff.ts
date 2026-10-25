@@ -16,6 +16,7 @@ import {
 } from "./node-ticket-grill-session.js";
 import { type NodeProbeEnd, nodeProbeEnd, nodeProbeNotice } from "./node-ticket-probe.js";
 import {
+  markPullRequestRework,
   publishCandidate,
   publishNodeTicket,
   type WorkboardGitHubAccess,
@@ -458,6 +459,7 @@ export type WorkboardNodeTicketStart = (
  */
 async function reopenNodeTicket(params: {
   store: WorkboardStore;
+  github: WorkboardGitHubAccess;
   start: WorkboardNodeTicketStart;
   card: WorkboardCard;
   now: () => number;
@@ -469,12 +471,22 @@ async function reopenNodeTicket(params: {
   }
   const { worktreePath, round } = reopen;
   const rework = reopen.kind === "rework";
+  // A notice moves reviewFrom past the review comments, so a marking failure
+  // rides on the backlog notice or is a plain comment after the start.
+  const unmarked = rework
+    ? await markPullRequestRework({ github: params.github, card, round })
+    : undefined;
   if (!reopen.reviewed) {
     await store.addNodeTicketNotice(card.id, {
       worktreePath,
       status: rework ? "backlog" : "review",
       body: rework
-        ? `Reopened without a review comment; add what should change and move it to todo again to start rework round ${round}.`
+        ? [
+            `Reopened without a review comment; add what should change and move it to todo again to start rework round ${round}.`,
+            unmarked,
+          ]
+            .filter(Boolean)
+            .join("\n\n")
         : reopen.kind === "grill"
           ? "Moved to todo while grilling; the grilling goes on in its grill session, which the card names once it is open. Finish it there, or choose End grilling on the card to let the agent continue with the grill session's last reply, if it has one."
           : "Moved to todo without an answer; answer the questions in a comment and move it to todo again to resume the session.",
@@ -483,6 +495,9 @@ async function reopenNodeTicket(params: {
     return;
   }
   const { startFailures, queued } = await params.start(card.id, "request");
+  if (unmarked) {
+    await store.addComment(card.id, { body: unmarked });
+  }
   const failure = startFailures[0];
   // A start that claimed the card already blocked it on failure; only a
   // refusal before the claim leaves the reopened card in todo.
@@ -710,7 +725,13 @@ export function createNodeTicketHandoffs(params: {
               now,
             });
           } else if (reopen) {
-            await reopenNodeTicket({ store: params.store, start: params.start, card, now });
+            await reopenNodeTicket({
+              store: params.store,
+              github: params.github,
+              start: params.start,
+              card,
+              now,
+            });
           } else if (grilling) {
             await openNodeGrillSession({
               store: params.store,
@@ -739,6 +760,7 @@ export function createNodeTicketHandoffs(params: {
             if (moved) {
               await reopenNodeTicket({
                 store: params.store,
+                github: params.github,
                 start: params.start,
                 card: moved,
                 now,
