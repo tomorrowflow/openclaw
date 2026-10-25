@@ -94,6 +94,7 @@ it("keeps reassigned session cards current through events without polling", asyn
     expect(request.mock.calls).toEqual([
       ["workboard.transcriptViewer", {}],
       ["workboard.officeViewer", {}],
+      ["workboard.architectureViewer", {}],
       ["workboard.boards.list", {}],
       ["workboard.cards.list", { sessionKey: session.key }],
     ]);
@@ -712,6 +713,25 @@ it("shows the Office page only while the operator can write, and embeds a portal
     connection.canWrite = false;
     notify();
     expect(registrations.has("navigation/office")).toBe(false);
+  } finally {
+    dispose?.();
+  }
+});
+
+it("loads the architecture viewer port without adding a page for it", async () => {
+  vi.useFakeTimers();
+  const { host, connection, registrations } = workboardTestHost();
+  connection.connected = true;
+  const request = vi.fn(async (method: string) =>
+    method === "workboard.architectureViewer" ? { port: 17318 } : { cards: [], boards: [] },
+  );
+  host.request = request as typeof host.request;
+  const dispose = await workboardPlugin.activate(host);
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(request).toHaveBeenCalledWith("workboard.architectureViewer", {});
+    expect(registrations.has("page/architecture")).toBe(false);
+    expect(registrations.has("navigation/architecture")).toBe(false);
   } finally {
     dispose?.();
   }

@@ -66,6 +66,8 @@ GitHub token map for their draft PRs) and an optional transcript viewer:
           transcriptViewer: { port: 17317 },
           // Optional office viewer (Habblaud) on this loopback port of the Gateway host.
           officeViewer: { port: 17320 },
+          // Optional architecture viewer (SeeCode) on this loopback port of the Gateway host.
+          architectureViewer: { port: 17318 },
           github: {
             repos: {
               // Keyed by the owner/name of the host clone's origin.
@@ -117,6 +119,18 @@ To run Habblaud as the office viewer:
    and `HABBLAUD_WORKBOARD_TOKEN` set to a Gateway token.
 2. Approve its device pairing once with `openclaw devices approve <requestId>`.
 3. Set `officeViewer.port` to the port Habblaud listens on.
+
+`architectureViewer.port` is the loopback port of an architecture viewer, such
+as the SeeCode viewer (`viewer/` in
+[tomorrowflow/SeeCode](https://github.com/tomorrowflow/SeeCode)), which renders
+each project's `docs/architecture` maps keyed by board id. It follows the same
+rules, validated at `plugins.entries.workboard.config.architectureViewer.port`.
+When it is set, the header of each board with a [node target](#node-tickets)
+(`orchestration.defaultTarget`) shows an **Architecture** button that opens the
+viewer's `/board/<boardId>/` in a new tab through a portal. Boards without a node
+target have no repository and show no button, and there is no Workboard page for
+this viewer. The button needs `operator.write`, and the viewer must accept
+`Host: localhost:<port>`.
 
 ```bash
 openclaw plugins disable workboard
@@ -1550,7 +1564,7 @@ read/write scopes as boards:
 
 | Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `cards.probes`, `overview`, `transcriptViewer`, `officeViewer`                                                                                                                                                                                                                 |
+| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `cards.probes`, `overview`, `transcriptViewer`, `officeViewer`, `architectureViewer`                                                                                                                                                                                           |
 | `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.sampleRead`, `cards.verify`, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
 | `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                                                                |

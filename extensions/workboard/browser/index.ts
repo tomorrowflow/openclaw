@@ -125,7 +125,15 @@ export default defineControlUiPlugin({
       method: "workboard.officeViewer",
       createPage: createOfficePage,
     });
-    const viewers = [transcripts, office];
+    // No page: the header of each board with a node target opens the viewer for that board.
+    const architecture = createViewerPage(host, {
+      id: "architecture",
+      label: () => t("workboard.architectureTitle"),
+      icon: "network",
+      order: 14,
+      method: "workboard.architectureViewer",
+    });
+    const viewers = [transcripts, office, architecture];
     const registrations = [
       host.ui.registerPage({
         id: "workboard",
@@ -144,6 +152,7 @@ export default defineControlUiPlugin({
               catalog.refresh();
             },
             transcripts.port,
+            architecture.port,
           );
         }),
       }),

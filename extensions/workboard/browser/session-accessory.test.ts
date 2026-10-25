@@ -46,6 +46,7 @@ it("reveals a reassigned linked card without changing the selected chat agent", 
       workboard,
       vi.fn(),
       () => null,
+      () => null,
     )(destination, createViewContext(host, { boardId: path?.[0] ?? "__all__" }));
     disposeDestination = () => mounted?.dispose?.();
   });
