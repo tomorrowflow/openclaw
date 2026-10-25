@@ -1,0 +1,7 @@
+[Unit]
+Description=Fetch the architecture viewer's board clones so merged maps render within minutes
+
+[Service]
+Type=oneshot
+# Assumes the Gateway host checkout at ~/openclaw.
+ExecStart=%h/openclaw/scripts/architecture-refresh.sh
