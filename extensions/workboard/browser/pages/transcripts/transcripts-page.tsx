@@ -4,7 +4,7 @@ import type { ControlUiHost, ControlUiView } from "openclaw/plugin-sdk/control-u
 import { createSignal } from "solid-js";
 import { WorkboardErrorToast } from "../../components/toast.tsx";
 import { t } from "../../i18n/index.ts";
-import { openTranscriptViewer } from "../../lib/transcript-viewer.ts";
+import { openPortalTab } from "../../lib/portal.ts";
 import { formatError } from "../../lib/workboard/normalization-utils.ts";
 
 export function createTranscriptsPage(host: ControlUiHost, port: number): ControlUiView {
@@ -13,9 +13,11 @@ export function createTranscriptsPage(host: ControlUiHost, port: number): Contro
     const [error, setError] = createSignal<string | null>(null);
     const open = () => {
       setError(null);
-      openTranscriptViewer(host, port, "/").catch((reason: unknown) => {
-        setError(formatError(reason));
-      });
+      openPortalTab(host, { port, title: t("workboard.transcriptsTitle"), path: "/" }).catch(
+        (reason: unknown) => {
+          setError(formatError(reason));
+        },
+      );
     };
     const dispose = render(
       () => (

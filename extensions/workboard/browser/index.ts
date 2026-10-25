@@ -1,4 +1,3 @@
-import type { WorkboardTranscriptViewerResult } from "@openclaw/workboard-contract";
 import { defineControlUiPlugin } from "openclaw/plugin-sdk/control-ui";
 import { WorkboardCatalog } from "./catalog.ts";
 import { deleteWorkboardBoard } from "./delete-board.tsx";
@@ -7,13 +6,16 @@ import { t } from "./i18n/index.ts";
 import { workboardBoardName } from "./lib/workboard/board-presentation.ts";
 import { createWorkboardCapability } from "./lib/workboard/capability.ts";
 import { WORKBOARD_CHANGED_EVENT, type WorkboardBoardSummary } from "./lib/workboard/types.ts";
+import { createOfficePage } from "./pages/office/office-page.tsx";
 import { PROTOTYPE_PAGE_ID } from "./pages/prototype/prototype-target.ts";
 import { createTranscriptsPage } from "./pages/transcripts/transcripts-page.tsx";
 import { createLazyWorkboardPage } from "./pages/workboard/lazy-page.ts";
 import { workboardPageTarget } from "./pages/workboard/page-target.ts";
 import { createWorkboardSessionAccessory } from "./session-accessory.tsx";
+import { createViewerPage } from "./viewer-page.ts";
 import { createWorkboardWidget } from "./widgets.tsx";
 import "./styles/workboard.css";
+import "./styles/office.css";
 import "./styles/overview.css";
 import "./styles/widgets.css";
 import "./styles/session-chip.css";
@@ -107,61 +109,23 @@ export default defineControlUiPlugin({
       }
     };
     const catalog = new WorkboardCatalog(({ boards }) => syncBoardNavigation(boards), workboard);
-    let transcriptViewerPort: number | null = null;
-    let transcriptViewerRequested = false;
-    let disposeTranscriptsPage: (() => void) | null = null;
-    const registerTranscriptsPage = (port: number) => {
-      const disposers = [
-        host.ui.registerPage({
-          id: "transcripts",
-          label: t("workboard.transcriptsTitle"),
-          mount: createTranscriptsPage(host, port),
-        }),
-        host.ui.registerNavigation({
-          id: "transcripts",
-          parent: "workboard",
-          label: t("workboard.transcriptsTitle"),
-          page: { id: "transcripts" },
-          icon: "scrollText",
-          order: 12,
-        }),
-      ];
-      return () => {
-        for (const dispose of disposers.toReversed()) {
-          dispose();
-        }
-      };
-    };
-    // Opening a portal needs operator.write, so read-only operators get no page whose only control fails.
-    const syncTranscriptsPage = () => {
-      const port = host.connection.canWrite ? transcriptViewerPort : null;
-      if ((port === null) === (disposeTranscriptsPage === null)) {
-        return;
-      }
-      disposeTranscriptsPage?.();
-      disposeTranscriptsPage = port === null ? null : registerTranscriptsPage(port);
-      host.ui.invalidate();
-    };
-    // The port is Gateway plugin config, so it can only change with a Gateway restart.
-    const loadTranscriptViewer = () => {
-      if (transcriptViewerRequested || !host.connection.connected) {
-        return;
-      }
-      transcriptViewerRequested = true;
-      void host.request<WorkboardTranscriptViewerResult>("workboard.transcriptViewer", {}).then(
-        ({ port }) => {
-          if (host.signal.aborted) {
-            return;
-          }
-          transcriptViewerPort = port;
-          syncTranscriptsPage();
-        },
-        // The next host change asks again.
-        () => {
-          transcriptViewerRequested = false;
-        },
-      );
-    };
+    const transcripts = createViewerPage(host, {
+      id: "transcripts",
+      label: () => t("workboard.transcriptsTitle"),
+      icon: "scrollText",
+      order: 12,
+      method: "workboard.transcriptViewer",
+      createPage: createTranscriptsPage,
+    });
+    const office = createViewerPage(host, {
+      id: "office",
+      label: () => t("workboard.officeTitle"),
+      icon: "monitor",
+      order: 13,
+      method: "workboard.officeViewer",
+      createPage: createOfficePage,
+    });
+    const viewers = [transcripts, office];
     const registrations = [
       host.ui.registerPage({
         id: "workboard",
@@ -179,7 +143,7 @@ export default defineControlUiPlugin({
               syncBoardNavigation(boards);
               catalog.refresh();
             },
-            () => transcriptViewerPort,
+            transcripts.port,
           );
         }),
       }),
@@ -243,19 +207,24 @@ export default defineControlUiPlugin({
       workboard.subscribe(host.ui.invalidate),
       host.subscribe(() => {
         catalog.sync(client, host.connection.connected);
-        loadTranscriptViewer();
-        syncTranscriptsPage();
+        for (const viewer of viewers) {
+          viewer.load();
+          viewer.sync();
+        }
       }),
       () => {
-        disposeTranscriptsPage?.();
-        disposeTranscriptsPage = null;
+        for (const viewer of viewers) {
+          viewer.dispose();
+        }
       },
       host.onEvent(WORKBOARD_CHANGED_EVENT, (payload) =>
         catalog.handleGatewayEvent(WORKBOARD_CHANGED_EVENT, payload),
       ),
     ];
     catalog.sync(client, host.connection.connected);
-    loadTranscriptViewer();
+    for (const viewer of viewers) {
+      viewer.load();
+    }
     return () => {
       for (const dispose of registrations.toReversed()) {
         dispose();

@@ -333,6 +333,22 @@
         "required": [
           "port"
         ]
+      },
+      "officeViewer": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "An office viewer (Habblaud) listening on the Gateway host. The Control UI embeds it through an OpenClaw Portal on an Office page.",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "The viewer's loopback port on the Gateway host."
+          }
+        },
+        "required": [
+          "port"
+        ]
       }
     }
   },

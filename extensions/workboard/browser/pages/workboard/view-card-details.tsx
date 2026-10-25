@@ -9,7 +9,7 @@ import {
 import { icons } from "../../components/icons.tsx";
 import { WorkboardErrorToast } from "../../components/toast.tsx";
 import { t } from "../../i18n/index.ts";
-import { openTranscriptViewer } from "../../lib/transcript-viewer.ts";
+import { openPortalTab } from "../../lib/portal.ts";
 import {
   workboardCardBoardId,
   WORKBOARD_ALL_BOARDS_FILTER,
@@ -244,12 +244,14 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
       const cardId = card().id;
       return port && client && action().linkedSessionKey
         ? () => {
-            openTranscriptViewer(client, port, `/card/${encodeURIComponent(cardId)}`).catch(
-              (error: unknown) => {
-                state().error = formatError(error);
-                props.onRequestUpdate?.();
-              },
-            );
+            openPortalTab(client, {
+              port,
+              title: t("workboard.transcriptsTitle"),
+              path: `/card/${encodeURIComponent(cardId)}`,
+            }).catch((error: unknown) => {
+              state().error = formatError(error);
+              props.onRequestUpdate?.();
+            });
           }
         : undefined;
     },

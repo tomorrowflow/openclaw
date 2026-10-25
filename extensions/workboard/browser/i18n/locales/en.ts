@@ -168,10 +168,13 @@ export default {
     transcriptsDescription:
       "The transcript viewer shows each card's Claude sessions. It opens in a new tab.",
     openTranscriptViewer: "Open transcript viewer",
-    transcriptPopupBlocked:
-      "The browser blocked the transcript tab. Allow pop-ups for the Control UI and try again.",
-    transcriptPortalUnavailable:
-      "The Gateway did not return a usable portal for the transcript viewer. Check the Portals page and try again.",
+    officeTitle: "Office",
+    openOfficeViewer: "Open in new tab",
+    officeFrameTitle: "Office",
+    portalPopupBlocked:
+      "The browser blocked the new tab. Allow pop-ups for the Control UI and try again.",
+    portalUnavailable:
+      "The Gateway did not return a usable portal. Check the Portals page and try again.",
     overviewNeedsYou: "Needs you",
     overviewNeedsYouEmpty: "Nothing waits on you. Reviews, questions, and blocks show up here.",
     overviewInFlight: "In flight",
