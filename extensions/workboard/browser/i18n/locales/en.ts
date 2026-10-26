@@ -349,7 +349,7 @@ export default {
     restartNodeTicket: "Restart in the same node worktree",
     startQueued: "Queued",
     startQueuedHelp:
-      "Queued for a node-ticket slot; it starts when one frees. Move it to backlog to cancel.",
+      "Queued; it starts once its dependencies are done and a node-ticket slot is free. Move it to backlog to cancel.",
     dependencies: "Dependencies",
     dependenciesBlocked: "{count} blocked",
     dependencyStatusMissing: "Missing",
@@ -397,7 +397,7 @@ export default {
     cardStaleTitle: "No activity for {age}",
     cardUpdatedNow: "just now",
     cardUpdatedAgo: "{time} ago",
-    stageQueued: "Waiting for a node slot",
+    stageQueued: "Queued to start",
     stageRunning: "Running",
     stageRunningOn: "Running on {node}",
     stageReworkRound: "rework round {round}",

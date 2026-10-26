@@ -1,4 +1,4 @@
-// Workboard tests cover queued node-ticket starts draining as route slots free up.
+// Workboard tests cover queued node-ticket starts draining as parents finish and route slots free up.
 import { describe, expect, it, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { createNodeTicketHandoffs } from "./node-ticket-handoff.js";
@@ -103,6 +103,33 @@ describe("node ticket start queue", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("starts a card queued on its parents once they are done", async () => {
+    const { store, start, handoffs, runningServer, toReview } = await fullRoutes();
+    await toReview(runningServer.id);
+    const parent = await store.create({
+      title: "Design the retry",
+      boardId: "app",
+      status: "todo",
+    });
+    const child = await store.create({
+      title: "Fix the retry",
+      boardId: "app",
+      status: "todo",
+      labels: ["class:server-fix"],
+      parents: [parent.id],
+    });
+    expect((await start(child.id, "request")).queued).toBeDefined();
+    await handoffs.resume(vi.fn());
+    expect((await store.get(child.id))?.metadata?.automation?.startRequest).toBeDefined();
+
+    await store.move(parent.id, "done", undefined);
+    await handoffs.resume(vi.fn());
+
+    const started = await store.get(child.id);
+    expect(started?.status).toBe("running");
+    expect(started?.metadata?.automation?.startRequest).toBeUndefined();
   });
 
   it("drops a request when the card moves to backlog and never starts it after it moves back", async () => {

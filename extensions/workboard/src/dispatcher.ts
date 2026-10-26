@@ -20,10 +20,10 @@ import {
   type ResolveAgentWorkspaceRuntime,
 } from "./dispatcher-workspace.js";
 import { buildNodeTicketMessage } from "./node-ticket-brief.js";
+import { type NodeTicketStartWait, queueNodeTicketStart } from "./node-ticket-start-queue.js";
 import {
   createNodeTicketWorktree,
   nodeTicketReopen,
-  queueNodeTicketStart,
   nodeTicketTarget,
   startNodeTicketSession,
   type WorkboardNodeTicketRuntime,
@@ -33,7 +33,6 @@ import { cardBoardId, workboardClaimRefusal } from "./store-card-helpers.js";
 import {
   isWorkboardNodeTicket,
   type WorkboardNodeTicketSlot,
-  type WorkboardSlotFull,
   workboardCardConsumesNodeTicketSlot,
   workboardCardConsumesOwnerSlot,
   workboardCardSlotOwner,
@@ -77,9 +76,9 @@ type WorkboardDispatchStartOptions = {
   workspaceAccess?: WorkboardWorkspaceAccess;
   assertOwnerCurrent?: () => void;
   /**
-   * For an exact node-ticket start: `request` queues the card while its slot
-   * is full instead of refusing; `drain` starts only a card that is queued and
-   * keeps it queued while its slot is still full.
+   * For an exact node-ticket start: `request` queues the card while its
+   * parents are not done or its slot is full instead of refusing; `drain`
+   * starts only a card that is queued and keeps it queued while it still waits.
    */
   queue?: "request" | "drain";
 };
@@ -103,13 +102,8 @@ type WorkboardStartFailure = {
 type WorkboardDispatchAndStartResult = WorkboardDispatchResult & {
   started: WorkboardStartedRun[];
   startFailures: WorkboardStartFailure[];
-  /** The exact start's card, queued because its node-ticket slot is full. */
+  /** The exact start's card, queued because it waits on its parents or a full slot. */
   queued?: WorkboardCard;
-};
-
-type WorkboardFullSlot = {
-  slot: WorkboardNodeTicketSlot;
-  full: WorkboardSlotFull;
 };
 
 type WorkboardPreparedLaunch = Extract<WorkboardLaunchState, { phase: "prepared" }>;
@@ -231,7 +225,7 @@ function selectStartableCards(
 ): {
   cards: WorkboardCard[];
   rejection?: WorkboardStartFailure;
-  fullSlot?: WorkboardFullSlot;
+  wait?: NodeTicketStartWait;
 } {
   if (limit <= 0) {
     return { cards: [] };
@@ -257,8 +251,15 @@ function selectStartableCards(
     const placement =
       nodeTicketSlot && workboardSlotPlacement(nodeTicketOccupants, nodeTicketSlot, now);
     const nodeTicketFull = placement?.full;
+    const claimRefusal = mode === "exact" ? workboardClaimRefusal(card, false) : undefined;
+    // Unfinished parents are the one claim refusal a node ticket may queue on:
+    // the claim accepts it once they are done.
+    const parentsRefusal =
+      nodeTicketSlot && claimRefusal && !workboardClaimRefusal(card, false, true)
+        ? claimRefusal
+        : undefined;
     // A card the claim would refuse gets that reason on a full slot as on a
-    // free one; only a refusal for the slot alone may queue it.
+    // free one; only a refusal for its parents or the slot alone may queue it.
     const cardRefusal = card.metadata?.archivedAt
       ? "Card is archived; restore it before starting."
       : cardHasActiveClaim(card, now)
@@ -271,17 +272,23 @@ function selectStartableCards(
               card.status !== "todo" &&
               card.status !== "ready"
             ? `Card cannot start from ${card.status}; move it to backlog, todo, or ready first.`
-            : mode === "exact"
-              ? workboardClaimRefusal(card, false)
-              : undefined;
-    const fullSlot =
-      cardRefusal === undefined && nodeTicketSlot && nodeTicketFull
-        ? { slot: nodeTicketSlot, full: nodeTicketFull }
-        : undefined;
+            : parentsRefusal
+              ? undefined
+              : claimRefusal;
+    const wait: NodeTicketStartWait | undefined =
+      cardRefusal !== undefined
+        ? undefined
+        : parentsRefusal
+          ? { kind: "dependencies", refusal: parentsRefusal }
+          : nodeTicketSlot && nodeTicketFull
+            ? { kind: "slot", slot: nodeTicketSlot, full: nodeTicketFull }
+            : undefined;
     const rejection =
       cardRefusal ??
-      (fullSlot
-        ? workboardSlotBusyMessage(fullSlot.slot, fullSlot.full)
+      (wait
+        ? wait.kind === "dependencies"
+          ? wait.refusal
+          : workboardSlotBusyMessage(wait.slot, wait.full)
         : !nodeTicketSlot && runningOwners.has(owner)
           ? `Owner ${owner} already has active Workboard work; complete or stop it before starting another card.`
           : undefined);
@@ -290,7 +297,7 @@ function selectStartableCards(
         return {
           cards: [],
           rejection: { cardId: card.id, title: card.title, error: rejection },
-          ...(fullSlot ? { fullSlot } : {}),
+          ...(wait ? { wait } : {}),
         };
       }
       continue;
@@ -399,7 +406,7 @@ async function runWorkboardDispatch(
     directCardId ? "exact" : "scheduled",
     nodeTicketSlots,
   );
-  let fullSlot = selection.fullSlot;
+  let wait = selection.wait;
   if (selection.rejection) {
     startFailures.push(selection.rejection);
   }
@@ -699,7 +706,7 @@ async function runWorkboardDispatch(
           : {}),
       });
       if (error instanceof WorkboardSlotFullError && error.slot.kind === "node-tickets") {
-        fullSlot = { slot: error.slot, full: error.full };
+        wait = { kind: "slot", slot: error.slot, full: error.full };
       }
       if (!claimValue || runStarted) {
         continue;
@@ -737,13 +744,8 @@ async function runWorkboardDispatch(
   }
 
   const queued =
-    directCard && queue && fullSlot && started.length === 0
-      ? await queueNodeTicketStart(
-          params.store,
-          directCard.id,
-          fullSlot.full === "route_busy" ? fullSlot.slot.route : undefined,
-          now,
-        )
+    directCard && queue && wait && started.length === 0
+      ? await queueNodeTicketStart(params.store, directCard.id, wait, now)
       : undefined;
   return {
     ...dispatch,

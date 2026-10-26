@@ -31,9 +31,6 @@ import {
   reviewVerdictOf,
 } from "./review-readiness.js";
 import {
-  type WorkboardNodeTicketRouteSlot,
-  workboardRouteName,
-  workboardRoutePinnedNode,
   MAX_BLOCK_REASON_CHARS,
   MAX_COMMENT_BODY_CHARS,
   MAX_PROOF_NOTE_CHARS,
@@ -283,40 +280,6 @@ export function nodeTicketReopenSubject(reopen: NodeTicketReopen): string {
     return `Rework round ${reopen.round}`;
   }
   return reopen.kind === "grill" ? "The grilling result" : "The answer";
-}
-
-/** Queues a start on a full slot; the card when the request was recorded. */
-export async function queueNodeTicketStart(
-  store: WorkboardStore,
-  cardId: string,
-  route: WorkboardNodeTicketRouteSlot | undefined,
-  now: number,
-): Promise<WorkboardCard | undefined> {
-  const request = await store.requestNodeTicketStart(cardId, {
-    notice: (card) => nodeTicketSlotWaitNotice(card, route, now),
-  });
-  return request.queued ? request.card : undefined;
-}
-
-/**
- * What a queued node ticket's notice says it waits for. `route` names a
- * capped route whose slots are full; without it the whole pool is.
- */
-export function nodeTicketSlotWaitNotice(
-  card: WorkboardCard,
-  route: WorkboardNodeTicketRouteSlot | undefined,
-  now: number,
-): string {
-  const reopen = nodeTicketReopen(card, now);
-  const what = reopen ? nodeTicketReopenSubject(reopen) : "This ticket";
-  if (!route) {
-    return `${what} waits for a node-ticket slot; it starts when a running node ticket reaches review.`;
-  }
-  const name = workboardRouteName(route);
-  const pinned = workboardRoutePinnedNode(route);
-  return pinned
-    ? `${what} waits for a slot on node ${pinned}, where its worktree is, on the ${name} route; it starts when a running ticket of that route on ${pinned} reaches review.`
-    : `${what} waits for a slot on the ${name} route; it starts when a running ticket on that route reaches review.`;
 }
 
 export function nodeInvokePayload(result: unknown): Record<string, unknown> {

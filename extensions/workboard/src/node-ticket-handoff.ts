@@ -440,7 +440,8 @@ async function runNodeTicketHandoff(params: {
 
 /**
  * Starts one card through the dispatcher's exact start path. `request`
- * queues it while its slot is full; `drain` starts it only while it is queued.
+ * queues it while its parents are not done or its slot is full; `drain`
+ * starts it only while it is queued.
  */
 export type WorkboardNodeTicketStart = (
   cardId: string,
@@ -516,9 +517,9 @@ async function reopenNodeTicket(params: {
 }
 
 /**
- * Starts one queued node ticket. A card whose slot is still full, or that
- * changed while the start read it, stays queued for the next card change; any
- * other refusal blocks it with the reason.
+ * Starts one queued node ticket. A card that still waits on its parents or a
+ * full slot, or that changed while the start read it, stays queued for the
+ * next card change; any other refusal blocks it with the reason.
  */
 async function drainStartQueue(params: {
   store: WorkboardStore;

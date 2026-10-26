@@ -6,7 +6,7 @@ import { WorkboardWorkflowStore } from "./store-workflow.js";
 
 export class WorkboardNodeTicketQueueStore extends WorkboardWorkflowStore {
   /**
-   * Queues a node ticket's start while its slot is full, with the notice that
+   * Queues a node ticket's start that has to wait, with the notice that
    * says what it waits for, in one write. A queued card keeps its first
    * request so its place in line holds. A reopened ticket's notice is noted on
    * its handoff, once per round, so it never counts as review feedback.
