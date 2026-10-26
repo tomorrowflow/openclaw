@@ -123,8 +123,8 @@ const log = createSubsystemLogger("state/agent-admission");
 const startupAdmission = new AsyncLocalStorage<AgentDatabaseStartupAdmission>();
 
 export class AgentDatabaseStartupSupersededError extends Error {
-  constructor(agentId: string, subject: "startup" | "secrets") {
-    super(`Agent ${agentId} ${subject} preparation was superseded`);
+  constructor(agentId: string, subject: "startup" | "secrets", options?: ErrorOptions) {
+    super(`Agent ${agentId} ${subject} preparation was superseded`, options);
     this.name = "AgentDatabaseStartupSupersededError";
   }
 }
