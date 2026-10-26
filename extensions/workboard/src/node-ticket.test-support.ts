@@ -225,6 +225,45 @@ export function createFakeGitHub(remote: string) {
     if (url.endsWith("/comments") && failComments.value) {
       return new Response(JSON.stringify({ message: "Resource not accessible" }), { status: 403 });
     }
+    if (url.endsWith("/graphql") && String(body?.query).includes("pullRequests(")) {
+      // GitHub's GraphQL reports a rate limit as errors on a 200.
+      if (failPullList.value) {
+        return new Response(
+          JSON.stringify({
+            errors: [{ type: "RATE_LIMITED", message: "API rate limit exceeded" }],
+          }),
+          { status: 200 },
+        );
+      }
+      const all = [
+        ...openPulls.map((html_url) => ({
+          number: Number(html_url.split("/").at(-1)),
+          state: "OPEN",
+          isDraft: draftPulls.has(html_url),
+        })),
+        ...closedPulls.map(({ html_url, merged }) => ({
+          number: Number(html_url.split("/").at(-1)),
+          state: merged ? "MERGED" : "CLOSED",
+          isDraft: false,
+        })),
+      ];
+      const first = Number(/first: (\d+)/.exec(String(body.query))?.[1] ?? 100);
+      const start = Number(body.variables?.after ?? 0);
+      const end = start + first;
+      return new Response(
+        JSON.stringify({
+          data: {
+            repository: {
+              pullRequests: {
+                nodes: all.slice(start, end),
+                pageInfo: { hasNextPage: end < all.length, endCursor: String(end) },
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      );
+    }
     if (url.endsWith("/graphql")) {
       const ready = failReady.value
         ? undefined
@@ -259,35 +298,6 @@ export function createFakeGitHub(remote: string) {
     }
     if (url.endsWith("/pulls") && method === "POST" && rejectCreate.value) {
       return new Response(JSON.stringify(rejectCreate.value), { status: 422 });
-    }
-    if (url.includes("/pulls?state=all")) {
-      if (failPullList.value) {
-        return new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
-          status: 403,
-        });
-      }
-      const query = new URL(url).searchParams;
-      const perPage = Number(query.get("per_page") ?? 30);
-      const page = Number(query.get("page") ?? 1);
-      const all = [
-        ...openPulls.map((html_url) => ({
-          html_url,
-          number: Number(html_url.split("/").at(-1)),
-          state: "open",
-          draft: draftPulls.has(html_url),
-          merged_at: null,
-        })),
-        ...closedPulls.map(({ html_url, merged }) => ({
-          html_url,
-          number: Number(html_url.split("/").at(-1)),
-          state: "closed",
-          draft: false,
-          merged_at: merged ? "2026-10-19T14:07:34Z" : null,
-        })),
-      ];
-      return new Response(JSON.stringify(all.slice((page - 1) * perPage, page * perPage)), {
-        status: 200,
-      });
     }
     const reply = url.includes("/pulls?state=closed")
       ? closedPulls.map(({ html_url, sha, merged }) => ({

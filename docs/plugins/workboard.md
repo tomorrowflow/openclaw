@@ -1156,9 +1156,11 @@ publish step and the PR state sync read it.
 `pullRequest: {state, checkedAt}`, where `state` is `open`, `draft`, `merged`,
 or `closed`. The publish sets it (`merged` when it found the merged PR that
 holds the commit). Every 10 minutes the handoff pass then reads each
-repository's PRs with one list call, paging back by update time until it has
-found every published PR not yet seen merged or closed (at most 10 pages of
-100). It records only a changed state, so `checkedAt` is the read that saw the
+repository's PRs with one GraphQL query that asks only for each PR's number,
+state, and draft flag, paging back by update time until it has found every
+published PR not yet seen merged or closed (at most 10 pages of 100). The REST
+list is not used: its pages carry every PR body and outgrow the 1 MiB response
+cap. It records only a changed state, so `checkedAt` is the read that saw the
 current state, and a PR seen merged or closed is never read again. The first
 read comes 10 minutes after the Gateway starts. The repository and token come
 from the host clone's origin, as for the publish. A missing token, a GitHub
