@@ -67,19 +67,64 @@ function groupBy<K, T>(items: readonly T[], key: (item: T) => K): Map<K, T[]> {
   return groups;
 }
 
-function pullRequestState(pull: Record<string, unknown>): WorkboardPullRequestState {
-  if (typeof pull.merged_at === "string") {
-    return "merged";
+// GraphQL, not the REST list: a REST page carries every PR body, and 100 of
+// them outgrow the 1 MiB response cap on a busy repository.
+const PULL_STATES_QUERY = `query($owner: String!, $name: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(first: ${PULLS_PER_PAGE}, after: $after, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      nodes { number state isDraft }
+      pageInfo { hasNextPage endCursor }
+    }
   }
-  if (pull.state === "closed") {
-    return "closed";
+}`;
+
+function pullRequestState(pull: Record<string, unknown>): WorkboardPullRequestState | undefined {
+  switch (pull.state) {
+    case "MERGED":
+      return "merged";
+    case "CLOSED":
+      return "closed";
+    case "OPEN":
+      return pull.isDraft === true ? "draft" : "open";
+    default:
+      return undefined;
   }
-  return pull.draft === true ? "draft" : "open";
+}
+
+/** One page of the repository's PRs, newest update first; GraphQL errors arrive with a 200. */
+async function pullStatesPage(
+  github: WorkboardGitHubAccess,
+  token: string,
+  repo: string,
+  after: string | undefined,
+): Promise<{ pulls: unknown[]; next?: string }> {
+  const [owner, name] = repo.split("/");
+  const reply = await githubApi(github, token, "POST", "/graphql", {
+    query: PULL_STATES_QUERY,
+    variables: { owner, name, after: after ?? null },
+  });
+  const errors = isRecord(reply) && Array.isArray(reply.errors) ? reply.errors : [];
+  if (errors.length > 0) {
+    throw new Error(`GitHub GraphQL: ${JSON.stringify(errors[0]).slice(0, 300)}`);
+  }
+  const connection =
+    isRecord(reply) && isRecord(reply.data) && isRecord(reply.data.repository)
+      ? reply.data.repository.pullRequests
+      : undefined;
+  const pageInfo = isRecord(connection) ? connection.pageInfo : undefined;
+  return {
+    pulls: isRecord(connection) && Array.isArray(connection.nodes) ? connection.nodes : [],
+    ...(isRecord(pageInfo) &&
+    pageInfo.hasNextPage === true &&
+    typeof pageInfo.endCursor === "string"
+      ? { next: pageInfo.endCursor }
+      : {}),
+  };
 }
 
 /**
  * Reads the GitHub state of every published node ticket PR not yet seen
- * merged or closed, with one paged list call per repository, and records the
+ * merged or closed, with one paged GraphQL query per repository, and records the
  * changed ones. Repositories and tokens come from the host clones' origins,
  * as for the publish. A failure leaves the last known state and warns.
  */
@@ -111,22 +156,22 @@ export async function syncPullRequestStates(params: {
     const wanted = groupBy(items, (item) => item.number);
     const found = new Map<number, WorkboardPullRequestState>();
     try {
+      let after: string | undefined;
       for (let page = 1; page <= MAX_PAGES_PER_REPO && found.size < wanted.size; page += 1) {
-        const pulls = await githubApi(
-          params.github,
-          token,
-          "GET",
-          `/repos/${repo}/pulls?state=all&sort=updated&direction=desc&per_page=${PULLS_PER_PAGE}&page=${page}`,
-        );
-        const list = Array.isArray(pulls) ? pulls : [];
-        for (const pull of list) {
-          if (isRecord(pull) && typeof pull.number === "number" && wanted.has(pull.number)) {
-            found.set(pull.number, pullRequestState(pull));
+        const { pulls, next } = await pullStatesPage(params.github, token, repo, after);
+        for (const pull of pulls) {
+          if (!isRecord(pull) || typeof pull.number !== "number" || !wanted.has(pull.number)) {
+            continue;
+          }
+          const state = pullRequestState(pull);
+          if (state) {
+            found.set(pull.number, state);
           }
         }
-        if (list.length < PULLS_PER_PAGE) {
+        if (!next) {
           break;
         }
+        after = next;
       }
     } catch (error) {
       params.warn(`workboard PR state sync failed for ${repo}: ${formatErrorMessage(error)}`);

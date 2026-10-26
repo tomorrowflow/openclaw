@@ -23,7 +23,9 @@ async function publishedTicket() {
   const pullRequest = async () =>
     (await ticket.store.get(ticket.card.id))?.metadata?.automation?.target?.worktree?.handoff;
   const listCalls = () =>
-    ticket.github.requests.filter((request) => request.url.includes("/pulls?state=all"));
+    ticket.github.requests.filter((request) =>
+      String((request.body as { query?: unknown } | undefined)?.query).includes("pullRequests("),
+    );
   /** One handoff pass after the sync interval elapsed. */
   const syncPass = async () => {
     clock += PULL_REQUEST_SYNC_INTERVAL_MS;
@@ -49,7 +51,7 @@ describe("node ticket PR state sync", () => {
     const before = await ticket.store.get(ticket.card.id);
     await ticket.syncPass();
     expect(ticket.listCalls()).toHaveLength(1);
-    expect(ticket.listCalls()[0]).toMatchObject({ method: "GET", auth: "Bearer token-app" });
+    expect(ticket.listCalls()[0]).toMatchObject({ method: "POST", auth: "Bearer token-app" });
     // An unchanged state writes nothing.
     expect((await ticket.store.get(ticket.card.id))?.updatedAt).toBe(before?.updatedAt);
 
@@ -99,8 +101,10 @@ describe("node ticket PR state sync", () => {
     );
     await ticket.syncPass();
     expect(
-      ticket.listCalls().map((request) => new URL(request.url).searchParams.get("page")),
-    ).toEqual(["1", "2"]);
+      ticket
+        .listCalls()
+        .map((request) => (request.body as { variables: { after: unknown } }).variables.after),
+    ).toEqual([null, "100"]);
     expect(await ticket.pullRequest()).toMatchObject({ pullRequest: { state: "merged" } });
   });
 
@@ -110,7 +114,7 @@ describe("node ticket PR state sync", () => {
     ticket.github.failPullList.value = true;
     await ticket.syncPass();
     expect(ticket.warn).toHaveBeenLastCalledWith(
-      expect.stringContaining("workboard PR state sync failed for acme/app: GitHub GET"),
+      expect.stringContaining("workboard PR state sync failed for acme/app: GitHub GraphQL"),
     );
     expect(ticket.warn).toHaveBeenLastCalledWith(
       expect.stringContaining("API rate limit exceeded"),
