@@ -1,6 +1,7 @@
 // Workboard tests cover syncing a published node ticket PR's GitHub state onto its card.
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { workboardCardStage } from "./card-stage.js";
+import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { PULL_REQUEST_SYNC_INTERVAL_MS } from "./node-ticket-pr-state.js";
 import { finishNodeTicket, git, postVerdict, removeTempRoots } from "./node-ticket.test-support.js";
 
@@ -133,5 +134,44 @@ describe("node ticket PR state sync", () => {
     ticket.github.tokens.set("acme/app", "token-app");
     await ticket.syncPass();
     expect(await ticket.pullRequest()).toMatchObject({ pullRequest: { state: "merged" } });
+  });
+
+  it("starts a child ticket only once its parent's PR merged", async () => {
+    const ticket = await publishedTicket();
+    const child = await ticket.store.create({
+      title: "Use the parser",
+      status: "ready",
+      agentId: "dev",
+      parents: [ticket.card.id],
+      workspaceAccess: { unrestricted: true },
+      metadata: { automation: { target: ticket.repos.target } },
+    });
+    const dispatch = async () =>
+      await dispatchAndStartWorkboardCards({
+        store: ticket.store,
+        subagent: { run: vi.fn() },
+        nodeTickets: ticket.gateway,
+        options: { maxStarts: 1, now: ticket.now() },
+      });
+
+    // The parent is done, but its draft PR is not on the default branch the
+    // child's worktree starts from: the scheduled pass queues the child.
+    expect((await dispatch()).started).toEqual([]);
+    const queued = await ticket.store.get(child.id);
+    expect(queued?.status).toBe("ready");
+    expect(queued && workboardCardStage(queued)).toMatchObject({ kind: "queued" });
+    expect(queued?.metadata?.comments?.at(-1)?.body).toContain(
+      `waits for its parents' PRs to merge: ${PR}.`,
+    );
+    await ticket.handoffs.resume(ticket.warn);
+    expect((await ticket.store.get(child.id))?.status).toBe("ready");
+
+    ticket.github.closedPulls.push({ html_url: PR, sha: "0".repeat(40), merged: true });
+    await ticket.syncPass();
+    await ticket.handoffs.resume(ticket.warn);
+    expect(ticket.warn).not.toHaveBeenCalled();
+    const started = await ticket.store.get(child.id);
+    expect(started?.status).toBe("running");
+    expect(started?.metadata?.automation?.startRequest).toBeUndefined();
   });
 });

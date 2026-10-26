@@ -20,7 +20,13 @@ import {
   type ResolveAgentWorkspaceRuntime,
 } from "./dispatcher-workspace.js";
 import { buildNodeTicketMessage } from "./node-ticket-brief.js";
-import { type NodeTicketStartWait, queueNodeTicketStart } from "./node-ticket-start-queue.js";
+import {
+  nodeTicketDependencyWait,
+  type NodeTicketStartWait,
+  nodeTicketStartWaitRefusal,
+  queueMergeWaits,
+  queueNodeTicketStart,
+} from "./node-ticket-start-queue.js";
 import {
   createNodeTicketWorktree,
   nodeTicketReopen,
@@ -37,7 +43,6 @@ import {
   workboardCardConsumesOwnerSlot,
   workboardCardSlotOwner,
   withWorkboardRouteTarget,
-  workboardSlotBusyMessage,
   workboardSlotPlacement,
 } from "./store-constants.js";
 import {
@@ -252,12 +257,7 @@ function selectStartableCards(
       nodeTicketSlot && workboardSlotPlacement(nodeTicketOccupants, nodeTicketSlot, now);
     const nodeTicketFull = placement?.full;
     const claimRefusal = mode === "exact" ? workboardClaimRefusal(card, false) : undefined;
-    // Unfinished parents are the one claim refusal a node ticket may queue on:
-    // the claim accepts it once they are done.
-    const parentsRefusal =
-      nodeTicketSlot && claimRefusal && !workboardClaimRefusal(card, false, true)
-        ? claimRefusal
-        : undefined;
+    const parentsWait = nodeTicketSlot && nodeTicketDependencyWait(card, cards, now, claimRefusal);
     // A card the claim would refuse gets that reason on a full slot as on a
     // free one; only a refusal for its parents or the slot alone may queue it.
     const cardRefusal = card.metadata?.archivedAt
@@ -272,23 +272,20 @@ function selectStartableCards(
               card.status !== "todo" &&
               card.status !== "ready"
             ? `Card cannot start from ${card.status}; move it to backlog, todo, or ready first.`
-            : parentsRefusal
+            : parentsWait
               ? undefined
               : claimRefusal;
     const wait: NodeTicketStartWait | undefined =
       cardRefusal !== undefined
         ? undefined
-        : parentsRefusal
-          ? { kind: "dependencies", refusal: parentsRefusal }
-          : nodeTicketSlot && nodeTicketFull
+        : (parentsWait ??
+          (nodeTicketSlot && nodeTicketFull
             ? { kind: "slot", slot: nodeTicketSlot, full: nodeTicketFull }
-            : undefined;
+            : undefined));
     const rejection =
       cardRefusal ??
       (wait
-        ? wait.kind === "dependencies"
-          ? wait.refusal
-          : workboardSlotBusyMessage(wait.slot, wait.full)
+        ? nodeTicketStartWaitRefusal(wait)
         : !nodeTicketSlot && runningOwners.has(owner)
           ? `Owner ${owner} already has active Workboard work; complete or stop it before starting another card.`
           : undefined);
@@ -406,6 +403,8 @@ async function runWorkboardDispatch(
     directCardId ? "exact" : "scheduled",
     nodeTicketSlots,
   );
+  // An exact start queues only on request, below.
+  await queueMergeWaits(params.store, directCard ? [] : candidates, cards, nodeTicketSlots, now);
   let wait = selection.wait;
   if (selection.rejection) {
     startFailures.push(selection.rejection);

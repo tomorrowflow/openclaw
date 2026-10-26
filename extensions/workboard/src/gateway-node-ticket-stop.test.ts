@@ -182,7 +182,7 @@ describe("workboard.cards.start on a full node-ticket pool", () => {
     const stored = await store.get(child.id);
     expect(stored?.metadata?.automation?.startRequest).toBeDefined();
     expect(stored?.metadata?.comments?.map((comment) => comment.body)).toEqual([
-      "This ticket waits for its dependencies: Design the grammar. It starts when they are done and a node-ticket slot is free.",
+      "This ticket waits for its dependencies: Design the grammar. It starts when they are done, their PRs are merged, and a node-ticket slot is free.",
     ]);
   });
 
