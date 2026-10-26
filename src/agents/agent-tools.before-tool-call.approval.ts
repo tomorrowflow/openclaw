@@ -6,6 +6,7 @@
 import { addTimerTimeoutGraceMs } from "@openclaw/normalization-core/number-coercion";
 import { isGatewayRestartUnavailableError } from "../../packages/gateway-protocol/src/restart-unavailable.js";
 import { GatewayClientRequestError } from "../gateway/client.js";
+import { emitAgentEvent } from "../infra/agent-events.js";
 import { sanitizeApprovalScope } from "../infra/approval-scope.js";
 import { isEmbeddedMode } from "../infra/embedded-mode.js";
 import { getEmbeddedPluginApprovalBroker } from "../infra/embedded-plugin-approval-broker.js";
@@ -384,17 +385,36 @@ async function requestPluginToolApprovalDecision(
       // Wait for the decision, but abort early if the agent run is cancelled
       // so the user isn't blocked for the full approval timeout.
       gatewayApprovalPhase = "wait";
-      const waitResult: {
+      // Same run lifecycle facts as exec approvals: Code Mode exec/wait hold
+      // their deadline while the approval is open instead of parking the cell.
+      const emitApprovalLifecycle = (phase: "waiting-approval" | "approval-resolved") => {
+        if (params.ctx?.runId) {
+          emitAgentEvent({
+            runId: params.ctx.runId,
+            sessionKey: params.ctx.sessionKey,
+            sessionId: params.ctx.sessionId,
+            stream: "lifecycle",
+            data: { phase, approvalId: id, toolCallId: params.toolCallId },
+          });
+        }
+      };
+      emitApprovalLifecycle("waiting-approval");
+      let waitResult: {
         id?: string;
         decision?: unknown;
-      } = await callGatewayTool(
-        "plugin.approval.waitDecision",
-        // Buffer beyond the approval timeout so the gateway can clean up
-        // and respond before the client-side RPC timeout fires.
-        { timeoutMs: gatewayTimeoutMs },
-        { id },
-        { signal: params.signal },
-      );
+      };
+      try {
+        waitResult = await callGatewayTool(
+          "plugin.approval.waitDecision",
+          // Buffer beyond the approval timeout so the gateway can clean up
+          // and respond before the client-side RPC timeout fires.
+          { timeoutMs: gatewayTimeoutMs },
+          { id },
+          { signal: params.signal },
+        );
+      } finally {
+        emitApprovalLifecycle("approval-resolved");
+      }
       // Bind the verdict to the request that parked this call. A stale or
       // misrouted reply must never release a different tool gate.
       decision = waitResult?.id === id ? waitResult.decision : undefined;
