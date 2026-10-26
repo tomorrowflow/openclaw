@@ -174,7 +174,9 @@ describe("workboard card list revisions", () => {
       (await listed()).metadata.comments.map((comment: { body: string }) => comment.body);
 
     expect(await comments()).toEqual(["Proof looks thin.", HIDDEN_VERDICT_NOTICE]);
-    expect((await listed()).stage).toEqual({ kind: "awaiting_review", since: importedAt });
+    // The wait starts at the hidden verdict's arrival; only its time shows.
+    const verdictAt = (await store.get(card.id))?.metadata?.comments?.at(-1)?.createdAt;
+    expect((await listed()).stage).toEqual({ kind: "awaiting_review", since: verdictAt });
     expect((await store.get(card.id))?.metadata?.comments).toHaveLength(2);
 
     await store.update(card.id, { status: "done" });

@@ -140,9 +140,10 @@ describe("projectWorkboardOverview", () => {
         boardId: "default",
         title: "pending",
         summary: "Fix the parser crash on empty input.",
-        stage: { kind: "awaiting_review", since: NOW - 2 * HOUR },
+        // The wait starts at the verdict's arrival, not the import.
+        stage: { kind: "awaiting_review", since: NOW - HOUR },
         reason: "decide",
-        waitingSince: NOW - 2 * HOUR,
+        waitingSince: NOW - HOUR,
       },
     ]);
     expect(JSON.stringify(result)).not.toMatch(/verdict|rework: the fix/i);
@@ -186,14 +187,15 @@ describe("projectWorkboardOverview", () => {
     const result = overview([withVerdict, waiting, overdue]);
 
     expect(result.inFlight).toEqual([expect.objectContaining({ cardId: "waiting" })]);
+    // Longest wait first: the posted round waits from its verdict, after the overdue import.
     expect(result.needsYou).toEqual([
-      expect.objectContaining({
-        cardId: "posted",
-        stage: { kind: "awaiting_review", since: NOW - HOUR },
-      }),
       expect.objectContaining({
         cardId: "overdue",
         stage: { kind: "review_incomplete", since: NOW - HOUR, missing: ["verdict"] },
+      }),
+      expect.objectContaining({
+        cardId: "posted",
+        stage: { kind: "awaiting_review", since: NOW - HOUR + 1 },
       }),
     ]);
   });

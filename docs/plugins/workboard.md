@@ -380,17 +380,20 @@ never stored. The Control UI shows it as one status line under the summary on
 the card and in the card's overview tab, with the time since the card entered
 that stage:
 
-| `stage.kind`      | When                                                                                       | Fields                                                       |
-| ----------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| `queued`          | A [queued start](#queued-starts) waits for its parents or a node slot.                     | `since`                                                      |
-| `running`         | The card is `running`.                                                                     | `since`, `nodeId`, `reworkRound`, `attempt`                  |
-| `questions`       | A node ticket waits with open questions; `escalatedAt` once passed to you.                 | `since`, `escalatedAt`                                       |
-| `grilling`        | A node ticket grills you in its grill session; `round` counts handoffs.                    | `since`, `round`                                             |
-| `awaiting_review` | A node ticket's branch is imported and waits for the operator's decision.                  | `since`                                                      |
-| `published`       | A node ticket's PR is published; `pullRequestState` is its [GitHub state](#pr-state-sync). | `since`, `pullRequestUrl`, `reworkRound`, `pullRequestState` |
-| `blocked`         | The card is `blocked`.                                                                     | `since`                                                      |
-| `review`          | Any other card in `review`.                                                                | `since`                                                      |
-| `done`            | Any other card in `done`.                                                                  | `since`                                                      |
+| `stage.kind`        | When                                                                                       | Fields                                                       |
+| ------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| `queued`            | A [queued start](#queued-starts) waits for its parents or a node slot.                     | `since`                                                      |
+| `running`           | The card is `running`.                                                                     | `since`, `nodeId`, `reworkRound`, `attempt`                  |
+| `questions`         | A node ticket waits with open questions; `escalatedAt` once passed to you.                 | `since`, `escalatedAt`                                       |
+| `grilling`          | A node ticket grills you in its grill session; `round` counts handoffs.                    | `since`, `round`                                             |
+| `verifying`         | An imported round waits for the board's verifier.                                          | `since`                                                      |
+| `reviewing`         | An imported round waits for the board automation's verdict.                                | `since`                                                      |
+| `awaiting_review`   | An imported round has both and waits for the operator's decision.                          | `since`                                                      |
+| `review_incomplete` | An imported round still lacks either after 30 minutes; you may decide it.                  | `since`, `missing`                                           |
+| `published`         | A node ticket's PR is published; `pullRequestState` is its [GitHub state](#pr-state-sync). | `since`, `pullRequestUrl`, `reworkRound`, `pullRequestState` |
+| `blocked`           | The card is `blocked`.                                                                     | `since`                                                      |
+| `review`            | Any other card in `review`.                                                                | `since`                                                      |
+| `done`              | Any other card in `done`.                                                                  | `since`                                                      |
 
 The status line of a published ticket reads **PR open**, **Draft PR**,
 **PR merged**, or **PR closed** from `pullRequestState`; an open or draft PR
@@ -399,9 +402,21 @@ after a rework round names the round.
 Idle statuses (`triage`, `backlog`, `todo`, `scheduled`, `ready`) and archived
 cards have no stage. `since` comes from recorded facts: the start request, the
 handoff timestamps, the running attempt, or the newest card event that entered
-the status. A status entered before the newest 50 events has no `since`. The
-stage never reads comments, so an agent's pending verdict stays hidden: an
-imported round reads `awaiting_review` until the card moves to `done`.
+the status. A status entered before the newest 50 events has no `since`. An
+imported round's `since` is the import while it verifies, the verification's
+end while the verdict is outstanding, and the later of the two once it awaits
+your decision, so your wait starts at zero. The stage reads comments only for
+when a verdict arrived, never what it says, so an agent's pending verdict stays
+hidden.
+
+Operator reads of a node ticket also add a derived `reviewTimes`, oldest round
+first: each round's `importedAt`, its verification's `startedAt` and `endedAt`,
+and its `verdictAt`. The Control UI lists them in the card's **Activity** tab as
+how long the verification took and how long after it the verdict arrived. They
+carry times only, so blind review hides nothing they show. A publish records
+both in the round's `reviews` entry (`verdictAt`, `verification.startedAt`,
+`verification.endedAt`); rounds published before that show no verification
+time.
 
 Cards also carry compact metadata:
 

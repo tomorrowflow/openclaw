@@ -4,6 +4,7 @@ import type {
   WorkboardNodeChanges,
   WorkboardNodeDecision,
   WorkboardNodeRound,
+  WorkboardRoundReviewTimes,
 } from "./types.ts";
 
 function count(value: unknown): number | undefined {
@@ -90,5 +91,31 @@ export function normalizeNodeRounds(value: unknown): WorkboardNodeRound[] {
     return decisions.length > 0 || changes
       ? [{ round, ...(decisions.length > 0 ? { decisions } : {}), ...(changes ? { changes } : {}) }]
       : [];
+  });
+}
+
+/** The Gateway derives review times; rounds without an import time are dropped. */
+export function normalizeReviewTimes(value: unknown): WorkboardRoundReviewTimes[] {
+  return (Array.isArray(value) ? value : []).flatMap((entry): WorkboardRoundReviewTimes[] => {
+    const round = isRecord(entry) ? count(entry.round) : undefined;
+    const importedAt = isRecord(entry) ? count(entry.importedAt) : undefined;
+    if (round === undefined || importedAt === undefined) {
+      return [];
+    }
+    const verdictAt = count(entry.verdictAt);
+    const startedAt = isRecord(entry.verification)
+      ? count(entry.verification.startedAt)
+      : undefined;
+    const endedAt = isRecord(entry.verification) ? count(entry.verification.endedAt) : undefined;
+    return [
+      {
+        round,
+        importedAt,
+        ...(startedAt === undefined
+          ? {}
+          : { verification: { startedAt, ...(endedAt === undefined ? {} : { endedAt }) } }),
+        ...(verdictAt === undefined ? {} : { verdictAt }),
+      },
+    ];
   });
 }

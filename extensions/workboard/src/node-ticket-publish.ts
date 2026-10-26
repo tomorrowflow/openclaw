@@ -12,7 +12,7 @@ import {
   requireHostGit,
   STANDARDS_REVIEW_LABEL,
 } from "./node-ticket.js";
-import { currentNodeVerification, reviewVerdictOf } from "./review-readiness.js";
+import { currentNodeVerification, firstVerdictAt, reviewVerdictOf } from "./review-readiness.js";
 import type { WorkboardStore } from "./store.js";
 
 const GITHUB_API_URL = "https://api.github.com";
@@ -88,6 +88,8 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
           verification: {
             verdict: verification.verdict,
             ...(verification.model ? { model: verification.model } : {}),
+            startedAt: verification.startedAt,
+            endedAt: verification.endedAt,
           },
         }
       : {}),
@@ -107,9 +109,11 @@ function reviewVerdict(item: PublishCard): WorkboardNodeReviewVerdict {
     .filter((comment) => comment.createdAt >= item.importedAt && comment.createdAt <= decidedAt)
     .flatMap((comment) => reviewVerdictOf(comment) ?? [])
     .at(-1);
+  const verdictAt = firstVerdictAt(card, item.importedAt, decidedAt);
   return {
     round: item.rework?.round ?? 0,
     verdict: verdict ?? "missed",
+    ...(verdictAt === undefined ? {} : { verdictAt }),
     ...(item.decidedByAgent ? { decidedBy: "agent" as const } : {}),
     ...(item.sampled === undefined ? {} : { sampled: item.sampled }),
     ...(item.verification ? { verification: item.verification } : {}),

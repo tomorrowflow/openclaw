@@ -487,6 +487,7 @@ describe("node ticket draft PR", () => {
         verdict: "accept",
         importedAt: expect.any(Number),
         publishedAt: expect.any(Number),
+        verdictAt: expect.any(Number),
       },
     ]);
     const review = reviews![0]!;

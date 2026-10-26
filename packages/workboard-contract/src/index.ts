@@ -436,8 +436,15 @@ export type WorkboardNodeReviewVerdict = {
   decidedBy?: "agent";
   sampled?: boolean;
   readAt?: number;
+  /** When the board automation's first verdict comment on the round arrived. */
+  verdictAt?: number;
   /** The round's verification result, when the board ran one before the publish. */
-  verification?: { verdict: WorkboardVerificationVerdict; model?: string };
+  verification?: {
+    verdict: WorkboardVerificationVerdict;
+    model?: string;
+    startedAt?: number;
+    endedAt?: number;
+  };
   /**
    * The round ran at rung b (`WorkboardNodeWorktree.rung`), so its
    * verification was visible to whoever decided it. Absent = rung a.
@@ -851,9 +858,23 @@ export type WorkboardCardStage =
  * statuses. `rounds` copies a node ticket's round facts out of its worktree
  * record, which the Control UI never reads.
  */
+/**
+ * When a node ticket round's verification ran and the board automation's
+ * verdict arrived, oldest round first. Derived on operator reads and never
+ * stored; it carries times only, so blind review hides nothing it shows.
+ * Rounds published before the times were recorded lack the verification.
+ */
+export type WorkboardRoundReviewTimes = {
+  round: number;
+  importedAt: number;
+  verification?: { startedAt: number; endedAt?: number };
+  verdictAt?: number;
+};
+
 export type WorkboardOperatorCard = WorkboardCard & {
   stage?: WorkboardCardStage;
   rounds?: WorkboardNodeRound[];
+  reviewTimes?: WorkboardRoundReviewTimes[];
   /** A node ticket's draft PR, from its publish on; kept while rework rounds run. */
   pullRequestUrl?: string;
   /** The newest round pushed to `pullRequestUrl`'s branch; it and earlier rounds are on GitHub. */
