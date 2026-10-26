@@ -169,6 +169,8 @@ export default {
       "The transcript viewer shows each card's Claude sessions. It opens in a new tab.",
     openTranscriptViewer: "Open transcript viewer",
     officeTitle: "Office",
+    architectureTitle: "Architecture map",
+    openArchitectureMap: "Open this board's architecture map",
     openOfficeViewer: "Open in new tab",
     officeFrameTitle: "Office",
     portalPopupBlocked:

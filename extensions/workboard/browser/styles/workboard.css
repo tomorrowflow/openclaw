@@ -262,7 +262,8 @@
   width: auto;
 }
 
-.workboard-board-edit {
+.workboard-board-edit,
+.workboard-board-architecture {
   flex: 0 0 32px;
   width: 32px;
   min-width: 32px;
@@ -272,11 +273,16 @@
   border: 0;
   background: transparent;
   color: var(--muted);
+}
+
+/* The architecture button stays visible: it opens the board's map, not an edit. */
+.workboard-board-edit {
   opacity: 0;
   pointer-events: none;
 }
 
-.workboard-heading .workboard-board-edit.btn.btn--icon {
+.workboard-heading .workboard-board-edit.btn.btn--icon,
+.workboard-heading .workboard-board-architecture.btn.btn--icon {
   border: 0;
   background: transparent;
   box-shadow: none;
@@ -295,7 +301,8 @@
   }
 }
 
-.workboard-heading .workboard-board-edit.btn.btn--icon:hover {
+.workboard-heading .workboard-board-edit.btn.btn--icon:hover,
+.workboard-heading .workboard-board-architecture.btn.btn--icon:hover {
   background: transparent;
   color: var(--text);
 }
@@ -538,7 +545,8 @@
 
 .workboard-toolbar__tools > .btn > svg,
 .workboard-search-trigger > svg,
-.workboard-board-edit > svg {
+.workboard-board-edit > svg,
+.workboard-board-architecture > svg {
   width: 18px;
   height: 18px;
   flex: none;

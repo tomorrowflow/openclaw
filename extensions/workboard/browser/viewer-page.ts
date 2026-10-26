@@ -7,7 +7,8 @@ export type ViewerPageSpec = {
   order: number;
   /** Gateway method that returns `{ port }`, the viewer's loopback port or null when unset. */
   method: string;
-  createPage: (host: ControlUiHost, port: number) => ControlUiView;
+  /** Omitted for a viewer opened from elsewhere (the board header), which needs only its port. */
+  createPage?: (host: ControlUiHost, port: number) => ControlUiView;
 };
 
 /**
@@ -19,12 +20,12 @@ export function createViewerPage(host: ControlUiHost, spec: ViewerPageSpec) {
   let requested = false;
   let dispose: (() => void) | null = null;
 
-  const register = (viewerPort: number) => {
+  const register = (viewerPort: number, createPage: NonNullable<ViewerPageSpec["createPage"]>) => {
     const disposers = [
       host.ui.registerPage({
         id: spec.id,
         label: spec.label(),
-        mount: spec.createPage(host, viewerPort),
+        mount: createPage(host, viewerPort),
       }),
       host.ui.registerNavigation({
         id: spec.id,
@@ -44,12 +45,16 @@ export function createViewerPage(host: ControlUiHost, spec: ViewerPageSpec) {
 
   // Opening a portal needs operator.write, so read-only operators get no page whose only control fails.
   const sync = () => {
+    const createPage = spec.createPage;
+    if (!createPage) {
+      return;
+    }
     const visiblePort = host.connection.canWrite ? port : null;
     if ((visiblePort === null) === (dispose === null)) {
       return;
     }
     dispose?.();
-    dispose = visiblePort === null ? null : register(visiblePort);
+    dispose = visiblePort === null ? null : register(visiblePort, createPage);
     host.ui.invalidate();
   };
 
@@ -63,8 +68,12 @@ export function createViewerPage(host: ControlUiHost, spec: ViewerPageSpec) {
         if (host.signal.aborted) {
           return;
         }
-        port = result.port;
-        sync();
+        port = typeof result.port === "number" ? result.port : null;
+        if (spec.createPage) {
+          sync();
+        } else {
+          host.ui.invalidate();
+        }
       },
       // The next host change asks again.
       () => {

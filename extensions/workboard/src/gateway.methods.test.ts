@@ -61,6 +61,7 @@ describe("workboard gateway method registry", () => {
       "workboard.overview",
       "workboard.transcriptViewer",
       "workboard.officeViewer",
+      "workboard.architectureViewer",
       "workboard.cards.runs",
       "workboard.cards.specify",
       "workboard.cards.decompose",
@@ -95,6 +96,7 @@ describe("workboard gateway method registry", () => {
           "overview",
           "transcriptViewer",
           "officeViewer",
+          "architectureViewer",
           "cards.attachments.get",
           "cards.screenshots.list",
           "cards.changes.diff",
@@ -204,6 +206,18 @@ describe("workboard gateway method registry", () => {
     registerWorkboardGatewayMethods({ api, store: createWorkboardSqliteTestStore() });
 
     const respond = await invoke("workboard.officeViewer", {});
+    expect(respond.mock.calls[0]).toEqual([true, { port: served }]);
+  });
+
+  it.each([
+    [undefined, null],
+    [{ architectureViewer: { port: 17318 } }, 17318],
+    [{ officeViewer: { port: 17320 } }, null],
+  ])("serves the configured architecture viewer port (%j)", async (config, served) => {
+    const { api, invoke } = createGatewayMethodCapture(config);
+    registerWorkboardGatewayMethods({ api, store: createWorkboardSqliteTestStore() });
+
+    const respond = await invoke("workboard.architectureViewer", {});
     expect(respond.mock.calls[0]).toEqual([true, { port: served }]);
   });
 });

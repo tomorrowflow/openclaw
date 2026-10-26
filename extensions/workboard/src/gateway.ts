@@ -239,12 +239,13 @@ export function registerWorkboardGatewayMethods(params: {
         : input;
   };
   const dispatchCards = createWorkboardDispatchHandler({ api, store });
-  const viewerPort = (key: "transcriptViewer" | "officeViewer") => {
+  const viewerPort = (key: "transcriptViewer" | "officeViewer" | "architectureViewer") => {
     const viewer = api.pluginConfig?.[key];
     return isRecord(viewer) && typeof viewer.port === "number" ? viewer.port : null;
   };
   const transcriptViewerPort = viewerPort("transcriptViewer");
   const officeViewerPort = viewerPort("officeViewer");
+  const architectureViewerPort = viewerPort("architectureViewer");
 
   register("workboard.cards.list", READ_SCOPE, async ({ params: input }) => {
     const { sessionKey } = cardsListFilterSchema.parse(input);
@@ -497,6 +498,7 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.overview", READ_SCOPE, ({ params: input }) => store.overview(input.boardId));
   register("workboard.transcriptViewer", READ_SCOPE, () => ({ port: transcriptViewerPort }));
   register("workboard.officeViewer", READ_SCOPE, () => ({ port: officeViewerPort }));
+  register("workboard.architectureViewer", READ_SCOPE, () => ({ port: architectureViewerPort }));
   register("workboard.cards.runs", READ_SCOPE, async ({ params: input }) => {
     const result = await store.runs(readId(input));
     return { ...result, card: redactOperatorCard(result.card) };

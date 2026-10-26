@@ -22,7 +22,12 @@ afterEach(() => {
 });
 
 export function mountPage(
-  params: { boardId?: string; connected?: boolean; presented?: boolean } = {},
+  params: {
+    boardId?: string;
+    connected?: boolean;
+    presented?: boolean;
+    architectureViewerPort?: number | null;
+  } = {},
 ) {
   const fixture = workboardTestHost();
   const hostListeners = fixture.listeners.size;
@@ -74,6 +79,7 @@ export function mountPage(
     workboard,
     registerBoardNavigation,
     () => null,
+    () => params.architectureViewerPort ?? null,
   )(container, context);
   cleanup.push(() => {
     mounted?.dispose?.();

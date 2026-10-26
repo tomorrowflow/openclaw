@@ -4,12 +4,9 @@ import type { ControlUiView } from "openclaw/plugin-sdk/control-ui";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { createSignal, Show } from "solid-js";
 import { AgentPicker } from "../../components/host-components.tsx";
-import { icons } from "../../components/icons.tsx";
-import { WorkboardBoardGlyph } from "../../components/workboard-board-glyph.tsx";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
 import { workboardCardBoardId } from "../../lib/workboard/board-filter.ts";
-import { workboardBoardName } from "../../lib/workboard/board-presentation.ts";
 import type { WorkboardCapability } from "../../lib/workboard/capability.ts";
 import { isActiveWorkboardCard, workboardCardSessionKey } from "../../lib/workboard/card-state.ts";
 import {
@@ -46,6 +43,7 @@ import {
   BoardModal,
   type BoardDraft,
 } from "./view-board-modal.tsx";
+import { BoardTitle } from "./view-board-title.tsx";
 import { createCardChanges, type CardChanges } from "./view-card-changes.tsx";
 import { getVisibleDetailCard, openCardDetails } from "./view-card-details.tsx";
 import { createCardGrilling, type CardGrilling } from "./view-card-grilling.tsx";
@@ -83,6 +81,7 @@ export function createWorkboardPage(
   workboard: WorkboardCapability,
   registerBoardNavigation: (board: WorkboardBoardMetadata) => void,
   transcriptViewerPort: () => number | null,
+  architectureViewerPort: () => number | null,
 ): ControlUiView {
   return (container, initialContext) => {
     const host = initialContext.host;
@@ -439,37 +438,25 @@ export function createWorkboardPage(
       const board = () => presentation()?.selectedBoard;
       return (
         <div class="workboard-heading__identity">
-          <div class="page-title workboard-page-title">
-            <Show when={board()}>
-              {(selected) => (
-                <WorkboardBoardGlyph board={selected()} class="workboard-board-glyph--header" />
-              )}
-            </Show>
-            <span>{board() ? workboardBoardName(board()!) : "Workboard"}</span>
-            <Show when={board() && presentation()?.workboardProps.canWrite}>
-              <button
-                class="btn btn--icon workboard-board-edit"
-                type="button"
-                aria-label={t("workboard.editBoard")}
-                title={t("workboard.editBoard")}
-                onClick={() => {
-                  const selected = board();
-                  if (!selected) {
-                    return;
-                  }
-                  boardDraft = createBoardDraft({
-                    ...selected,
-                    ...(sessionsBoard.snapshot?.board.id === selected.id
-                      ? sessionsBoard.snapshot.board
-                      : {}),
-                  });
-                  requestUpdate();
-                }}
-              >
-                {icons.penLine}
-              </button>
-            </Show>
-          </div>
+          <BoardTitle
+            board={board()}
+            canWrite={presentation()?.workboardProps.canWrite}
+            client={presentation()?.workboardProps.client}
+            architectureViewerPort={architectureViewerPort()}
+            onEdit={(selected) => {
+              boardDraft = createBoardDraft({
+                ...selected,
+                ...(sessionsBoard.snapshot?.board.id === selected.id
+                  ? sessionsBoard.snapshot.board
+                  : {}),
+              });
+              requestUpdate();
+            }}
+            onError={(message) => {
+              state.error = message;
+              requestUpdate();
+            }}
+          />
           <Show when={board()?.automationJobId}>
             {(jobId) => (
               <BoardAutomationHeading
