@@ -3,6 +3,7 @@ import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { withinTest } from "../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { PreparedModelRuntimePublicationSupersededError } from "../agents/prepared-model-runtime.errors.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import {
@@ -568,6 +569,34 @@ it.for(["config", "secrets", "secrets preparation"] as const)(
     });
   },
 );
+
+it("retries a publication the model runtime reports as superseded and recovers", async ({
+  signal,
+}) => {
+  const fleet = createFleet(["large"]);
+  let calls = 0;
+  // The real owner checks `isPublicationCurrent` itself and throws its own error.
+  mocks.refreshModels.mockImplementation(
+    async (_cfg: unknown, { isPublicationCurrent }: { isPublicationCurrent: () => boolean }) => {
+      if (++calls === 1) {
+        fleet.bumpSecretsRevision();
+      }
+      if (!isPublicationCurrent()) {
+        throw new PreparedModelRuntimePublicationSupersededError(
+          "prepared model runtime publication was superseded for /agents/large/agent",
+        );
+      }
+    },
+  );
+  await fleet.run(async (admission) => {
+    fleet.inspect(0);
+    await withinTest(admission.waitForAgentPreparation("large", fleet)!, signal);
+    expect(readAgentDatabaseAdmissionRefusal("large", fleet)).toBeUndefined();
+    expect(mocks.refreshModels).toHaveBeenCalledTimes(2);
+    expect(mocks.warn).toHaveBeenCalledWith(supersededRetryMessage, expect.anything());
+    expect(mocks.info).toHaveBeenCalledWith(recoveredMessage, expect.anything());
+  });
+});
 
 it("fails admission after four continuously superseded publications", async ({ signal }) => {
   const fleet = createFleet(["large"]);
