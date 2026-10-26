@@ -1,0 +1,9 @@
+[Unit]
+Description=Build the architecture drift reports nightly at 03:20, before the 03:30 gardener
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
