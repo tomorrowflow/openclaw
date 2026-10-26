@@ -340,7 +340,18 @@ export type WorkboardNodeHandoff =
       reviewFrom?: number;
       /** When Workboard noted that the reopened ticket waits for a node-ticket slot. */
       slotWaitNotedAt?: number;
+      /**
+       * The PR's state on GitHub: set by the publish, then by the PR state
+       * sync, which stops reading a merged or closed PR. `checkedAt` is the
+       * GitHub read that recorded `state`; a read that finds the same state
+       * writes nothing, so an open PR does not churn the card. Merged is a
+       * GitHub fact, not the card's accept verdict.
+       */
+      pullRequest?: { state: WorkboardPullRequestState; checkedAt: number };
     };
+
+/** A node ticket PR's state on GitHub; `draft` is an open draft. */
+export type WorkboardPullRequestState = "open" | "draft" | "merged" | "closed";
 
 /**
  * Review rework on a published ticket (D54): the worktree restarts at the
@@ -415,7 +426,7 @@ export type WorkboardNodeGrill = {
  * operator reworked it when the ticket later reached rework round `round + 1`.
  * `importedAt` and `publishedAt` bound the round's wait for the operator;
  * entries recorded before they existed lack them. `readAt` is when the
- * operator marked a sampled round's PR as read; Workboard never sees the merge.
+ * operator marked a sampled round's PR as read.
  */
 export type WorkboardNodeReviewVerdict = {
   round: number;
@@ -823,7 +834,14 @@ export type WorkboardCardStage =
   | { kind: "reviewing"; since: number }
   | { kind: "review_incomplete"; since: number; missing: Array<"verification" | "verdict"> }
   | { kind: "awaiting_review"; since: number }
-  | { kind: "published"; since: number; pullRequestUrl: string; reworkRound: number }
+  | {
+      kind: "published";
+      since: number;
+      pullRequestUrl: string;
+      reworkRound: number;
+      /** Absent until the publish or the PR state sync recorded it. */
+      pullRequestState?: WorkboardPullRequestState;
+    }
   | { kind: "blocked"; since?: number }
   | { kind: "review"; since?: number }
   | { kind: "done"; since?: number };

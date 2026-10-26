@@ -8,6 +8,7 @@ import type {
   WorkboardNodeRework,
   WorkboardNodeVerification,
   WorkboardNodeWorktree,
+  WorkboardPullRequestState,
   WorkboardVerificationVerdict,
 } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
@@ -87,6 +88,7 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
   }
   const reviewFrom = resolveOptionalIntegerOption(value.reviewFrom, { min: 0 });
   const slotWaitNotedAt = resolveOptionalIntegerOption(value.slotWaitNotedAt, { min: 0 });
+  const pullRequest = normalizePullRequestState(value.pullRequest);
   return {
     phase: "published",
     headCommit,
@@ -95,7 +97,22 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
     pullRequestUrl,
     ...(reviewFrom !== undefined ? { reviewFrom } : {}),
     ...(slotWaitNotedAt !== undefined ? { slotWaitNotedAt } : {}),
+    ...(pullRequest ? { pullRequest } : {}),
   };
+}
+
+function normalizePullRequestState(
+  value: unknown,
+): { state: WorkboardPullRequestState; checkedAt: number } | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const { state } = value;
+  const checkedAt = resolveOptionalIntegerOption(value.checkedAt, { min: 0 });
+  return checkedAt !== undefined &&
+    (state === "open" || state === "draft" || state === "merged" || state === "closed")
+    ? { state, checkedAt }
+    : undefined;
 }
 
 function normalizeNodeRework(value: unknown): WorkboardNodeRework | undefined {

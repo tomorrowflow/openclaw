@@ -122,6 +122,7 @@ export function workboardCardStage(
         since: handoff.publishedAt,
         pullRequestUrl: handoff.pullRequestUrl,
         reworkRound: worktree?.rework?.round ?? 0,
+        ...(handoff.pullRequest ? { pullRequestState: handoff.pullRequest.state } : {}),
       };
     case "pending":
     case undefined:

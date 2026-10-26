@@ -380,17 +380,21 @@ never stored. The Control UI shows it as one status line under the summary on
 the card and in the card's overview tab, with the time since the card entered
 that stage:
 
-| `stage.kind`      | When                                                                       | Fields                                      |
-| ----------------- | -------------------------------------------------------------------------- | ------------------------------------------- |
-| `queued`          | A [queued start](#queued-starts) waits for its parents or a node slot.     | `since`                                     |
-| `running`         | The card is `running`.                                                     | `since`, `nodeId`, `reworkRound`, `attempt` |
-| `questions`       | A node ticket waits with open questions; `escalatedAt` once passed to you. | `since`, `escalatedAt`                      |
-| `grilling`        | A node ticket grills you in its grill session; `round` counts handoffs.    | `since`, `round`                            |
-| `awaiting_review` | A node ticket's branch is imported and waits for the operator's decision.  | `since`                                     |
-| `published`       | A node ticket's draft PR is open.                                          | `since`, `pullRequestUrl`, `reworkRound`    |
-| `blocked`         | The card is `blocked`.                                                     | `since`                                     |
-| `review`          | Any other card in `review`.                                                | `since`                                     |
-| `done`            | Any other card in `done`.                                                  | `since`                                     |
+| `stage.kind`      | When                                                                                       | Fields                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| `queued`          | A [queued start](#queued-starts) waits for its parents or a node slot.                     | `since`                                                      |
+| `running`         | The card is `running`.                                                                     | `since`, `nodeId`, `reworkRound`, `attempt`                  |
+| `questions`       | A node ticket waits with open questions; `escalatedAt` once passed to you.                 | `since`, `escalatedAt`                                       |
+| `grilling`        | A node ticket grills you in its grill session; `round` counts handoffs.                    | `since`, `round`                                             |
+| `awaiting_review` | A node ticket's branch is imported and waits for the operator's decision.                  | `since`                                                      |
+| `published`       | A node ticket's PR is published; `pullRequestState` is its [GitHub state](#pr-state-sync). | `since`, `pullRequestUrl`, `reworkRound`, `pullRequestState` |
+| `blocked`         | The card is `blocked`.                                                                     | `since`                                                      |
+| `review`          | Any other card in `review`.                                                                | `since`                                                      |
+| `done`            | Any other card in `done`.                                                                  | `since`                                                      |
+
+The status line of a published ticket reads **PR open**, **Draft PR**,
+**PR merged**, or **PR closed** from `pullRequestState`; an open or draft PR
+after a rework round names the round.
 
 Idle statuses (`triage`, `backlog`, `todo`, `scheduled`, `ready`) and archived
 cards have no stage. `since` comes from recorded facts: the start request, the
@@ -1129,7 +1133,25 @@ model, so a verdict always comes from the configured one:
    `todo` first; a published or questions card then resumes on its own.
 
 Nodes and ticket sessions never hold the GitHub token; only the Gateway's
-publish step reads it.
+publish step and the PR state sync read it.
+
+<a id="pr-state-sync" />
+
+**PR state:** the published handoff records its PR's GitHub state as
+`pullRequest: {state, checkedAt}`, where `state` is `open`, `draft`, `merged`,
+or `closed`. The publish sets it (`merged` when it found the merged PR that
+holds the commit). Every 10 minutes the handoff pass then reads each
+repository's PRs with one list call, paging back by update time until it has
+found every published PR not yet seen merged or closed (at most 10 pages of
+100). It records only a changed state, so `checkedAt` is the read that saw the
+current state, and a PR seen merged or closed is never read again. The first
+read comes 10 minutes after the Gateway starts. The repository and token come
+from the host clone's origin, as for the publish. A missing token, a GitHub
+error such as a rate limit, or a network failure keeps the last known state and
+logs a warning; the next read catches up. A merge is a GitHub fact, not the
+card's verdict: the round's `reviews` entry is unchanged. Archived cards and
+rework rounds in progress are not read; the next publish records the state
+again.
 
 #### Trust KPIs
 
@@ -1511,9 +1533,9 @@ from the [trust KPIs](#trust-kpis), which count as `workboard.cards.trust`
 does. Rows and the status counts leave out archived cards and cards on archived
 boards, and an agent's pending verdict never shows. Whether you agreed with a
 shadow verdict shows in the trust KPIs once a later rework round does or does
-not follow. Workboard does not see a PR merge, so a sampled PR stays in
-**Needs you** until you press **Mark read** on its row, or for 7 days after its
-publish. **Mark read** calls `workboard.cards.sampleRead {id}`
+not follow. A sampled PR stays in **Needs you** until you press **Mark read**
+on its row, the [PR state sync](#pr-state-sync) sees it merged or closed, or
+for 7 days after its publish. **Mark read** calls `workboard.cards.sampleRead {id}`
 (`operator.write`), which records `readAt` on the round's entry in `reviews`;
 the first read of a round stands, and a rework round's next publish waits for
 its own read. The method refuses a card whose latest published round is not an

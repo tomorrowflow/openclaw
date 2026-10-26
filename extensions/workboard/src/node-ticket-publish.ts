@@ -22,7 +22,8 @@ const GITHUB_API_MAX_BYTES = 1024 * 1024;
 const REWORK_COMMENT_MAX_CHARS = 1500;
 const REWORK_COMMENT_MAX_ENTRIES = 10;
 const GITHUB_ISSUE_URL_PATTERN = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)\/?$/;
-const GITHUB_PULL_URL_PATTERN = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/;
+export const GITHUB_PULL_URL_PATTERN =
+  /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/;
 const GITHUB_ORIGIN_PATTERN =
   /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/;
 
@@ -159,7 +160,7 @@ function pullRequestBody(item: PublishCard): string {
     .join("\n\n");
 }
 
-async function githubApi(
+export async function githubApi(
   access: WorkboardGitHubAccess,
   token: string,
   method: "GET" | "POST" | "PATCH",
@@ -243,7 +244,7 @@ async function markReadyForReview(
 }
 
 /** The host clone's GitHub repository and the operator's token for it. */
-async function githubRepo(
+export async function githubRepo(
   access: WorkboardGitHubAccess,
   hostRepoPath: string,
 ): Promise<{ repo: string; token: string }> {
@@ -525,6 +526,10 @@ export async function publishNodeTicket(params: {
   }
   const pullRequestUrl = pullRequest.url;
   const publishedAt = params.now();
+  const { reused } = pullRequest;
+  // An agent's accept opens the PR ready, or marks a reused draft ready below;
+  // if that mark fails, the PR state sync records the draft.
+  const draft = item.sampled === undefined && (!reused || reused.draftId !== undefined);
   await store.setNodeHandoff(
     card.id,
     {
@@ -535,6 +540,10 @@ export async function publishNodeTicket(params: {
         importedAt: item.importedAt,
         publishedAt,
         pullRequestUrl,
+        pullRequest: {
+          state: pullRequest.merged ? "merged" : draft ? "draft" : "open",
+          checkedAt: publishedAt,
+        },
       },
       review: { ...reviewVerdict(item), importedAt: item.importedAt, publishedAt },
     },
@@ -552,7 +561,6 @@ export async function publishNodeTicket(params: {
   );
   // Posting after the published record keeps it to one comment per round: a
   // published handoff is never a publish candidate again.
-  const { reused } = pullRequest;
   // An agent's accept after its own rework reuses the draft that round opened.
   // Marking it ready after the published record keeps a GitHub failure from
   // blocking the card, whose operator retry would replace the agent's decision.

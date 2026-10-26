@@ -2,6 +2,7 @@ import type {
   WorkboardCard,
   WorkboardNodeVerification,
   WorkboardNodeWorktree,
+  WorkboardPullRequestState,
 } from "@openclaw/workboard-contract";
 import { type WorkboardNodeRoundFacts, withNodeRound } from "./node-ticket-rounds.js";
 import { assertCanMutateClaimedCard } from "./store-card-helpers.js";
@@ -18,6 +19,56 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
     scope?: WorkboardMutationScope,
   ): Promise<WorkboardCard | undefined> {
     return await this.updateNodeWorktree(id, input, scope, withNodeHandoff);
+  }
+
+  /**
+   * Records the GitHub state of the published handoff's PR. Writes only a
+   * changed state of the same PR on the same worktree, so a sync that finds
+   * nothing new leaves the card's `updatedAt` alone.
+   */
+  async recordPullRequestState(
+    id: string,
+    input: {
+      worktreePath: string;
+      pullRequestUrl: string;
+      state: WorkboardPullRequestState;
+      checkedAt: number;
+    },
+  ): Promise<WorkboardCard | undefined> {
+    return await this.enqueueMutation(async () => {
+      const result = await this.updateLatestCard(
+        id,
+        (card) => {
+          const target = card.metadata?.automation?.target;
+          const worktree = target?.worktree;
+          const handoff = worktree?.handoff;
+          if (
+            !target ||
+            worktree?.path !== input.worktreePath ||
+            handoff?.phase !== "published" ||
+            handoff.pullRequestUrl !== input.pullRequestUrl ||
+            handoff.pullRequest?.state === input.state
+          ) {
+            return undefined;
+          }
+          const pullRequest = { state: input.state, checkedAt: input.checkedAt };
+          return {
+            metadata: {
+              ...card.metadata,
+              automation: {
+                ...card.metadata?.automation,
+                target: {
+                  ...target,
+                  worktree: { ...worktree, handoff: { ...handoff, pullRequest } },
+                },
+              },
+            },
+          };
+        },
+        { allowAutomationLaunch: true },
+      );
+      return result.updated ? result.card : undefined;
+    });
   }
 
   /** Adds a report's decisions or an import's changes to the worktree's current round. */

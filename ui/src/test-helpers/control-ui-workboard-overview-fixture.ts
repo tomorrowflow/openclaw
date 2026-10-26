@@ -1,5 +1,20 @@
 import type { WorkboardOverviewResult } from "@openclaw/workboard-contract";
 
+/** A done node ticket's stage and PR once GitHub reports the PR merged. */
+export function workboardMergedPullRequestFixture(baseTime: number) {
+  const pullRequestUrl = "https://github.com/acme/app/pull/398";
+  return {
+    stage: {
+      kind: "published",
+      since: baseTime - 2 * 60 * 60 * 1000,
+      pullRequestUrl,
+      reworkRound: 0,
+      pullRequestState: "merged",
+    },
+    pullRequestUrl,
+  };
+}
+
 /** A Factory overview with every band populated, across the Product Operations board. */
 export function buildWorkboardOverviewFixture(
   boardId: string,
@@ -39,6 +54,7 @@ export function buildWorkboardOverviewFixture(
           since: baseTime - hour,
           pullRequestUrl: pr(412),
           reworkRound: 0,
+          pullRequestState: "open",
         },
         reason: "sampled",
         waitingSince: baseTime - hour,
@@ -79,6 +95,7 @@ export function buildWorkboardOverviewFixture(
           since: baseTime - hour,
           pullRequestUrl: pr(412),
           reworkRound: 0,
+          pullRequestState: "open",
         },
         shippedAt: baseTime - hour,
         pullRequestUrl: pr(412),
@@ -96,6 +113,7 @@ export function buildWorkboardOverviewFixture(
           since: baseTime - 30 * hour,
           pullRequestUrl: pr(405),
           reworkRound: 1,
+          pullRequestState: "merged",
         },
         shippedAt: baseTime - 30 * hour,
         pullRequestUrl: pr(405),

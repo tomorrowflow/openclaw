@@ -3,7 +3,10 @@ import {
   createControlUiChatHistoryMessage as chatHistoryMessage,
   createControlUiMockSessionRow as sessionRow,
 } from "./control-ui-session-fixtures.ts";
-import { buildWorkboardOverviewFixture } from "./control-ui-workboard-overview-fixture.ts";
+import {
+  buildWorkboardOverviewFixture,
+  workboardMergedPullRequestFixture,
+} from "./control-ui-workboard-overview-fixture.ts";
 import { buildWorkboardProgressResponses } from "./control-ui-workboard-progress-fixtures.ts";
 import {
   workboardPrototypeCard,
@@ -104,16 +107,19 @@ export function buildWorkboardMocks(
       "",
       stagingSessionKey,
     ),
-    card(
-      "card-done",
-      "Publish support handoff notes",
-      "done",
-      "low",
-      1,
-      ["docs"],
-      "",
-      handoffSessionKey,
-    ),
+    {
+      ...card(
+        "card-done",
+        "Publish support handoff notes",
+        "done",
+        "low",
+        1,
+        ["docs"],
+        "",
+        handoffSessionKey,
+      ),
+      ...workboardMergedPullRequestFixture(baseTime),
+    },
   ];
   const statuses = ["todo", "ready", "running", "review", "blocked", "done"];
   const summarizeBoard = (entries: readonly { status: string }[]) => ({

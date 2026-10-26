@@ -223,6 +223,29 @@ describe("workboardCardStage", () => {
       stage: { kind: "published", since: 90, pullRequestUrl: pr, reworkRound: 1 },
     },
     {
+      name: "a published ticket whose PR merged on GitHub",
+      card: card(
+        "done",
+        nodeTicket({
+          handoff: {
+            phase: "published",
+            headCommit: "b".repeat(40),
+            importedAt: 80,
+            publishedAt: 90,
+            pullRequestUrl: pr,
+            pullRequest: { state: "merged", checkedAt: 95 },
+          },
+        }),
+      ),
+      stage: {
+        kind: "published",
+        since: 90,
+        pullRequestUrl: pr,
+        reworkRound: 0,
+        pullRequestState: "merged",
+      },
+    },
+    {
       name: "a blocked published ticket",
       card: card(
         "blocked",

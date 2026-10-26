@@ -2,6 +2,7 @@ import type {
   WorkboardBoardSummary,
   WorkboardCard,
   WorkboardNodeWorktree,
+  WorkboardPullRequestState,
 } from "@openclaw/workboard-contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { redactOperatorCard } from "./card-redaction.js";
@@ -71,7 +72,11 @@ function imported(at: number): Partial<WorkboardNodeWorktree> {
   return { handoff: { phase: "imported", headCommit: "b", importedAt: at } };
 }
 
-function published(at: number, review: NonNullable<WorkboardNodeWorktree["reviews"]>[number]) {
+function published(
+  at: number,
+  review: NonNullable<WorkboardNodeWorktree["reviews"]>[number],
+  pullRequest?: { state: WorkboardPullRequestState; checkedAt: number },
+) {
   return {
     handoff: {
       phase: "published" as const,
@@ -79,6 +84,7 @@ function published(at: number, review: NonNullable<WorkboardNodeWorktree["review
       importedAt: at - HOUR,
       publishedAt: at,
       pullRequestUrl: PR,
+      ...(pullRequest ? { pullRequest } : {}),
     },
     reviews: [review],
   };
@@ -192,12 +198,16 @@ describe("projectWorkboardOverview", () => {
     ]);
   });
 
-  it("shows a sampled agent-accepted PR as waiting for a read until marked read, and an unsampled one only as shipped", () => {
+  it("shows a sampled agent-accepted PR as waiting for a read until marked read or merged or closed, and an unsampled one only as shipped", () => {
     const accept = { round: 0, verdict: "accept" as const, decidedBy: "agent" as const };
     const result = overview([
       card("sampled", {
         status: "done",
-        worktree: published(NOW - DAY, { ...accept, sampled: true }),
+        worktree: published(
+          NOW - DAY,
+          { ...accept, sampled: true },
+          { state: "open", checkedAt: NOW - DAY },
+        ),
       }),
       card("unsampled", {
         status: "done",
@@ -206,6 +216,22 @@ describe("projectWorkboardOverview", () => {
       card("read", {
         status: "done",
         worktree: published(NOW - 3 * DAY, { ...accept, sampled: true, readAt: NOW - HOUR }),
+      }),
+      card("merged", {
+        status: "done",
+        worktree: published(
+          NOW - 4 * DAY,
+          { ...accept, sampled: true },
+          { state: "merged", checkedAt: NOW - HOUR },
+        ),
+      }),
+      card("closed", {
+        status: "done",
+        worktree: published(
+          NOW - 5 * DAY,
+          { ...accept, sampled: true },
+          { state: "closed", checkedAt: NOW - HOUR },
+        ),
       }),
     ]);
 
@@ -222,6 +248,12 @@ describe("projectWorkboardOverview", () => {
       }),
       expect.objectContaining({ cardId: "unsampled", decidedBy: "agent", sampled: false }),
       expect.objectContaining({ cardId: "read", sampled: true }),
+      expect.objectContaining({
+        cardId: "merged",
+        sampled: true,
+        stage: expect.objectContaining({ pullRequestState: "merged" }),
+      }),
+      expect.objectContaining({ cardId: "closed", sampled: true }),
     ]);
     expect(result.shipped[0]).not.toHaveProperty("shadowVerdict");
   });
