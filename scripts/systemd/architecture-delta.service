@@ -1,0 +1,7 @@
+[Unit]
+Description=Build the architecture viewer's weekly delta for the dev agent
+
+[Service]
+Type=oneshot
+# Assumes the Gateway host checkout at ~/openclaw.
+ExecStart=%h/openclaw/scripts/architecture-delta.sh
