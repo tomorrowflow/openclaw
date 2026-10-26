@@ -5,7 +5,11 @@ import type {
 } from "@openclaw/workboard-contract";
 import { workboardCardPullRequest, workboardCardStage } from "./card-stage.js";
 import { isVerificationComment, nodeTicketTarget } from "./node-ticket.js";
-import { currentNodeVerification, reviewVerdictOf } from "./review-readiness.js";
+import {
+  currentNodeVerification,
+  nodeRoundReviewTimes,
+  reviewVerdictOf,
+} from "./review-readiness.js";
 import type { WorkboardDispatchResult } from "./store-inputs.js";
 
 export const HIDDEN_VERDICT_NOTICE = "Verdict posted. It stays hidden until you decide this round.";
@@ -45,6 +49,7 @@ export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
   const stage = workboardCardStage(card);
   const worktree = nodeTicketTarget(card)?.worktree;
   const rounds = worktree?.rounds;
+  const reviewTimes = worktree ? nodeRoundReviewTimes(card, worktree) : [];
   const grill = worktree?.grill;
   const pullRequest = workboardCardPullRequest(card);
   const redacted = hidePendingVerdicts(redactClaimToken(card), card);
@@ -52,6 +57,7 @@ export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
     ...redacted,
     ...(stage ? { stage } : {}),
     ...(rounds ? { rounds } : {}),
+    ...(reviewTimes.length ? { reviewTimes } : {}),
     ...(grill
       ? {
           grill: {

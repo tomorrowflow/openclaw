@@ -5,7 +5,7 @@ import {
   normalizeMetadata,
   normalizeNodeClaudeTarget,
 } from "./metadata-normalization.ts";
-import { normalizeNodeRounds } from "./node-rounds-normalization.ts";
+import { normalizeNodeRounds, normalizeReviewTimes } from "./node-rounds-normalization.ts";
 import {
   isValidWorkboardBoardId,
   normalizeWorkboardSessionsBoardSpec,
@@ -193,6 +193,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
   const metadata = normalizeMetadata(value.metadata);
   const stage = normalizeStage(value.stage);
   const rounds = normalizeNodeRounds(value.rounds);
+  const reviewTimes = normalizeReviewTimes(value.reviewTimes);
   const grill = normalizeGrill(value.grill);
   return {
     id,
@@ -217,6 +218,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
     ...(metadata ? { metadata } : {}),
     ...(stage ? { stage } : {}),
     ...(rounds.length > 0 ? { rounds } : {}),
+    ...(reviewTimes.length > 0 ? { reviewTimes } : {}),
     ...(grill ? { grill } : {}),
     ...(typeof value.pullRequestUrl === "string" && value.pullRequestUrl.startsWith("https://")
       ? { pullRequestUrl: value.pullRequestUrl }

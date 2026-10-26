@@ -2,6 +2,7 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import type { WorkboardNodeVerification } from "@openclaw/workboard-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { redactOperatorCard } from "./card-redaction.js";
 import { nodeTicketTarget } from "./node-ticket.js";
 import { postVerdict, startNodeCard } from "./node-ticket.test-support.js";
 import { REVIEW_READINESS_DEADLINE_MS } from "./review-readiness.js";
@@ -44,12 +45,12 @@ async function importedTicket(params: { verify?: boolean } = {}) {
     token: claim.token,
     status: "review",
   });
-  const settleVerification = async (verdict: "pass" | "fail" = "pass") => {
+  const settleVerification = async (verdict: "pass" | "fail" = "pass", startedAt = Date.now()) => {
     const verification: WorkboardNodeVerification = {
       phase: "done",
       round: 0,
       headCommit: HEAD,
-      startedAt: Date.now(),
+      startedAt,
       endedAt: Date.now(),
       verdict,
       summary: "checked",
@@ -107,5 +108,33 @@ describe("imported round readiness", () => {
 
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + REVIEW_READINESS_DEADLINE_MS });
     await expect(store.move(card.id, "done", undefined)).resolves.toMatchObject({ status: "done" });
+  });
+
+  it("starts the operator's wait when the later of the verification and the verdict arrives", async () => {
+    const importedAt = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"], now: importedAt });
+    const { store, card, settleVerification } = await importedTicket({ verify: true });
+    const operatorView = async () =>
+      redactOperatorCard(expectDefined(await store.get(card.id), "card"));
+
+    vi.setSystemTime(importedAt + 6 * 60_000);
+    await settleVerification("pass", importedAt + 60_000);
+    expect((await operatorView()).stage).toEqual({
+      kind: "reviewing",
+      since: importedAt + 6 * 60_000,
+    });
+
+    vi.setSystemTime(importedAt + 8 * 60_000);
+    await postVerdict(store, card.id);
+    const ready = await operatorView();
+    expect(ready.stage).toEqual({ kind: "awaiting_review", since: importedAt + 8 * 60_000 });
+    expect(ready.reviewTimes).toEqual([
+      {
+        round: 0,
+        importedAt,
+        verification: { startedAt: importedAt + 60_000, endedAt: importedAt + 6 * 60_000 },
+        verdictAt: importedAt + 8 * 60_000,
+      },
+    ]);
   });
 });

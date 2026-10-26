@@ -13,6 +13,7 @@ export {
   type WorkboardNodeChanges,
   type WorkboardNodeDecision,
   type WorkboardNodeRound,
+  type WorkboardRoundReviewTimes,
   type WorkboardPriority,
   type WorkboardStatus,
   type WorkboardTemplateId,

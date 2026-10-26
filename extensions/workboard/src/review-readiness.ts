@@ -4,6 +4,7 @@ import type {
   WorkboardNodeHandoff,
   WorkboardNodeVerification,
   WorkboardNodeWorktree,
+  WorkboardRoundReviewTimes,
 } from "@openclaw/workboard-contract";
 
 // Not in node-ticket.ts: card-stage.ts reads this, and importing node-ticket.ts
@@ -21,6 +22,20 @@ export function reviewVerdictOf(comment: WorkboardComment): "accept" | "rework" 
     ? REVIEW_VERDICT_PATTERN.exec(comment.body.trim())?.[2]?.toLowerCase()
     : undefined;
   return match === "accept" || match === "rework" ? match : undefined;
+}
+
+/** When the first verdict comment between `from` and `to` arrived. */
+export function firstVerdictAt(
+  card: WorkboardCard,
+  from: number,
+  to = Number.POSITIVE_INFINITY,
+): number | undefined {
+  return card.metadata?.comments?.find(
+    (comment) =>
+      comment.createdAt >= from &&
+      comment.createdAt <= to &&
+      reviewVerdictOf(comment) !== undefined,
+  )?.createdAt;
 }
 
 export type ImportedHandoff = Extract<WorkboardNodeHandoff, { phase: "imported" }>;
@@ -47,11 +62,16 @@ export function currentNodeVerification(
  */
 export const REVIEW_READINESS_DEADLINE_MS = 30 * 60_000;
 
+/**
+ * `since` is when the round entered the state: the import while it verifies,
+ * the verification's end while the verdict is outstanding, and once ready the
+ * later of the two, so the operator's wait starts at zero.
+ */
 export type NodeReviewReadiness =
-  | { kind: "verifying" }
-  | { kind: "reviewing" }
-  | { kind: "ready" }
-  | { kind: "incomplete"; missing: ReadonlyArray<"verification" | "verdict"> };
+  | { kind: "verifying"; since: number }
+  | { kind: "reviewing"; since: number }
+  | { kind: "ready"; since: number }
+  | { kind: "incomplete"; since: number; missing: ReadonlyArray<"verification" | "verdict"> };
 
 /**
  * Whether an imported round has what its decision needs: the verification
@@ -66,22 +86,77 @@ export function nodeReviewReadiness(
   handoff: ImportedHandoff,
   now: number,
 ): NodeReviewReadiness {
-  const noVerification =
-    handoff.verify === true && currentNodeVerification(worktree, handoff)?.phase !== "done";
-  const noVerdict = !(card.metadata?.comments ?? []).some(
-    (comment) => comment.createdAt >= handoff.importedAt && reviewVerdictOf(comment) !== undefined,
-  );
+  const verification =
+    handoff.verify === true ? currentNodeVerification(worktree, handoff) : undefined;
+  const verifiedAt = verification?.phase === "done" ? verification.endedAt : undefined;
+  const noVerification = handoff.verify === true && verifiedAt === undefined;
+  const verdictAt = firstVerdictAt(card, handoff.importedAt);
+  const noVerdict = verdictAt === undefined;
   if (!noVerification && !noVerdict) {
-    return { kind: "ready" };
+    return { kind: "ready", since: Math.max(handoff.importedAt, verifiedAt ?? 0, verdictAt) };
   }
   if (now - handoff.importedAt >= REVIEW_READINESS_DEADLINE_MS) {
     return {
       kind: "incomplete",
+      since: handoff.importedAt,
       missing: [
         ...(noVerification ? ["verification" as const] : []),
         ...(noVerdict ? ["verdict" as const] : []),
       ],
     };
   }
-  return { kind: noVerification ? "verifying" : "reviewing" };
+  return noVerification
+    ? { kind: "verifying", since: handoff.importedAt }
+    : { kind: "reviewing", since: verifiedAt ?? handoff.importedAt };
+}
+
+/**
+ * Each round's verification span and verdict time, oldest first: published
+ * rounds from their `reviews` entry, the imported round from the live record.
+ * An entry published before the times were recorded falls back to the
+ * comments for its verdict and has no verification span.
+ */
+export function nodeRoundReviewTimes(
+  card: WorkboardCard,
+  worktree: WorkboardNodeWorktree,
+): WorkboardRoundReviewTimes[] {
+  const published = (worktree.reviews ?? []).flatMap((entry): WorkboardRoundReviewTimes[] => {
+    if (entry.importedAt === undefined) {
+      return [];
+    }
+    const { startedAt, endedAt } = entry.verification ?? {};
+    const verdictAt = entry.verdictAt ?? firstVerdictAt(card, entry.importedAt, entry.publishedAt);
+    return [
+      {
+        round: entry.round,
+        importedAt: entry.importedAt,
+        ...(startedAt === undefined
+          ? {}
+          : { verification: { startedAt, ...(endedAt === undefined ? {} : { endedAt }) } }),
+        ...(verdictAt === undefined ? {} : { verdictAt }),
+      },
+    ];
+  });
+  const handoff = worktree.handoff;
+  if (handoff?.phase !== "imported") {
+    return published;
+  }
+  const verification = currentNodeVerification(worktree, handoff);
+  const verdictAt = firstVerdictAt(card, handoff.importedAt);
+  return [
+    ...published,
+    {
+      round: worktree.rework?.round ?? 0,
+      importedAt: handoff.importedAt,
+      ...(verification
+        ? {
+            verification: {
+              startedAt: verification.startedAt,
+              ...(verification.phase === "done" ? { endedAt: verification.endedAt } : {}),
+            },
+          }
+        : {}),
+      ...(verdictAt === undefined ? {} : { verdictAt }),
+    },
+  ];
 }

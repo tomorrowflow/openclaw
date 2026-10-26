@@ -173,7 +173,8 @@ describe("workboardCardStage", () => {
         }),
         comments: [verdict(83)],
       }),
-      stage: { kind: "awaiting_review", since: 80 },
+      // The operator's wait starts when the later of the two arrives.
+      stage: { kind: "awaiting_review", since: 83 },
     },
     {
       name: "a round that never got its verification or verdict within the deadline",
