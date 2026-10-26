@@ -165,39 +165,44 @@ describe("workboard.cards.start on a full node-ticket pool", () => {
     expect((await store.get(card.id))?.metadata?.automation?.startRequest).toBeUndefined();
   });
 
-  it("refuses a card the claim would refuse with its own reason instead of queueing it", async () => {
+  it("queues a card whose parents are not done on a free slot, naming them", async () => {
     const { store, invoke } = await setup();
+    store.nodeTicketConcurrency = 4;
     const parent = await store.create({ title: "Design the grammar", status: "todo" });
     const child = await store.create({
       title: "Fix the grammar",
-      status: "todo",
+      status: "backlog",
       parents: [parent.id],
       metadata: { automation: { target: NODE_TARGET } },
     });
+
+    const respond = await invoke("workboard.cards.start", { id: child.id });
+
+    expect(respond.mock.calls[0]?.[1]).toMatchObject({ queued: true, card: { status: "todo" } });
+    const stored = await store.get(child.id);
+    expect(stored?.metadata?.automation?.startRequest).toBeDefined();
+    expect(stored?.metadata?.comments?.map((comment) => comment.body)).toEqual([
+      "This ticket waits for its dependencies: Design the grammar. It starts when they are done and a node-ticket slot is free.",
+    ]);
+  });
+
+  it("refuses a card the claim would refuse with its own reason instead of queueing it", async () => {
+    const { store, invoke } = await setup();
     const later = await store.create({
       title: "Fix it tomorrow",
       status: "todo",
       scheduledAt: Date.now() + 60 * 60 * 1000,
       metadata: { automation: { target: NODE_TARGET } },
     });
-    const start = async (id: string) => {
-      const respond = await invoke("workboard.cards.start", { id });
-      const [ok, , error] = respond.mock.calls[0] ?? [];
-      expect(ok).toBe(false);
-      return (error as { message?: string } | undefined)?.message;
-    };
 
-    expect(await start(child.id)).toBe("card dependencies are not done.");
+    const respond = await invoke("workboard.cards.start", { id: later.id });
 
-    expect(await start(later.id)).toMatch(/scheduled/);
-    for (const id of [child.id, later.id]) {
-      const stored = await store.get(id);
-      expect(stored?.metadata?.automation?.startRequest).toBeUndefined();
-      expect(stored?.metadata?.comments ?? []).toEqual([]);
-    }
-    // A free slot refuses the same way.
-    store.nodeTicketConcurrency = 4;
-    expect(await start(child.id)).toBe("card dependencies are not done.");
+    const [ok, , error] = respond.mock.calls[0] ?? [];
+    expect(ok).toBe(false);
+    expect((error as { message?: string } | undefined)?.message).toMatch(/scheduled/);
+    const stored = await store.get(later.id);
+    expect(stored?.metadata?.automation?.startRequest).toBeUndefined();
+    expect(stored?.metadata?.comments ?? []).toEqual([]);
   });
 
   it("never lets an update or a create set the request", async () => {

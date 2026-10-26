@@ -630,10 +630,10 @@ export type WorkboardLaunchState =
     });
 
 /**
- * The operator's Start of a node ticket whose slot was full. Only that start
- * and a reviewed rework or answer reopen record it, and the card loses it once
- * it leaves todo or ready, is claimed, or is archived; queued tickets start
- * oldest first as slots free.
+ * The operator's Start of a node ticket whose parents were not done or whose
+ * slot was full. Only that start and a reviewed rework or answer reopen record
+ * it, and the card loses it once it leaves todo or ready, is claimed, or is
+ * archived; queued tickets start oldest first as parents finish and slots free.
  */
 export type WorkboardStartRequest = {
   requestedAt: number;

@@ -382,7 +382,7 @@ that stage:
 
 | `stage.kind`      | When                                                                       | Fields                                      |
 | ----------------- | -------------------------------------------------------------------------- | ------------------------------------------- |
-| `queued`          | A [queued start](#queued-starts) waits for a node ticket slot.             | `since`                                     |
+| `queued`          | A [queued start](#queued-starts) waits for its parents or a node slot.     | `since`                                     |
 | `running`         | The card is `running`.                                                     | `since`, `nodeId`, `reworkRound`, `attempt` |
 | `questions`       | A node ticket waits with open questions; `escalatedAt` once passed to you. | `since`, `escalatedAt`                      |
 | `grilling`        | A node ticket grills you in its grill session; `round` counts handoffs.    | `since`, `round`                            |
@@ -1239,26 +1239,27 @@ beyond the pool until a slot frees. A route can set its own lower cap; see
 #### Queued starts
 
 When the operator starts a node ticket (**Start** in the Control UI, or
-`workboard.cards.start`) while the pool or the ticket's route is full, the
-card is queued instead of refused. It waits in `todo` (or `ready`); a card
-started from `backlog` moves to `todo` as it queues. One comment names the
-route or node it waits for, the card shows a **Queued** chip, its start
-controls are disabled, and `workboard.cards.start` returns
-`{ queued: true, card }`. A reviewed rework or answer reopen that finds no free
-slot joins the same queue. A published or questions ticket without a review
-comment or answer is not queued; it goes back with the next step as described
-in the rework step above. Only a full slot queues a start: a card that could
-not start on a free slot either, such as one whose parents are not done, one
-scheduled for later, or one out of retries, is refused with that reason and
-not queued.
+`workboard.cards.start`) while its parents are not done, or while the pool or
+the ticket's route is full, the card is queued instead of refused. It waits in
+`todo` (or `ready`); a card started from `backlog` moves to `todo` as it
+queues. One comment names the unfinished parents, or the route or node, it
+waits for, the card shows a **Queued** chip, its start controls are disabled,
+and `workboard.cards.start` returns `{ queued: true, card }`. A reviewed
+rework or answer reopen that finds no free slot joins the same queue. A
+published or questions ticket without a review comment or answer is not
+queued; it goes back with the next step as described in the rework step above.
+Only unfinished parents and a full slot queue a start: a blocked card, one
+scheduled for later, or one out of retries is refused with that reason and not
+queued. Queued is not the `scheduled` status, which holds a card until its
+scheduled time.
 
 Whenever a card changes, such as a running ticket reaching `review`, Workboard
-starts queued tickets oldest request first. A ticket whose own route is still
-full keeps its place without holding back a later ticket on a route with a
-free slot, so a full Mac route never blocks the Linux pool. A card edited
-while its queued start reads it stays queued and is tried again on the next
-change. A queued start refused for another reason blocks the card with that
-reason.
+starts queued tickets oldest request first. A ticket whose parents are not all
+`done`, or whose own route is still full, keeps its place without holding back
+a later ticket on a route with a free slot, so a full Mac route never blocks
+the Linux pool. A card edited while its queued start reads it stays queued and
+is tried again on the next change. A queued start refused for another reason
+blocks the card with that reason.
 
 The request is stored as `metadata.automation.startRequest`. Only the
 operator's start and a reviewed reopen set it; card updates, agent tools, and
