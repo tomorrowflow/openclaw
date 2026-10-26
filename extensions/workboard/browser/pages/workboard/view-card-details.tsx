@@ -579,7 +579,7 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                 tabindex="0"
                 hidden={activeTab() !== "activity"}
               >
-                <NodeRounds rounds={card().rounds} />
+                <NodeRounds rounds={card().rounds} times={card().reviewTimes} />
                 <section class="workboard-detail__section workboard-detail__activity">
                   {events().length ? (
                     <>

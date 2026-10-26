@@ -249,7 +249,12 @@ describe("node ticket verification", () => {
       expect.objectContaining({
         round: 0,
         verdict: "missed",
-        verification: { verdict: "error", model: "openai/gpt-6-sol" },
+        verification: {
+          verdict: "error",
+          model: "openai/gpt-6-sol",
+          startedAt: expect.any(Number),
+          endedAt: expect.any(Number),
+        },
       }),
     ]);
   });

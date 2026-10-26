@@ -527,6 +527,7 @@ describe("Workboard rung b", () => {
         verdict: "accept",
         importedAt: expect.any(Number),
         publishedAt: expect.any(Number),
+        verdictAt: expect.any(Number),
         rung: "b",
       },
     ]);

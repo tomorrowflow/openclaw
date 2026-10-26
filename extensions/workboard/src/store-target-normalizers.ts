@@ -209,6 +209,7 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
       const importedAt = resolveOptionalIntegerOption(entry.importedAt, { min: 0 });
       const publishedAt = resolveOptionalIntegerOption(entry.publishedAt, { min: 0 });
       const readAt = resolveOptionalIntegerOption(entry.readAt, { min: 0 });
+      const verdictAt = resolveOptionalIntegerOption(entry.verdictAt, { min: 0 });
       const verification = isRecord(entry.verification)
         ? verificationVerdict(entry.verification.verdict)
         : undefined;
@@ -221,12 +222,14 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
           ...(entry.decidedBy === "agent" ? { decidedBy: "agent" as const } : {}),
           ...(typeof entry.sampled === "boolean" ? { sampled: entry.sampled } : {}),
           ...(readAt === undefined ? {} : { readAt }),
+          ...(verdictAt === undefined ? {} : { verdictAt }),
           ...(entry.rung === "b" ? { rung: "b" as const } : {}),
           ...(verification && isRecord(entry.verification)
             ? {
                 verification: {
                   verdict: verification,
                   ...verificationModel(entry.verification.model),
+                  ...verificationSpan(entry.verification),
                 },
               }
             : {}),
@@ -238,6 +241,17 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
 
 function verificationVerdict(value: unknown): WorkboardVerificationVerdict | undefined {
   return value === "pass" || value === "fail" || value === "error" ? value : undefined;
+}
+
+function verificationSpan(value: Record<string, unknown>): {
+  startedAt?: number;
+  endedAt?: number;
+} {
+  const startedAt = resolveOptionalIntegerOption(value.startedAt, { min: 0 });
+  const endedAt = resolveOptionalIntegerOption(value.endedAt, { min: 0 });
+  return startedAt === undefined
+    ? {}
+    : { startedAt, ...(endedAt === undefined ? {} : { endedAt }) };
 }
 
 function verificationModel(value: unknown): { model?: string } {

@@ -103,16 +103,19 @@ export function workboardCardStage(
         const readiness =
           worktree && !card.metadata?.automation?.probe
             ? nodeReviewReadiness(card, worktree, handoff, now)
-            : { kind: "ready" as const };
-        const at = handoff.importedAt;
+            : { kind: "ready" as const, since: handoff.importedAt };
         switch (readiness.kind) {
           case "verifying":
           case "reviewing":
-            return { kind: readiness.kind, since: at };
+            return { kind: readiness.kind, since: readiness.since };
           case "incomplete":
-            return { kind: "review_incomplete", since: at, missing: [...readiness.missing] };
+            return {
+              kind: "review_incomplete",
+              since: readiness.since,
+              missing: [...readiness.missing],
+            };
           case "ready":
-            return { kind: "awaiting_review", since: at };
+            return { kind: "awaiting_review", since: readiness.since };
         }
       }
       break;
