@@ -276,6 +276,29 @@ describe("Code Mode subscribed host denial", () => {
     },
   );
 
+  it("holds exec open while a plugin approval outlasts the cell timeout", async () => {
+    installBefore(() => ({ requireApproval: { title: "Confirm", description: "Review" } }));
+    vi.spyOn(gatewayTool, "callGatewayTool").mockImplementation(async (method) => {
+      if (method === "plugin.approval.request") {
+        return { id: "slow-approval", status: "accepted" };
+      }
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2_000);
+      });
+      return { id: "slow-approval", decision: "allow-once" };
+    });
+    const harness = createHostHarness({ name: "approval-outlasts-timeout" });
+    const install = wrapToolWithBeforeToolCallHook(
+      pluginToolWithExecute("install", "Install a pack", async () =>
+        jsonResult({ installed: true }),
+      ),
+      { runId: harness.runId, sessionKey: harness.sessionKey },
+    );
+    applyCodeModeCatalog({ ...harness, tools: [...harness.tools, install] });
+    const details = await harness.run("return await install({});");
+    expect(details).toMatchObject({ status: "completed", value: { installed: true } });
+  });
+
   it("keeps the approved host snapshot frozen against later hook rewrites", async () => {
     const approve = vi.fn(() => ({
       params: { command: "printf approved", host: "node" },
