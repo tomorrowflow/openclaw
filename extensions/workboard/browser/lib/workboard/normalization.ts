@@ -94,6 +94,14 @@ function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function pullRequestState(value: unknown): {
+  pullRequestState?: "open" | "draft" | "merged" | "closed";
+} {
+  return value === "open" || value === "draft" || value === "merged" || value === "closed"
+    ? { pullRequestState: value }
+    : {};
+}
+
 /** The Gateway derives the stage; the UI keeps only shapes it can render. */
 function normalizeStage(value: unknown): WorkboardCardStage | undefined {
   if (!isRecord(value)) {
@@ -130,7 +138,13 @@ function normalizeStage(value: unknown): WorkboardCardStage | undefined {
         reworkRound === undefined ||
         typeof value.pullRequestUrl !== "string"
         ? undefined
-        : { kind, since, pullRequestUrl: value.pullRequestUrl, reworkRound };
+        : {
+            kind,
+            since,
+            pullRequestUrl: value.pullRequestUrl,
+            reworkRound,
+            ...pullRequestState(value.pullRequestState),
+          };
     }
     case "running": {
       const reworkRound = finiteNumber(value.reworkRound);

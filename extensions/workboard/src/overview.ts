@@ -163,8 +163,9 @@ function place(
       }
       const shipped = shippedTicket(card, stage.since, stage.pullRequestUrl);
       result.shipped.push(shipped);
-      // Workboard never sees the merge, so a sampled PR waits for the operator to mark it read.
-      if (shipped.sampled && latest?.readAt === undefined) {
+      // A sampled PR waits for the operator's read until it is merged or closed on GitHub.
+      const settled = stage.pullRequestState === "merged" || stage.pullRequestState === "closed";
+      if (shipped.sampled && latest?.readAt === undefined && !settled) {
         result.needsYou.push(waiting(card, "sampled", stage.since));
       }
       return;

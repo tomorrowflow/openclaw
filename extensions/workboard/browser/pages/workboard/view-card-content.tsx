@@ -127,9 +127,19 @@ function stageText(stage: WorkboardCardStage): string {
     );
   }
   if (stage.kind === "published") {
+    if (stage.pullRequestState === "merged" || stage.pullRequestState === "closed") {
+      return t(
+        stage.pullRequestState === "merged"
+          ? "workboard.stagePublishedMerged"
+          : "workboard.stagePublishedClosed",
+      );
+    }
+    const draft = stage.pullRequestState === "draft";
     return stage.reworkRound
-      ? t("workboard.stagePublishedRework", { round: String(stage.reworkRound) })
-      : t("workboard.stagePublished");
+      ? t(draft ? "workboard.stagePublishedDraftRework" : "workboard.stagePublishedRework", {
+          round: String(stage.reworkRound),
+        })
+      : t(draft ? "workboard.stagePublishedDraft" : "workboard.stagePublished");
   }
   return t(STAGE_LABEL_KEYS[stage.kind]);
 }

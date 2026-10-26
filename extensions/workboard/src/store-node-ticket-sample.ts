@@ -4,8 +4,8 @@ import { WorkboardNodeTicketEscalationStore } from "./store-node-ticket-escalati
 export class WorkboardNodeTicketSampleStore extends WorkboardNodeTicketEscalationStore {
   /**
    * Records that the operator read the PR of a published round an agent
-   * accepted into the human review sample. Workboard never sees the merge, so
-   * this read is what takes the PR off the operator's list. The first read of
+   * accepted into the human review sample. This read, or the PR merging or
+   * closing on GitHub, takes the PR off the operator's list. The first read of
    * a round stands; a rework round publishes a new review entry without one.
    */
   async readNodeTicketSample(id: string): Promise<WorkboardCard> {

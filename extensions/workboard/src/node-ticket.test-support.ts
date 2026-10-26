@@ -215,6 +215,7 @@ export function createFakeGitHub(remote: string) {
   const failComments = { value: false };
   const failPullEdits = { value: false };
   const failReady = { value: false };
+  const failPullList = { value: false };
   const requests: Array<{ method: string; url: string; auth?: string; body?: unknown }> = [];
   const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET";
@@ -259,6 +260,35 @@ export function createFakeGitHub(remote: string) {
     if (url.endsWith("/pulls") && method === "POST" && rejectCreate.value) {
       return new Response(JSON.stringify(rejectCreate.value), { status: 422 });
     }
+    if (url.includes("/pulls?state=all")) {
+      if (failPullList.value) {
+        return new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+          status: 403,
+        });
+      }
+      const query = new URL(url).searchParams;
+      const perPage = Number(query.get("per_page") ?? 30);
+      const page = Number(query.get("page") ?? 1);
+      const all = [
+        ...openPulls.map((html_url) => ({
+          html_url,
+          number: Number(html_url.split("/").at(-1)),
+          state: "open",
+          draft: draftPulls.has(html_url),
+          merged_at: null,
+        })),
+        ...closedPulls.map(({ html_url, merged }) => ({
+          html_url,
+          number: Number(html_url.split("/").at(-1)),
+          state: "closed",
+          draft: false,
+          merged_at: merged ? "2026-10-19T14:07:34Z" : null,
+        })),
+      ];
+      return new Response(JSON.stringify(all.slice((page - 1) * perPage, page * perPage)), {
+        status: 200,
+      });
+    }
     const reply = url.includes("/pulls?state=closed")
       ? closedPulls.map(({ html_url, sha, merged }) => ({
           html_url,
@@ -289,6 +319,7 @@ export function createFakeGitHub(remote: string) {
     failComments,
     failPullEdits,
     failReady,
+    failPullList,
     requests,
     access: {
       token: (repo: string) => tokens.get(repo),
@@ -360,6 +391,7 @@ export async function finishNodeTicket(params: {
   messages?: unknown[];
   onReview?: (card: WorkboardCard) => Promise<void>;
   readSessions?: WorkboardLifecycleSessionReader;
+  now?: () => number;
 }) {
   const root = tempRoot("workboard-handoff-");
   const repos = createNodeRepos(root);
@@ -399,6 +431,7 @@ export async function finishNodeTicket(params: {
       }),
     ...(params.onReview ? { onReview: params.onReview } : {}),
     ...(params.readSessions ? { readSessions: params.readSessions } : {}),
+    ...(params.now ? { now: params.now } : {}),
   });
   // The handoff sweep runs on every card change, so it fires while a start
   // that claimed the card still carries the previous worktree record.

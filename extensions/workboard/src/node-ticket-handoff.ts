@@ -14,6 +14,7 @@ import {
   openNodeGrillSession,
   readNodeGrillResult,
 } from "./node-ticket-grill-session.js";
+import { createPullRequestStateSync } from "./node-ticket-pr-state.js";
 import { type NodeProbeEnd, nodeProbeEnd, nodeProbeNotice } from "./node-ticket-probe.js";
 import {
   markPullRequestRework,
@@ -605,7 +606,8 @@ async function endNodeProbe(params: {
  * answered ones back into their session, and handed-off grillings into their
  * grill session. The agent_end report and card changes start it right away
  * and the lifecycle sweep resumes it after a restart; each card runs at most
- * once at a time.
+ * once at a time. Every 10 minutes a pass also syncs published PRs' GitHub
+ * state.
  */
 export function createNodeTicketHandoffs(params: {
   store: WorkboardStore;
@@ -620,6 +622,7 @@ export function createNodeTicketHandoffs(params: {
 }) {
   const inFlight = new Set<string>();
   const now = params.now ?? Date.now;
+  const syncPullRequests = createPullRequestStateSync({ ...params, now });
   const verifierOf = (card: WorkboardCard) => async () =>
     (await params.store.boardOrchestration(cardBoardId(card)))?.verifier;
   /**
@@ -807,6 +810,7 @@ export function createNodeTicketHandoffs(params: {
           inFlight.delete(card.id);
         }
       }
+      await syncPullRequests(warn);
     },
   };
 }
