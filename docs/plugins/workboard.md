@@ -1162,7 +1162,7 @@ publish step and the PR state sync read it.
 or `closed`. The publish sets it (`merged` when it found the merged PR that
 holds the commit). Every 10 minutes the handoff pass then reads each
 repository's PRs with one GraphQL query that asks only for each PR's number,
-state, and draft flag, paging back by update time until it has found every
+state, draft flag, and mergeability, paging back by update time until it has found every
 published PR not yet seen merged or closed (at most 10 pages of 100). The REST
 list is not used: its pages carry every PR body and outgrow the 1 MiB response
 cap. It records only a changed state, so `checkedAt` is the read that saw the
@@ -1174,6 +1174,17 @@ logs a warning; the next read catches up. A merge is a GitHub fact, not the
 card's verdict: the round's `reviews` entry is unchanged. Archived cards and
 rework rounds in progress are not read; the next publish records the state
 again.
+
+**Conflicts:** when the read finds a done ticket's open PR `CONFLICTING` with
+its base, Workboard reopens the ticket for a rework round in the same write:
+it adds a comment asking to merge the base branch into the PR branch as a new
+merge commit, resolve the conflicts, and re-run the proof, moves the card to
+`todo`, and sets the handoff's `conflictReworkAt`. That comment is the round's
+review feedback. It happens once per publish: a card an operator already
+moved, or one sent back to done with the conflict unresolved, is left to the
+operator. GitHub computes mergeability lazily, so an `UNKNOWN` PR waits for a
+later read. A merge-only round does not count as a rework round in the
+[Trust KPIs](#trust-kpis).
 
 #### Trust KPIs
 

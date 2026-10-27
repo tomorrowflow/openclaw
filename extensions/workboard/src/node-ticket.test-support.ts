@@ -212,6 +212,8 @@ export function createFakeGitHub(remote: string) {
   const rejectCreate: { value?: { message: string; errors: Array<{ message: string }> } } = {};
   // Open PRs still in draft; the GraphQL ready mutation removes one by its node id.
   const draftPulls = new Set<string>();
+  // Open PRs GitHub reports as conflicting with their base.
+  const conflictingPulls = new Set<string>();
   const failComments = { value: false };
   const failPullEdits = { value: false };
   const failReady = { value: false };
@@ -240,6 +242,7 @@ export function createFakeGitHub(remote: string) {
           number: Number(html_url.split("/").at(-1)),
           state: "OPEN",
           isDraft: draftPulls.has(html_url),
+          mergeable: conflictingPulls.has(html_url) ? "CONFLICTING" : "MERGEABLE",
         })),
         ...closedPulls.map(({ html_url, merged }) => ({
           number: Number(html_url.split("/").at(-1)),
@@ -326,6 +329,7 @@ export function createFakeGitHub(remote: string) {
     closedPulls,
     rejectCreate,
     draftPulls,
+    conflictingPulls,
     failComments,
     failPullEdits,
     failReady,

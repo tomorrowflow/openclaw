@@ -89,6 +89,7 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
   const reviewFrom = resolveOptionalIntegerOption(value.reviewFrom, { min: 0 });
   const slotWaitNotedAt = resolveOptionalIntegerOption(value.slotWaitNotedAt, { min: 0 });
   const pullRequest = normalizePullRequestState(value.pullRequest);
+  const conflictReworkAt = resolveOptionalIntegerOption(value.conflictReworkAt, { min: 0 });
   return {
     phase: "published",
     headCommit,
@@ -98,6 +99,7 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
     ...(reviewFrom !== undefined ? { reviewFrom } : {}),
     ...(slotWaitNotedAt !== undefined ? { slotWaitNotedAt } : {}),
     ...(pullRequest ? { pullRequest } : {}),
+    ...(conflictReworkAt !== undefined ? { conflictReworkAt } : {}),
   };
 }
 
