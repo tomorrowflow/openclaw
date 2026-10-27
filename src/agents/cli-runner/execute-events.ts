@@ -252,11 +252,19 @@ export function createCliEventHandlers(params: {
       toolOwner: "cli-runner",
       toolCallId: event.toolCallId,
     } as const;
-    // Claude enforces this MCP response timeout. Keep recovery behind that
-    // deadline while the request is still in the CLI's own tool runtime.
-    const timeoutMs = context.managedMcpToolTimeoutMs;
+    // Claude enforces the managed MCP response timeout and a Bash call's own
+    // `timeout`. Keep recovery behind that deadline while the call is still in
+    // the CLI's own tool runtime: a quiet 15-minute build is not a stuck run.
+    const timeoutMs = event.name.startsWith("mcp__openclaw__")
+      ? context.managedMcpToolTimeoutMs
+      : event.kind === "tool_use" &&
+          event.name === "Bash" &&
+          typeof event.args.timeout === "number" &&
+          event.args.timeout > 0
+        ? event.args.timeout
+        : undefined;
     emitTrustedDiagnosticEvent(
-      timeoutMs !== undefined && event.name.startsWith("mcp__openclaw__")
+      timeoutMs !== undefined
         ? markToolExecutionLivenessDiagnosticEvent(diagnosticEvent, {
             deadlineAtMs: startedAt + timeoutMs,
           })
