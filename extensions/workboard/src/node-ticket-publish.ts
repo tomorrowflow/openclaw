@@ -146,6 +146,30 @@ function closesIssue(card: WorkboardCard): string | undefined {
   return match ? `Closes ${match[1]}#${match[2]}` : undefined;
 }
 
+/**
+ * The ticket session's decision trail for the published round, folded so a
+ * reviewer holding only the PR sees what was chosen and why.
+ */
+function decisionTrail(item: PublishCard): string | undefined {
+  const round = item.rework?.round ?? 0;
+  const decisions = nodeTicketTarget(item.card)?.worktree?.rounds?.find(
+    (entry) => entry.round === round,
+  )?.decisions;
+  if (!decisions?.length) {
+    return undefined;
+  }
+  return [
+    `<details><summary>Decisions this round (${decisions.length})</summary>`,
+    "",
+    ...decisions.map(
+      (row) =>
+        `- **${row.phase}:** ${row.decision}${row.why ? ` Why: ${row.why}` : ""}${row.evidence ? ` (${row.evidence})` : ""}`,
+    ),
+    "",
+    "</details>",
+  ].join("\n");
+}
+
 function pullRequestBody(item: PublishCard): string {
   const { card, headCommit } = item;
   const proof = (card.metadata?.proof ?? [])
@@ -153,9 +177,13 @@ function pullRequestBody(item: PublishCard): string {
     .map(
       (entry) => `- ${entry.status}: ${entry.command ? `\`${entry.command}\`` : "(no command)"}`,
     );
+  // The done report's headline, or the drafted summary when the session gave none.
+  const summary = card.metadata?.automation?.summary?.trim();
   return [
+    summary ? `**Summary:** ${summary}` : undefined,
     card.notes?.trim(),
     proof.length > 0 ? ["Ticket proof:", ...proof].join("\n") : undefined,
+    decisionTrail(item),
     ...rungBLines(item, undefined),
     closesIssue(card),
     `Workboard card \`${card.id}\` at ${headCommit}.`,
@@ -472,6 +500,7 @@ function reworkCommentBody(item: PublishCard, rework: WorkboardNodeRework): stri
   return [
     `Rework round ${rework.round} pushed \`${item.headCommit.slice(0, 12)}\` to this PR.`,
     ...rungBLines(item, previousPublish),
+    decisionTrail(item),
     outside > 0
       ? `${outside} commit${outside === 1 ? "" : "s"} pushed by others since the first publish.`
       : undefined,
