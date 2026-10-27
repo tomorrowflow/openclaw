@@ -1040,7 +1040,9 @@ model, so a verdict always comes from the configured one:
    or a command, sibling entry points, async/cancel/restart state, interface
    boundaries, drift against docs or ADRs), that throwaway probes in the
    worktree are fine but committing, pushing, or touching other worktrees is
-   not, that `Operator-run` proof and style preferences are not failures,
+   not, that a build cache outside the worktree a proof names (such as an
+   `xcodebuild -derivedDataPath <dir>`) becomes `<dir>-verify`, so it neither
+   waits on ticket sessions' builds nor starts cold each time, that `Operator-run` proof and style preferences are not failures,
    that a failure beyond the failure scope (the notes' `Failure scope:` line,
    else one fault at a time, a client cancellation, or a restart; two
    simultaneous faults or a destructive admin operation racing the change are

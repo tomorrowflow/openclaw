@@ -156,6 +156,7 @@ export function verificationMessage(params: {
     "## Where",
     `- Node ${target.nodeId}. Your working directory is the detached worktree \`${verifyPath}\` at commit \`${head}\`, the round's imported head. Stay inside it.`,
     `- The round's range is \`${from}..${head}\`: \`git log --oneline ${from}..${head}\` lists its commits, \`git diff ${from}..${head}\` its changes.`,
+    "- Ticket sessions build on this node while you verify. Where a proof command names a build cache outside this worktree (such as `xcodebuild -derivedDataPath <dir>`), use `<dir>-verify` instead: the shared one is locked by their builds, and yours stays warm across verifications.",
     ...(from !== worktree.baseCommit
       ? [
           `- This is rework round ${round}; the whole ticket since its base is \`${worktree.baseCommit}..${head}\`.`,

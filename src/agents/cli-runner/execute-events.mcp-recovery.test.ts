@@ -52,3 +52,36 @@ it("keeps a managed Claude MCP call alive through its enforced response timeout"
   expect(activity.activeToolDeadlineAtMs).toBe(now + 3_610_000 + 900_000);
   expect(resolveRunStaleThresholdMs(activity, 900_000)).toBe(4_510_000);
 });
+
+it("keeps a Claude Bash call alive through its own timeout", async () => {
+  vi.useFakeTimers();
+  const now = Date.parse("2026-10-27T00:00:00Z");
+  vi.setSystemTime(now);
+  startDiagnosticRunActivityTracking();
+  const context = buildPreparedCliRunContext({
+    runId: "bash-deadline",
+    agentId: "dev",
+    sessionId: "session-1",
+    sessionKey: "agent:dev:main",
+    model: "claude-haiku-4-5",
+    timeoutMs: 5_000_000,
+  });
+  const toolTracking = { handleCliToolUseStart: vi.fn() } as unknown as CliToolTracking;
+  const handlers = createCliEventHandlers({
+    context,
+    toolTracking,
+    getRunState: () => ({ failed: false, error: undefined }),
+  });
+  handlers.emitParsedToolUseStart({
+    toolCallId: "build",
+    name: "Bash",
+    kind: "tool_use",
+    args: { command: "xcodebuild test", timeout: 1_800_000 },
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  await waitForDiagnosticEventsDrained();
+  vi.setSystemTime(now + 900_000);
+  const activity = getDiagnosticSessionActivitySnapshot(context.params, now + 900_000);
+  expect(activity.activeToolDeadlineAtMs).toBe(now + 1_800_000 + 900_000);
+  expect(resolveRunStaleThresholdMs(activity, 900_000)).toBe(2_700_000);
+});
