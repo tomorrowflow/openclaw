@@ -36,8 +36,10 @@ afterEach(() => {
 
 /** GitHub as the publish step sees it: a local remote for the push and a recorded REST API. */
 /** Imports the ticket, points the host clone at a GitHub origin, and accepts the card. */
-async function acceptImportedTicket(params: { sourceUrl?: string; verdict?: string } = {}) {
-  const ticket = await finishNodeTicket({});
+async function acceptImportedTicket(
+  params: { sourceUrl?: string; verdict?: string; messages?: unknown[] } = {},
+) {
+  const ticket = await finishNodeTicket({ messages: params.messages });
   await ticket.handoffs.resume(ticket.warn);
   if (params.sourceUrl) {
     await ticket.store.update(ticket.card.id, { sourceUrl: params.sourceUrl });
@@ -439,6 +441,36 @@ describe("node ticket draft PR", () => {
     expect(trust.weeks.at(-1)).toMatchObject({ accepted: 1, autonomous: 1 });
   });
 
+  it("leads the draft PR body with the session's headline and folds in its decisions", async () => {
+    const { handoffs, warn, github } = await acceptImportedTicket({
+      messages: reportMessages({
+        outcome: "done",
+        headline: "Empty input now parses to no rows.",
+        summary: "Parser accepts empty input",
+        proof: [{ command: "pytest", status: "passed" }],
+        decisions: [
+          {
+            phase: "build",
+            decision: "Return [] for empty input",
+            why: "the CLI pipes empty files",
+            evidence: "parser.py:1",
+          },
+        ],
+      }),
+    });
+    github.tokens.set("acme/app", "token-app");
+
+    await handoffs.resume(warn);
+
+    const body =
+      (github.requests.find((request) => request.method === "POST")?.body as { body: string })
+        ?.body ?? "";
+    expect(body).toMatch(/^\*\*Summary:\*\* Empty input now parses to no rows\.\n\n/);
+    expect(body).toContain(
+      "<details><summary>Decisions this round (1)</summary>\n\n- **build:** Return [] for empty input Why: the CLI pipes empty files (parser.py:1)\n\n</details>",
+    );
+  });
+
   it("closes the card's source GitHub issue when the draft PR merges", async () => {
     const { card, handoffs, warn, github } = await acceptImportedTicket({
       sourceUrl: "https://github.com/acme/tracker/issues/41",
@@ -683,6 +715,9 @@ describe("node ticket draft PR", () => {
     const comment = (posts[1]?.body as { body: string } | undefined)?.body ?? "";
     expect(comment).toContain(`Rework round 1 pushed \`${reworked.slice(0, 12)}\``);
     expect(comment).toContain("1 commit pushed by others");
+    expect(comment).toContain(
+      "<summary>Decisions this round (1)</summary>\n\n- **fix:** Rename the flag to --strict (flags.py:1)",
+    );
     expect(comment).toMatch(/> Rename the flag to --strict\.[\s\S]*> Parser accepts empty input/);
     expect((await store.get(card.id))?.metadata?.automation?.target?.worktree).toMatchObject({
       handoff: { phase: "published", headCommit: reworked, pullRequestUrl },
