@@ -388,8 +388,12 @@ CI=true corepack pnpm install --frozen-lockfile
 STAGE="deploy: stale build lock (gateway still up)"
 node scripts/release-stale-dist-lock.mjs
 
+# OPENCLAW_RUN_NODE_SKIP_DTS_BUILD=1: the installed Gateway runs JS only.
+# Declaration emission is the build's memory peak (a ~6.6 GB tsc beside the
+# live Gateway); on 2026-10-27 it drove the OOM killer through signal-cli and
+# Gateway children for ~25 min. PR CI keeps the declaration and SDK export gates.
 STAGE="deploy: build (gateway still up)"
-OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 CI=true corepack pnpm build
+OPENCLAW_INCLUDE_OPTIONAL_BUNDLED=1 OPENCLAW_RUN_NODE_SKIP_DTS_BUILD=1 CI=true corepack pnpm build
 
 STAGE="deploy: npm i -g (gateway still up)"
 node scripts/prepare-global-install-package-json.mjs
