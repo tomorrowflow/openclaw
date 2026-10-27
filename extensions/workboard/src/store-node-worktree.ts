@@ -5,7 +5,7 @@ import type {
   WorkboardPullRequestState,
 } from "@openclaw/workboard-contract";
 import { type WorkboardNodeRoundFacts, withNodeRound } from "./node-ticket-rounds.js";
-import { assertCanMutateClaimedCard } from "./store-card-helpers.js";
+import { appendComment, assertCanMutateClaimedCard } from "./store-card-helpers.js";
 import type { WorkboardMutationScope } from "./store-inputs.js";
 import { WorkboardNotificationStore } from "./store-notifications.js";
 import { type WorkboardNodeHandoffInput, withNodeHandoff } from "./store-target-normalizers.js";
@@ -60,6 +60,62 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
                 target: {
                   ...target,
                   worktree: { ...worktree, handoff: { ...handoff, pullRequest } },
+                },
+              },
+            },
+          };
+        },
+        { allowAutomationLaunch: true },
+      );
+      return result.updated ? result.card : undefined;
+    });
+  }
+
+  /**
+   * Reopens a done ticket whose open PR conflicts with its base for a rework
+   * round that merges the base; the comment is that round's review feedback.
+   * Once per publish: a card an operator already moved, or a publish already
+   * reopened, is left alone.
+   */
+  async reopenConflictingPullRequest(
+    id: string,
+    input: { worktreePath: string; pullRequestUrl: string; now: number },
+  ): Promise<WorkboardCard | undefined> {
+    return await this.enqueueMutation(async () => {
+      const result = await this.updateLatestCard(
+        id,
+        (card) => {
+          const target = card.metadata?.automation?.target;
+          const worktree = target?.worktree;
+          const handoff = worktree?.handoff;
+          if (
+            card.status !== "done" ||
+            card.metadata?.archivedAt ||
+            !target ||
+            worktree?.path !== input.worktreePath ||
+            handoff?.phase !== "published" ||
+            handoff.pullRequestUrl !== input.pullRequestUrl ||
+            handoff.conflictReworkAt !== undefined
+          ) {
+            return undefined;
+          }
+          return {
+            status: "todo",
+            metadata: {
+              ...card.metadata,
+              comments: appendComment(
+                card.metadata?.comments,
+                `The draft PR ${input.pullRequestUrl} no longer merges into its base branch. Merge the base branch into the PR branch as a new merge commit, resolve the conflicts keeping both sides' intent, and re-run the ticket's proof on the merged result.`,
+                input.now,
+              ),
+              automation: {
+                ...card.metadata?.automation,
+                target: {
+                  ...target,
+                  worktree: {
+                    ...worktree,
+                    handoff: { ...handoff, conflictReworkAt: input.now },
+                  },
                 },
               },
             },

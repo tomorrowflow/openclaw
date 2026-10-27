@@ -72,7 +72,7 @@ function groupBy<K, T>(items: readonly T[], key: (item: T) => K): Map<K, T[]> {
 const PULL_STATES_QUERY = `query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
     pullRequests(first: ${PULLS_PER_PAGE}, after: $after, orderBy: { field: UPDATED_AT, direction: DESC }) {
-      nodes { number state isDraft }
+      nodes { number state isDraft mergeable }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -125,8 +125,10 @@ async function pullStatesPage(
 /**
  * Reads the GitHub state of every published node ticket PR not yet seen
  * merged or closed, with one paged GraphQL query per repository, and records the
- * changed ones. Repositories and tokens come from the host clones' origins,
- * as for the publish. A failure leaves the last known state and warns.
+ * changed ones. A done ticket whose open PR conflicts with its base is reopened
+ * for a rework round that merges the base. Repositories and tokens come from
+ * the host clones' origins, as for the publish. A failure leaves the last known
+ * state and warns.
  */
 export async function syncPullRequestStates(params: {
   store: WorkboardStore;
@@ -155,6 +157,7 @@ export async function syncPullRequestStates(params: {
   for (const [repo, { token, items }] of byRepo) {
     const wanted = groupBy(items, (item) => item.number);
     const found = new Map<number, WorkboardPullRequestState>();
+    const conflicting = new Set<number>();
     try {
       let after: string | undefined;
       for (let page = 1; page <= MAX_PAGES_PER_REPO && found.size < wanted.size; page += 1) {
@@ -166,6 +169,10 @@ export async function syncPullRequestStates(params: {
           const state = pullRequestState(pull);
           if (state) {
             found.set(pull.number, state);
+          }
+          // GitHub computes mergeability lazily: UNKNOWN now resolves by a later sync.
+          if (pull.state === "OPEN" && pull.mergeable === "CONFLICTING") {
+            conflicting.add(pull.number);
           }
         }
         if (!next) {
@@ -184,6 +191,15 @@ export async function syncPullRequestStates(params: {
           pullRequestUrl: item.url,
           state,
           checkedAt,
+        });
+      }
+    }
+    for (const number of conflicting) {
+      for (const item of wanted.get(number) ?? []) {
+        await params.store.reopenConflictingPullRequest(item.card.id, {
+          worktreePath: item.worktreePath,
+          pullRequestUrl: item.url,
+          now: checkedAt,
         });
       }
     }

@@ -90,6 +90,25 @@ describe("node ticket PR state sync", () => {
     expect(await ticket.pullRequest()).toMatchObject({ pullRequest: { state: "closed" } });
   });
 
+  it("reopens a done ticket once when its PR conflicts with the base", async () => {
+    const ticket = await publishedTicket();
+    ticket.github.openPulls.push(PR);
+    ticket.github.draftPulls.add(PR);
+    ticket.github.conflictingPulls.add(PR);
+    await ticket.syncPass();
+    const reopened = await ticket.store.get(ticket.card.id);
+    expect(reopened?.status).toBe("todo");
+    expect(reopened?.metadata?.comments?.at(-1)?.body).toContain(
+      `The draft PR ${PR} no longer merges into its base branch.`,
+    );
+    expect(await ticket.pullRequest()).toMatchObject({ conflictReworkAt: ticket.now() });
+
+    // An operator who sends it back to done owns the conflict; the sync does not loop.
+    await ticket.store.move(ticket.card.id, "done", undefined);
+    await ticket.syncPass();
+    expect((await ticket.store.get(ticket.card.id))?.status).toBe("done");
+  });
+
   it("pages back through the repository's PRs to find an old one", async () => {
     const ticket = await publishedTicket();
     ticket.github.closedPulls.push(

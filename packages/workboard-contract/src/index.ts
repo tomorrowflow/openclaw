@@ -348,6 +348,12 @@ export type WorkboardNodeHandoff =
        * GitHub fact, not the card's accept verdict.
        */
       pullRequest?: { state: WorkboardPullRequestState; checkedAt: number };
+      /**
+       * When the PR state sync found the PR in conflict with its base and
+       * reopened the ticket for a rework round that merges the base: once per
+       * publish, so a rework that cannot resolve it does not loop.
+       */
+      conflictReworkAt?: number;
     };
 
 /** A node ticket PR's state on GitHub; `draft` is an open draft. */
