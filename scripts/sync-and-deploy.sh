@@ -185,6 +185,19 @@ trap on_exit EXIT
 
 step() { echo ""; echo "── $1 ──────────────────────────────────────────────────────────"; }
 
+# Prints the node tickets a build or restart would hurt, one per line: running,
+# or verifying in review (the board counts both against the node's slot).
+# Empty when there are none; fails when the board cannot be read.
+list_busy_node_tickets() {
+  local cards
+  cards="$(oc_openclaw gateway call workboard.cards.list --json --params '{}' 2>/dev/null)" || return 1
+  printf '%s' "$cards" | jq -er '[.cards[]
+      | select(.metadata.automation.target.kind == "node-claude")
+      | select(.status == "running"
+          or .metadata.automation.target.worktree.verification.phase == "running")
+      | "    \(.id)  \(.title)"] | join("\n")' 2>/dev/null
+}
+
 # Refuse while a Workboard node ticket is running. The build starves the
 # Gateway (the 2026-10-10 deploy delayed its liveness heartbeat by 22 s), and a
 # node ticket streams its Claude CLI session through it: UX-3 blocked with
@@ -197,28 +210,58 @@ step() { echo ""; echo "── $1 ───────────────�
 check_running_node_tickets() {
   local rerun="$1"
   [ "$ALLOW_RUNNING_TICKETS" -eq 0 ] || { echo "  ! running node ticket guard skipped (--allow-running-tickets)"; return 0; }
-  local cards running
-  if ! cards="$(oc_openclaw gateway call workboard.cards.list --json --params '{}' 2>/dev/null)" \
-    || ! running="$(printf '%s' "$cards" | jq -er '[.cards[]
-        | select(.status == "running" and .metadata.automation.target.kind == "node-claude")
-        | "    \(.id)  \(.title)"] | join("\n")' 2>/dev/null)"; then
+  local running
+  if ! running="$(list_busy_node_tickets)"; then
     echo "  ! could not list Workboard cards (Gateway down or workboard plugin absent) — not checking for running node tickets"
     return 0
   fi
   if [ -z "$running" ]; then
-    echo "  ✓ no node ticket is running"
+    echo "  ✓ no node ticket is running or verifying"
     return 0
   fi
   echo ""
-  echo "  ✗ Node tickets are running; a deploy now can truncate their sessions:"
+  echo "  ✗ Node tickets are running or verifying; a deploy now can truncate their sessions:"
   echo "$running"
   echo ""
   echo "    Nothing was built or installed; the gateway keeps running the previous version."
-  echo "    Wait until they reach review (or stop them on the board), then rerun:"
+  echo "    Wait until they finish (or stop them on the board), then rerun:"
   echo "      $rerun"
   echo "    To deploy anyway, add --allow-running-tickets."
   echo ""
   exit 1
+}
+
+# The launch-time check cannot see tickets that start during the ~15 min
+# build: FTR-04 started from "ready" and a reworked FTR-05 began between the
+# check and the restart (2026-10-25/26), and the restart aborts them. The build
+# is installed by now, so wait for them rather than fail and force a rebuild.
+# A ticket starting in the seconds between this check and the stop is accepted.
+wait_for_idle_node_tickets() {
+  [ "$ALLOW_RUNNING_TICKETS" -eq 0 ] || return 0
+  local busy shown="" deadline=$((SECONDS + 3600))
+  while true; do
+    if ! busy="$(list_busy_node_tickets)"; then
+      echo "  ! could not list Workboard cards — cutting over without the node ticket check"
+      return 0
+    fi
+    [ -n "$busy" ] || break
+    if [ "$busy" != "$shown" ]; then
+      echo "  … holding the cutover; the restart would abort these node tickets:"
+      echo "$busy"
+      shown="$busy"
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      echo ""
+      echo "  ✗ Node tickets still busy after 60 min — skipping cutover."
+      echo "    The gateway keeps running the previous version, but the new dist is"
+      echo "    already installed: a restart, crash, or reboot starts the new build."
+      echo "    Once they finish, rerun: $0 --deploy-only"
+      echo ""
+      exit 1
+    fi
+    sleep 30
+  done
+  echo "  ✓ no node ticket is running or verifying"
 }
 
 echo "=== OpenClaw upstream sync + deploy  $(date) ==="
@@ -632,6 +675,9 @@ if ! oc_openclaw config validate 2>&1; then
   echo "      systemctl --user restart openclaw-gateway.service"
   exit 1
 fi
+
+STAGE="deploy: running node ticket recheck (installed, gateway still up)"
+wait_for_idle_node_tickets
 
 # ── Cutover ────────────────────────────────────────────────────────────────
 # Everything above kept the old gateway serving. From here we swap to the new
