@@ -177,10 +177,10 @@ export function verificationMessage(params: {
     "End your final message with exactly one block:",
     "",
     "```" + VERIFICATION_FENCE,
-    '{"verdict":"pass|fail","summary":"what you ran and what you found, in plain words","findings":[{"path":"repo/relative/file","line":1,"body":"what is wrong and how you showed it"}]}',
+    '{"verdict":"pass|fail|error","summary":"what you ran and what you found, in plain words","findings":[{"path":"repo/relative/file","line":1,"body":"what is wrong and how you showed it"}]}',
     "```",
     "",
-    "`fail` needs at least one in-scope finding that names a defect. `pass` means the proof re-ran and nothing you tried broke the change. At most 12 findings are kept; `line` may be left out when a finding has no line.",
+    "`fail` needs at least one in-scope finding that names a defect. `pass` means the proof re-ran and nothing you tried broke the change. `error` means you could not finish the proof (the node went away, a tool or simulator kept failing) and found no defect; the summary says what ran and what stopped you, and the operator re-runs the verification. At most 12 findings are kept; `line` may be left out when a finding has no line.",
   ].join("\n");
 }
 
@@ -213,8 +213,13 @@ export function parseVerificationReply(text: string): ParsedVerification {
       `The verifier's ${VERIFICATION_FENCE} block is not valid JSON: ${formatErrorMessage(parseError)}.`,
     );
   }
-  if (!isRecord(value) || (value.verdict !== "pass" && value.verdict !== "fail")) {
-    return error(`The verifier's ${VERIFICATION_FENCE} block needs a verdict of pass or fail.`);
+  if (
+    !isRecord(value) ||
+    (value.verdict !== "pass" && value.verdict !== "fail" && value.verdict !== "error")
+  ) {
+    return error(
+      `The verifier's ${VERIFICATION_FENCE} block needs a verdict of pass, fail, or error.`,
+    );
   }
   return {
     verdict: value.verdict,
@@ -222,7 +227,8 @@ export function parseVerificationReply(text: string): ParsedVerification {
       typeof value.summary === "string"
         ? (capText(value.summary.trim(), MAX_VERIFICATION_SUMMARY_CHARS) ?? "")
         : "",
-    findings: normalizeVerificationFindings(value.findings),
+    // An unfinished proof names no defect, so it carries no findings.
+    findings: value.verdict === "error" ? [] : normalizeVerificationFindings(value.findings),
   };
 }
 

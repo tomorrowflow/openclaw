@@ -1047,7 +1047,10 @@ model, so a verdict always comes from the configured one:
    beyond it) goes in the summary under `Beyond scope:` with a proposed
    follow-up card instead of a finding, and to end with exactly one
    `workboard-verification` block:
-   `{"verdict": "pass|fail", "summary": "…", "findings": [{"path": "…", "line": 1, "body": "…"}]}`.
+   `{"verdict": "pass|fail|error", "summary": "…", "findings": [{"path": "…", "line": 1, "body": "…"}]}`.
+   The verifier reports `error` when it could not finish the proof (its node
+   went away, a tool or simulator kept failing) without finding a defect; the
+   result keeps its summary, drops any findings, and the operator re-runs it.
    The card holds its node-ticket slot while the verification runs (one build
    at a time on the node). Once the session has no active run, the pass reads
    the block from its last reply; a missing, doubled, or invalid block is the
