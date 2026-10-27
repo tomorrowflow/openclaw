@@ -259,6 +259,27 @@ describe("node ticket verification", () => {
     ]);
   });
 
+  it("keeps the verifier's reason when it reports that it could not finish the proof", async () => {
+    const { store, card, handoffs, warn, verifier, verificationOf } = await verifiedTicket();
+    await handoffs.resume(warn);
+    verifier.running = false;
+    verifier.history = verificationReply({
+      verdict: "error",
+      summary: "Tests passed; the simulator stalled and the node disconnected.",
+      findings: [{ path: "a.swift", body: "not a defect" }],
+    });
+    await handoffs.resume(warn);
+    await expect(verificationOf()).resolves.toMatchObject({
+      phase: "done",
+      verdict: "error",
+      summary: "Tests passed; the simulator stalled and the node disconnected.",
+      findings: [],
+    });
+    expect((await store.get(card.id))?.metadata?.comments?.at(-1)?.body).toContain(
+      "the simulator stalled and the node disconnected",
+    );
+  });
+
   it("keeps a just-started verification running until its session replies or the start grace ends", async () => {
     const ticket = await verifiedTicket();
     const { store, card, handoffs, warn, onReview, verifier } = ticket;
