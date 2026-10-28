@@ -157,6 +157,7 @@ export function verificationMessage(params: {
     `- Node ${target.nodeId}. Your working directory is the detached worktree \`${verifyPath}\` at commit \`${head}\`, the round's imported head. Stay inside it.`,
     `- The round's range is \`${from}..${head}\`: \`git log --oneline ${from}..${head}\` lists its commits, \`git diff ${from}..${head}\` its changes.`,
     "- Ticket sessions build on this node while you verify. Where a proof command names a build cache outside this worktree (such as `xcodebuild -derivedDataPath <dir>`), use `<dir>-verify` instead: the shared one is locked by their builds, and yours stays warm across verifications.",
+    `- Where a proof command runs on a named simulator (such as \`xcodebuild -destination 'platform=iOS Simulator,name=<device>'\`), ticket sessions test on that simulator too, and a test run on it while theirs runs gets killed or stalls. Create your own instead: \`xcrun simctl create ${verificationName(card, round)} "<device>"\` prints its udid; boot it with \`xcrun simctl boot <udid>\` and \`xcrun simctl bootstatus <udid> -b\`, and use \`id=<udid>\` in place of \`name=<device>\`. Run \`xcrun simctl delete <udid>\` before your reply, also when the proof failed, so its caches go with it.`,
     ...(from !== worktree.baseCommit
       ? [
           `- This is rework round ${round}; the whole ticket since its base is \`${worktree.baseCommit}..${head}\`.`,

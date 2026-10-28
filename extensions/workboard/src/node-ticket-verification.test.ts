@@ -118,6 +118,8 @@ describe("node ticket verification", () => {
     expect(message).toContain(card.title);
     expect(message).toContain(notes);
     expect(message).toContain(`${base}..${head}`);
+    // Its own simulator, named like its session, so it never tests on a ticket session's.
+    expect(message).toContain(`xcrun simctl create verify-${card.id.slice(0, 8)}-r0 "<device>"`);
     // Blind to the author: the done report's summary and proof stay out of the brief.
     expect(message).not.toContain("Parser accepts empty input");
     expect(message).not.toContain('pytest"');

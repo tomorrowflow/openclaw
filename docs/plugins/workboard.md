@@ -1042,7 +1042,10 @@ model, so a verdict always comes from the configured one:
    worktree are fine but committing, pushing, or touching other worktrees is
    not, that a build cache outside the worktree a proof names (such as an
    `xcodebuild -derivedDataPath <dir>`) becomes `<dir>-verify`, so it neither
-   waits on ticket sessions' builds nor starts cold each time, that `Operator-run` proof and style preferences are not failures,
+   waits on ticket sessions' builds nor starts cold each time, that a proof
+   run on a named simulator runs instead on a simulator the verifier creates
+   (`verify-<card8>-r<round>`) and deletes before its reply, so it never
+   shares one with a ticket session's test run, that `Operator-run` proof and style preferences are not failures,
    that a failure beyond the failure scope (the notes' `Failure scope:` line,
    else one fault at a time, a client cancellation, or a restart; two
    simultaneous faults or a destructive admin operation racing the change are
