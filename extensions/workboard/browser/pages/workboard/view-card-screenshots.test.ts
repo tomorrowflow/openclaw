@@ -1,5 +1,6 @@
 import "../../test/dom.setup.ts";
 import { expectDefined } from "@openclaw/normalization-core";
+import { flush } from "solid-js";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createWorkboardCard } from "../../lib/workboard/test/index-helpers.ts";
 import { mountPage } from "./workboard-page.test-support.ts";
@@ -370,4 +371,69 @@ it("lists a card that has only a relates_to link and shows the linked card's ima
     round: 0,
     path: "docs/screenshots/PROTO-1/home.png",
   });
+});
+
+const VISUAL_CHECK = "workboard.cards.visualCheck";
+
+function visualPage(withVisualCheck: boolean) {
+  const card = {
+    ...nodeCard(["b".repeat(40)]),
+    ...(withVisualCheck ? { visualCheck: { round: 0 } } : {}),
+  };
+  const page = screenshotsPage({ list: () => roundOf(["docs/a.png"]), get: image }, [card]);
+  const fallback = expectDefined(page.request.getMockImplementation(), "request implementation");
+  page.request.mockImplementation(async (method, params) =>
+    method === VISUAL_CHECK
+      ? {
+          card: {
+            ...card,
+            visualCheck: { round: 0, check: { verdict: "problem", note: "clipped", at: 5 } },
+          },
+        }
+      : fallback(method, params),
+  );
+  const buttons = () => [
+    ...page.container.querySelectorAll<HTMLButtonElement>(".workboard-visual-check button"),
+  ];
+  return { ...page, buttons };
+}
+
+it("offers the visual check only when the imported round has one", async () => {
+  const without = visualPage(false);
+  await vi.waitFor(() => expect(without.images()).toBe(1));
+  expect(without.container.querySelector(".workboard-visual-check")).toBeNull();
+
+  const withCheck = visualPage(true);
+  await vi.waitFor(() =>
+    expect(withCheck.buttons().map((button) => button.textContent)).toEqual([
+      "Looks right",
+      "Problem",
+    ]),
+  );
+});
+
+it("records the operator's verdict with its note and shows the returned check", async () => {
+  const page = visualPage(true);
+  await vi.waitFor(() => expect(page.images()).toBe(1));
+  await vi.waitFor(() => expect(page.buttons()).toHaveLength(2));
+  const note = expectDefined(
+    page.container.querySelector<HTMLInputElement>(".workboard-visual-check__note"),
+    "note input",
+  );
+  note.value = "clipped";
+  note.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  flush();
+  page.buttons()[1]!.click();
+
+  await vi.waitFor(() =>
+    expect(
+      page.container.querySelector(".workboard-visual-check__recorded")?.textContent,
+    ).toContain("You recorded: problem · clipped"),
+  );
+  expect(page.request).toHaveBeenCalledWith(VISUAL_CHECK, {
+    id: "card-1",
+    verdict: "problem",
+    note: "clipped",
+  });
+  expect(page.buttons().every((button) => !button.disabled)).toBe(true);
 });

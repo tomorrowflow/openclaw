@@ -42,8 +42,8 @@ function trustResult(accepted: number, autonomous: number): WorkboardTrustResult
     verifierAgreedRounds: 0,
     verifierEscapes: 0,
     verifierCatches: 0,
-    visualRounds: 0,
-    visualAgreedRounds: 0,
+    visualRounds: 4,
+    visualAgreedRounds: 3,
   };
   return {
     boardId: "app",
@@ -132,6 +132,10 @@ describe("Workboard trust KPIs", () => {
     expect(popover.textContent).toContain("Runs over 150K");
     expect(cells(1).at(-1)).toBe("1 of 4");
     expect(page.request).toHaveBeenCalledWith("workboard.cards.trust", { boardId: "app" });
+    const visual = [...popover.querySelectorAll("tbody")[2]!.querySelectorAll("tr")].map((row) =>
+      row.textContent?.replace(/\s+/g, " ").trim(),
+    );
+    expect(visual).toEqual(["dead-code3 of 4 (75%)", "All classes3 of 4 (75%)"]);
 
     result = trustResult(3, 3);
     page.bumpRevision();

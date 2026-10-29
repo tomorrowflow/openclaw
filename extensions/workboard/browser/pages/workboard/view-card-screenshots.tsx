@@ -4,9 +4,11 @@ import type {
   WorkboardLiveNodeFile,
   WorkboardLiveNodeFiles,
   WorkboardNodeFileRound,
+  WorkboardNodeVisualCheck,
   WorkboardScreenshotResult,
+  WorkboardVisualVerdict,
 } from "@openclaw/workboard-contract";
-import { For, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { icons } from "../../components/icons.tsx";
 import { t } from "../../i18n/index.ts";
@@ -366,9 +368,72 @@ export function LiveScreenshots(
   );
 }
 
+/** The operator's own visual check of the imported round; recording it reveals the verifier's read. */
+export type VisualCheckControl = {
+  check?: WorkboardNodeVisualCheck;
+  busy: boolean;
+  onRecord: (verdict: WorkboardVisualVerdict, note: string) => void;
+};
+
+function VisualCheck(props: { control: VisualCheckControl }) {
+  const [note, setNote] = createSignal("");
+  const record = (verdict: WorkboardVisualVerdict) =>
+    props.control.onRecord(verdict, note().trim());
+  return (
+    <section class="workboard-detail__section workboard-visual-check">
+      <h3>{t("workboard.visualCheck")}</h3>
+      <div class="workboard-visual-check__controls">
+        <button
+          class="btn"
+          type="button"
+          disabled={props.control.busy}
+          onClick={() => record("looks_right")}
+        >
+          {t("workboard.visualLooksRight")}
+        </button>
+        <button
+          class="btn"
+          type="button"
+          disabled={props.control.busy}
+          onClick={() => record("problem")}
+        >
+          {t("workboard.visualProblem")}
+        </button>
+        <input
+          type="text"
+          class="workboard-visual-check__note"
+          aria-label={t("workboard.visualNote")}
+          placeholder={t("workboard.visualNote")}
+          value={note()}
+          onInput={(event) => setNote(event.currentTarget.value)}
+        />
+      </div>
+      <Show when={props.control.check}>
+        {(check) => (
+          <p class="workboard-visual-check__recorded" role="status">
+            {t("workboard.visualRecorded", {
+              verdict:
+                check().verdict === "looks_right"
+                  ? t("workboard.visualVerdictLooksRight")
+                  : t("workboard.visualVerdictProblem"),
+            })}
+            {check().note ? ` · ${check().note}` : ""}
+            {" · "}
+            <RelativeTime timestamp={check().at} now={Date.now()} />
+          </p>
+        )}
+      </Show>
+    </section>
+  );
+}
+
 /** The drawer's Screenshots tab: each round's committed images, then those of linked cards. */
 export function ScreenshotsPanel(
-  props: ScreenshotsView & { listed: SettledList; active: boolean },
+  props: ScreenshotsView & {
+    listed: SettledList;
+    active: boolean;
+    visualCheck?: VisualCheckControl;
+  },
 ) {
   const loaded = () => (props.listed.status === "loaded" ? props.listed.result : undefined);
   return (
@@ -392,6 +457,7 @@ export function ScreenshotsPanel(
       >
         {(result) => (
           <Show when={props.active}>
+            <Show when={props.visualCheck}>{(control) => <VisualCheck control={control()} />}</Show>
             <ScreenshotRounds
               screenshots={props.screenshots}
               cardId={props.cardId}

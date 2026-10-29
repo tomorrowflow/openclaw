@@ -1,12 +1,17 @@
 /** @jsxImportSource @solidjs/web */
 import { For, Show } from "solid-js";
 import { t } from "../../i18n/index.ts";
-import type { WorkboardCard, WorkboardUiState } from "../../lib/workboard/index.ts";
+import {
+  getWorkboardState,
+  recordWorkboardVisualCheck,
+  type WorkboardCard,
+  type WorkboardUiState,
+} from "../../lib/workboard/index.ts";
 import { ChangesPanel, hasCardChanges } from "./view-card-changes.tsx";
 import { GrillingPanel } from "./view-card-grilling.tsx";
 import { hasPrototypes, PrototypePanel } from "./view-card-prototypes.tsx";
 import { hasCommittedScreenshots, ScreenshotsPanel } from "./view-card-screenshots.tsx";
-import type { WorkboardProps } from "./view-helpers.tsx";
+import { canMutate, type WorkboardProps, workboardMutationContext } from "./view-helpers.tsx";
 
 type DetailTabId = WorkboardUiState["detailTab"];
 
@@ -75,6 +80,25 @@ export function detailScreenshots(props: WorkboardProps, card: WorkboardCard) {
     : undefined;
 }
 
+/** The Screenshots tab's visual check, once the imported round's verification finished. */
+function visualCheckControl(props: WorkboardProps, card: WorkboardCard) {
+  void props.revision;
+  const visual = card.visualCheck;
+  return visual
+    ? {
+        check: visual.check,
+        busy: !canMutate(props) || getWorkboardState(props.host).busyCardIds.has(card.id),
+        onRecord: (verdict: "looks_right" | "problem", note: string) =>
+          void recordWorkboardVisualCheck({
+            ...workboardMutationContext(props),
+            cardId: card.id,
+            verdict,
+            note,
+          }),
+      }
+    : undefined;
+}
+
 /** The card's prototypes, live and committed, once listed and only when there is one. */
 export function detailPrototypes(props: WorkboardProps, card: WorkboardCard) {
   void props.revision;
@@ -132,6 +156,7 @@ export function NodeTicketTabPanels(props: {
             listed={shown().listed}
             active={props.activeTab === "screenshots"}
             revision={props.workboard.revision}
+            visualCheck={visualCheckControl(props.workboard, props.card)}
           />
         )}
       </Show>

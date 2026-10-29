@@ -5271,3 +5271,21 @@ workboard-inline-text {
   font-size: 12px;
   text-align: center;
 }
+
+.workboard-visual-check__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.workboard-visual-check__note {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.workboard-visual-check__recorded {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}

@@ -142,6 +142,30 @@ function TrustDetails(props: { result: WorkboardTrustResult }) {
           </For>
         </tbody>
       </table>
+      <table class="workboard-trust-table">
+        <caption>{t("workboard.trustVisual")}</caption>
+        <tbody>
+          <For each={[...props.result.classes, undefined]}>
+            {(entry) => {
+              const counts = () => entry ?? props.result.total;
+              return (
+                <tr>
+                  <th scope="row">{entry?.taskClass ?? t("workboard.trustVisualTotal")}</th>
+                  <td>
+                    {counts().visualRounds > 0
+                      ? t("workboard.trustVisualAgreed", {
+                          agreed: String(counts().visualAgreedRounds),
+                          rounds: String(counts().visualRounds),
+                          rate: percent(counts().visualAgreedRounds, counts().visualRounds),
+                        })
+                      : "–"}
+                  </td>
+                </tr>
+              );
+            }}
+          </For>
+        </tbody>
+      </table>
     </>
   );
 }
@@ -154,7 +178,11 @@ export function BoardTrustHeading(props: { trust: BoardTrustState | undefined })
     const loaded = result();
     const week = loaded?.weeks.at(-1);
     return !loaded
-      ? t(props.trust?.status === "loading" ? "workboard.trustLoading" : "workboard.trustUnavailable")
+      ? t(
+          props.trust?.status === "loading"
+            ? "workboard.trustLoading"
+            : "workboard.trustUnavailable",
+        )
       : week?.accepted
         ? t("workboard.trustThisWeek", {
             autonomous: String(week.autonomous),
