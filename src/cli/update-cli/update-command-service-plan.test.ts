@@ -187,7 +187,17 @@ describe("package runtime compatibility guidance", () => {
       execPath: path.resolve("/fixture/app-runtime"),
       versions: { ...process.versions, bun: "1.4.3" },
     });
-    vi.mocked(resolveNodeRuntimeInfo).mockResolvedValue(unsupportedServiceRuntimeFixture);
+    vi.mocked(resolveNodeRuntimeInfo).mockImplementation(async (runner) =>
+      runner === "/recovered/node"
+        ? {
+            status: "supported",
+            version: "24.22.1",
+            sqliteVersion: "3.53.0",
+            nodeSharedSqlite: false,
+            sqliteProbe: { available: true, version: "3.53.0", text: true, blob: true, json: true },
+          }
+        : unsupportedServiceRuntimeFixture,
+    );
     vi.mocked(resolveTargetNodeRuntime).mockResolvedValue("/recovered/node");
     const result = await resolvePackageRuntimePreflight({
       target: { version: "2027.1.0", nodeEngine: ">=24.22.1" },
@@ -212,7 +222,37 @@ describe("package runtime compatibility guidance", () => {
     });
     expect(vi.mocked(resolveNodeRuntimeInfo).mock.calls.map(([runner]) => runner)).toEqual([
       "/old/node",
+      "/recovered/node",
     ]);
+    expect(resolveBunRuntimeInfo).not.toHaveBeenCalled();
+    expect(resolveTargetNodeRuntime).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a recovered Node that still fails its capability probe", async () => {
+    vi.stubGlobal("process", {
+      ...process,
+      execPath: path.resolve("/fixture/app-runtime"),
+      versions: { ...process.versions, bun: "1.4.3" },
+    });
+    vi.mocked(resolveNodeRuntimeInfo).mockResolvedValue(unsupportedServiceRuntimeFixture);
+    vi.mocked(resolveTargetNodeRuntime).mockResolvedValue("/recovered/node");
+    const result = await resolvePackageRuntimePreflight({
+      target: { version: "2027.1.0", nodeEngine: ">=24.22.1" },
+      nodeRunner: "/old/node",
+      shouldRestart: true,
+      alreadyCurrent: true,
+      service: refreshableService,
+      runtimeRecovery: { env: {} },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.failureFacts).toEqual([
+      expect.objectContaining({ check: "node-runtime", code: "node-runtime-preflight" }),
+    ]);
+    expect(vi.mocked(resolveNodeRuntimeInfo).mock.calls.map(([runner]) => runner)).toEqual([
+      "/old/node",
+      "/recovered/node",
+    ]);
+    expect(resolveBunRuntimeInfo).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -621,7 +661,7 @@ describe("package runtime compatibility guidance", () => {
       ]),
       error: expect.stringContaining(
         [
-          `Node ${node}: node:sqlite truncates TEXT at embedded NUL (nodejs/node#61954); use 24.22.1+/26.12.1+ or a build with the fix`,
+          `Node ${node}: node:sqlite truncates TEXT at embedded NUL (nodejs/node#61954); use 24.16+/26.1+ or a build with the fix`,
           expectedPlainRecovery("2026.9.3", "24.22.1", "refresh", "", path.resolve("/fixture/cli")),
         ].join("\n"),
       ),
@@ -629,10 +669,10 @@ describe("package runtime compatibility guidance", () => {
   });
 
   it.each([
-    [">=22.19.0", "24.22.1"],
-    [">=24.18.0 <25", "24.22.1"],
-    ["^22 || >=25 <27", "26.12.1"],
-    [">=26.2.0-rc.1 <27", "26.12.1"],
+    [">=22.19.0", "24.16.0"],
+    [">=24.18.0 <25", "24.18.0"],
+    ["^22 || >=25 <27", "26.1.0"],
+    [">=26.2.0-rc.1 <27", "26.2.0"],
   ])("recommends a release usable by the updater and candidate %s", async (engine, minimum) => {
     const node = "22.23.2";
     vi.stubGlobal("process", {
@@ -650,7 +690,7 @@ describe("package runtime compatibility guidance", () => {
       ]),
       error: expect.stringContaining(
         [
-          `Node ${node}: openclaw requires Node >=24.22.1 <25, or >=26.12.1.`,
+          `Node ${node}: openclaw requires Node >=24.16.0 <25, or >=26.1.0.`,
           expectedPlainRecovery("2027.1.0", minimum),
         ].join("\n"),
       ),
@@ -702,7 +742,7 @@ describe("package runtime compatibility guidance", () => {
       expect(result.error).toContain(
         minimum
           ? expectedPlainRecovery(version, minimum)
-          : "No Node version satisfies both this range and this updater's supported range (>=24.22.1 <25 || >=26.12.1).",
+          : "No Node version satisfies both this range and this updater's supported range (>=24.16.0 <25 || >=26.1.0).",
       );
     });
   }

@@ -3919,7 +3919,8 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
       expect(worker.test?.runner).toBe(previous.test?.runner);
       expect(worker.test?.setupFiles).toEqual(previous.test?.setupFiles);
     }
-    expect(listMatchedTestFiles(worker)).toEqual(gatewayDatabaseWorkerTestFiles);
+    const expected = gatewayDatabaseWorkerTestFiles.toSorted((a, b) => a.localeCompare(b));
+    expect(listMatchedTestFiles(worker)).toEqual(expected);
     expect(listMatchedTestFiles(worker)).toEqual(
       expect.arrayContaining([
         "src/gateway/github-publication-transcript.test.ts",
@@ -4130,7 +4131,7 @@ describe("scripts/lib/ci-node-test-plan.mts", () => {
     "config/ci-budget.md",
     "test/vitest/vitest.tooling.config.ts",
     "package.json",
-    "patches/vitest@5.0.1.patch",
+    "patches/vitest@5.0.5.patch",
     ".github/workflows/ci.yml",
     "apps/ios/fastlane/Fastfile",
     "extensions/matrix/scripts/build.mjs",

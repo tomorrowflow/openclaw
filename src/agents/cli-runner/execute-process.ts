@@ -99,6 +99,7 @@ export async function executeCliProcess(params: {
   // buildCliArgs emits this option only for an actual checkpointed resume.
   const resumeAtArg =
     params.useResume && runParams.cliSessionResumeAt ? params.backend.resumeAtArg : undefined;
+  const resumeCheckpointId = params.useResume ? runParams.cliSessionResumeAt : undefined;
   const hasJsonlOutput = params.outputMode === "jsonl";
   const eventDelivery =
     runParams.sourceReplyDeliveryMode === "message_tool_only" ||
@@ -339,7 +340,7 @@ export async function executeCliProcess(params: {
         if (runParams.abortSignal?.aborted || params.events.hasObservedCliActivity()) {
           throw error;
         }
-        throw resolveCliResumeAtError(error, resumeAtArg, failoverContext) ?? error;
+        throw resolveCliResumeAtError(error, { resumeAtArg }, failoverContext) ?? error;
       });
     } else {
       const supervisor = params.deps.getProcessSupervisor();
@@ -502,6 +503,16 @@ export async function executeCliProcess(params: {
   // A completed terminal record is authoritative even if the CLI hangs
   // afterward. Reclassifying it as a timeout could replay completed tools.
   if (parsedStructuredOutput?.terminalFailure) {
+    const checkpointError = parsedStructuredOutput.errorText
+      ? resolveCliResumeAtError(
+          parsedStructuredOutput.errorText,
+          { resumeCheckpointId },
+          failoverContext,
+        )
+      : undefined;
+    if (checkpointError) {
+      throw checkpointError;
+    }
     const terminalError = createCliOutputFailoverError({
       output: parsedStructuredOutput,
       ...outputErrorContext,
@@ -612,6 +623,7 @@ export async function executeCliProcess(params: {
       fallbackMessage: "CLI failed.",
       retryEmptyFailure,
       resumeAtArg: retryEmptyFailure ? resumeAtArg : undefined,
+      resumeCheckpointId,
     });
   }
 
@@ -641,6 +653,12 @@ export async function executeCliProcess(params: {
     };
   }
   const parsed = parsedStructuredOutput ?? parseOutput();
+  const checkpointError = parsed.errorText
+    ? resolveCliResumeAtError(parsed.errorText, { resumeCheckpointId }, failoverContext)
+    : undefined;
+  if (checkpointError) {
+    throw checkpointError;
+  }
   const parsedError = createCliOutputFailoverError({
     output: parsed,
     ...outputErrorContext,

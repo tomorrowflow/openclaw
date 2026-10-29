@@ -159,6 +159,33 @@ describe("Feishu app registration", () => {
     );
   });
 
+  it("ends the registration poll at its monotonic deadline when the wall clock rewinds", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => Response.json({ error: "authorization_pending" }));
+    mockRegistrationFetch({
+      fetchImpl: withFetchPreconnect(fetchMock),
+      lookupFn: hermeticPublicLookup,
+    });
+    // Settlement observer is attached before fake time advances, so the
+    // recorded outcome can be asserted without leaving real timers behind.
+    let outcome: string | undefined;
+    const poll = pollAppRegistration({ deviceCode: "device-code", interval: 5, expireIn: 30 }).then(
+      (result) => {
+        outcome = `settled:${result.status}`;
+      },
+      () => {
+        outcome = "settled:rejected";
+      },
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    // NTP correction or VM resume rewinds the wall clock mid-poll.
+    vi.setSystemTime(Date.now() - 10 * 60_000);
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(outcome).toBe("settled:timeout");
+    await poll;
+    vi.useRealTimers();
+  });
+
   it("clamps unsafe poll sleeps from provider intervals", async () => {
     vi.useFakeTimers();
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
@@ -258,17 +285,12 @@ describe("Feishu app registration", () => {
   // over-cap: body > 16 MiB, no Content-Length. The bounded reader cancels
   // through the real SSRF guard and rejects before full buffering.
   it("rejects Feishu API responses that exceed the 16 MiB JSON body cap", async () => {
-    let streamState:
-      | {
-          bytesPulled: () => number;
-          canceled: () => boolean;
-        }
-      | undefined;
+    let streamState: ReturnType<typeof writeOversizedJson> | undefined;
     await withRegistrationServer(
       (_req, res) => {
         streamState = writeOversizedJson(
           res,
-          FEISHU_JSON_MAX_BYTES * 2,
+          FEISHU_JSON_MAX_BYTES,
           '{"device_code":"dev","padding":"',
         );
       },
@@ -276,6 +298,7 @@ describe("Feishu app registration", () => {
         await expect(beginAppRegistration("feishu")).rejects.toThrow(
           /feishu\.api: JSON response exceeds \d+ bytes/,
         );
+        await expect(streamState?.clientClosed).resolves.toBeUndefined();
       },
     );
 

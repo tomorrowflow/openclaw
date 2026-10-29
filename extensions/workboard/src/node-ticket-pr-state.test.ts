@@ -122,13 +122,9 @@ describe("node ticket PR state sync", () => {
     const ticket = await publishedTicket();
     ticket.github.openPulls.push(PR);
     ticket.github.conflictingPulls.add(PR);
-    // The fixture's run still holds its claim; a live conflict arrives long after it lapsed.
-    const claim = (await ticket.store.get(ticket.card.id))?.metadata?.claim;
-    await ticket.store.releaseClaim(ticket.card.id, {
-      ownerId: claim!.ownerId,
-      token: claim!.token,
-      status: "done",
-    });
+    // Moving the fixture's run to done released its claim, as a live conflict
+    // arrives long after the run lapsed.
+    expect((await ticket.store.get(ticket.card.id))?.metadata?.claim).toBeUndefined();
     await ticket.syncPass();
     // The next handoff pass starts the reopened round, as the conflict comment is its feedback.
     await ticket.handoffs.resume(ticket.warn);

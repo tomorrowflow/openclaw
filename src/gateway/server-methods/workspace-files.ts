@@ -170,7 +170,7 @@ async function toSessionFileEntry(
     onOutsideBoundary?: () => void;
     sandbox?: SessionSandboxPaths;
   } = {},
-): Promise<SessionFileEntry> {
+): Promise<SessionFileEntry | undefined> {
   const target = await resolveSessionFileReadTarget(
     { root, fileRoot, authorizeHostRead: opts.authorizeHostRead, sandbox: opts.sandbox },
     touched.path,
@@ -189,6 +189,10 @@ async function toSessionFileEntry(
   const browserPath = target.path;
   const readRoot = target.outside ? target.root : (opts.workspaceRoot ?? target.root);
   const stat = await statWorkspacePath(readRoot, browserPath, opts.assertCurrent);
+  // Confirmed directories belong to the browser, not file-only activity.
+  if (stat?.isDirectory && !opts.includeContent) {
+    return undefined;
+  }
   if (!stat?.isFile) {
     return { ...base, missing: true };
   }
@@ -453,7 +457,7 @@ export async function listSessionWorkspaceFiles(
   return {
     ...(root ? { root } : {}),
     ...(gitCheckout === undefined ? {} : { gitCheckout }),
-    files,
+    files: files.filter((file) => file !== undefined),
     ...(browser ? { browser } : {}),
   };
 }
@@ -506,7 +510,7 @@ async function getSandboxMountedFile(
     target.hostRoot,
     { includeContent: true, assertCurrent: params.assertCurrent },
   );
-  if (entry.missing) {
+  if (!entry || entry.missing) {
     return undefined;
   }
   const { hash: _hash, workspacePath: _workspacePath, ...readOnly } = entry;
@@ -565,7 +569,7 @@ async function getSessionRootFile(
           params.root,
           options,
         );
-        if (!file.missing) {
+        if (file && !file.missing) {
           return { root: params.root, file };
         }
       }

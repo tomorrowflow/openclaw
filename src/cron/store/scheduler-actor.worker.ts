@@ -8,6 +8,7 @@ import { tryResolveCronJobEffectiveAgentId } from "../agent-id.js";
 import { resolveCronJobConfigRevision } from "../config-revision.js";
 import { isHeartbeatTaskCronJob } from "../heartbeat-task.js";
 import {
+  computeJobPreviousRunAtOrBeforeMs,
   DEFAULT_ERROR_BACKOFF_SCHEDULE_MS,
   hasActiveCronRun,
   hasScheduledNextRunAtMs,
@@ -482,11 +483,17 @@ export function runCronSchedulerInWorker(
       );
       candidates = catchup.immediate;
       overflow = catchup.overflow;
+      // Catch-up loads its own job rows; run admission validates slots against `jobs`,
+      // so the recovered-slot rewrite below must land on the same objects.
+      for (const job of candidates) {
+        jobs.set(job.id, job);
+      }
     } else if (command.type !== "cron.schedulerRefresh") {
+      const allowCronMissedRunByLastRun = snapshot.config.cronConfig?.skipMissedJobs !== true;
       candidates = currentJobs().filter(
         (job) =>
           !waitsForStartupBatch(actor, job) &&
-          isRunnableJob({ job, nowMs, activeInProcess: false }),
+          isRunnableJob({ job, nowMs, allowCronMissedRunByLastRun, activeInProcess: false }),
       );
     }
     const ownerless = candidates.filter(
@@ -531,6 +538,12 @@ export function runCronSchedulerInWorker(
         currentJobs().some((job) => job.state.queuedAtMs !== undefined))
     ) {
       currentJobs();
+      for (const job of owned) {
+        if (job.state.nextRunAtMs !== undefined && job.state.nextRunAtMs > nowMs) {
+          // Recovery must not consume the future occurrence's receipt identity.
+          job.state.nextRunAtMs = computeJobPreviousRunAtOrBeforeMs(job, nowMs);
+        }
+      }
       const requested = requestAndDrainCronRunsInWorker(
         database,
         {

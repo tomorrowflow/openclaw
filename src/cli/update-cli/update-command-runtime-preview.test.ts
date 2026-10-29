@@ -26,6 +26,40 @@ beforeEach(() => {
   vi.stubEnv("OPENCLAW_DISABLE_BUNDLED_PLUGINS", "1");
 });
 it.each([
+  ["24.16.0", true],
+  ["26.1.0", false],
+] as const)(
+  "warns without refusing an update preview under compatible service Node %s",
+  async (version, json) => {
+    stubNodeRuntime();
+    fixture.managedServiceNodeRunner = process.execPath;
+    vi.spyOn(runtimePaths, "resolveNodeRuntimeInfo").mockResolvedValue({
+      status: "supported",
+      version,
+      sqliteVersion: "3.53.0",
+      nodeSharedSqlite: false,
+      sqliteProbe: { available: true, version: "3.53.0", text: true, blob: true, json: true },
+    });
+    vi.mocked(packageMetadata.fetchNpmPackageTargetStatus).mockResolvedValue({
+      ...targetMetadata,
+      nodeEngine: ">=24.16.0 <25 || >=26.1.0",
+    });
+    const log = vi.spyOn(defaultRuntime, "log").mockImplementation(() => undefined);
+
+    await updateCommand({ tag: targetMetadata.version, yes: true, dryRun: true, json });
+
+    const output = json
+      ? JSON.stringify(vi.mocked(defaultRuntime.writeJson).mock.lastCall?.[0])
+      : log.mock.calls.flat().join("\n");
+    expect(output).toContain("SECURITY WARNING");
+    expect(output).toContain(`Node.js ${version}`);
+    expect(output).not.toContain("Would refuse update");
+    expect(packageUpdate.stagePackageInstallUpdate).not.toHaveBeenCalled();
+    expect(fs.existsSync(fixture.databasePath)).toBe(false);
+  },
+);
+
+it.each([
   { name: "no restart", restart: false, debugCapture: true },
   { name: "replacement" },
   { name: "compatible", compatible: true },
@@ -136,7 +170,7 @@ it.each([
     expect(captureNotices).toHaveLength(debugCapture ? 1 : 0);
     const preview = vi.mocked(defaultRuntime.writeJson).mock.calls.at(-1)?.[0];
     const notes = json ? JSON.stringify(preview) : log.mock.calls.flat().join("\n");
-    const replacement = !compatible && restart && owned && (!current || (running && refresh));
+    const replacement = !compatible && restart && owned && current && running && refresh;
     if (!compatible && !replacement) {
       const recoverySteps = [
         {
@@ -175,7 +209,7 @@ it.each([
           notes: [expect.stringContaining(message)],
           failures: [
             {
-              reason: "node-runtime-preflight",
+              reason: current ? "node-runtime-preflight" : "preflight-node-runtime-incompatible",
               message: expect.stringContaining(message),
               recoverySteps,
               failureFacts: expect.arrayContaining([
@@ -212,14 +246,14 @@ it.each([
       await expect(
         updateCommand({ ...opts, json: true, admission: "installed" }),
       ).rejects.toBeInstanceOf(Error);
-      if (compatible || replacement) {
+      if (compatible) {
         expect(packageUpdate.stagePackageInstallUpdate).toHaveBeenCalledWith(
           expect.objectContaining({ nodeRunner: replacement ? "/current/node" : "/service/node" }),
         );
       } else {
         expect(defaultRuntime.writeJson).toHaveBeenLastCalledWith(
           expect.objectContaining({
-            reason: "node-runtime-preflight",
+            reason: "preflight-node-runtime-incompatible",
             steps: expect.arrayContaining([
               expect.objectContaining({
                 stderrTail: expect.stringContaining(

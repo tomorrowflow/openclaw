@@ -44,6 +44,7 @@ import type {
 import { WorkboardNodeProbeStore } from "./store-node-probe.js";
 import { capText, normalizeBoardId, normalizeTimestamp } from "./store-normalizers.js";
 import { readCards } from "./store-read.js";
+import { finishRun } from "./store-status-write.js";
 
 export type { WorkboardDispatchResult } from "./store-inputs.js";
 export { WorkboardCardConflictError } from "./store-core.js";
@@ -499,7 +500,7 @@ export class WorkboardStore extends WorkboardNodeProbeStore {
             const reason = timedOut
               ? "Run exceeded the card max runtime."
               : "Claim expired without a recent heartbeat.";
-            const finished = this.finishRun(latest, "blocked", now, reason);
+            const finished = finishRun(latest, "blocked", now, reason);
             latest = await this.updateCard(latest, {
               ...finished,
               metadata: {

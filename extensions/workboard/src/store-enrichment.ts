@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import type {
   WorkboardArtifact,
   WorkboardAttachment,
@@ -9,23 +8,12 @@ import type {
 } from "@openclaw/workboard-contract";
 import { grillLogAttachmentId } from "./node-ticket-grill.js";
 import type { PersistedWorkboardAttachment } from "./persistence-types.js";
-import {
-  assertCanMutateClaimedCard,
-  cardRunId,
-  cardSessionKey,
-  closeRunningAttempts,
-} from "./store-card-helpers.js";
-import {
-  MAX_CARD_ARTIFACTS,
-  MAX_CARD_NOTIFICATIONS,
-  MAX_CARD_PROOF,
-  MAX_CARD_WORKER_LOGS,
-} from "./store-constants.js";
+import { assertCanMutateClaimedCard, cardRunId, cardSessionKey } from "./store-card-helpers.js";
+import { MAX_CARD_ARTIFACTS, MAX_CARD_PROOF, MAX_CARD_WORKER_LOGS } from "./store-constants.js";
 import { WorkboardCoreStore } from "./store-core.js";
 import type {
   WorkboardArtifactInput,
   WorkboardAttachmentInput,
-  WorkboardCardPatch,
   WorkboardMutationScope,
   WorkboardProofInput,
   WorkboardProtocolViolationInput,
@@ -39,50 +27,16 @@ import {
   normalizeProofInput,
   workerLogEntry,
 } from "./store-normalizers.js";
+import { appendCardNotification, finishRun } from "./store-status-write.js";
 import { normalizeBoundedString } from "./store-value-normalizers.js";
 
 export class WorkboardEnrichmentStore extends WorkboardCoreStore {
-  protected finishRun(
-    card: WorkboardCard,
-    status: "done" | "blocked",
-    now: number,
-    reason?: string,
-  ): WorkboardCardPatch & { metadata: WorkboardMetadata } {
-    const execution =
-      card.execution?.status === "running"
-        ? { ...card.execution, status, updatedAt: now }
-        : card.execution;
-    return {
-      status,
-      ...(execution ? { execution } : {}),
-      metadata: {
-        ...card.metadata,
-        claim: undefined,
-        attempts: closeRunningAttempts(
-          card.metadata?.attempts,
-          now,
-          status === "done" ? "succeeded" : "blocked",
-          reason,
-        ),
-        failureCount: status === "done" ? 0 : (card.metadata?.failureCount ?? 0) + 1,
-      },
-    };
-  }
-
   protected appendNotification(
     metadata: WorkboardMetadata | undefined,
     now: number,
     notification: Omit<WorkboardNotification, "id" | "createdAt" | "sequence">,
   ): WorkboardNotification[] {
-    return [
-      ...(metadata?.notifications ?? []),
-      {
-        id: randomUUID(),
-        createdAt: now,
-        sequence: this.nextNotificationSequence(now),
-        ...notification,
-      },
-    ].slice(-MAX_CARD_NOTIFICATIONS);
+    return appendCardNotification(metadata, now, this.nextNotificationSequence(now), notification);
   }
 
   async addProof(
@@ -261,7 +215,7 @@ export class WorkboardEnrichmentStore extends WorkboardCoreStore {
         "Worker stopped without completing or blocking the card.";
       const log = workerLogEntry({ ...input, level: "error" }, detail, now);
       const { sessionKey, runId } = log;
-      const finished = this.finishRun(card, "blocked", now, detail);
+      const finished = finishRun(card, "blocked", now, detail);
       const notifications = this.appendNotification(card.metadata, now, {
         kind: "failed",
         message: capText(detail, 240) ?? "Worker protocol violation.",

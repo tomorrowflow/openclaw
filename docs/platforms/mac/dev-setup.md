@@ -16,7 +16,7 @@ the Xcode requirements below.
 
 - **Xcode 26.4+** (Swift 6.3 toolchain), on the latest macOS available in
   Software Update.
-- **Node.js 24.22.1+ or 26.12.1+ & pnpm** for the gateway, CLI, and packaging scripts.
+- **Patched Node.js 24.22.1+ or 26.12.1+ & pnpm** is recommended for development and packaging. Gateway/CLI runtime compatibility starts at Node 24.16.0 on 24.x or 26.1.0, subject to SQLite checks.
   SwiftPM and Xcode generate the Gateway protocol models with the first
   supported Node on `PATH`, then `/opt/homebrew/bin/node` or
   `/usr/local/bin/node`. Version-manager shims such as mise, asdf, or Volta
@@ -378,6 +378,10 @@ the rest of the run.
 If packaging stops at `Freezing authenticated Peekaboo sources in a read-only snapshot`,
 check the `hdiutil` error on stderr. Routine image creation and attachment output stays
 quiet, but failures such as `hdiutil: attach failed - Permission denied` are preserved.
+A transient `Resource temporarily unavailable` attach failure is retried, up to three
+attempts in total. If attachment fails before mounting, cleanup detaches the snapshot image
+by device; if it stays attached, cleanup fails, retains the files, and prints the
+`hdiutil detach /dev/diskN` command to run.
 Snapshot images and build outputs stay in the checkout. Their read-only mount directories
 use macOS's per-user temporary location (`getconf DARWIN_USER_TEMP_DIR`), independently of
 `TMPDIR`, so an external checkout does not need to support nested mounts. If attachment

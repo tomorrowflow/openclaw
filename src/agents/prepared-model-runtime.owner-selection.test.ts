@@ -14,6 +14,7 @@ import {
 import * as pluginMetadata from "../plugins/plugin-metadata-snapshot.js";
 import * as legacyAuth from "./legacy-inherited-auth-dir.js";
 import { withPreparedModelRuntimePluginGenerationScope } from "./prepared-model-runtime-generation-scope.js";
+import { readCapturedPreparedModelRuntimeCatalog } from "./prepared-model-runtime.capture.js";
 import {
   acquireAgentRunPreparedModelRuntime,
   acquireReadOnlyPreparedModelRuntime,
@@ -131,9 +132,21 @@ describe("prepared model runtime owner selection", () => {
   );
 
   it("prepares prompt-only runtime owners separately from the configured agent generation", async () => {
+    const discovered = { id: "live-only", name: "Published discovered model", provider: "custom" };
+    const discoveredCatalog = { entries: [discovered], routeVariants: [discovered] };
+    mocks.buildPreparedModelCatalogSnapshot.mockResolvedValue(discoveredCatalog);
+    // Gateway-configured agents load their full catalog through the catalog worker.
+    mocks.runPreparedModelCatalogWorker.mockResolvedValue(discoveredCatalog);
     const config = gatewayConfig();
     await publishGateway(config, { catalogMode: "static" });
     const published = (await loadPublishedGatewayReplyDispatchRuntime({ agentId: "default" }))!;
+    const configuredSnapshot = await prepareModelRuntimeSnapshot(
+      fixture.agentInput("default", config),
+    );
+    await configuredSnapshot.loadFullModelCatalog!({ refresh: true, wait: true });
+    expect(configuredSnapshot.readFullModelCatalog?.()?.entries).toContainEqual(
+      expect.objectContaining(discovered),
+    );
     mocks.loadAgentRuntimePluginRegistryHandle.mockClear();
     const lease = await acquireAgentRunPreparedModelRuntime(
       {
@@ -145,6 +158,9 @@ describe("prepared model runtime owner selection", () => {
     );
     try {
       expect(lease.pluginGeneration).not.toBe(published.pluginGeneration);
+      expect(readCapturedPreparedModelRuntimeCatalog(lease.snapshot)?.entries).toContainEqual(
+        expect.objectContaining(discovered),
+      );
       expect(mocks.loadAgentRuntimePluginRegistryHandle.mock.calls[0]?.[0]).toMatchObject({
         purpose: "isolated-completion",
       });

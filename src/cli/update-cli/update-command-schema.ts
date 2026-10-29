@@ -58,6 +58,7 @@ export async function previewUpdateCommand(params: {
     | "requestedChannel"
     | "controlPlaneUpdateSentinelMeta"
     | "packageActivationNotes"
+    | "nodeSecurityWarning"
   >;
   opts: UpdateCommandOptions;
   runId: string;
@@ -80,6 +81,9 @@ export async function previewUpdateCommand(params: {
     }));
   if (preflight) {
     preflight.preflightNotes.push(...(prepared.packageActivationNotes ?? []));
+    if (prepared.nodeSecurityWarning) {
+      preflight.preflightNotes.push(`SECURITY WARNING: ${prepared.nodeSecurityWarning}`);
+    }
     if (target.inspectionWarning) {
       preflight.preflightNotes.push(target.inspectionWarning);
     }
@@ -242,8 +246,13 @@ export async function preflightUpdateCommandSchemas(params: {
         installedContexts,
       );
       if (opts.dryRun && updateInstallKind === "package") {
+        const engineOnly =
+          !params.packageAlreadyCurrent &&
+          Boolean(params.packageRuntimeTarget?.nodeEngine) &&
+          canResolveRegistryVersionForPackageTarget(params.packageInstallSpec ?? "");
         const runtime = await resolvePackageRuntimePreflight({
           ...params,
+          engineOnly,
           target: params.packageRuntimeTarget,
           nodeRunner: params.managedServiceNodeRunner,
           timeoutMs: updateStepTimeoutMs,
@@ -254,7 +263,7 @@ export async function preflightUpdateCommandSchemas(params: {
         if (!runtime.ok) {
           preflightNotes.push(`Would refuse update: ${runtime.error}`);
           preflightFailures.push({
-            reason: "node-runtime-preflight",
+            reason: engineOnly ? "preflight-node-runtime-incompatible" : "node-runtime-preflight",
             message: runtime.error,
             failureFacts: runtime.failureFacts,
             recoverySteps: runtime.recoverySteps,
@@ -263,6 +272,9 @@ export async function preflightUpdateCommandSchemas(params: {
           preflightNotes.push(
             `Would replace managed gateway service Node (${runtime.value.replacedNodeRunner}) with current Node (${runtime.value.nodeRunner}) for openclaw@${runtime.value.targetVersion}.`,
           );
+        }
+        if (runtime.ok && runtime.value.nodeSecurityWarning) {
+          preflightNotes.push(`SECURITY WARNING: ${runtime.value.nodeSecurityWarning}`);
         }
         if (
           params.packageInstallSpec &&

@@ -274,7 +274,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: async auth-provider preparation for Codex and voice model-session patches.
       // +1: isHostNoticePayload for agent-to-agent reply filtering.
       // +1: observeToolCallHumanInputWaits pauses Codex per-call watchdogs during plugin approvals.
-      3761,
+      // +1: managed plugin resource root retained during redirected agent execution.
+      3762,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -310,7 +311,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: the same prepareAuthProfileProvider operation on model-session-runtime.
       // +1: the same host-notice classifier on reply-payload.
       // +1: observeToolCallHumanInputWaits pauses Codex per-call watchdogs during plugin approvals.
-      2196,
+      // +1: managed plugin resource root retained during redirected agent execution.
+      2197,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
