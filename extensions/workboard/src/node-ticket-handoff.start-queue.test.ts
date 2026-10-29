@@ -50,7 +50,7 @@ describe("node ticket start queue", () => {
         token: claim?.token ?? "",
       });
     };
-    return { store, start, handoffs, create, runningIos, runningServer, toReview };
+    return { store, gateway, start, handoffs, create, runningIos, runningServer, toReview };
   }
 
   it("starts the oldest queued request first when its route frees a slot", async () => {
@@ -77,6 +77,47 @@ describe("node ticket start queue", () => {
       const waiting = await store.get(newer.id);
       expect(waiting?.status).toBe("todo");
       expect(waiting?.metadata?.automation?.startRequest).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a slot that frees mid-pass for the oldest request, not a later card the pass reaches", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    try {
+      const { store, gateway, start, create, runningIos, toReview } = await fullRoutes();
+      const older = await create("Fix the wake word", "class:ios-ui");
+      const newer = await create("Fix the badge", "class:ios-ui");
+      for (const card of [older, newer]) {
+        vi.advanceTimersByTime(1000);
+        expect((await start(card.id, "request")).queued).toBeDefined();
+      }
+      // The running ticket reaches review while the pass walks the queue: after
+      // the older request found the route full, before the newer one's turn.
+      let freed = false;
+      const handoffs = createNodeTicketHandoffs({
+        store,
+        runtime: gateway,
+        github: { token: () => undefined },
+        start: async (cardId, queue) => {
+          const result = await start(cardId, queue);
+          if (!freed) {
+            freed = true;
+            await toReview(runningIos.id);
+          }
+          return result;
+        },
+      });
+      const warn = vi.fn();
+
+      await handoffs.resume(warn);
+      expect((await store.get(newer.id))?.status).toBe("todo");
+
+      // The pass the review triggers starts the older request.
+      await handoffs.resume(warn);
+      expect(warn).not.toHaveBeenCalled();
+      expect((await store.get(older.id))?.status).toBe("running");
+      expect((await store.get(newer.id))?.status).toBe("todo");
     } finally {
       vi.useRealTimers();
     }
@@ -169,11 +210,11 @@ describe("node ticket start queue", () => {
     const { store, start, handoffs, create, runningIos, toReview } = await fullRoutes();
     const card = await create("Fix the wake word", "class:ios-ui");
     expect((await start(card.id, "request")).queued).toBeDefined();
-    const slots = store.nodeTicketSlots.bind(store);
-    vi.spyOn(store, "nodeTicketSlots").mockImplementationOnce(async (cards) => {
+    const claim = store.claim.bind(store);
+    vi.spyOn(store, "claim").mockImplementationOnce(async (...args) => {
       // An edit lands between the drain's read and its claim.
       await store.update(card.id, { agentId: "reviewer" });
-      return await slots(cards);
+      return await claim(...args);
     });
 
     await toReview(runningIos.id);

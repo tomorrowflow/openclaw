@@ -39,6 +39,7 @@ import { cardBoardId, workboardClaimRefusal } from "./store-card-helpers.js";
 import {
   isWorkboardNodeTicket,
   type WorkboardNodeTicketSlot,
+  type WorkboardSlotFull,
   workboardCardConsumesNodeTicketSlot,
   workboardCardConsumesOwnerSlot,
   workboardCardSlotOwner,
@@ -109,6 +110,8 @@ type WorkboardDispatchAndStartResult = WorkboardDispatchResult & {
   startFailures: WorkboardStartFailure[];
   /** The exact start's card, queued because it waits on its parents or a full slot. */
   queued?: WorkboardCard;
+  /** Why a queued start waits when its slot, not its dependencies, holds it. */
+  queuedForSlot?: WorkboardSlotFull;
 };
 
 type WorkboardPreparedLaunch = Extract<WorkboardLaunchState, { phase: "prepared" }>;
@@ -753,6 +756,7 @@ async function runWorkboardDispatch(
     started,
     startFailures,
     ...(queued ? { queued } : {}),
+    ...(queued && wait?.kind === "slot" ? { queuedForSlot: wait.full } : {}),
     count: dispatch.count + started.length + startFailures.length,
   };
 }

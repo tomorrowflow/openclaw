@@ -35,7 +35,13 @@ import {
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
 import { cardBoardId, cardRunId, cardSessionKey } from "./store-card-helpers.js";
-import { MAX_BLOCK_REASON_CHARS, MAX_PROOF_NOTE_CHARS } from "./store-constants.js";
+import {
+  MAX_BLOCK_REASON_CHARS,
+  MAX_PROOF_NOTE_CHARS,
+  type WorkboardNodeTicketSlot,
+  type WorkboardSlotFull,
+  workboardRoutePinnedNode,
+} from "./store-constants.js";
 import { capText } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
 
@@ -450,6 +456,7 @@ export type WorkboardNodeTicketStart = (
 ) => Promise<{
   startFailures: ReadonlyArray<{ error: string; changed?: true }>;
   queued?: WorkboardCard;
+  queuedForSlot?: WorkboardSlotFull;
 }>;
 
 /**
@@ -517,20 +524,34 @@ async function reopenNodeTicket(params: {
   );
 }
 
+const POOL_SLOT = "pool";
+
+/**
+ * Which slot a queued card waits on: its route, and the node its worktree
+ * pins it to, or the shared pool when no route matches.
+ */
+function slotKey(slot: WorkboardNodeTicketSlot | undefined): string {
+  const route = slot?.route;
+  return route
+    ? `${route.boardId}#${route.index}@${workboardRoutePinnedNode(route) ?? "*"}`
+    : POOL_SLOT;
+}
+
 /**
  * Starts one queued node ticket. A card that still waits on its parents or a
  * full slot, or that changed while the start read it, stays queued for the
- * next card change; any other refusal blocks it with the reason.
+ * next card change; any other refusal blocks it with the reason. Returns
+ * why a slot holds the card, so the pass skips later cards on that slot.
  */
 async function drainStartQueue(params: {
   store: WorkboardStore;
   start: WorkboardNodeTicketStart;
   card: WorkboardCard;
-}): Promise<void> {
-  const { startFailures, queued } = await params.start(params.card.id, "drain");
+}): Promise<WorkboardSlotFull | undefined> {
+  const { startFailures, queued, queuedForSlot } = await params.start(params.card.id, "drain");
   const failure = startFailures[0];
   if (!failure || queued || failure.changed) {
-    return;
+    return queuedForSlot;
   }
   // A start that claimed the card already blocked it on failure.
   const current = await params.store.get(params.card.id);
@@ -789,7 +810,9 @@ export function createNodeTicketHandoffs(params: {
         }
       }
       // Oldest request first; a card whose route is still full does not hold
-      // back a later one on a route with a free slot.
+      // back a later one on a route with a free slot. A slot that frees while
+      // the pass walks the queue goes to the oldest card waiting for it, on the
+      // pass that change triggers, not to a later card this pass reaches first.
       const queue = (await params.store.list())
         .filter((card) => card.metadata?.automation?.startRequest)
         .toSorted(
@@ -797,13 +820,19 @@ export function createNodeTicketHandoffs(params: {
             (left.metadata?.automation?.startRequest?.requestedAt ?? 0) -
             (right.metadata?.automation?.startRequest?.requestedAt ?? 0),
         );
+      const slots = await params.store.nodeTicketSlots(queue);
+      const fullSlots = new Set<string>();
       for (const card of queue) {
-        if (inFlight.has(card.id)) {
+        const slot = slotKey(slots.get(card.id));
+        if (inFlight.has(card.id) || fullSlots.has(POOL_SLOT) || fullSlots.has(slot)) {
           continue;
         }
         inFlight.add(card.id);
         try {
-          await drainStartQueue({ store: params.store, start: params.start, card });
+          const full = await drainStartQueue({ store: params.store, start: params.start, card });
+          if (full) {
+            fullSlots.add(full === "slot_busy" ? POOL_SLOT : slot);
+          }
         } catch (error) {
           warn(`workboard queued start failed for card ${card.id}: ${formatErrorMessage(error)}`);
         } finally {
