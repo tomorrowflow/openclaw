@@ -2,7 +2,7 @@ import { jsonResult, readStringParam } from "openclaw/plugin-sdk/core";
 import type { AnyAgentTool } from "openclaw/plugin-sdk/plugin-entry";
 import { asNonArrayRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { Type } from "typebox";
-import { redactClaimToken, redactDispatchResult } from "./card-redaction.js";
+import { redactCard, redactDispatchResult } from "./card-redaction.js";
 import type { WorkboardAgentActor } from "./store-inputs.js";
 import type { WorkboardStore } from "./store.js";
 import {
@@ -133,7 +133,7 @@ export function createWorkboardOrchestrationTools(params: {
       execute: async (_toolCallId, rawParams) => {
         const id = readStringParam(asNonArrayRecord(rawParams), "id", { required: true });
         const result = await store.runs(id);
-        return jsonResult({ ...result, card: redactClaimToken(result.card) });
+        return jsonResult({ ...result, card: redactCard(result.card) });
       },
     },
     {
@@ -166,7 +166,7 @@ export function createWorkboardOrchestrationTools(params: {
       }),
       execute: async (_toolCallId, rawParams) => {
         const { record, id, scope } = await readScopedCardToolParams(asNonArrayRecord(rawParams));
-        return jsonResult({ card: redactClaimToken(await store.specify(id, record, scope)) });
+        return jsonResult({ card: redactCard(await store.specify(id, record, scope)) });
       },
     },
     {
@@ -209,8 +209,8 @@ export function createWorkboardOrchestrationTools(params: {
         const { record, id, scope } = await readScopedCardToolParams(asNonArrayRecord(rawParams));
         const result = await store.decompose(id, record, scope, actor);
         return jsonResult({
-          parent: redactClaimToken(result.parent),
-          children: result.children.map(redactClaimToken),
+          parent: redactCard(result.parent),
+          children: result.children.map(redactCard),
         });
       },
     },

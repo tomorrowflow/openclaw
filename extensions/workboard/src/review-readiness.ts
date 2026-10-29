@@ -57,6 +57,22 @@ export function currentNodeVerification(
 }
 
 /**
+ * The finished verification an operator's visual check is recorded on: the
+ * current one of an unarchived card's imported round.
+ */
+export function visualCheckVerification(
+  card: WorkboardCard,
+): Extract<WorkboardNodeVerification, { phase: "done" }> | undefined {
+  const worktree = card.metadata?.automation?.target?.worktree;
+  const handoff = worktree?.handoff;
+  if (!worktree || handoff?.phase !== "imported" || card.metadata?.archivedAt) {
+    return undefined;
+  }
+  const verification = currentNodeVerification(worktree, handoff);
+  return verification?.phase === "done" ? verification : undefined;
+}
+
+/**
  * How long an imported round waits for its verification and verdict before
  * the operator may decide without them. The slowest observed pair took ~12 min.
  */

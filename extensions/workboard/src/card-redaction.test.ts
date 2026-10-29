@@ -1,15 +1,57 @@
-import type { WorkboardCard } from "@openclaw/workboard-contract";
+import type { WorkboardCard, WorkboardNodeVerification } from "@openclaw/workboard-contract";
 import { describe, expect, it } from "vitest";
 import {
   HIDDEN_VERDICT_NOTICE,
   HIDDEN_VERIFICATION_NOTICE,
-  redactClaimToken,
+  redactCard,
   redactOperatorCard,
 } from "./card-redaction.js";
 
 type NodeTarget = NonNullable<
   NonNullable<NonNullable<WorkboardCard["metadata"]>["automation"]>["target"]
 >;
+
+const DONE_VERIFICATION = {
+  phase: "done" as const,
+  round: 0,
+  headCommit: "b".repeat(40),
+  startedAt: 11,
+  endedAt: 12,
+  sessionKey: "agent:verifier:verify-card-1-r0-v0",
+  model: "openai/gpt-6-sol",
+  verdict: "pass" as const,
+  summary: "xcodebuild test passed",
+  findings: [],
+};
+
+/** A node ticket in review on its imported round, with a finished verification. */
+function visualCard(
+  extra: Partial<Extract<WorkboardNodeVerification, { phase: "done" }>>,
+  options: { rung?: "b"; status?: WorkboardCard["status"] } = {},
+): WorkboardCard {
+  return {
+    ...createCard({
+      automation: {
+        target: {
+          kind: "node-claude",
+          nodeId: "node",
+          repoPath: "/repo",
+          worktreesRoot: "/wt",
+          hostRepoPath: "/host",
+          worktree: {
+            path: "/wt/wb-card-1",
+            branch: "factory/card-1",
+            baseCommit: "a".repeat(40),
+            handoff: { phase: "imported", headCommit: "b".repeat(40), importedAt: 10 },
+            verification: { ...DONE_VERIFICATION, ...extra },
+            ...(options.rung ? { rung: options.rung } : {}),
+          },
+        },
+      },
+    }),
+    status: options.status ?? "review",
+  };
+}
 
 function createCard(metadata?: WorkboardCard["metadata"]): WorkboardCard {
   return {
@@ -25,11 +67,11 @@ function createCard(metadata?: WorkboardCard["metadata"]): WorkboardCard {
   };
 }
 
-describe("redactClaimToken", () => {
+describe("redactCard", () => {
   it("preserves card identity when there is no claim", () => {
     const card = createCard({ archivedAt: 1 });
 
-    expect(redactClaimToken(card)).toBe(card);
+    expect(redactCard(card)).toBe(card);
   });
 
   it("redacts the token without mutating the card", () => {
@@ -42,7 +84,7 @@ describe("redactClaimToken", () => {
       },
     });
 
-    const redacted = redactClaimToken(card);
+    const redacted = redactCard(card);
 
     expect(redacted).not.toBe(card);
     expect(redacted.labels).toBe(card.labels);
@@ -50,6 +92,27 @@ describe("redactClaimToken", () => {
     expect(redacted.metadata?.claim).not.toBe(card.metadata?.claim);
     expect(redacted.metadata?.claim?.token).toBe("[redacted]");
     expect(card.metadata?.claim?.token).toBe("secret-token");
+  });
+
+  it("leaves the verifier's visual read out until the operator records a visual check", () => {
+    const visual = {
+      verdict: "problem" as const,
+      screenshots: [{ path: "dark.png", shows: "label unreadable", verdict: "problem" as const }],
+    };
+    const checked = (visualCheck?: { verdict: "looks_right"; at: number }) =>
+      visualCard({ visual, ...(visualCheck ? { visualCheck } : {}) });
+    const verificationOf = (card: WorkboardCard) =>
+      redactCard(card).metadata?.automation?.target?.worktree?.verification;
+
+    const unchecked = checked();
+    expect(verificationOf(unchecked)).toEqual({ ...DONE_VERIFICATION });
+    expect(unchecked.metadata?.automation?.target?.worktree?.verification).toHaveProperty("visual");
+    const check = { verdict: "looks_right" as const, at: 30 };
+    expect(verificationOf(checked(check))).toEqual({
+      ...DONE_VERIFICATION,
+      visual,
+      visualCheck: check,
+    });
   });
 });
 
@@ -368,5 +431,43 @@ describe("redactOperatorCard", () => {
         metadata: { ...round.metadata, automation: { ...round.metadata?.automation, probe } },
       }).verification,
     ).toEqual(done);
+  });
+
+  it("derives the visual check at every rung and shows the visual read only once checked", () => {
+    const visual = { verdict: "looks_right" as const, screenshots: [] };
+    const check = { verdict: "problem" as const, note: "Record button grey in dark mode", at: 30 };
+    const view = (card: WorkboardCard) => {
+      const redacted = redactOperatorCard(card);
+      return {
+        visualCheck: redacted.visualCheck,
+        verification: redacted.metadata?.automation?.target?.worktree?.verification,
+      };
+    };
+
+    // Rung a, undecided: the record stays hidden, the operator's check field does not.
+    expect(view(visualCard({ visual }))).toEqual({
+      visualCheck: { round: 0 },
+      verification: undefined,
+    });
+    expect(view(visualCard({ visual, visualCheck: check }))).toEqual({
+      visualCheck: { round: 0, check },
+      verification: undefined,
+    });
+    // Rung b shows the record, still without the unchecked read.
+    expect(view(visualCard({ visual }, { rung: "b" }))).toEqual({
+      visualCheck: { round: 0 },
+      verification: DONE_VERIFICATION,
+    });
+    expect(view(visualCard({ visual, visualCheck: check }, { rung: "b" }))).toEqual({
+      visualCheck: { round: 0, check },
+      verification: { ...DONE_VERIFICATION, visual, visualCheck: check },
+    });
+    // Deciding the round does not reveal a read the operator never checked.
+    expect(view(visualCard({ visual }, { status: "done" })).verification).toEqual(
+      DONE_VERIFICATION,
+    );
+    // A stale record, of another round, has no visual check to record.
+    expect(view(visualCard({ round: 1, visual })).visualCheck).toBeUndefined();
+    expect(redactOperatorCard(createCard())).not.toHaveProperty("visualCheck");
   });
 });
