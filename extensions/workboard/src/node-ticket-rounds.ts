@@ -6,7 +6,11 @@ import type {
   WorkboardNodeReview,
   WorkboardNodeRound,
   WorkboardNodeVerificationFinding,
+  WorkboardNodeVisualCheck,
+  WorkboardNodeVisualRead,
+  WorkboardNodeVisualScreenshot,
   WorkboardNodeWorktree,
+  WorkboardVisualVerdict,
 } from "@openclaw/workboard-contract";
 import {
   parseStrictPositiveInteger,
@@ -40,6 +44,9 @@ const MAX_FINDINGS_CHARS = 2400;
 const MAX_FINDING_PATH_CHARS = 160;
 const FINDING_CELL_CHARS = { body: 200, rule: 80 } as const;
 export const MAX_REVIEW_NOTE_CHARS = 400;
+const MAX_VISUAL_SCREENSHOTS = 12;
+const MAX_VISUAL_CHARS = 2400;
+const VISUAL_SHOWS_CHARS = 200;
 
 function cell(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") {
@@ -249,6 +256,58 @@ export function normalizeVerificationFindings(value: unknown): WorkboardNodeVeri
     kept.push({ path, ...(line === undefined ? {} : { line }), body });
   }
   return kept;
+}
+
+export function visualCheckVerdict(value: unknown): WorkboardVisualVerdict | undefined {
+  return value === "looks_right" || value === "problem" ? value : undefined;
+}
+
+export function visualReadVerdict(value: unknown): WorkboardNodeVisualRead["verdict"] | undefined {
+  return value === "not_checked" ? value : visualCheckVerdict(value);
+}
+
+/**
+ * The verifier's visual read: a missing or malformed read is `not_checked`,
+ * and a screenshot without a path, what it shows, or a verdict is dropped.
+ * Paths may be absolute: the verifier captures in its own verify worktree.
+ */
+export function normalizeNodeVisualRead(value: unknown): WorkboardNodeVisualRead {
+  const verdict = isRecord(value) ? visualReadVerdict(value.verdict) : undefined;
+  if (!isRecord(value) || !verdict) {
+    return { verdict: "not_checked", screenshots: [] };
+  }
+  const screenshots: WorkboardNodeVisualScreenshot[] = [];
+  let chars = 0;
+  for (const entry of Array.isArray(value.screenshots) ? value.screenshots : []) {
+    const rawPath = isRecord(entry) && typeof entry.path === "string" ? entry.path.trim() : "";
+    const path = hasControlCharacter(rawPath) ? undefined : capPath(rawPath);
+    const shows = isRecord(entry) ? cell(entry.shows, VISUAL_SHOWS_CHARS) : undefined;
+    const shotVerdict = isRecord(entry) ? visualCheckVerdict(entry.verdict) : undefined;
+    if (!path || !shows || !shotVerdict) {
+      continue;
+    }
+    chars += path.length + shows.length;
+    if (screenshots.length === MAX_VISUAL_SCREENSHOTS || chars > MAX_VISUAL_CHARS) {
+      break;
+    }
+    screenshots.push({ path, shows, verdict: shotVerdict });
+  }
+  return { verdict, screenshots };
+}
+
+/** The operator's visual check note: one line, bounded like a standards review note. */
+export function visualCheckNote(value: unknown): string | undefined {
+  return cell(value, MAX_REVIEW_NOTE_CHARS);
+}
+
+export function normalizeNodeVisualCheck(value: unknown): WorkboardNodeVisualCheck | undefined {
+  const verdict = isRecord(value) ? visualCheckVerdict(value.verdict) : undefined;
+  const at = isRecord(value) ? resolveOptionalIntegerOption(value.at, { min: 0 }) : undefined;
+  if (!isRecord(value) || !verdict || at === undefined) {
+    return undefined;
+  }
+  const note = visualCheckNote(value.note);
+  return { verdict, ...(note ? { note } : {}), at };
 }
 
 /** Session-written findings; one without a repo-relative path, a 1-based line, or a body is dropped. */

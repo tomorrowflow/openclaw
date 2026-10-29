@@ -4,6 +4,7 @@ import path from "node:path";
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
+import { parseVerificationReply } from "./node-ticket-verification.js";
 import {
   finishNodeTicket,
   git,
@@ -120,6 +121,10 @@ describe("node ticket verification", () => {
     expect(message).toContain(`${base}..${head}`);
     // Its own simulator, named like its session, so it never tests on a ticket session's.
     expect(message).toContain(`xcrun simctl create verify-${card.id.slice(0, 8)}-r0 "<device>"`);
+    // Code Mode's `image()` helper turns the downscaled screenshot into an image block.
+    expect(message).toContain("sips -Z 800 -s format jpeg");
+    expect(message).toContain('image("data:image/jpeg;base64,<base64>")');
+    expect(message).toContain('"visual":{"verdict":"looks_right|problem|not_checked"');
     // Blind to the author: the done report's summary and proof stay out of the brief.
     expect(message).not.toContain("Parser accepts empty input");
     expect(message).not.toContain('pytest"');
@@ -165,6 +170,7 @@ describe("node ticket verification", () => {
       verdict: "fail",
       summary: 'pytest passes, but `parse("")` raises on a whitespace-only input.',
       findings: [{ path: "parser.py", line: 1, body: "whitespace-only input raises" }],
+      visual: { verdict: "not_checked", screenshots: [] },
     });
     expect(existsSync(verifyPath)).toBe(false);
     const stored = await store.get(card.id);
@@ -280,6 +286,41 @@ describe("node ticket verification", () => {
     expect((await store.get(card.id))?.metadata?.comments?.at(-1)?.body).toContain(
       "the simulator stalled and the node disconnected",
     );
+  });
+
+  it("records the verifier's visual read beside a verdict it never changes, and keeps it out of the comment", async () => {
+    const { store, card, handoffs, warn, verifier, verificationOf } = await verifiedTicket();
+    await handoffs.resume(warn);
+    verifier.running = false;
+    const visual = {
+      verdict: "problem",
+      screenshots: [
+        {
+          path: "docs/screenshots/A49/today-dark.png",
+          shows: "Today tab selected; the Record button stays light grey in dark mode",
+          verdict: "problem",
+        },
+        {
+          path: "docs/screenshots/A49/today-light.png",
+          shows: "Today tab selected; Record button filled blue",
+          verdict: "looks_right",
+        },
+      ],
+    };
+    verifier.history = verificationReply({
+      verdict: "pass",
+      summary: "xcodebuild test passed",
+      visual,
+    });
+    await handoffs.resume(warn);
+
+    await expect(verificationOf()).resolves.toMatchObject({
+      phase: "done",
+      verdict: "pass",
+      visual,
+    });
+    const comment = (await store.get(card.id))?.metadata?.comments?.at(-1)?.body ?? "";
+    expect(comment).toBe("**Verification:** pass (openai/gpt-6-sol)\n\nxcodebuild test passed");
   });
 
   it("keeps a just-started verification running until its session replies or the start grace ends", async () => {
@@ -453,5 +494,70 @@ describe("node ticket verification", () => {
     expect(
       existsSync(path.join(repos.target.worktreesRoot, `verify-${card.id.slice(0, 8)}-r0`)),
     ).toBe(false);
+  });
+});
+
+describe("parseVerificationReply visual read", () => {
+  const reply = (block: unknown) =>
+    `\`\`\`workboard-verification\n${JSON.stringify(block)}\n\`\`\``;
+  const notChecked = { verdict: "not_checked", screenshots: [] };
+
+  it("defaults a missing or malformed visual read to not_checked", () => {
+    expect(parseVerificationReply(reply({ verdict: "pass" })).visual).toEqual(notChecked);
+    expect(parseVerificationReply(reply({ verdict: "pass", visual: "fine" })).visual).toEqual(
+      notChecked,
+    );
+    expect(
+      parseVerificationReply(reply({ verdict: "pass", visual: { verdict: "great" } })).visual,
+    ).toEqual(notChecked);
+    expect(parseVerificationReply("no block").visual).toEqual(notChecked);
+  });
+
+  it("drops malformed screenshots, caps the list at 12, and bounds what each shows", () => {
+    const shot = (index: number) => ({
+      path: `docs/screenshots/A49/${index}.png`,
+      shows: `Screen ${index}`,
+      verdict: "looks_right",
+    });
+    const parsed = parseVerificationReply(
+      reply({
+        verdict: "fail",
+        findings: [{ path: "App.swift", body: "crashes on launch" }],
+        visual: {
+          verdict: "looks_right",
+          screenshots: [
+            { path: "a.png", shows: "no verdict" },
+            { path: "", shows: "no path", verdict: "problem" },
+            { path: "b.png", shows: "  ", verdict: "problem" },
+            { path: "c.png", shows: "x".repeat(500), verdict: "problem" },
+            ...Array.from({ length: 14 }, (_, index) => shot(index)),
+          ],
+        },
+      }),
+    );
+
+    expect(parsed.verdict).toBe("fail");
+    expect(parsed.visual.verdict).toBe("looks_right");
+    expect(parsed.visual.screenshots).toHaveLength(12);
+    expect(parsed.visual.screenshots[0]).toEqual({
+      path: "c.png",
+      shows: `${"x".repeat(199)}…`,
+      verdict: "problem",
+    });
+    expect(parsed.visual.screenshots[11]).toEqual(shot(10));
+  });
+
+  it("keeps the verdict whatever the visual read says, and an error keeps its visual read", () => {
+    const visual = {
+      verdict: "problem",
+      screenshots: [{ path: "dark.png", shows: "unreadable label", verdict: "problem" }],
+    };
+    expect(parseVerificationReply(reply({ verdict: "pass", visual }))).toMatchObject({
+      verdict: "pass",
+      visual,
+    });
+    expect(
+      parseVerificationReply(reply({ verdict: "error", summary: "simulator stalled", visual })),
+    ).toMatchObject({ verdict: "error", findings: [], visual });
   });
 });

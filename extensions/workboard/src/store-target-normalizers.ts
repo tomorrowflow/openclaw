@@ -13,7 +13,14 @@ import type {
 } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { normalizeNodeRounds, normalizeVerificationFindings } from "./node-ticket-rounds.js";
+import {
+  normalizeNodeRounds,
+  normalizeNodeVisualCheck,
+  normalizeNodeVisualRead,
+  normalizeVerificationFindings,
+  visualCheckVerdict,
+  visualReadVerdict,
+} from "./node-ticket-rounds.js";
 import { MAX_NODE_REVIEW_VERDICTS } from "./store-constants.js";
 import { normalizeBoundedString, normalizeCommentSource } from "./store-value-normalizers.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
@@ -232,6 +239,9 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
       const verification = isRecord(entry.verification)
         ? verificationVerdict(entry.verification.verdict)
         : undefined;
+      const visual = isRecord(entry.verification)
+        ? reviewVisual(entry.verification.visual)
+        : undefined;
       return [
         {
           round,
@@ -249,6 +259,7 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
                   verdict: verification,
                   ...verificationModel(entry.verification.model),
                   ...verificationSpan(entry.verification),
+                  ...(visual ? { visual } : {}),
                 },
               }
             : {}),
@@ -256,6 +267,14 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
       ];
     })
     .slice(-MAX_NODE_REVIEW_VERDICTS);
+}
+
+function reviewVisual(
+  value: unknown,
+): NonNullable<WorkboardNodeReviewVerdict["verification"]>["visual"] {
+  const verifier = isRecord(value) ? visualReadVerdict(value.verifier) : undefined;
+  const operator = isRecord(value) ? visualCheckVerdict(value.operator) : undefined;
+  return verifier && operator ? { verifier, operator } : undefined;
 }
 
 function verificationVerdict(value: unknown): WorkboardVerificationVerdict | undefined {
@@ -313,6 +332,7 @@ function normalizeNodeVerification(value: unknown): WorkboardNodeVerification | 
   if (value.phase !== "done" || endedAt === undefined || !verdict) {
     return undefined;
   }
+  const visualCheck = normalizeNodeVisualCheck(value.visualCheck);
   return {
     phase: "done",
     round,
@@ -330,6 +350,8 @@ function normalizeNodeVerification(value: unknown): WorkboardNodeVerification | 
         "node verification summary",
       ) ?? "",
     findings: normalizeVerificationFindings(value.findings),
+    ...(value.visual === undefined ? {} : { visual: normalizeNodeVisualRead(value.visual) }),
+    ...(visualCheck ? { visualCheck } : {}),
   };
 }
 
