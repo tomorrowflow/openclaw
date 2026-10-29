@@ -1282,8 +1282,10 @@ see it.
 Each accept (the publish) records the newest agent verdict since the import
 and up to the move to `done`, or `missed` when none came first, in the node
 worktree's `reviews` (the last 20 rounds). A round agrees when the verdict was
-`accept` and the card was not reopened for rework after that publish, or
-`rework` and it was. The counts report `verdictRounds` and
+`accept` and the round right after it was not a counted rework round, or
+`rework` and it was. A later counted round reworks the round before it only:
+an accept that held through a merge-only conflict round stays agreed when a
+later round reworks what the conflict round added. The counts report `verdictRounds` and
 `verdictAgreedRounds` per round, `verdictCards` and `verdictAgreedCards` for
 tickets whose every round had a verdict and every verdict agreed, and
 `verdictMissed` rounds, which count in neither rate, with `verdictMissedRecent`
@@ -1293,8 +1295,8 @@ cover only rounds the operator moved to `done`.
 
 **Agent acceptance:** rounds an agent accepted at rung b record
 `decidedBy: "agent"` and `sampled` in `reviews`. The counts report
-`agentAccepts`, `reworkedAccepts` (accepted, then reopened for rework: a
-person disagreed), `sampledRounds`, and `sampledAgreed` (sampled and never
+`agentAccepts`, `reworkedAccepts` (accepted, then the next round was a
+counted rework round: a person disagreed), `sampledRounds`, and `sampledAgreed` (sampled and never
 reworked). Whether a person merged an unsampled PR without reading it needs
 GitHub state that the projection does not have. On a one-board projection
 (`boardId` set), each class row carries the board's `rung` for that class.
@@ -1307,8 +1309,9 @@ who decided without seeing it: `verifierScoredRounds` are verified rounds an
 operator decided at rung a (a rung b round shows the operator its
 verification, so their decision is not independent of it) plus sampled agent
 accepts (an agent's rework after a `fail` agrees with itself and is not
-scored), `verifierAgreedRounds` those where `pass` met no later rework or a
-non-pass (`fail` or `error`) met one, `verifierEscapes` the `pass` verdicts a
+scored), `verifierAgreedRounds` those where `pass` met no rework or a
+non-pass (`fail` or `error`) met one (the round right after, as for
+verdicts), `verifierEscapes` the `pass` verdicts a
 person then reworked, and `verifierCatches` the non-pass verdicts a person
 then reworked. These flow through `blind` and `sinceRung` like every other
 count, so a class's verifier agreement at its current rung is read from
