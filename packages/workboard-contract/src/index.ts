@@ -2,8 +2,11 @@ import type { WorkboardProbe } from "./probes.js";
 import type { WorkboardSessionsBoardSpec } from "./sessions-board.js";
 import type {
   WorkboardNodeVerification,
+  WorkboardNodeVisualCheck,
+  WorkboardNodeVisualRead,
   WorkboardVerificationVerdict,
   WorkboardVerifierSettings,
+  WorkboardVisualVerdict,
 } from "./verification.js";
 
 export type * from "./verification.js";
@@ -450,6 +453,13 @@ export type WorkboardNodeReviewVerdict = {
     model?: string;
     startedAt?: number;
     endedAt?: number;
+    /**
+     * The round's visual check, copied in only when the operator recorded one
+     * before the publish: the verifier's visual verdict beside the operator's.
+     * A round decided without a visual check keeps the verifier's read out of
+     * the agreement data.
+     */
+    visual?: { verifier: WorkboardNodeVisualRead["verdict"]; operator: WorkboardVisualVerdict };
   };
   /**
    * The round ran at rung b (`WorkboardNodeWorktree.rung`), so its
@@ -887,6 +897,12 @@ export type WorkboardOperatorCard = WorkboardCard & {
   publishedRound?: number;
   /** A node ticket's grilling, from its first handoff on; the interview stays in its grill session. */
   grill?: Pick<WorkboardNodeGrill, "status" | "rounds" | "attachmentId" | "sessionKey">;
+  /**
+   * The imported round's visual check once its verification finished, at
+   * every rung: `check` is the operator's, absent while the round waits for
+   * one. The verifier's own read stays out of operator reads until then.
+   */
+  visualCheck?: { round: number; check?: WorkboardNodeVisualCheck };
 };
 
 /** One file's diff in one node ticket round, read from the host clone. */
@@ -972,6 +988,12 @@ export type WorkboardTrustCounts = {
   verifierAgreedRounds: number;
   verifierEscapes: number;
   verifierCatches: number;
+  /**
+   * Published rounds with both an operator visual check and a verifier visual
+   * verdict other than `not_checked`, and those where the two agree.
+   */
+  visualRounds: number;
+  visualAgreedRounds: number;
 };
 
 /** Accepted tickets in one UTC week (Monday 00:00), by acceptance time. */
