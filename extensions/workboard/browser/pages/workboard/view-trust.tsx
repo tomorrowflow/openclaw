@@ -166,7 +166,107 @@ function TrustDetails(props: { result: WorkboardTrustResult }) {
           </For>
         </tbody>
       </table>
+      <Show when={props.result.classes.some((entry) => entry.rung)}>
+        <RungWindows classes={props.result.classes} />
+      </Show>
     </>
+  );
+}
+
+// The voice-diary a-to-b rule counts blind rounds: at least 15 accepted, at least 80% clean.
+const PROMOTION_ACCEPTED = 15;
+const PROMOTION_CLEAN_SHARE = 0.8;
+
+type TrustClass = WorkboardTrustResult["classes"][number];
+type TrustCounts = WorkboardTrustResult["total"];
+
+/**
+ * Clean accepts a class at rung a still needs, assuming every next accept is
+ * clean: enough to reach the count, and enough for the share
+ * (clean + n >= 0.8 * (accepted + n), so n >= 4 * accepted - 5 * clean).
+ */
+export function promotionGap(blind: TrustCounts | undefined): number {
+  const accepted = blind?.accepted ?? 0;
+  const clean = blind?.cleanAccepted ?? 0;
+  const forShare = Math.ceil(
+    (PROMOTION_CLEAN_SHARE * accepted - clean) / (1 - PROMOTION_CLEAN_SHARE) - 1e-9,
+  );
+  return Math.max(0, PROMOTION_ACCEPTED - accepted, forShare);
+}
+
+function acceptedClean(counts: TrustCounts | undefined): string {
+  return counts && counts.accepted > 0
+    ? t("workboard.trustAcceptedClean", {
+        accepted: String(counts.accepted),
+        clean: String(counts.cleanAccepted),
+      })
+    : "–";
+}
+
+function dateLabel(at: number): string {
+  return new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function RungWindows(props: { classes: readonly TrustClass[] }) {
+  return (
+    <table class="workboard-trust-table">
+      <caption>{t("workboard.trustRungs")}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{t("workboard.trustClass")}</th>
+          <th scope="col">{t("workboard.trustRung")}</th>
+          <th scope="col">{t("workboard.trustBlindAt", { rung: "a" })}</th>
+          <th scope="col">{t("workboard.trustBlindAt", { rung: "b" })}</th>
+          <th scope="col">{t("workboard.trustSinceRung")}</th>
+          <th scope="col">
+            {t("workboard.trustToPromotion", {
+              accepted: String(PROMOTION_ACCEPTED),
+              percent: `${PROMOTION_CLEAN_SHARE * 100}%`,
+            })}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        <For each={props.classes}>
+          {(entry) => (
+            <tr>
+              <th scope="row">{entry.taskClass}</th>
+              <td>
+                {entry.rung
+                  ? entry.rungSince === undefined
+                    ? entry.rung
+                    : t("workboard.trustRungSince", {
+                        rung: entry.rung,
+                        date: dateLabel(entry.rungSince),
+                      })
+                  : "–"}
+              </td>
+              <td>{acceptedClean(entry.blind.a)}</td>
+              <td>{acceptedClean(entry.blind.b)}</td>
+              <td>
+                {acceptedClean(entry.sinceRung)}
+                <Show when={entry.sinceRung?.reworkedAccepts}>
+                  {(count) => (
+                    <span class="workboard-trust-table__note">
+                      {t("workboard.trustReopened", { count: String(count()) })}
+                    </span>
+                  )}
+                </Show>
+              </td>
+              <td>
+                {entry.rung !== "a"
+                  ? "–"
+                  : promotionGap(entry.blind.a) === 0
+                    ? t("workboard.trustPromotionMet")
+                    : t("workboard.trustPromotionGap", {
+                        count: String(promotionGap(entry.blind.a)),
+                      })}
+              </td>
+            </tr>
+          )}
+        </For>
+      </tbody>
+    </table>
   );
 }
 

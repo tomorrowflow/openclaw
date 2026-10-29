@@ -1231,8 +1231,9 @@ merge commit, resolve the conflicts, and re-run the proof, moves the card to
 review feedback. It happens once per publish: a card an operator already
 moved, or one sent back to done with the conflict unresolved, is left to the
 operator. GitHub computes mergeability lazily, so an `UNKNOWN` PR waits for a
-later read. A merge-only round does not count as a rework round in the
-[Trust KPIs](#trust-kpis).
+later read. That round does not count as a rework round in the
+[Trust KPIs](#trust-kpis), even when re-running the proof commits new
+evidence: its start records it in `rework.unchangedRounds`.
 
 #### Trust KPIs
 
@@ -1254,10 +1255,11 @@ Blocks come from card events, which keep the newest 50 per card. An archived
 ticket counts only when it was accepted before; archiving one that never
 published (a probe, a duplicate, a dropped ticket) removes it from every count.
 A rework round whose import adds no commit of its own besides merges (only a
-merge of the base branch to clear a PR conflict, or nothing) is recorded in
+merge of the base branch to clear a PR conflict, or nothing), or that the PR
+state sync opened for a conflict (see **Conflicts** above), is recorded in
 `rework.unchangedRounds` and is not rework: it leaves rework rounds, clean
-accepts, and verdict agreement as they were. Rounds imported before this was
-recorded still count.
+accepts, and verdict agreement as they were. Rounds recorded before either
+rule still count.
 
 **Smart zone:** when a run ends, Workboard records its context use at turn end
 on the attempt (`contextTokens`): the prompt tokens of the run's last model

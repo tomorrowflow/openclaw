@@ -211,6 +211,11 @@
   border-bottom: 1px solid var(--border);
 }
 
+.workboard-trust-table__note {
+  margin-inline-start: 6px;
+  color: var(--muted);
+}
+
 .workboard-trust-table td:first-of-type {
   display: flex;
   align-items: center;

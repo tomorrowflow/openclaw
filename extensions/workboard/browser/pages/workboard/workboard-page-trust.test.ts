@@ -137,11 +137,68 @@ describe("Workboard trust KPIs", () => {
     );
     expect(visual).toEqual(["dead-code3 of 4 (75%)", "All classes3 of 4 (75%)"]);
 
+    // Without a class rung the rung-window table stays out of the popover.
+    expect(popover.querySelectorAll("tbody")).toHaveLength(2);
+
     result = trustResult(3, 3);
     page.bumpRevision();
     page.fixture.emit("plugin.workboard.changed", { epoch: "cards", revision: 2 });
     await vi.waitFor(() =>
       expect(page.trigger()?.textContent).toContain("3 of 3 autonomous this week"),
     );
+  });
+
+  it("shows each class's blind windows, its since-rung window, and the gap to promotion", async () => {
+    const base = trustResult(3, 3);
+    const counts = (accepted: number, cleanAccepted: number, reworkedAccepts = 0) => ({
+      ...base.total,
+      accepted,
+      cleanAccepted,
+      reworkedAccepts,
+    });
+    const page = mountTrust({ orchestration: { defaultTarget: TARGET } }, () => ({
+      ...base,
+      classes: [
+        {
+          taskClass: "ios-ui",
+          ...base.total,
+          rung: "a",
+          blind: { a: counts(25, 18), b: counts(15, 8) },
+        },
+        {
+          taskClass: "ios-logic",
+          ...base.total,
+          rung: "a",
+          blind: { a: counts(31, 27), b: counts(32, 28) },
+        },
+        {
+          taskClass: "server-refactor",
+          ...base.total,
+          rung: "b",
+          rungSince: Date.UTC(2026, 9, 24, 12),
+          sinceRung: counts(5, 4, 1),
+          blind: { a: counts(16, 13), b: counts(5, 4) },
+        },
+      ],
+    }));
+
+    await vi.waitFor(() => expect(page.trigger()?.disabled).toBe(false));
+    const popover = expectDefined(
+      page.container.querySelector("#workboard-trust-popover"),
+      "trust popover",
+    );
+    const rows = [...popover.querySelectorAll("tbody")[2]!.querySelectorAll("tr")].map((row) =>
+      [...row.querySelectorAll("th, td")].map((cell) => cell.textContent?.trim()),
+    );
+    expect(rows[0]).toEqual(["ios-ui", "a", "25 / 18 clean", "15 / 8 clean", "–", "10 more clean"]);
+    expect(rows[1]?.slice(-1)).toEqual(["Met"]);
+    expect(rows[2]?.[0]).toBe("server-refactor");
+    expect(rows[2]?.[1]).toMatch(/^b since /);
+    expect(rows[2]?.slice(2)).toEqual([
+      "16 / 13 clean",
+      "5 / 4 clean",
+      "5 / 4 clean1 reopened",
+      "–",
+    ]);
   });
 });
