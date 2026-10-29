@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+// mock-isolation: the real module shells out to the host tailscale CLI and claims live serve routes.
 vi.mock("../infra/tailscale.js", () => ({
   claimTailscaleRoute: mocks.claimTailscaleRoute,
   claimTailscaleServePort: mocks.claimTailscaleServePort,
