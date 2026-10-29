@@ -619,6 +619,9 @@ export function buildWorkerContext(
     if (automation.skills?.length) {
       lines.push(`Skills: ${automation.skills.join(", ")}`);
     }
+    if (automation.touches?.length) {
+      lines.push(`Touches: ${automation.touches.join(", ")}`);
+    }
     if (automation.workspace) {
       lines.push(
         `Workspace: ${automation.workspace.kind}${automation.workspace.path ? ` ${automation.workspace.path}` : ""}`,

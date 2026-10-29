@@ -153,6 +153,12 @@ export function createWorkboardOrchestrationTools(params: {
         boardId: Type.Optional(Type.String({ description: "Board id." })),
         tenant: Type.Optional(Type.String({ description: "Tenant or routing namespace." })),
         skills: Type.Optional(Type.Array(Type.String(), { description: "Suggested skills." })),
+        touches: Type.Optional(
+          Type.Array(Type.String(), {
+            description:
+              "Repo-relative files or directories a node ticket will change. Its start waits while an open node ticket touching an overlapping path has not merged its PR.",
+          }),
+        ),
         workspace: workspaceField(),
         maxRuntimeSeconds: Type.Optional(Type.Number({ description: "Runtime budget." })),
         maxRetries: Type.Optional(Type.Number({ description: "Retry budget." })),
@@ -198,6 +204,7 @@ export function createWorkboardOrchestrationTools(params: {
             boardId: Type.Optional(Type.String()),
             tenant: Type.Optional(Type.String()),
             skills: Type.Optional(Type.Array(Type.String())),
+            touches: Type.Optional(Type.Array(Type.String())),
             workspace: workspaceField(),
             maxRuntimeSeconds: Type.Optional(Type.Number()),
             maxRetries: Type.Optional(Type.Number()),

@@ -536,7 +536,7 @@ do not need it: each worker run is granted `workboard_heartbeat`,
 | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `workboard_list`                                                                                                                                 | List compact cards with claim/diagnostic state; optional board filter.                                                                                                                    |
 | `workboard_read`                                                                                                                                 | Return one card plus bounded worker context from the same card read (notes, attempts, comments, links, proof, artifacts, parent results, recent assignee work, active diagnostics).       |
-| `workboard_create`                                                                                                                               | Create a card with optional parents, tenant, skills, board, workspace metadata, idempotency key, runtime limit, retry budget, operator summary.                                           |
+| `workboard_create`                                                                                                                               | Create a card with optional parents, tenant, skills, touches, board, workspace metadata, idempotency key, runtime limit, retry budget, operator summary.                                  |
 | `workboard_link`                                                                                                                                 | Link a parent to a child card. Queued children stay `todo` until every parent is `done`, then move to `ready`; backlog children wait until started.                                       |
 | `workboard_reference`                                                                                                                            | Reference another card with a `relates_to` link (no dependency), so the card's Prototype and Screenshots tabs also show its committed files                                               |
 | `workboard_claim`                                                                                                                                | Claim a card for the calling agent; moves `backlog`/`todo`/`ready` into `running`.                                                                                                        |
@@ -1366,7 +1366,16 @@ continues its own branch, never waits for one. A scheduled pass that finds a
 `ready` ticket in this state queues it the same way, and its comment names the
 PRs. The [PR state sync](#pr-state-sync) reads GitHub every 10 minutes, so
 the ticket starts up to 10 minutes after the merge.
-Only unfinished parents, unmerged parent PRs and a full slot queue a start: a
+A first round with `touches` (repo-relative files or directories the ticket
+will change, set on create, specify, decompose, or `workboard.cards.update`)
+also waits while another open node ticket touches an overlapping path: a
+directory covers everything under it. Open means picked in the same pass, or
+started (it has a worktree) with a PR that is not merged or closed. Siblings
+that change one file then land one by one instead of conflicting on each
+merge. The comment names each ticket and the shared path. Archiving the other
+ticket releases the wait, and a rework round never waits.
+Only unfinished parents, unmerged parent PRs, open tickets on the same paths,
+and a full slot queue a start: a
 blocked card, one
 scheduled for later, or one out of retries is refused with that reason and not
 queued. Queued is not the `scheduled` status, which holds a card until its

@@ -158,6 +158,12 @@ export function createWorkboardTools(params: {
           }),
         ),
         skills: Type.Optional(Type.Array(Type.String(), { description: "Suggested skills." })),
+        touches: Type.Optional(
+          Type.Array(Type.String(), {
+            description:
+              "Repo-relative files or directories a node ticket will change. Its start waits while an open node ticket touching an overlapping path has not merged its PR.",
+          }),
+        ),
         workspace: workspaceField(),
         maxRuntimeSeconds: Type.Optional(Type.Number({ description: "Run timeout seconds." })),
         maxRetries: Type.Optional(Type.Number({ description: "Retry budget." })),

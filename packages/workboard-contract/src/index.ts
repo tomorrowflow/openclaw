@@ -680,6 +680,12 @@ export type WorkboardAutomation = {
   createdByCardId?: string;
   idempotencyKey?: string;
   skills?: string[];
+  /**
+   * Repo-relative files or directories a node ticket expects to change. Its
+   * first round waits while an open node ticket touching an overlapping path
+   * has not merged its PR.
+   */
+  touches?: string[];
   workspace?: WorkboardWorkspace;
   workspaceAccess?: WorkboardWorkspaceAccess;
   target?: WorkboardExecutionTarget;
