@@ -181,15 +181,31 @@ describe("projectWorkboardTrust", () => {
     ]);
   });
 
-  it("leaves out archived tickets that were never accepted", () => {
+  it("leaves out archived tickets whose PR never merged", () => {
     const archived = (card: WorkboardCard): WorkboardCard => ({
       ...card,
       metadata: { ...card.metadata, archivedAt: MONDAY },
     });
+    const withPullRequest = (at: number, state: "open" | "merged") => {
+      const { handoff } = published(at);
+      return { handoff: { ...handoff, pullRequest: { state, checkedAt: at } } };
+    };
     const cards = [
       ticket("shipped", { createdAt: MONDAY, worktree: published(MONDAY + HOUR) }),
-      // Archiving a shipped ticket tidies the board; its acceptance stays history.
-      archived(ticket("tidied", { createdAt: MONDAY, worktree: published(MONDAY + 3 * HOUR) })),
+      // Archiving a merged ticket tidies the board; its acceptance stays history.
+      archived(
+        ticket("tidied", {
+          createdAt: MONDAY,
+          worktree: withPullRequest(MONDAY + 3 * HOUR, "merged"),
+        }),
+      ),
+      // An accepted ticket dropped before its PR merged shipped nothing.
+      archived(
+        ticket("abandoned", {
+          createdAt: MONDAY,
+          worktree: withPullRequest(MONDAY + HOUR, "open"),
+        }),
+      ),
       // Archive closes a ticket without a PR, so it is no outcome to score.
       archived(ticket("dropped", { createdAt: MONDAY })),
       archived(ticket("duplicate", { createdAt: MONDAY, blocked: true })),
