@@ -56,10 +56,6 @@ export function currentNodeVerification(
     : undefined;
 }
 
-/**
- * The finished verification an operator's visual check is recorded on: the
- * current one of an unarchived card's imported round.
- */
 export function visualCheckVerification(
   card: WorkboardCard,
 ): Extract<WorkboardNodeVerification, { phase: "done" }> | undefined {

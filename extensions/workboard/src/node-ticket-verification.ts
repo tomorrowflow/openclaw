@@ -4,7 +4,6 @@ import type {
   WorkboardExecutionTarget,
   WorkboardNodeVerification,
   WorkboardNodeVerificationFinding,
-  WorkboardNodeVisualCheck,
   WorkboardNodeVisualRead,
   WorkboardNodeWorktree,
   WorkboardVerificationVerdict,
@@ -199,10 +198,7 @@ type ParsedVerification = {
   visual: WorkboardNodeVisualRead;
 };
 
-/**
- * Reads the one verification block of the verifier's last reply; anything
- * else is an `error` verdict. The visual read never changes the verdict.
- */
+/** Reads the one verification block of the verifier's last reply; anything else is an `error` verdict. */
 export function parseVerificationReply(text: string): ParsedVerification {
   const error = (summary: string): ParsedVerification => ({
     verdict: "error",
@@ -326,36 +322,6 @@ function verificationComment(
         `**Verification:** ${verification.verdict}${verification.model ? ` (${verification.model})` : ""}`,
         ...(verification.summary ? ["", verification.summary] : []),
         ...(findings.length > 0 ? ["", ...findings] : []),
-      ].join("\n"),
-      MAX_COMMENT_BODY_CHARS,
-    ) ?? ""
-  );
-}
-
-/**
- * The operator's visual check beside the verifier's visual read, which the
- * check reveals. Its first line is not a verification line, so the round's
- * run count and blind review never take it for the verifier's comment.
- */
-export function visualCheckComment(
-  verification: Extract<WorkboardNodeVerification, { phase: "done" }>,
-  check: WorkboardNodeVisualCheck,
-): string {
-  const visual = verification.visual ?? normalizeNodeVisualRead(undefined);
-  return (
-    capText(
-      [
-        `**Visual check:** operator ${check.verdict} · verifier ${visual.verdict}`,
-        ...(check.note ? ["", check.note] : []),
-        ...(visual.screenshots.length > 0
-          ? [
-              "",
-              ...visual.screenshots.map(
-                (screenshot) =>
-                  `- \`${screenshot.path}\` ${screenshot.verdict}: ${screenshot.shows}`,
-              ),
-            ]
-          : []),
       ].join("\n"),
       MAX_COMMENT_BODY_CHARS,
     ) ?? ""

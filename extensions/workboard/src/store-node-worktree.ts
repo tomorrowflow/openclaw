@@ -6,6 +6,7 @@ import type {
   WorkboardVisualVerdict,
 } from "@openclaw/workboard-contract";
 import {
+  visualCheckComment,
   visualCheckNote,
   type WorkboardNodeRoundFacts,
   withNodeRound,
@@ -198,9 +199,9 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
   }
 
   /**
-   * Records the operator's own visual check on the imported round's finished
-   * verification, replacing an earlier one; recording it reveals the
-   * verifier's visual read on card reads.
+   * Recording the check reveals the verifier's visual read on card reads
+   * (`redactCard`); the comment pairing the two has no agent source, so it
+   * is never taken for the verifier's own comment.
    */
   async setNodeVisualCheck(
     id: string,
@@ -225,6 +226,12 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
           return {
             metadata: {
               ...card.metadata,
+              comments: appendComment(
+                card.metadata?.comments,
+                visualCheckComment(verification.visual, visualCheck),
+                visualCheck.at,
+                "operator",
+              ),
               automation: {
                 ...card.metadata?.automation,
                 target: {

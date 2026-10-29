@@ -66,13 +66,10 @@ export type WorkboardNodeVerification =
       visualCheck?: WorkboardNodeVisualCheck;
     };
 
-/** What a look at a screenshot found. */
 export type WorkboardVisualVerdict = "looks_right" | "problem";
 
-/** One screenshot the verifier looked at: which one, what it shows, and whether that is right. */
 export type WorkboardNodeVisualScreenshot = {
   path: string;
-  /** What is on screen: the selected tab, the text, the filled button, the alert, the dark colors. */
   shows: string;
   verdict: WorkboardVisualVerdict;
 };
@@ -86,7 +83,7 @@ export type WorkboardNodeVisualScreenshot = {
  */
 export type WorkboardNodeVisualRead = {
   verdict: WorkboardVisualVerdict | "not_checked";
-  /** Capped at 12. */
+  /** Capped. */
   screenshots: WorkboardNodeVisualScreenshot[];
 };
 

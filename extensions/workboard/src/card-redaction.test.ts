@@ -24,7 +24,6 @@ const DONE_VERIFICATION = {
   findings: [],
 };
 
-/** A node ticket in review on its imported round, with a finished verification. */
 function visualCard(
   extra: Partial<Extract<WorkboardNodeVerification, { phase: "done" }>>,
   options: { rung?: "b"; status?: WorkboardCard["status"] } = {},

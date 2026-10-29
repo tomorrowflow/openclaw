@@ -449,7 +449,6 @@ describe("projectWorkboardTrust", () => {
           reviews: [{ round: 0, verdict: "accept", ...visual("looks_right", "problem") }],
         },
       }),
-      // The verifier could not look, and a round decided without a check carries no visual.
       ticket("unscored", {
         createdAt: MONDAY,
         labels: ["class:ios"],

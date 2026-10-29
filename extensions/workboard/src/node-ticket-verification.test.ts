@@ -121,7 +121,6 @@ describe("node ticket verification", () => {
     expect(message).toContain(`${base}..${head}`);
     // Its own simulator, named like its session, so it never tests on a ticket session's.
     expect(message).toContain(`xcrun simctl create verify-${card.id.slice(0, 8)}-r0 "<device>"`);
-    // Code Mode's `image()` helper turns the downscaled screenshot into an image block.
     expect(message).toContain("sips -Z 800 -s format jpeg");
     expect(message).toContain('image("data:image/jpeg;base64,<base64>")');
     expect(message).toContain('"visual":{"verdict":"looks_right|problem|not_checked"');

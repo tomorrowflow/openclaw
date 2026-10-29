@@ -80,7 +80,6 @@ export function detailScreenshots(props: WorkboardProps, card: WorkboardCard) {
     : undefined;
 }
 
-/** The Screenshots tab's visual check, once the imported round's verification finished. */
 function visualCheckControl(props: WorkboardProps, card: WorkboardCard) {
   void props.revision;
   const visual = card.visualCheck;

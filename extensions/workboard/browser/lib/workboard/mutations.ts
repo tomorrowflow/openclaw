@@ -275,7 +275,6 @@ export async function runWorkboardCardMutation<T>(
   }
 }
 
-/** Records the operator's own look at the imported round's screenshots; the Gateway returns the refreshed card. */
 export async function recordWorkboardVisualCheck(
   params: WorkboardCardMutationParams & { verdict: "looks_right" | "problem"; note?: string },
 ) {

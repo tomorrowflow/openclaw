@@ -18,6 +18,7 @@ import {
 } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
+import { MAX_COMMENT_BODY_CHARS } from "./store-constants.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
 
 // Round facts ride in the card's metadata, which has a 24 KiB budget shared
@@ -266,11 +267,7 @@ export function visualReadVerdict(value: unknown): WorkboardNodeVisualRead["verd
   return value === "not_checked" ? value : visualCheckVerdict(value);
 }
 
-/**
- * The verifier's visual read: a missing or malformed read is `not_checked`,
- * and a screenshot without a path, what it shows, or a verdict is dropped.
- * Paths may be absolute: the verifier captures in its own verify worktree.
- */
+/** Paths may be absolute: the verifier captures in its own verify worktree. */
 export function normalizeNodeVisualRead(value: unknown): WorkboardNodeVisualRead {
   const verdict = isRecord(value) ? visualReadVerdict(value.verdict) : undefined;
   if (!isRecord(value) || !verdict) {
@@ -295,9 +292,31 @@ export function normalizeNodeVisualRead(value: unknown): WorkboardNodeVisualRead
   return { verdict, screenshots };
 }
 
-/** The operator's visual check note: one line, bounded like a standards review note. */
 export function visualCheckNote(value: unknown): string | undefined {
   return cell(value, MAX_REVIEW_NOTE_CHARS);
+}
+
+/** The operator's check beside the verifier's read, which recording the check reveals. */
+export function visualCheckComment(
+  visual: WorkboardNodeVisualRead | undefined,
+  check: WorkboardNodeVisualCheck,
+): string {
+  const read = visual ?? normalizeNodeVisualRead(undefined);
+  return truncateUtf16Safe(
+    [
+      `**Visual check:** operator ${check.verdict} · verifier ${read.verdict}`,
+      ...(check.note ? ["", check.note] : []),
+      ...(read.screenshots.length > 0
+        ? [
+            "",
+            ...read.screenshots.map(
+              (screenshot) => `- \`${screenshot.path}\` ${screenshot.verdict}: ${screenshot.shows}`,
+            ),
+          ]
+        : []),
+    ].join("\n"),
+    MAX_COMMENT_BODY_CHARS,
+  );
 }
 
 export function normalizeNodeVisualCheck(value: unknown): WorkboardNodeVisualCheck | undefined {
