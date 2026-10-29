@@ -423,6 +423,54 @@ describe("projectWorkboardTrust", () => {
     });
   });
 
+  it("scores the verifier's visual read against the operator's visual check", () => {
+    const at = MONDAY + HOUR;
+    const visual = (
+      verifier: "looks_right" | "problem" | "not_checked",
+      operator: "looks_right" | "problem",
+    ) => ({ verification: { verdict: "pass" as const, visual: { verifier, operator } } });
+    const cards = [
+      ticket("agreed", {
+        createdAt: MONDAY,
+        labels: ["class:ios"],
+        worktree: {
+          ...published(at),
+          reviews: [
+            { round: 0, verdict: "accept", ...visual("looks_right", "looks_right") },
+            { round: 1, verdict: "accept", ...visual("problem", "problem") },
+          ],
+        },
+      }),
+      ticket("disagreed", {
+        createdAt: MONDAY,
+        labels: ["class:ios"],
+        worktree: {
+          ...published(at),
+          reviews: [{ round: 0, verdict: "accept", ...visual("looks_right", "problem") }],
+        },
+      }),
+      // The verifier could not look, and a round decided without a check carries no visual.
+      ticket("unscored", {
+        createdAt: MONDAY,
+        labels: ["class:ios"],
+        worktree: {
+          ...published(at),
+          reviews: [
+            { round: 0, verdict: "accept", ...visual("not_checked", "looks_right") },
+            { round: 1, verdict: "accept", verification: { verdict: "pass" } },
+          ],
+        },
+      }),
+    ];
+
+    const trust = projectWorkboardTrust(cards, "app", MONDAY);
+    expect(trust.total).toMatchObject({ visualRounds: 3, visualAgreedRounds: 2 });
+    expect(trust.classes.find((row) => row.taskClass === "ios")).toMatchObject({
+      visualRounds: 3,
+      visualAgreedRounds: 2,
+    });
+  });
+
   it("counts blind rounds by the rung that decided them, leaving out rounds the operator saw", () => {
     const blindSince = Date.parse("2026-10-11T13:01:00+02:00");
     const before = blindSince - HOUR;
