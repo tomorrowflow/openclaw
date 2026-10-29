@@ -61,8 +61,15 @@ function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
   const acceptedAt =
     worktree?.rework?.acceptedAt ??
     (handoff?.phase === "published" ? handoff.publishedAt : undefined);
-  // Archive closes a ticket without a PR; an accepted ticket archived later keeps its history.
-  if (card.metadata?.archivedAt && acceptedAt === undefined) {
+  // Archive closes a ticket without a PR, or drops one whose PR never merged; an
+  // accepted ticket archived after its merge keeps its history. The PR state sync
+  // stops at the archive, so a merge it had not seen yet leaves the ticket out too.
+  if (
+    card.metadata?.archivedAt &&
+    (acceptedAt === undefined ||
+      handoff?.phase !== "published" ||
+      handoff.pullRequest?.state !== "merged")
+  ) {
     return undefined;
   }
   return {

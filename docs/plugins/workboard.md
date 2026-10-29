@@ -1252,8 +1252,11 @@ was recorded have no review wait. On a board with an
 `orchestration.defaultTarget`, the Control UI shows "N of M autonomous this
 week" under the board title; select it for the weekly and per-class tables.
 Blocks come from card events, which keep the newest 50 per card. An archived
-ticket counts only when it was accepted before; archiving one that never
-published (a probe, a duplicate, a dropped ticket) removes it from every count.
+ticket counts only when its PR merged before the archive: archiving one that
+never published (a probe, a duplicate, a dropped ticket) or whose PR never
+merged (accepted, then dropped) removes it from every count. The
+[PR state sync](#pr-state-sync) stops at the archive, so a merge it had not
+recorded by then leaves the ticket out as well.
 A rework round whose import adds no commit of its own besides merges (only a
 merge of the base branch to clear a PR conflict, or nothing), or that the PR
 state sync opened for a conflict (see **Conflicts** above), is recorded in
