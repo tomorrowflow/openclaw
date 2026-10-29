@@ -204,6 +204,48 @@ describe("node ticket PR state sync", () => {
     expect(await ticket.pullRequest()).toMatchObject({ pullRequest: { state: "merged" } });
   });
 
+  it("starts a ticket touching an open ticket's paths only once that PR merged, one sibling per pass", async () => {
+    const ticket = await publishedTicket();
+    await ticket.store.update(ticket.card.id, { touches: ["App/Theme.swift"] });
+    const sibling = (title: string, touches: string[]) =>
+      ticket.store.create({
+        title,
+        status: "ready",
+        agentId: "dev",
+        touches,
+        workspaceAccess: { unrestricted: true },
+        metadata: { automation: { target: ticket.repos.target } },
+      });
+    // The directory covers the published ticket's file; the two new siblings share a file too.
+    const first = await sibling("Tokenize spacing", ["App", "App/Tokens.swift"]);
+    const second = await sibling("Tokenize radius", ["App/Tokens.swift"]);
+    const dispatch = async () =>
+      await dispatchAndStartWorkboardCards({
+        store: ticket.store,
+        subagent: { run: vi.fn() },
+        nodeTickets: ticket.gateway,
+        options: { maxStarts: 2, now: ticket.now() },
+      });
+
+    // The published ticket's PR is still a draft: "first" queues on it and
+    // "second" starts. Had "second" waited too, the pass could start neither.
+    expect((await dispatch()).started.map(({ cardId }) => cardId)).toEqual([second.id]);
+    const queued = await ticket.store.get(first.id);
+    expect(queued && workboardCardStage(queued)).toMatchObject({ kind: "queued" });
+    expect(queued?.metadata?.comments?.at(-1)?.body).toContain(
+      `waits for open tickets touching the same paths: ${ticket.card.title} (App)`,
+    );
+    await ticket.handoffs.resume(ticket.warn);
+    expect((await ticket.store.get(first.id))?.status).toBe("ready");
+
+    ticket.github.closedPulls.push({ html_url: PR, sha: "0".repeat(40), merged: true });
+    await ticket.syncPass();
+    await ticket.handoffs.resume(ticket.warn);
+    // "second" is open on App/Tokens.swift now, so "first" keeps waiting.
+    expect((await dispatch()).started).toEqual([]);
+    expect((await ticket.store.get(first.id))?.status).toBe("ready");
+  });
+
   it("starts a child ticket only once its parent's PR merged", async () => {
     const ticket = await publishedTicket();
     const child = await ticket.store.create({

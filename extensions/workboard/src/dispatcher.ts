@@ -257,7 +257,9 @@ function selectStartableCards(
       nodeTicketSlot && workboardSlotPlacement(nodeTicketOccupants, nodeTicketSlot, now);
     const nodeTicketFull = placement?.full;
     const claimRefusal = mode === "exact" ? workboardClaimRefusal(card, false) : undefined;
-    const parentsWait = nodeTicketSlot && nodeTicketDependencyWait(card, cards, now, claimRefusal);
+    const parentsWait =
+      nodeTicketSlot &&
+      nodeTicketDependencyWait(card, cards, now, claimRefusal, nodeTicketOccupants);
     // A card the claim would refuse gets that reason on a full slot as on a
     // free one; only a refusal for its parents or the slot alone may queue it.
     const cardRefusal = card.metadata?.archivedAt

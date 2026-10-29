@@ -23,7 +23,7 @@ import {
 } from "./node-ticket-rounds.js";
 import { MAX_NODE_REVIEW_VERDICTS } from "./store-constants.js";
 import { normalizeBoundedString, normalizeCommentSource } from "./store-value-normalizers.js";
-import { isAbsoluteWorkspacePath } from "./workspace-path.js";
+import { isAbsoluteWorkspacePath, relativeRepoPath } from "./workspace-path.js";
 
 function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined {
   if (!isRecord(value)) {
@@ -443,14 +443,8 @@ function normalizeScreenshotDirs(value: unknown): string[] | undefined {
   }
   const dirs = new Set<string>();
   for (const entry of value) {
-    const dir = typeof entry === "string" ? entry.trim().replace(/\/+$/, "") : "";
-    const segments = dir.split("/");
-    if (
-      !dir ||
-      dir.length > MAX_SCREENSHOT_DIR_LENGTH ||
-      segments.some((segment) => !segment || segment === "." || segment === "..") ||
-      dir.includes("\\")
-    ) {
+    const dir = relativeRepoPath(entry);
+    if (!dir || dir.length > MAX_SCREENSHOT_DIR_LENGTH) {
       throw new Error(
         `target screenshotDirs entry ${JSON.stringify(entry)} must be a relative path inside the worktree, without "." or ".." segments.`,
       );
