@@ -181,15 +181,31 @@ describe("projectWorkboardTrust", () => {
     ]);
   });
 
-  it("leaves out archived tickets that were never accepted", () => {
+  it("leaves out archived tickets whose PR never merged", () => {
     const archived = (card: WorkboardCard): WorkboardCard => ({
       ...card,
       metadata: { ...card.metadata, archivedAt: MONDAY },
     });
+    const withPullRequest = (at: number, state: "open" | "merged") => {
+      const { handoff } = published(at);
+      return { handoff: { ...handoff, pullRequest: { state, checkedAt: at } } };
+    };
     const cards = [
       ticket("shipped", { createdAt: MONDAY, worktree: published(MONDAY + HOUR) }),
-      // Archiving a shipped ticket tidies the board; its acceptance stays history.
-      archived(ticket("tidied", { createdAt: MONDAY, worktree: published(MONDAY + 3 * HOUR) })),
+      // Archiving a merged ticket tidies the board; its acceptance stays history.
+      archived(
+        ticket("tidied", {
+          createdAt: MONDAY,
+          worktree: withPullRequest(MONDAY + 3 * HOUR, "merged"),
+        }),
+      ),
+      // An accepted ticket dropped before its PR merged shipped nothing.
+      archived(
+        ticket("abandoned", {
+          createdAt: MONDAY,
+          worktree: withPullRequest(MONDAY + HOUR, "open"),
+        }),
+      ),
       // Archive closes a ticket without a PR, so it is no outcome to score.
       archived(ticket("dropped", { createdAt: MONDAY })),
       archived(ticket("duplicate", { createdAt: MONDAY, blocked: true })),
@@ -258,7 +274,7 @@ describe("projectWorkboardTrust", () => {
     });
   });
 
-  it("leaves rework rounds that added no commit besides merges out of rework and disagreement", () => {
+  it("leaves rework rounds that added no commit besides merges out of rework and disagreement, reworking only the round before a counted one", () => {
     const at = MONDAY + HOUR;
     const rework = { pullRequestUrl: "u", acceptedAt: at, outsideCommits: 0, unchangedRounds: [1] };
     const accept = (round: number) => ({ round, verdict: "accept" as const });
@@ -268,7 +284,8 @@ describe("projectWorkboardTrust", () => {
         createdAt: MONDAY,
         worktree: { ...published(at), rework: { ...rework, round: 1 }, reviews: [accept(0)] },
       }),
-      // Round 2 changed code, so the accepts on rounds 0 and 1 were both reworked.
+      // Round 2 changed code, reworking round 1's accept only: round 0's accept
+      // held through the merge-only round 1.
       ticket("changed", {
         createdAt: MONDAY,
         worktree: {
@@ -277,15 +294,33 @@ describe("projectWorkboardTrust", () => {
           reviews: [accept(0), accept(1), accept(2)],
         },
       }),
+      // The same shape at rung b: only round 1's agent accept and its passed verification were reworked.
+      ticket("agent", {
+        createdAt: MONDAY,
+        worktree: {
+          ...published(at),
+          rework: { ...rework, round: 2 },
+          reviews: [0, 1, 2].map((round) => ({
+            ...accept(round),
+            decidedBy: "agent" as const,
+            sampled: true,
+            verification: { verdict: "pass" as const, startedAt: at, endedAt: at },
+          })),
+        },
+      }),
     ];
 
     expect(projectWorkboardTrust(cards, "app", MONDAY).total).toMatchObject({
-      accepted: 2,
+      accepted: 3,
       cleanAccepted: 1,
-      reworkRounds: 1,
+      reworkRounds: 2,
       verdictRounds: 4,
-      verdictAgreedRounds: 2,
+      verdictAgreedRounds: 3,
       verdictAgreedCards: 1,
+      agentAccepts: 3,
+      reworkedAccepts: 1,
+      verifierScoredRounds: 3,
+      verifierEscapes: 1,
     });
   });
 

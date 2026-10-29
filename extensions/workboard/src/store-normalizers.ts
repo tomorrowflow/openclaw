@@ -78,7 +78,7 @@ import {
   normalizeCommentSource,
   normalizeRunId,
 } from "./store-value-normalizers.js";
-import { isAbsoluteWorkspacePath } from "./workspace-path.js";
+import { isAbsoluteWorkspacePath, relativeRepoPath } from "./workspace-path.js";
 
 export function normalizeBoardId(value: unknown, fallback?: string): string | undefined {
   const raw = normalizeBoundedString(value, fallback, 80, "board id");
@@ -205,6 +205,20 @@ export function normalizeStringList(value: unknown, fieldName: string, maxLength
   return values;
 }
 
+/** Repo-relative paths a node ticket expects to change; an empty list clears them. */
+function normalizeTouches(value: unknown): string[] {
+  const paths = normalizeStringList(value, "touches", 300).map((entry) => {
+    const path = relativeRepoPath(entry);
+    if (!path) {
+      throw new Error(
+        `touches entry ${JSON.stringify(entry)} must be a repo-relative path, without "." or ".." segments.`,
+      );
+    }
+    return path;
+  });
+  return [...new Set(paths)];
+}
+
 function normalizePositiveInteger(value: unknown, fieldName: string): number | undefined {
   if (value == null || value === "") {
     return undefined;
@@ -292,6 +306,7 @@ export function normalizeAutomation(
       "idempotency key",
     ),
     skills: strings("skills", "skills"),
+    touches: Object.hasOwn(record, "touches") ? normalizeTouches(record.touches) : fallback.touches,
     workspace: Object.hasOwn(record, "workspace")
       ? normalizeWorkspace(record.workspace, fallback.workspace)
       : fallback.workspace,

@@ -536,7 +536,7 @@ do not need it: each worker run is granted `workboard_heartbeat`,
 | ------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `workboard_list`                                                                                                                                 | List compact cards with claim/diagnostic state; optional board filter.                                                                                                                    |
 | `workboard_read`                                                                                                                                 | Return one card plus bounded worker context from the same card read (notes, attempts, comments, links, proof, artifacts, parent results, recent assignee work, active diagnostics).       |
-| `workboard_create`                                                                                                                               | Create a card with optional parents, tenant, skills, board, workspace metadata, idempotency key, runtime limit, retry budget, operator summary.                                           |
+| `workboard_create`                                                                                                                               | Create a card with optional parents, tenant, skills, touches, board, workspace metadata, idempotency key, runtime limit, retry budget, operator summary.                                  |
 | `workboard_link`                                                                                                                                 | Link a parent to a child card. Queued children stay `todo` until every parent is `done`, then move to `ready`; backlog children wait until started.                                       |
 | `workboard_reference`                                                                                                                            | Reference another card with a `relates_to` link (no dependency), so the card's Prototype and Screenshots tabs also show its committed files                                               |
 | `workboard_claim`                                                                                                                                | Claim a card for the calling agent; moves `backlog`/`todo`/`ready` into `running`.                                                                                                        |
@@ -1252,8 +1252,11 @@ was recorded have no review wait. On a board with an
 `orchestration.defaultTarget`, the Control UI shows "N of M autonomous this
 week" under the board title; select it for the weekly and per-class tables.
 Blocks come from card events, which keep the newest 50 per card. An archived
-ticket counts only when it was accepted before; archiving one that never
-published (a probe, a duplicate, a dropped ticket) removes it from every count.
+ticket counts only when its PR merged before the archive: archiving one that
+never published (a probe, a duplicate, a dropped ticket) or whose PR never
+merged (accepted, then dropped) removes it from every count. The
+[PR state sync](#pr-state-sync) stops at the archive, so a merge it had not
+recorded by then leaves the ticket out as well.
 A rework round whose import adds no commit of its own besides merges (only a
 merge of the base branch to clear a PR conflict, or nothing), or that the PR
 state sync opened for a conflict (see **Conflicts** above), is recorded in
@@ -1282,8 +1285,10 @@ see it.
 Each accept (the publish) records the newest agent verdict since the import
 and up to the move to `done`, or `missed` when none came first, in the node
 worktree's `reviews` (the last 20 rounds). A round agrees when the verdict was
-`accept` and the card was not reopened for rework after that publish, or
-`rework` and it was. The counts report `verdictRounds` and
+`accept` and the round right after it was not a counted rework round, or
+`rework` and it was. A later counted round reworks the round before it only:
+an accept that held through a merge-only conflict round stays agreed when a
+later round reworks what the conflict round added. The counts report `verdictRounds` and
 `verdictAgreedRounds` per round, `verdictCards` and `verdictAgreedCards` for
 tickets whose every round had a verdict and every verdict agreed, and
 `verdictMissed` rounds, which count in neither rate, with `verdictMissedRecent`
@@ -1293,8 +1298,8 @@ cover only rounds the operator moved to `done`.
 
 **Agent acceptance:** rounds an agent accepted at rung b record
 `decidedBy: "agent"` and `sampled` in `reviews`. The counts report
-`agentAccepts`, `reworkedAccepts` (accepted, then reopened for rework: a
-person disagreed), `sampledRounds`, and `sampledAgreed` (sampled and never
+`agentAccepts`, `reworkedAccepts` (accepted, then the next round was a
+counted rework round: a person disagreed), `sampledRounds`, and `sampledAgreed` (sampled and never
 reworked). Whether a person merged an unsampled PR without reading it needs
 GitHub state that the projection does not have. On a one-board projection
 (`boardId` set), each class row carries the board's `rung` for that class.
@@ -1307,8 +1312,9 @@ who decided without seeing it: `verifierScoredRounds` are verified rounds an
 operator decided at rung a (a rung b round shows the operator its
 verification, so their decision is not independent of it) plus sampled agent
 accepts (an agent's rework after a `fail` agrees with itself and is not
-scored), `verifierAgreedRounds` those where `pass` met no later rework or a
-non-pass (`fail` or `error`) met one, `verifierEscapes` the `pass` verdicts a
+scored), `verifierAgreedRounds` those where `pass` met no rework or a
+non-pass (`fail` or `error`) met one (the round right after, as for
+verdicts), `verifierEscapes` the `pass` verdicts a
 person then reworked, and `verifierCatches` the non-pass verdicts a person
 then reworked. These flow through `blind` and `sinceRung` like every other
 count, so a class's verifier agreement at its current rung is read from
@@ -1366,7 +1372,16 @@ continues its own branch, never waits for one. A scheduled pass that finds a
 `ready` ticket in this state queues it the same way, and its comment names the
 PRs. The [PR state sync](#pr-state-sync) reads GitHub every 10 minutes, so
 the ticket starts up to 10 minutes after the merge.
-Only unfinished parents, unmerged parent PRs and a full slot queue a start: a
+A first round with `touches` (repo-relative files or directories the ticket
+will change, set on create, specify, decompose, or `workboard.cards.update`)
+also waits while another open node ticket touches an overlapping path: a
+directory covers everything under it. Open means picked in the same pass, or
+started (it has a worktree) with a PR that is not merged or closed. Siblings
+that change one file then land one by one instead of conflicting on each
+merge. The comment names each ticket and the shared path. Archiving the other
+ticket releases the wait, and a rework round never waits.
+Only unfinished parents, unmerged parent PRs, open tickets on the same paths,
+and a full slot queue a start: a
 blocked card, one
 scheduled for later, or one out of retries is refused with that reason and not
 queued. Queued is not the `scheduled` status, which holds a card until its
@@ -1376,8 +1391,11 @@ Whenever a card changes, such as a running ticket reaching `review`, Workboard
 starts queued tickets oldest request first. A ticket whose parents are not all
 `done` and merged, or whose own route is still full, keeps its place without holding back
 a later ticket on a route with a free slot, so a full Mac route never blocks
-the Linux pool. A card edited while its queued start reads it stays queued and
-is tried again on the next change. A queued start refused for another reason
+the Linux pool. A slot that frees while a pass walks the queue stays for the
+oldest request waiting on it: the pass skips later requests on a slot an older
+one found full, and the change that freed it starts the next pass. A card
+edited while its queued start reads it stays queued and is tried again on the
+next change. A queued start refused for another reason
 blocks the card with that reason.
 
 The request is stored as `metadata.automation.startRequest`. Only the

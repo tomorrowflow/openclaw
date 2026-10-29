@@ -61,8 +61,15 @@ function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
   const acceptedAt =
     worktree?.rework?.acceptedAt ??
     (handoff?.phase === "published" ? handoff.publishedAt : undefined);
-  // Archive closes a ticket without a PR; an accepted ticket archived later keeps its history.
-  if (card.metadata?.archivedAt && acceptedAt === undefined) {
+  // Archive closes a ticket without a PR, or drops one whose PR never merged; an
+  // accepted ticket archived after its merge keeps its history. The PR state sync
+  // stops at the archive, so a merge it had not seen yet leaves the ticket out too.
+  if (
+    card.metadata?.archivedAt &&
+    (acceptedAt === undefined ||
+      handoff?.phase !== "published" ||
+      handoff.pullRequest?.state !== "merged")
+  ) {
     return undefined;
   }
   return {
@@ -109,11 +116,15 @@ function countedReworkRounds(rework: WorkboardNodeRework | undefined): number[] 
   );
 }
 
-// The operator reworked a published round when the ticket went on to a later counted rework round.
+// A person reworked a published round when the round right after it is a counted
+// rework round. A later one corrects what came after, such as a commit a merge-only
+// conflict round added, not this round.
+function reworkedAfter(ticket: TicketFacts, review: WorkboardNodeReviewVerdict): boolean {
+  return ticket.reworkRounds.includes(review.round + 1);
+}
+
 function verdictAgrees(ticket: TicketFacts, review: WorkboardNodeReviewVerdict): boolean {
-  return (
-    (review.verdict === "rework") === ticket.reworkRounds.some((round) => round > review.round)
-  );
+  return (review.verdict === "rework") === reworkedAfter(ticket, review);
 }
 
 // Rung b lets an agent decide a round; at rung a the operator decides every one.
@@ -178,12 +189,9 @@ function decidedBlindToVerification(review: WorkboardNodeReviewVerdict): boolean
   );
 }
 
-// A verification agrees when `pass` met no rework after the publish; `fail` and `error` count as not pass.
+// A verification agrees when `pass` met no rework of its round; `fail` and `error` count as not pass.
 function verificationAgrees(ticket: TicketFacts, review: WorkboardNodeReviewVerdict): boolean {
-  return (
-    (review.verification?.verdict !== "pass") ===
-    ticket.reworkRounds.some((round) => round > review.round)
-  );
+  return (review.verification?.verdict !== "pass") === reworkedAfter(ticket, review);
 }
 
 function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
