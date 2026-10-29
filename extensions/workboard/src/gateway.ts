@@ -25,6 +25,8 @@ import {
 } from "./node-ticket-artifacts.js";
 import { readNodeTicketChangeDiff } from "./node-ticket-changes.js";
 import { readNodeGrillResult } from "./node-ticket-grill-session.js";
+import { visualCheckComment } from "./node-ticket-verification.js";
+import { visualCheckVerification } from "./review-readiness.js";
 import type { WorkboardSessionsBoardService } from "./sessions-board.js";
 import { resolveWorkboardSqliteWorkerModuleUrl } from "./sqlite-store-paths.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
@@ -41,6 +43,10 @@ const READ_SCOPE = "operator.read" as const;
 const WRITE_SCOPE = "operator.write" as const;
 const ADMIN_SCOPE = "operator.admin" as const;
 const cardsListFilterSchema = z.object({ sessionKey: z.string().trim().min(1).optional() });
+const visualCheckParamsSchema = z.object({
+  verdict: z.enum(["looks_right", "problem"]),
+  note: z.string().optional(),
+});
 const CLI_OWNER_METHODS = new Set([
   "workboard.cards.list",
   "workboard.cards.create",
@@ -327,6 +333,22 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.verify", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(store.dropNodeVerification(readId(input))),
   );
+  // Accepted edge: a crash between the record and its comment loses the
+  // comment; the card read still shows the check and the revealed read.
+  register("workboard.cards.visualCheck", WRITE_SCOPE, async ({ params: input }) => {
+    const id = readId(input);
+    const { verdict, note } = visualCheckParamsSchema.parse(input);
+    const checked = await store.setNodeVisualCheck(id, { verdict, ...(note ? { note } : {}) });
+    const verification = visualCheckVerification(checked);
+    const check = verification?.visualCheck;
+    if (!verification || !check) {
+      throw new Error("The visual check was not recorded; refresh the card.");
+    }
+    const body = visualCheckComment(verification, check);
+    return {
+      card: redactOperatorCard(await store.addComment(id, { body }, undefined, "operator")),
+    };
+  });
   // A repeat returns the source's unarchived probe of the arm; `start` then starts it if still todo.
   register("workboard.cards.probe", ADMIN_SCOPE, async (request) => {
     const input = request.params;

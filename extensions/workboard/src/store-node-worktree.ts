@@ -3,8 +3,14 @@ import type {
   WorkboardNodeVerification,
   WorkboardNodeWorktree,
   WorkboardPullRequestState,
+  WorkboardVisualVerdict,
 } from "@openclaw/workboard-contract";
-import { type WorkboardNodeRoundFacts, withNodeRound } from "./node-ticket-rounds.js";
+import {
+  visualCheckNote,
+  type WorkboardNodeRoundFacts,
+  withNodeRound,
+} from "./node-ticket-rounds.js";
+import { visualCheckVerification } from "./review-readiness.js";
 import { appendComment, assertCanMutateClaimedCard } from "./store-card-helpers.js";
 import type { WorkboardMutationScope } from "./store-inputs.js";
 import { WorkboardNotificationStore } from "./store-notifications.js";
@@ -182,6 +188,50 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
             metadata: {
               ...card.metadata,
               automation: { ...card.metadata?.automation, target: { ...target, worktree: rest } },
+            },
+          };
+        },
+        { allowAutomationLaunch: true },
+      );
+      return result.card;
+    });
+  }
+
+  /**
+   * Records the operator's own visual check on the imported round's finished
+   * verification, replacing an earlier one; recording it reveals the
+   * verifier's visual read on card reads.
+   */
+  async setNodeVisualCheck(
+    id: string,
+    input: { verdict: WorkboardVisualVerdict; note?: string },
+  ): Promise<WorkboardCard> {
+    return await this.enqueueMutation(async () => {
+      const result = await this.updateLatestCard(
+        id,
+        (card) => {
+          const verification = visualCheckVerification(card);
+          const target = card.metadata?.automation?.target;
+          const worktree = target?.worktree;
+          if (!verification || !target || !worktree) {
+            throw new Error(
+              worktree?.handoff?.phase === "imported" && !card.metadata?.archivedAt
+                ? "this round's verification has not finished; record the visual check after the verifier's comment."
+                : "only a node ticket waiting on an imported round can get a visual check.",
+            );
+          }
+          const note = visualCheckNote(input.note);
+          const visualCheck = { verdict: input.verdict, ...(note ? { note } : {}), at: Date.now() };
+          return {
+            metadata: {
+              ...card.metadata,
+              automation: {
+                ...card.metadata?.automation,
+                target: {
+                  ...target,
+                  worktree: { ...worktree, verification: { ...verification, visualCheck } },
+                },
+              },
             },
           };
         },

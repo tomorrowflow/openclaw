@@ -90,6 +90,15 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
             ...(verification.model ? { model: verification.model } : {}),
             startedAt: verification.startedAt,
             endedAt: verification.endedAt,
+            // Without the operator's check the verifier's read stays unrevealed.
+            ...(verification.visual && verification.visualCheck
+              ? {
+                  visual: {
+                    verifier: verification.visual.verdict,
+                    operator: verification.visualCheck.verdict,
+                  },
+                }
+              : {}),
           },
         }
       : {}),
