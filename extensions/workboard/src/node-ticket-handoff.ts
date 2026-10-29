@@ -556,7 +556,7 @@ async function drainStartQueue(params: {
   // A start that claimed the card already blocked it on failure.
   const current = await params.store.get(params.card.id);
   if (!current?.metadata?.automation?.startRequest) {
-    return;
+    return undefined;
   }
   await params.store.block(
     params.card.id,
@@ -565,6 +565,7 @@ async function drainStartQueue(params: {
     },
     null,
   );
+  return undefined;
 }
 
 /**
