@@ -809,7 +809,9 @@ cards then block at start with the core `model not allowed` reason.
 A board's `orchestration.classRungs`, also set only through
 `workboard.boards.upsert`, sets the trust-ladder rung of each task class (a
 card's first `class:<name>` label, keyed without the `class:` prefix). A class
-not listed is at rung a:
+not listed is at rung a. Rung c is for classes trusted to merge their own
+PRs; today it runs every round the way rung b does (standards review, agent
+decision, sampling):
 
 ```json5
 {
@@ -827,7 +829,7 @@ not listed is at rung a:
 `sampleEvery` (1 to 100, default 3) sizes the human review sample of PRs an
 agent accepts at rung b (see **Accept** below). Saving replaces the whole map; `classRungs: null` or `{}` removes it. Saving
 refuses more than 50 classes, a name with the `class:` prefix or longer than 34
-characters, a rung other than `a` or `b`, and a `sampleEvery` that is not an
+characters, a rung other than `a`, `b`, or `c`, and a `sampleEvery` that is not an
 integer from 1 to 100.
 
 Each entry also carries `since`, the epoch ms when the class last changed rung.
@@ -836,9 +838,10 @@ class counts as rung a, so listing it at `a` is no change) and carries the
 stored value on every other save, including one that omits it. An explicit
 `since` overrides both, to backfill a change made before stamping; saving
 refuses one that is not an integer from 0 to now. Each start, rework, answer, or retry reads the rung from
-the board and records a rung b round as `rung: "b"` on the node worktree, so
-promoting or demoting a class applies from the next round on, never to one
-already running. A rung b round's brief asks the session to run a reviewer
+the board and records a rung b or c round as `rung: "b"` or `rung: "c"` on
+the node worktree, so promoting or demoting a class applies from the next
+round on, never to one already running. An agent decides a round that ran at
+b or c while its class is at b or c. A rung b or c round's brief asks the session to run a reviewer
 subagent against the repository's `CODING_STANDARDS.md` before its `done`
 report, address the findings, and report them (see **Report** below).
 
@@ -1306,7 +1309,7 @@ GitHub state that the projection does not have. On a one-board projection
 
 **Verification:** a publish copies the round's finished verification into its
 `reviews` entry as `verification: {verdict, model}`, and the round's rung as
-`rung: "b"` when it ran at rung b. The counts report `verifiedRounds` and
+`rung: "b"` or `rung: "c"` when it ran there. The counts report `verifiedRounds` and
 `verifierFailed` (verdict `fail`), then score the verifier against the person
 who decided without seeing it: `verifierScoredRounds` are verified rounds an
 operator decided at rung a (a rung b round shows the operator its
@@ -1327,8 +1330,9 @@ the operator's. Rounds decided without a visual check count in neither.
 
 **Blind counts:** each class row also carries `blind`, the same counts over
 rounds published since the blind verdict went live (2026-10-11 13:01 CEST),
-split by the rung that decided each round: `blind.b` for rounds an agent
-decided, `blind.a` for the rest. A rung leaves its key out when the class had
+split by the rung that decided each round: `blind.b` and `blind.c` for rounds
+an agent decided at that rung (an agent's round recorded before rung c counts
+at b), `blind.a` for the rest. A rung leaves its key out when the class had
 no blind round there. A ticket counts as accepted in a rung when its first
 publish was decided there, so a class demoted from b to a keeps its rung b
 acceptances apart from the rung a ones. Rework, blocks, and attempts stay

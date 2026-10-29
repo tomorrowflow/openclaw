@@ -1,12 +1,13 @@
-import type {
-  WorkboardBoardSummary,
-  WorkboardOperatorCard,
-  WorkboardOverviewCard,
-  WorkboardOverviewInFlight,
-  WorkboardOverviewResult,
-  WorkboardOverviewShipped,
-  WorkboardOverviewWaitReason,
-  WorkboardOverviewWaiting,
+import {
+  workboardAgentDecides,
+  type WorkboardBoardSummary,
+  type WorkboardOperatorCard,
+  type WorkboardOverviewCard,
+  type WorkboardOverviewInFlight,
+  type WorkboardOverviewResult,
+  type WorkboardOverviewShipped,
+  type WorkboardOverviewWaiting,
+  type WorkboardOverviewWaitReason,
 } from "@openclaw/workboard-contract";
 import { nodeTicketTarget } from "./node-ticket.js";
 import { cardBoardId } from "./store-card-helpers.js";
@@ -121,12 +122,12 @@ function place(
       result.needsYou.push(waiting(card, "decide", stage.since));
       return;
     case "awaiting_review": {
-      // An agent accepts only a round that ran at rung b while its class is still at rung b.
-      // Only the board's automation job brings an agent to the review.
+      // An agent accepts only a round that ran at rung b or c while its class
+      // is still there. Only the board's automation job brings an agent to the review.
       const agentDecides =
         Boolean(board?.automationJobId) &&
-        nodeTicketTarget(card)?.worktree?.rung === "b" &&
-        workboardClassRung(board?.orchestration, card.labels)?.rung === "b";
+        workboardAgentDecides(nodeTicketTarget(card)?.worktree?.rung) &&
+        workboardAgentDecides(workboardClassRung(board?.orchestration, card.labels)?.rung);
       if (agentDecides) {
         result.inFlight.push(inFlight(card));
       } else {

@@ -1,7 +1,8 @@
-import type {
-  WorkboardCard,
-  WorkboardNodeGrill,
-  WorkboardNodeWorktree,
+import {
+  workboardAgentDecides,
+  type WorkboardCard,
+  type WorkboardNodeGrill,
+  type WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
 import { grillEndFromLog } from "./node-ticket-grill.js";
 import { REPORT_FENCE } from "./node-ticket-report.js";
@@ -66,7 +67,7 @@ export function buildNodeTicketMessage(params: {
           )
         : [];
   const feedback = rework || answering ? comments.slice(-REWORK_FEEDBACK_MAX_ENTRIES) : [];
-  const reviewed = params.worktree.rung === "b";
+  const reviewed = workboardAgentDecides(params.worktree.rung);
   // The range the host import checks with `git diff --check` (node-ticket-handoff.ts). A
   // legacy rework without startCommit is checked from the host head, a subset of this range.
   const checkFrom = params.worktree.rework?.startCommit ?? params.worktree.baseCommit;

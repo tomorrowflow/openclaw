@@ -1,14 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
-import type {
-  WorkboardCard,
-  WorkboardComment,
-  WorkboardExecutionTarget,
-  WorkboardNodeFeedback,
-  WorkboardNodeQuestions,
-  WorkboardNodeRework,
-  WorkboardNodeWorktree,
-  WorkboardOrchestrationSettings,
+import {
+  workboardAgentDecides,
+  type WorkboardCard,
+  type WorkboardComment,
+  type WorkboardExecutionTarget,
+  type WorkboardNodeFeedback,
+  type WorkboardNodeQuestions,
+  type WorkboardNodeRework,
+  type WorkboardNodeWorktree,
+  type WorkboardOrchestrationSettings,
 } from "@openclaw/workboard-contract";
 import { isFutureDateTimestampMs } from "openclaw/plugin-sdk/number-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
@@ -105,12 +106,12 @@ export function nodeTicketAcceptance(params: {
   }
   const classRung = workboardClassRung(board, card.labels);
   const askForVerdict = "Post `Verdict: accept` or `Verdict: rework: <finding>` as a comment";
-  if (classRung?.rung !== "b") {
+  if (!workboardAgentDecides(classRung?.rung)) {
     throw new Error(
       `Rung a: the operator accepts ${workboardTaskClass(card.labels) ?? "unclassified"} tickets. ${askForVerdict} instead of moving the card to done.`,
     );
   }
-  if (worktree.rung !== "b") {
+  if (!workboardAgentDecides(worktree.rung)) {
     throw new Error(
       `This round ran before its class reached rung b, so the operator accepts it. ${askForVerdict} instead of moving the card to done.`,
     );
@@ -729,7 +730,7 @@ export async function applyNodeTicketReport(params: {
     );
     return;
   }
-  if (worktree?.rung === "b" && !report.review) {
+  if (workboardAgentDecides(worktree?.rung) && !report.review) {
     await blockReport(
       `Reported done without the standards review its rung b brief asked for: ${report.summary || "no summary given"}\nRe-run the card; the next run reuses the node worktree, and its brief asks for the reviewer against CODING_STANDARDS.md and a \`review\` in the report.`,
     );

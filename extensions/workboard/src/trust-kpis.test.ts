@@ -539,11 +539,23 @@ describe("projectWorkboardTrust", () => {
           ],
         },
       }),
+      // An agent accept at rung c counts at c; one recorded before rung c existed counts at b.
+      ticket("at-c", {
+        createdAt: before,
+        labels: ["class:docs"],
+        worktree: {
+          ...published(after),
+          reviews: [
+            { round: 0, verdict: "accept", decidedBy: "agent", rung: "c", publishedAt: after },
+          ],
+        },
+      }),
     ];
 
     const [docs] = projectWorkboardTrust(cards, "app", after).classes;
 
-    expect(docs).toMatchObject({ tickets: 3, accepted: 3, verdictRounds: 2 });
+    expect(docs).toMatchObject({ tickets: 4, accepted: 4, verdictRounds: 2 });
+    expect(docs?.blind.c).toMatchObject({ tickets: 1, accepted: 1, agentAccepts: 1 });
     expect(docs?.blind.a).toMatchObject({
       tickets: 2,
       accepted: 1,
