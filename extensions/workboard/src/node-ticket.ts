@@ -448,15 +448,23 @@ export async function createNodeTicketWorktree(params: {
       if (!Number.isInteger(outside)) {
         throw new Error(`node ${target.nodeId} reported an invalid commit count for ${branch}`);
       }
+      const round = (previous.rework?.round ?? 0) + 1;
+      // A round the PR state sync opened for a base conflict corrects nothing,
+      // even when re-running the proof commits new evidence. The import sees only
+      // commits and the publish replaces the handoff that marks the round, so it
+      // is recorded at the start. Feedback an operator adds before the start
+      // rides along uncounted.
+      const unchangedRounds = [
+        ...(previous.rework?.unchangedRounds ?? []),
+        ...(published.conflictReworkAt !== undefined ? [round] : []),
+      ];
       rework = {
-        round: (previous.rework?.round ?? 0) + 1,
+        round,
         pullRequestUrl: published.pullRequestUrl,
         acceptedAt: previous.rework?.acceptedAt ?? published.publishedAt,
         outsideCommits: (previous.rework?.outsideCommits ?? 0) + outside,
         startCommit: start,
-        ...(previous.rework?.unchangedRounds
-          ? { unchangedRounds: previous.rework.unchangedRounds }
-          : {}),
+        ...(unchangedRounds.length > 0 ? { unchangedRounds } : {}),
       };
     } else {
       const baseRef = target.baseRef ?? "origin/HEAD";
