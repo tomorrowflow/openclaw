@@ -1379,8 +1379,11 @@ Whenever a card changes, such as a running ticket reaching `review`, Workboard
 starts queued tickets oldest request first. A ticket whose parents are not all
 `done` and merged, or whose own route is still full, keeps its place without holding back
 a later ticket on a route with a free slot, so a full Mac route never blocks
-the Linux pool. A card edited while its queued start reads it stays queued and
-is tried again on the next change. A queued start refused for another reason
+the Linux pool. A slot that frees while a pass walks the queue stays for the
+oldest request waiting on it: the pass skips later requests on a slot an older
+one found full, and the change that freed it starts the next pass. A card
+edited while its queued start reads it stays queued and is tried again on the
+next change. A queued start refused for another reason
 blocks the card with that reason.
 
 The request is stored as `metadata.automation.startRequest`. Only the
