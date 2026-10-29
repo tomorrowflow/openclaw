@@ -1062,7 +1062,11 @@ model, so a verdict always comes from the configured one:
    (`sips -Z 800 -s format jpeg -s formatOptions 65 in.png --out out.jpg`),
    base64-encodes it, and passes the `data:image/jpeg;base64,…` URL to Code
    Mode's `image()` helper, so the images come back to the model as image
-   blocks without a new tool. The `visual` part records, per screenshot, its
+   blocks without a new tool. `sips` and `base64 -i` are macOS commands; on
+   a Linux node the verifier records `not_checked` unless it finds an
+   equivalent. The brief also keeps what the verifier saw on screenshots out
+   of `summary` and `findings`, except a defect the proof shows by other
+   means (a crash, a wrong accessibility tree, a failing test). The `visual` part records, per screenshot, its
    path, what it shows (the selected tab, the text, the filled button, an
    alert, the dark-mode colors), and `looks_right` or `problem`, plus an
    overall visual verdict (at most 12 screenshots). The visual check is
@@ -1105,11 +1109,21 @@ model, so a verdict always comes from the configured one:
    `visualCheck: {round, check?}` once the imported round's verification
    finished, even at rung a while the record itself is hidden.
    `workboard.cards.visualCheck {id, verdict: "looks_right"|"problem", note?}`
-   (`operator.write`) records the check on that verification (replacing an
-   earlier one; refused while it runs, for a stale or missing record, and on
-   an archived card), which reveals the read on card reads, and posts one
-   operator comment comparing the two: `**Visual check:** operator <verdict> · verifier <verdict>`,
-   the note, and the verifier's line per screenshot. A publish copies
+   (`operator.write`) records the check on that verification, once per
+   record: a second check is refused until `workboard.cards.verify` re-runs
+   the verification, whose new record takes a fresh one. It is also refused
+   while the verification runs, for a stale or missing record, and on an
+   archived card. Recording it reveals the read on card reads, and posts one
+   operator comment: `**Visual check:** operator <verdict>`, the note, then
+   `**Verifier:** <verdict>` (`no visual read recorded` for a record finished
+   before the verifier wrote one) and the verifier's line per screenshot. The
+   Screenshots tab then shows the recorded check read-only. At rung a, until
+   the operator decides the round, operator reads show that comment with only
+   the operator's verdict and note, and the verifier part reads
+   `revealed when you decide this round`; once decided, the whole comment
+   shows. At rung b it always shows whole. `dev` reads the comment whole, so
+   at rung a it sees the operator's check before its shadow verdict; this is
+   accepted, as a free-form operator comment has the same effect. A publish copies
    `visual: {verifier, operator}` into the round's `reviews` entry only when
    both exist; a round decided without a check carries no visual, the next
    import replaces the record, and the verifier's read is never revealed.

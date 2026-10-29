@@ -412,7 +412,7 @@ it("offers the visual check only when the imported round has one", async () => {
   );
 });
 
-it("records the operator's verdict with its note and shows the returned check", async () => {
+it("records the operator's verdict with its note and then shows the check read-only", async () => {
   const page = visualPage(true);
   await vi.waitFor(() => expect(page.images()).toBe(1));
   await vi.waitFor(() => expect(page.buttons()).toHaveLength(2));
@@ -435,5 +435,6 @@ it("records the operator's verdict with its note and shows the returned check", 
     verdict: "problem",
     note: "clipped",
   });
-  expect(page.buttons().every((button) => !button.disabled)).toBe(true);
+  expect(page.buttons()).toHaveLength(0);
+  expect(page.container.querySelector(".workboard-visual-check__note")).toBeNull();
 });

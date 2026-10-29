@@ -7,6 +7,7 @@ import type {
 } from "@openclaw/workboard-contract";
 import { afterEach, describe, expect, it } from "vitest";
 import { registerWorkboardGatewayMethods } from "./gateway.js";
+import { visualCheckComment } from "./node-ticket-rounds.js";
 import { isVerificationComment } from "./node-ticket.js";
 import {
   finishNodeTicket,
@@ -94,11 +95,19 @@ describe("node ticket visual check", () => {
     await expect(store.setNodeVisualCheck(card.id, check)).rejects.toThrow(unfinished);
 
     await ticket.verify();
-    await store.setNodeVisualCheck(card.id, check);
     await store.setNodeVisualCheck(card.id, { verdict: "looks_right", note: "x".repeat(600) });
+    await expect(store.setNodeVisualCheck(card.id, check)).rejects.toThrow(
+      "this verification already has a visual check; re-run the verification (workboard.cards.verify) to record a new one.",
+    );
     expect(worktreeOf(await store.get(card.id)).verification).toMatchObject({
       visual: VISUAL,
       visualCheck: { verdict: "looks_right", note: `${"x".repeat(399)}…`, at: expect.any(Number) },
+    });
+    // A re-run writes a new record, which takes its own check.
+    await ticket.verify();
+    await store.setNodeVisualCheck(card.id, check);
+    expect(worktreeOf(await store.get(card.id)).verification).toMatchObject({
+      visualCheck: { verdict: "problem", note: check.note },
     });
 
     await store.archive(card.id, true);
@@ -144,15 +153,22 @@ describe("node ticket visual check", () => {
     expect(comment).toMatchObject({
       source: "operator",
       body: [
-        "**Visual check:** operator problem · verifier looks_right",
+        "**Visual check:** operator problem",
         "",
         "Record button grey in dark mode",
         "",
+        "**Verifier:** looks_right",
         "- `docs/screenshots/A49/today-dark.png` looks_right: Today tab selected; Record button filled blue on black",
       ].join("\n"),
     });
     expect(isVerificationComment(comment)).toBe(false);
     await expect(agentRead(ticket)).resolves.toMatchObject({ visual: VISUAL, visualCheck: check });
+  });
+
+  it("says a record finished before the visual read has none", () => {
+    expect(visualCheckComment(undefined, { verdict: "problem", at: 1 })).toBe(
+      "**Visual check:** operator problem\n\n**Verifier:** no visual read recorded",
+    );
   });
 
   it("copies the visual check into the round's review entry only when the operator recorded one", async () => {

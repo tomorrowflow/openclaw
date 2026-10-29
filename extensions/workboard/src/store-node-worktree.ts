@@ -221,6 +221,11 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
                 : "only a node ticket waiting on an imported round can get a visual check.",
             );
           }
+          if (verification.visualCheck) {
+            throw new Error(
+              "this verification already has a visual check; re-run the verification (workboard.cards.verify) to record a new one.",
+            );
+          }
           const note = visualCheckNote(input.note);
           const visualCheck = { verdict: input.verdict, ...(note ? { note } : {}), at: Date.now() };
           return {

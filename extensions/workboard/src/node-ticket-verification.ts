@@ -180,6 +180,7 @@ export function verificationMessage(params: {
     "## Screenshots",
     'When the proof captures screenshots (the project\'s skill says where), look at each one. In one `exec` script, downscale each PNG to a JPEG no wider than 800 px (`sips -Z 800 -s format jpeg -s formatOptions 65 in.png --out out.jpg` through your node exec tool), base64 it (`base64 -i out.jpg`), and call `image("data:image/jpeg;base64,<base64>")` in the script so the images come back to you as image blocks. Never send a full-size PNG.',
     "Record what you saw in the block's `visual` part: per screenshot its path, what it shows (the selected tab, the text, which button is filled, any alert, whether dark mode changed the colors), and `looks_right` or `problem`, plus the overall visual verdict. The visual check is operator-run: it never makes your verdict `fail` or `error`. A round without screenshots, or a session that cannot show itself an image, records `not_checked`, not `error`.",
+    "What you saw on the screenshots goes only in `visual`, never in `summary` or `findings`, since the operator compares it with their own look. A defect in the app's state that the proof shows by other means (a crash, a wrong accessibility tree, a failing test) still belongs in the findings.",
     "",
     "End your final message with exactly one block:",
     "",

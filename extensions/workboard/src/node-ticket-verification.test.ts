@@ -124,6 +124,9 @@ describe("node ticket verification", () => {
     expect(message).toContain("sips -Z 800 -s format jpeg");
     expect(message).toContain('image("data:image/jpeg;base64,<base64>")');
     expect(message).toContain('"visual":{"verdict":"looks_right|problem|not_checked"');
+    expect(message).toContain(
+      "What you saw on the screenshots goes only in `visual`, never in `summary` or `findings`",
+    );
     // Blind to the author: the done report's summary and proof stay out of the brief.
     expect(message).not.toContain("Parser accepts empty input");
     expect(message).not.toContain('pytest"');

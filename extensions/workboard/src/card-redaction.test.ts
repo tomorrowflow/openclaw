@@ -6,6 +6,7 @@ import {
   redactCard,
   redactOperatorCard,
 } from "./card-redaction.js";
+import { HIDDEN_VISUAL_READ_NOTICE, visualCheckComment } from "./node-ticket-rounds.js";
 
 type NodeTarget = NonNullable<
   NonNullable<NonNullable<WorkboardCard["metadata"]>["automation"]>["target"]
@@ -468,5 +469,38 @@ describe("redactOperatorCard", () => {
     // A stale record, of another round, has no visual check to record.
     expect(view(visualCard({ round: 1, visual })).visualCheck).toBeUndefined();
     expect(redactOperatorCard(createCard())).not.toHaveProperty("visualCheck");
+  });
+
+  it("keeps only the operator's part of a visual check comment until a rung-a round is decided", () => {
+    const visual = {
+      verdict: "problem" as const,
+      screenshots: [{ path: "dark.png", shows: "label unreadable", verdict: "problem" as const }],
+    };
+    const check = { verdict: "looks_right" as const, note: "fine on my phone", at: 30 };
+    const withComment = (options: { rung?: "b"; status?: WorkboardCard["status"] } = {}) => {
+      const card = visualCard({ visual, visualCheck: check }, options);
+      const comment = {
+        id: "visual",
+        body: visualCheckComment(visual, check),
+        createdAt: 30,
+        source: "operator" as const,
+      };
+      return { ...card, metadata: { ...card.metadata, comments: [comment] } };
+    };
+    const bodyOf = (card: WorkboardCard) => redactOperatorCard(card).metadata?.comments?.[0]?.body;
+    const full = visualCheckComment(visual, check);
+
+    expect(bodyOf(withComment())).toBe(
+      [
+        "**Visual check:** operator looks_right",
+        "",
+        "fine on my phone",
+        "",
+        `**Verifier:** ${HIDDEN_VISUAL_READ_NOTICE}`,
+      ].join("\n"),
+    );
+    expect(full).toContain("dark.png");
+    expect(bodyOf(withComment({ status: "done" }))).toBe(full);
+    expect(bodyOf(withComment({ rung: "b" }))).toBe(full);
   });
 });

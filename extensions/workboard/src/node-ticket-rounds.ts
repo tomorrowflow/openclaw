@@ -1,4 +1,5 @@
 import type {
+  WorkboardComment,
   WorkboardNodeChangedFile,
   WorkboardNodeChanges,
   WorkboardNodeDecision,
@@ -23,8 +24,10 @@ import { isAbsoluteWorkspacePath } from "./workspace-path.js";
 
 // Round facts ride in the card's metadata, which has a 24 KiB budget shared
 // with comments and proof. A full round serializes to about 11 KiB (decisions
-// 4.9, review 3.1, changes 2.8); the budget trim sheds the oldest round's
-// decisions, then its review items, then the round, before anything else.
+// 4.9, review 3.1, changes 2.8). The current verification record adds the
+// verifier's visual read, about 2.4 KiB at its caps. The budget trim sheds the
+// oldest round's decisions, then its review items, then the round, before
+// anything else.
 const MAX_NODE_ROUNDS = 5;
 const MAX_DECISIONS = 30;
 const MAX_DECISION_TRAIL_CHARS = 3000;
@@ -296,27 +299,45 @@ export function visualCheckNote(value: unknown): string | undefined {
   return cell(value, MAX_REVIEW_NOTE_CHARS);
 }
 
-/** The operator's check beside the verifier's read, which recording the check reveals. */
+const VISUAL_CHECK_LINE = "**Visual check:**";
+// The verifier's part comes last after a blank line and holds none itself
+// (each screenshot is one line), so its last start is where blinding cuts.
+const VISUAL_VERIFIER_LINE = "**Verifier:**";
+const VISUAL_VERIFIER_MARKER = `\n\n${VISUAL_VERIFIER_LINE}`;
+export const HIDDEN_VISUAL_READ_NOTICE = "revealed when you decide this round";
+
+/**
+ * The operator's check, then the verifier's read, which recording the check
+ * reveals. A record finished before the verifier wrote `visual` has no read.
+ */
 export function visualCheckComment(
   visual: WorkboardNodeVisualRead | undefined,
   check: WorkboardNodeVisualCheck,
 ): string {
-  const read = visual ?? normalizeNodeVisualRead(undefined);
   return truncateUtf16Safe(
     [
-      `**Visual check:** operator ${check.verdict} · verifier ${read.verdict}`,
+      `${VISUAL_CHECK_LINE} operator ${check.verdict}`,
       ...(check.note ? ["", check.note] : []),
-      ...(read.screenshots.length > 0
-        ? [
-            "",
-            ...read.screenshots.map(
-              (screenshot) => `- \`${screenshot.path}\` ${screenshot.verdict}: ${screenshot.shows}`,
-            ),
-          ]
-        : []),
+      "",
+      `${VISUAL_VERIFIER_LINE} ${visual ? visual.verdict : "no visual read recorded"}`,
+      ...(visual?.screenshots ?? []).map(
+        (screenshot) => `- \`${screenshot.path}\` ${screenshot.verdict}: ${screenshot.shows}`,
+      ),
     ].join("\n"),
     MAX_COMMENT_BODY_CHARS,
   );
+}
+
+export function isVisualCheckComment(comment: WorkboardComment): boolean {
+  return comment.source === "operator" && comment.body.startsWith(VISUAL_CHECK_LINE);
+}
+
+/** The comment with only the operator's verdict and note. */
+export function blindVisualCheckComment(body: string): string {
+  const cut = body.lastIndexOf(VISUAL_VERIFIER_MARKER);
+  return cut < 0
+    ? body
+    : `${body.slice(0, cut)}${VISUAL_VERIFIER_MARKER} ${HIDDEN_VISUAL_READ_NOTICE}`;
 }
 
 export function normalizeNodeVisualCheck(value: unknown): WorkboardNodeVisualCheck | undefined {

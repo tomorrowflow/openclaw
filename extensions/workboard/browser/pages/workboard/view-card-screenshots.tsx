@@ -382,33 +382,37 @@ function VisualCheck(props: { control: VisualCheckControl }) {
   return (
     <section class="workboard-detail__section workboard-visual-check">
       <h3>{t("workboard.visualCheck")}</h3>
-      <div class="workboard-visual-check__controls">
-        <button
-          class="btn"
-          type="button"
-          disabled={props.control.busy}
-          onClick={() => record("looks_right")}
-        >
-          {t("workboard.visualLooksRight")}
-        </button>
-        <button
-          class="btn"
-          type="button"
-          disabled={props.control.busy}
-          onClick={() => record("problem")}
-        >
-          {t("workboard.visualProblem")}
-        </button>
-        <input
-          type="text"
-          class="workboard-visual-check__note"
-          aria-label={t("workboard.visualNote")}
-          placeholder={t("workboard.visualNote")}
-          value={note()}
-          onInput={(event) => setNote(event.currentTarget.value)}
-        />
-      </div>
-      <Show when={props.control.check}>
+      <Show
+        when={props.control.check}
+        fallback={
+          <div class="workboard-visual-check__controls">
+            <button
+              class="btn"
+              type="button"
+              disabled={props.control.busy}
+              onClick={() => record("looks_right")}
+            >
+              {t("workboard.visualLooksRight")}
+            </button>
+            <button
+              class="btn"
+              type="button"
+              disabled={props.control.busy}
+              onClick={() => record("problem")}
+            >
+              {t("workboard.visualProblem")}
+            </button>
+            <input
+              type="text"
+              class="workboard-visual-check__note"
+              aria-label={t("workboard.visualNote")}
+              placeholder={t("workboard.visualNote")}
+              value={note()}
+              onInput={(event) => setNote(event.currentTarget.value)}
+            />
+          </div>
+        }
+      >
         {(check) => (
           <p class="workboard-visual-check__recorded" role="status">
             {t("workboard.visualRecorded", {
