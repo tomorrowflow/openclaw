@@ -138,7 +138,7 @@ describe("Workboard trust KPIs", () => {
     expect(visual).toEqual(["dead-code3 of 4 (75%)", "All classes3 of 4 (75%)"]);
 
     // Without a class rung the rung-window table stays out of the popover.
-    expect(popover.querySelectorAll("tbody")).toHaveLength(2);
+    expect(popover.querySelectorAll("tbody")).toHaveLength(3);
 
     result = trustResult(3, 3);
     page.bumpRevision();
@@ -187,7 +187,7 @@ describe("Workboard trust KPIs", () => {
       page.container.querySelector("#workboard-trust-popover"),
       "trust popover",
     );
-    const rows = [...popover.querySelectorAll("tbody")[2]!.querySelectorAll("tr")].map((row) =>
+    const rows = [...popover.querySelectorAll("tbody")[3]!.querySelectorAll("tr")].map((row) =>
       [...row.querySelectorAll("th, td")].map((cell) => cell.textContent?.trim()),
     );
     expect(rows[0]).toEqual(["ios-ui", "a", "25 / 18 clean", "15 / 8 clean", "–", "10 more clean"]);
