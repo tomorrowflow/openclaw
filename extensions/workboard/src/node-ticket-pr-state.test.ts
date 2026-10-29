@@ -2,8 +2,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { workboardCardStage } from "./card-stage.js";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
+import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
 import { PULL_REQUEST_SYNC_INTERVAL_MS } from "./node-ticket-pr-state.js";
-import { finishNodeTicket, git, postVerdict, removeTempRoots } from "./node-ticket.test-support.js";
+import {
+  doneReport,
+  endedSession,
+  finishNodeTicket,
+  git,
+  postVerdict,
+  removeTempRoots,
+} from "./node-ticket.test-support.js";
+import { projectWorkboardTrust } from "./trust-kpis.js";
 
 afterEach(() => {
   removeTempRoots();
@@ -107,6 +116,46 @@ describe("node ticket PR state sync", () => {
     await ticket.store.move(ticket.card.id, "done", undefined);
     await ticket.syncPass();
     expect((await ticket.store.get(ticket.card.id))?.status).toBe("done");
+  });
+
+  it("keeps a conflict round that re-ran the proof out of the rework count", async () => {
+    const ticket = await publishedTicket();
+    ticket.github.openPulls.push(PR);
+    ticket.github.conflictingPulls.add(PR);
+    // The fixture's run still holds its claim; a live conflict arrives long after it lapsed.
+    const claim = (await ticket.store.get(ticket.card.id))?.metadata?.claim;
+    await ticket.store.releaseClaim(ticket.card.id, {
+      ownerId: claim!.ownerId,
+      token: claim!.token,
+      status: "done",
+    });
+    await ticket.syncPass();
+    // The next handoff pass starts the reopened round, as the conflict comment is its feedback.
+    await ticket.handoffs.resume(ticket.warn);
+    const reopened = await ticket.store.get(ticket.card.id);
+    expect(reopened?.status).toBe("running");
+    const runId = reopened?.runId;
+    const sessionKey = reopened?.sessionKey;
+    const reworkTree = reopened?.metadata?.automation?.target?.worktree?.path;
+    // The round commits fresh proof besides the merge, as an ios-ui round does.
+    git(reworkTree!, "commit", "-q", "--allow-empty", "-m", "proof screenshots");
+    await syncWorkboardAgentEnded({
+      store: ticket.store,
+      event: { runId, success: true, messages: doneReport },
+      context: { runId, sessionKey },
+      readSessions: endedSession(),
+    });
+    await ticket.handoffs.resume(ticket.warn);
+
+    const stored = await ticket.store.get(ticket.card.id);
+    expect(stored?.metadata?.automation?.target?.worktree?.rework).toMatchObject({
+      round: 1,
+      unchangedRounds: [1],
+    });
+    expect(projectWorkboardTrust([stored!], "default", ticket.now()).total).toMatchObject({
+      reworkRounds: 0,
+      cleanAccepted: 1,
+    });
   });
 
   it("pages back through the repository's PRs to find an old one", async () => {
