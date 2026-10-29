@@ -275,6 +275,20 @@ export async function runWorkboardCardMutation<T>(
   }
 }
 
+export async function recordWorkboardVisualCheck(
+  params: WorkboardCardMutationParams & { verdict: "looks_right" | "problem"; note?: string },
+) {
+  return runWorkboardCardMutation(params, async (state, client) => {
+    const payload = await client.request("workboard.cards.visualCheck", {
+      id: params.cardId,
+      verdict: params.verdict,
+      ...(params.note ? { note: params.note } : {}),
+    });
+    replaceCard(state, normalizeCardPayload(payload));
+    return true;
+  });
+}
+
 /** Ends a node ticket's grilling; the session continues the ticket with what is settled. */
 export async function endWorkboardGrill(params: WorkboardCardMutationParams) {
   return runWorkboardCardMutation(params, async (state, client) => {

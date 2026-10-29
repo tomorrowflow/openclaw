@@ -3,7 +3,7 @@ import { jsonResult, readStringParam } from "openclaw/plugin-sdk/core";
 import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
 import { asRecord, readStringValue } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { Type, type TProperties } from "typebox";
-import { redactClaimToken } from "./card-redaction.js";
+import { redactCard } from "./card-redaction.js";
 import type { WorkboardMutationScope } from "./store-inputs.js";
 import type { WorkboardStore } from "./store.js";
 
@@ -36,7 +36,7 @@ export function createWorkboardCardMutations(store: WorkboardStore, ownerId: str
     async (_toolCallId: string, rawParams: unknown) => {
       const { record, id, scope } = await readParams(rawParams, requireClaim);
       // Nest cards so their status cannot be mistaken for the tool result's status.
-      return jsonResult({ card: redactClaimToken(await mutate(id, record, scope)) });
+      return jsonResult({ card: redactCard(await mutate(id, record, scope)) });
     };
   return {
     readScopedCardToolParams: (rawParams: unknown) => readParams(rawParams),

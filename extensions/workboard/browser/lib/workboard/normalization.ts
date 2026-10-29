@@ -187,6 +187,28 @@ function normalizeGrill(value: unknown): WorkboardCard["grill"] {
       };
 }
 
+function normalizeVisualCheck(value: unknown): WorkboardCard["visualCheck"] {
+  if (!isRecord(value) || typeof value.round !== "number") {
+    return undefined;
+  }
+  const { check } = value;
+  if (
+    !isRecord(check) ||
+    (check.verdict !== "looks_right" && check.verdict !== "problem") ||
+    typeof check.at !== "number"
+  ) {
+    return { round: value.round };
+  }
+  return {
+    round: value.round,
+    check: {
+      verdict: check.verdict,
+      at: check.at,
+      ...(typeof check.note === "string" ? { note: check.note } : {}),
+    },
+  };
+}
+
 function normalizeCard(value: unknown): WorkboardCard | null {
   if (!isRecord(value)) {
     return null;
@@ -209,6 +231,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
   const rounds = normalizeNodeRounds(value.rounds);
   const reviewTimes = normalizeReviewTimes(value.reviewTimes);
   const grill = normalizeGrill(value.grill);
+  const visualCheck = normalizeVisualCheck(value.visualCheck);
   return {
     id,
     title,
@@ -234,6 +257,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
     ...(rounds.length > 0 ? { rounds } : {}),
     ...(reviewTimes.length > 0 ? { reviewTimes } : {}),
     ...(grill ? { grill } : {}),
+    ...(visualCheck ? { visualCheck } : {}),
     ...(typeof value.pullRequestUrl === "string" && value.pullRequestUrl.startsWith("https://")
       ? { pullRequestUrl: value.pullRequestUrl }
       : {}),

@@ -216,8 +216,17 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
     verifierAgreedRounds: 0,
     verifierEscapes: 0,
     verifierCatches: 0,
+    visualRounds: 0,
+    visualAgreedRounds: 0,
   };
   for (const ticket of tickets) {
+    const visual = ticket.reviews.flatMap((review) =>
+      review.verification?.visual && review.verification.visual.verifier !== "not_checked"
+        ? [review.verification.visual]
+        : [],
+    );
+    counts.visualRounds += visual.length;
+    counts.visualAgreedRounds += visual.filter((entry) => entry.verifier === entry.operator).length;
     const verified = ticket.reviews.filter((review) => review.verification !== undefined);
     // An agent's rework after a failed verification agrees with itself; only a
     // person's decision made without the verification in view scores it.

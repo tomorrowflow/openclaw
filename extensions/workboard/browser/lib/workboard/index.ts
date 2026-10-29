@@ -44,6 +44,7 @@ export {
   endWorkboardGrill,
   grillWorkboardQuestions,
   moveWorkboardCard,
+  recordWorkboardVisualCheck,
   saveWorkboardCardDraft,
 } from "./mutations.ts";
 export { startWorkboardCard, stopWorkboardCard } from "./execution.ts";

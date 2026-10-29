@@ -668,7 +668,10 @@ deep, newest first; files the base branch already had are left out, using
 images. The panel lists again every 20 seconds while it is open and
 the card is running, skipping a tick while the previous list is still loading;
 a node walk that takes over 30 seconds shows as unavailable. The card drawer's
-**Screenshots** tab shows only committed rounds and never walks the node. Live
+**Screenshots** tab shows only committed rounds and never walks the node. Once
+the imported round's verification finished, the tab also carries the
+operator's **Looks right** / **Problem** control for the round's
+[visual check](#node-tickets) (`workboard.cards.visualCheck`). Live
 listing uses File Transfer's `dir.list`, `file.fetch`, and the node's
 `system.run`, so it needs the grants in
 [Workboard node setup](/plugins/workboard-node-setup#gateway-side); without
@@ -1052,7 +1055,24 @@ model, so a verdict always comes from the configured one:
    beyond it) goes in the summary under `Beyond scope:` with a proposed
    follow-up card instead of a finding, and to end with exactly one
    `workboard-verification` block:
-   `{"verdict": "pass|fail|error", "summary": "…", "findings": [{"path": "…", "line": 1, "body": "…"}]}`.
+   `{"verdict": "pass|fail|error", "summary": "…", "findings": [{"path": "…", "line": 1, "body": "…"}], "visual": {"verdict": "looks_right|problem|not_checked", "screenshots": [{"path": "…", "shows": "…", "verdict": "looks_right|problem"}]}}`.
+   When the proof captures screenshots, the brief tells the verifier to look
+   at each one: in one Code Mode `exec` script it downscales each PNG to a
+   JPEG no wider than 800 px on the node
+   (`sips -Z 800 -s format jpeg -s formatOptions 65 in.png --out out.jpg`),
+   base64-encodes it, and passes the `data:image/jpeg;base64,…` URL to Code
+   Mode's `image()` helper, so the images come back to the model as image
+   blocks without a new tool. `sips` and `base64 -i` are macOS commands; on
+   a Linux node the verifier records `not_checked` unless it finds an
+   equivalent. The brief also keeps what the verifier saw on screenshots out
+   of `summary` and `findings`, except a defect the proof shows by other
+   means (a crash, a wrong accessibility tree, a failing test). The `visual` part records, per screenshot, its
+   path, what it shows (the selected tab, the text, the filled button, an
+   alert, the dark-mode colors), and `looks_right` or `problem`, plus an
+   overall visual verdict (at most 12 screenshots). The visual check is
+   operator-run: the visual part never changes `verdict`, and a round with no
+   screenshots, or a session that cannot show itself an image, records
+   `not_checked`. A missing or malformed `visual` part is `not_checked`.
    The verifier reports `error` when it could not finish the proof (its node
    went away, a tool or simulator kept failing) without finding a defect; the
    result keeps its summary, drops any findings, and the operator re-runs it.
@@ -1061,8 +1081,8 @@ model, so a verdict always comes from the configured one:
    the block from its last reply; a missing, doubled, or invalid block is the
    verdict `error`. It records the result on the node worktree as
    `verification` (`phase: "done"`, the verdict, summary, up to 12 findings,
-   the model), removes the verify worktree (a failure only warns), posts one
-   card comment from `agent:<agentId>` whose first line is
+   the visual read, the model), removes the verify worktree (a failure only
+   warns), posts one card comment from `agent:<agentId>` whose first line is
    `**Verification:** pass|fail|error (<model>)` followed by the summary and
    findings, and only then nudges the automation. A session that cannot be
    created records `error` right away, so the card is never held by a
@@ -1082,6 +1102,31 @@ model, so a verdict always comes from the configured one:
    itself is listed in the Gateway's sessions under the **Verification**
    group and is readable there, so an operator who wants a blind decision at
    rung a does not open it before deciding.
+   **Visual check:** the verifier's visual read is blind at every rung until
+   the operator records their own look at the screenshots: every agent tool
+   and operator card read leaves `visual` out of the record, and the
+   `**Verification:**` comment never carries it. Operator reads carry
+   `visualCheck: {round, check?}` once the imported round's verification
+   finished, even at rung a while the record itself is hidden.
+   `workboard.cards.visualCheck {id, verdict: "looks_right"|"problem", note?}`
+   (`operator.write`) records the check on that verification, once per
+   record: a second check is refused until `workboard.cards.verify` re-runs
+   the verification, whose new record takes a fresh one. It is also refused
+   while the verification runs, for a stale or missing record, and on an
+   archived card. Recording it reveals the read on card reads, and posts one
+   operator comment: `**Visual check:** operator <verdict>`, the note, then
+   `**Verifier:** <verdict>` (`no visual read recorded` for a record finished
+   before the verifier wrote one) and the verifier's line per screenshot. The
+   Screenshots tab then shows the recorded check read-only. At rung a, until
+   the operator decides the round, operator reads show that comment with only
+   the operator's verdict and note, and the verifier part reads
+   `revealed when you decide this round`; once decided, the whole comment
+   shows. At rung b it always shows whole. `dev` reads the comment whole, so
+   at rung a it sees the operator's check before its shadow verdict; this is
+   accepted, as a free-form operator comment has the same effect. A publish copies
+   `visual: {verifier, operator}` into the round's `reviews` entry only when
+   both exist; a round decided without a check carries no visual, the next
+   import replaces the record, and the verifier's read is never revealed.
 4. **Accept:** moving the card from `review` to `done` pushes the imported
    commit from the host clone to its GitHub origin and opens a draft PR, or
    reuses an open one for the branch. When the branch has no open PR but a
@@ -1268,6 +1313,11 @@ person then reworked, and `verifierCatches` the non-pass verdicts a person
 then reworked. These flow through `blind` and `sinceRung` like every other
 count, so a class's verifier agreement at its current rung is read from
 `sinceRung`.
+
+**Visual agreement:** `visualRounds` counts published rounds whose `reviews`
+entry carries a visual check with a verifier read other than `not_checked`,
+and `visualAgreedRounds` those where the verifier's visual verdict matched
+the operator's. Rounds decided without a visual check count in neither.
 
 **Blind counts:** each class row also carries `blind`, the same counts over
 rounds published since the blind verdict went live (2026-10-11 13:01 CEST),
@@ -1633,13 +1683,13 @@ Diagnostics are computed from local card metadata. Built-in checks flag:
 Gateway RPC methods live under `workboard.*`. Sessions board methods use the same
 read/write scopes as boards:
 
-| Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `cards.probes`, `overview`, `transcriptViewer`, `officeViewer`, `architectureViewer`                                                                                                                                                                                           |
-| `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.sampleRead`, `cards.verify`, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
-| `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                                                                |
-| `operator.admin` | `cards.probe`                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `cards.probes`, `overview`, `transcriptViewer`, `officeViewer`, `architectureViewer`                                                                                                                                                                                                                |
+| `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.sampleRead`, `cards.verify`, `cards.visualCheck`, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
+| `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `operator.admin` | `cards.probe`                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 `workboard.cards.update`, `workboard.cards.move`, `workboard.cards.archive`, and
 `workboard.cards.delete` accept an optional `expectedUpdatedAt` request field.

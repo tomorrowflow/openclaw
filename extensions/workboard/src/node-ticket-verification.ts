@@ -4,6 +4,7 @@ import type {
   WorkboardExecutionTarget,
   WorkboardNodeVerification,
   WorkboardNodeVerificationFinding,
+  WorkboardNodeVisualRead,
   WorkboardNodeWorktree,
   WorkboardVerificationVerdict,
   WorkboardVerifierSettings,
@@ -12,7 +13,7 @@ import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import { lastAssistantReply } from "./node-ticket-report.js";
-import { normalizeVerificationFindings } from "./node-ticket-rounds.js";
+import { normalizeNodeVisualRead, normalizeVerificationFindings } from "./node-ticket-rounds.js";
 import {
   isVerificationComment,
   nodeTicketTarget,
@@ -176,13 +177,18 @@ export function verificationMessage(params: {
     "4. A proof the notes mark `Operator-run` is not a failure when you cannot run it. A style preference is not a failure.",
     "5. Judge each failure you find against the failure scope: the notes' `Failure scope:` line, or else one fault at a time, a client cancellation, or a restart. A failure that needs two simultaneous faults, or a destructive admin operation (a reset, wipe, or delete) racing the operation under test, is beyond scope and not a finding: name it in the summary under `Beyond scope:` with a proposed follow-up card.",
     "",
+    "## Screenshots",
+    'When the proof captures screenshots (the project\'s skill says where), look at each one. In one `exec` script, downscale each PNG to a JPEG no wider than 800 px (`sips -Z 800 -s format jpeg -s formatOptions 65 in.png --out out.jpg` through your node exec tool), base64 it (`base64 -i out.jpg`), and call `image("data:image/jpeg;base64,<base64>")` in the script so the images come back to you as image blocks. Never send a full-size PNG.',
+    "Record what you saw in the block's `visual` part: per screenshot its path, what it shows (the selected tab, the text, which button is filled, any alert, whether dark mode changed the colors), and `looks_right` or `problem`, plus the overall visual verdict. The visual check is operator-run: it never makes your verdict `fail` or `error`. A round without screenshots, or a session that cannot show itself an image, records `not_checked`, not `error`.",
+    "What you saw on the screenshots goes only in `visual`, never in `summary` or `findings`, since the operator compares it with their own look. A defect in the app's state that the proof shows by other means (a crash, a wrong accessibility tree, a failing test) still belongs in the findings.",
+    "",
     "End your final message with exactly one block:",
     "",
     "```" + VERIFICATION_FENCE,
-    '{"verdict":"pass|fail|error","summary":"what you ran and what you found, in plain words","findings":[{"path":"repo/relative/file","line":1,"body":"what is wrong and how you showed it"}]}',
+    '{"verdict":"pass|fail|error","summary":"what you ran and what you found, in plain words","findings":[{"path":"repo/relative/file","line":1,"body":"what is wrong and how you showed it"}],"visual":{"verdict":"looks_right|problem|not_checked","screenshots":[{"path":"path/to/screenshot.png","shows":"what is on screen","verdict":"looks_right|problem"}]}}',
     "```",
     "",
-    "`fail` needs at least one in-scope finding that names a defect. `pass` means the proof re-ran and nothing you tried broke the change. `error` means you could not finish the proof (the node went away, a tool or simulator kept failing) and found no defect; the summary says what ran and what stopped you, and the operator re-runs the verification. At most 12 findings are kept; `line` may be left out when a finding has no line.",
+    "`fail` needs at least one in-scope finding that names a defect. `pass` means the proof re-ran and nothing you tried broke the change. `error` means you could not finish the proof (the node went away, a tool or simulator kept failing) and found no defect; the summary says what ran and what stopped you, and the operator re-runs the verification. At most 12 findings and 12 screenshots are kept; `line` may be left out when a finding has no line.",
   ].join("\n");
 }
 
@@ -190,6 +196,7 @@ type ParsedVerification = {
   verdict: WorkboardVerificationVerdict;
   summary: string;
   findings: WorkboardNodeVerificationFinding[];
+  visual: WorkboardNodeVisualRead;
 };
 
 /** Reads the one verification block of the verifier's last reply; anything else is an `error` verdict. */
@@ -198,6 +205,7 @@ export function parseVerificationReply(text: string): ParsedVerification {
     verdict: "error",
     summary,
     findings: [],
+    visual: normalizeNodeVisualRead(undefined),
   });
   const blocks = [...text.matchAll(VERIFICATION_PATTERN)];
   if (blocks.length !== 1) {
@@ -231,6 +239,7 @@ export function parseVerificationReply(text: string): ParsedVerification {
         : "",
     // An unfinished proof names no defect, so it carries no findings.
     findings: value.verdict === "error" ? [] : normalizeVerificationFindings(value.findings),
+    visual: normalizeNodeVisualRead(value.visual),
   };
 }
 

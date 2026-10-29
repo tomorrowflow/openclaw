@@ -3,7 +3,7 @@ import { jsonResult, readStringParam } from "openclaw/plugin-sdk/core";
 import { resolveIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import type { AnyAgentTool, OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "typebox";
-import { redactClaimToken } from "./card-redaction.js";
+import { redactCard } from "./card-redaction.js";
 import { relatedCardIds } from "./node-ticket-artifacts.js";
 import { normalizeCappedStringList } from "./store-string-lists.js";
 import { normalizeCommentSource } from "./store-value-normalizers.js";
@@ -56,7 +56,7 @@ function redactedProofResult(card: WorkboardCard) {
     throw new Error("proof was not retained in card metadata.");
   }
   return jsonResult({
-    card: redactClaimToken(card),
+    card: redactCard(card),
     proofId,
   });
 }
@@ -167,7 +167,7 @@ export function createWorkboardTools(params: {
         const record = rawParams as Record<string, unknown>;
         normalizeCappedStringList(record.parents, "parents");
         return jsonResult({
-          card: redactClaimToken(
+          card: redactCard(
             await store.create(record, { ownerId, token: record.token as string | undefined }),
           ),
         });
@@ -191,7 +191,7 @@ export function createWorkboardTools(params: {
         const childId = readStringParam(record, "childId", { required: true });
         const token = record.token as string | undefined;
         return jsonResult({
-          card: redactClaimToken(await store.linkCards(parentId, childId, { ownerId, token })),
+          card: redactCard(await store.linkCards(parentId, childId, { ownerId, token })),
         });
       },
     },
@@ -234,7 +234,7 @@ export function createWorkboardTools(params: {
         const id = readStringParam(record, "id", { required: true });
         const { card, workerContext } = await store.readWithWorkerContext(id);
         return jsonResult({
-          card: redactClaimToken(card),
+          card: redactCard(card),
           workerContext,
         });
       },
@@ -255,7 +255,7 @@ export function createWorkboardTools(params: {
           ownerId,
           ttlSeconds: record.ttlSeconds,
         });
-        return jsonResult({ ...claimed, card: redactClaimToken(claimed.card) });
+        return jsonResult({ ...claimed, card: redactCard(claimed.card) });
       },
     },
     {

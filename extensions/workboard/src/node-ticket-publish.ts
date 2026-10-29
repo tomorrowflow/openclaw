@@ -90,6 +90,14 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
             ...(verification.model ? { model: verification.model } : {}),
             startedAt: verification.startedAt,
             endedAt: verification.endedAt,
+            ...(verification.visual && verification.visualCheck
+              ? {
+                  visual: {
+                    verifier: verification.visual.verdict,
+                    operator: verification.visualCheck.verdict,
+                  },
+                }
+              : {}),
           },
         }
       : {}),

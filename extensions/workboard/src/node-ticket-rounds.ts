@@ -1,4 +1,5 @@
 import type {
+  WorkboardComment,
   WorkboardNodeChangedFile,
   WorkboardNodeChanges,
   WorkboardNodeDecision,
@@ -6,7 +7,11 @@ import type {
   WorkboardNodeReview,
   WorkboardNodeRound,
   WorkboardNodeVerificationFinding,
+  WorkboardNodeVisualCheck,
+  WorkboardNodeVisualRead,
+  WorkboardNodeVisualScreenshot,
   WorkboardNodeWorktree,
+  WorkboardVisualVerdict,
 } from "@openclaw/workboard-contract";
 import {
   parseStrictPositiveInteger,
@@ -14,12 +19,15 @@ import {
 } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
+import { MAX_COMMENT_BODY_CHARS } from "./store-constants.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
 
 // Round facts ride in the card's metadata, which has a 24 KiB budget shared
 // with comments and proof. A full round serializes to about 11 KiB (decisions
-// 4.9, review 3.1, changes 2.8); the budget trim sheds the oldest round's
-// decisions, then its review items, then the round, before anything else.
+// 4.9, review 3.1, changes 2.8). The current verification record adds the
+// verifier's visual read, about 2.4 KiB at its caps. The budget trim sheds the
+// oldest round's decisions, then its review items, then the round, before
+// anything else.
 const MAX_NODE_ROUNDS = 5;
 const MAX_DECISIONS = 30;
 const MAX_DECISION_TRAIL_CHARS = 3000;
@@ -40,6 +48,9 @@ const MAX_FINDINGS_CHARS = 2400;
 const MAX_FINDING_PATH_CHARS = 160;
 const FINDING_CELL_CHARS = { body: 200, rule: 80 } as const;
 export const MAX_REVIEW_NOTE_CHARS = 400;
+const MAX_VISUAL_SCREENSHOTS = 12;
+const MAX_VISUAL_CHARS = 2400;
+const VISUAL_SHOWS_CHARS = 200;
 
 function cell(value: unknown, max: number): string | undefined {
   if (typeof value !== "string") {
@@ -249,6 +260,94 @@ export function normalizeVerificationFindings(value: unknown): WorkboardNodeVeri
     kept.push({ path, ...(line === undefined ? {} : { line }), body });
   }
   return kept;
+}
+
+export function visualCheckVerdict(value: unknown): WorkboardVisualVerdict | undefined {
+  return value === "looks_right" || value === "problem" ? value : undefined;
+}
+
+export function visualReadVerdict(value: unknown): WorkboardNodeVisualRead["verdict"] | undefined {
+  return value === "not_checked" ? value : visualCheckVerdict(value);
+}
+
+/** Paths may be absolute: the verifier captures in its own verify worktree. */
+export function normalizeNodeVisualRead(value: unknown): WorkboardNodeVisualRead {
+  const verdict = isRecord(value) ? visualReadVerdict(value.verdict) : undefined;
+  if (!isRecord(value) || !verdict) {
+    return { verdict: "not_checked", screenshots: [] };
+  }
+  const screenshots: WorkboardNodeVisualScreenshot[] = [];
+  let chars = 0;
+  for (const entry of Array.isArray(value.screenshots) ? value.screenshots : []) {
+    const rawPath = isRecord(entry) && typeof entry.path === "string" ? entry.path.trim() : "";
+    const path = hasControlCharacter(rawPath) ? undefined : capPath(rawPath);
+    const shows = isRecord(entry) ? cell(entry.shows, VISUAL_SHOWS_CHARS) : undefined;
+    const shotVerdict = isRecord(entry) ? visualCheckVerdict(entry.verdict) : undefined;
+    if (!path || !shows || !shotVerdict) {
+      continue;
+    }
+    chars += path.length + shows.length;
+    if (screenshots.length === MAX_VISUAL_SCREENSHOTS || chars > MAX_VISUAL_CHARS) {
+      break;
+    }
+    screenshots.push({ path, shows, verdict: shotVerdict });
+  }
+  return { verdict, screenshots };
+}
+
+export function visualCheckNote(value: unknown): string | undefined {
+  return cell(value, MAX_REVIEW_NOTE_CHARS);
+}
+
+const VISUAL_CHECK_LINE = "**Visual check:**";
+// The verifier's part comes last after a blank line and holds none itself
+// (each screenshot is one line), so its last start is where blinding cuts.
+const VISUAL_VERIFIER_LINE = "**Verifier:**";
+const VISUAL_VERIFIER_MARKER = `\n\n${VISUAL_VERIFIER_LINE}`;
+export const HIDDEN_VISUAL_READ_NOTICE = "revealed when you decide this round";
+
+/**
+ * The operator's check, then the verifier's read, which recording the check
+ * reveals. A record finished before the verifier wrote `visual` has no read.
+ */
+export function visualCheckComment(
+  visual: WorkboardNodeVisualRead | undefined,
+  check: WorkboardNodeVisualCheck,
+): string {
+  return truncateUtf16Safe(
+    [
+      `${VISUAL_CHECK_LINE} operator ${check.verdict}`,
+      ...(check.note ? ["", check.note] : []),
+      "",
+      `${VISUAL_VERIFIER_LINE} ${visual ? visual.verdict : "no visual read recorded"}`,
+      ...(visual?.screenshots ?? []).map(
+        (screenshot) => `- \`${screenshot.path}\` ${screenshot.verdict}: ${screenshot.shows}`,
+      ),
+    ].join("\n"),
+    MAX_COMMENT_BODY_CHARS,
+  );
+}
+
+export function isVisualCheckComment(comment: WorkboardComment): boolean {
+  return comment.source === "operator" && comment.body.startsWith(VISUAL_CHECK_LINE);
+}
+
+/** The comment with only the operator's verdict and note. */
+export function blindVisualCheckComment(body: string): string {
+  const cut = body.lastIndexOf(VISUAL_VERIFIER_MARKER);
+  return cut < 0
+    ? body
+    : `${body.slice(0, cut)}${VISUAL_VERIFIER_MARKER} ${HIDDEN_VISUAL_READ_NOTICE}`;
+}
+
+export function normalizeNodeVisualCheck(value: unknown): WorkboardNodeVisualCheck | undefined {
+  const verdict = isRecord(value) ? visualCheckVerdict(value.verdict) : undefined;
+  const at = isRecord(value) ? resolveOptionalIntegerOption(value.at, { min: 0 }) : undefined;
+  if (!isRecord(value) || !verdict || at === undefined) {
+    return undefined;
+  }
+  const note = visualCheckNote(value.note);
+  return { verdict, ...(note ? { note } : {}), at };
 }
 
 /** Session-written findings; one without a repo-relative path, a 1-based line, or a body is dropped. */

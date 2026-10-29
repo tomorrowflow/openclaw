@@ -56,4 +56,40 @@ export type WorkboardNodeVerification =
       summary: string;
       /** Capped; the verifier's comment on the card carries the full list it posted. */
       findings: WorkboardNodeVerificationFinding[];
+      /**
+       * The verifier's visual read of the round. Shadow data while the visual
+       * check is calibrated: card reads leave it out until `visualCheck` is
+       * recorded, and it never changes `verdict`.
+       */
+      visual?: WorkboardNodeVisualRead;
+      /** The operator's own visual check of the round; recording it reveals `visual`. */
+      visualCheck?: WorkboardNodeVisualCheck;
     };
+
+export type WorkboardVisualVerdict = "looks_right" | "problem";
+
+export type WorkboardNodeVisualScreenshot = {
+  path: string;
+  shows: string;
+  verdict: WorkboardVisualVerdict;
+};
+
+/**
+ * The verifier's look at a UI round's screenshots: those it captured in its
+ * verify worktree or the round committed, each with what it shows, and the
+ * overall verdict. `not_checked` means the round had no screenshots to look
+ * at or the session had no tool that shows an image; it is not an error. The
+ * visual check is operator-run, so no visual verdict fails a verification.
+ */
+export type WorkboardNodeVisualRead = {
+  verdict: WorkboardVisualVerdict | "not_checked";
+  /** Capped. */
+  screenshots: WorkboardNodeVisualScreenshot[];
+};
+
+/** The operator's own look at the round's screenshots, recorded with `workboard.cards.visualCheck`. */
+export type WorkboardNodeVisualCheck = {
+  verdict: WorkboardVisualVerdict;
+  note?: string;
+  at: number;
+};

@@ -3,6 +3,7 @@ import {
   WORKBOARD_STATUSES,
   type WorkboardAttemptStatus,
   type WorkboardCard,
+  type WorkboardComment,
   type WorkboardDiagnostic,
   type WorkboardEvent,
   type WorkboardExecution,
@@ -136,11 +137,18 @@ export function appendComment(
   comments: WorkboardMetadata["comments"],
   body: string | undefined,
   now?: number,
+  source?: WorkboardComment["source"],
 ): WorkboardMetadata["comments"] {
   return body
-    ? [...(comments ?? []), { id: randomUUID(), body, createdAt: now ?? Date.now() }].slice(
-        -MAX_CARD_COMMENTS,
-      )
+    ? [
+        ...(comments ?? []),
+        {
+          id: randomUUID(),
+          body,
+          createdAt: now ?? Date.now(),
+          ...(source ? { source } : {}),
+        },
+      ].slice(-MAX_CARD_COMMENTS)
     : comments;
 }
 

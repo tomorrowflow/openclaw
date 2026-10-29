@@ -41,6 +41,10 @@ const READ_SCOPE = "operator.read" as const;
 const WRITE_SCOPE = "operator.write" as const;
 const ADMIN_SCOPE = "operator.admin" as const;
 const cardsListFilterSchema = z.object({ sessionKey: z.string().trim().min(1).optional() });
+const visualCheckParamsSchema = z.object({
+  verdict: z.enum(["looks_right", "problem"]),
+  note: z.string().optional(),
+});
 const CLI_OWNER_METHODS = new Set([
   "workboard.cards.list",
   "workboard.cards.create",
@@ -327,6 +331,12 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.verify", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(store.dropNodeVerification(readId(input))),
   );
+  register("workboard.cards.visualCheck", WRITE_SCOPE, ({ params: input }) => {
+    const { verdict, note } = visualCheckParamsSchema.parse(input);
+    return redactCardResult(
+      store.setNodeVisualCheck(readId(input), { verdict, ...(note ? { note } : {}) }),
+    );
+  });
   // A repeat returns the source's unarchived probe of the arm; `start` then starts it if still todo.
   register("workboard.cards.probe", ADMIN_SCOPE, async (request) => {
     const input = request.params;

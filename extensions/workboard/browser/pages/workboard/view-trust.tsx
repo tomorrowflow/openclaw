@@ -142,6 +142,30 @@ function TrustDetails(props: { result: WorkboardTrustResult }) {
           </For>
         </tbody>
       </table>
+      <table class="workboard-trust-table">
+        <caption>{t("workboard.trustVisual")}</caption>
+        <tbody>
+          <For each={[...props.result.classes, undefined]}>
+            {(entry) => {
+              const counts = () => entry ?? props.result.total;
+              return (
+                <tr>
+                  <th scope="row">{entry?.taskClass ?? t("workboard.trustVisualTotal")}</th>
+                  <td>
+                    {counts().visualRounds > 0
+                      ? t("workboard.trustVisualAgreed", {
+                          agreed: String(counts().visualAgreedRounds),
+                          rounds: String(counts().visualRounds),
+                          rate: percent(counts().visualAgreedRounds, counts().visualRounds),
+                        })
+                      : "–"}
+                  </td>
+                </tr>
+              );
+            }}
+          </For>
+        </tbody>
+      </table>
       <Show when={props.result.classes.some((entry) => entry.rung)}>
         <RungWindows classes={props.result.classes} />
       </Show>

@@ -42,6 +42,8 @@ function trustResult(accepted: number, autonomous: number): WorkboardTrustResult
     verifierAgreedRounds: 0,
     verifierEscapes: 0,
     verifierCatches: 0,
+    visualRounds: 4,
+    visualAgreedRounds: 3,
   };
   return {
     boardId: "app",
@@ -130,9 +132,13 @@ describe("Workboard trust KPIs", () => {
     expect(popover.textContent).toContain("Runs over 150K");
     expect(cells(1).at(-1)).toBe("1 of 4");
     expect(page.request).toHaveBeenCalledWith("workboard.cards.trust", { boardId: "app" });
+    const visual = [...popover.querySelectorAll("tbody")[2]!.querySelectorAll("tr")].map((row) =>
+      row.textContent?.replace(/\s+/g, " ").trim(),
+    );
+    expect(visual).toEqual(["dead-code3 of 4 (75%)", "All classes3 of 4 (75%)"]);
 
     // Without a class rung the rung-window table stays out of the popover.
-    expect(popover.querySelectorAll("tbody")).toHaveLength(2);
+    expect(popover.querySelectorAll("tbody")).toHaveLength(3);
 
     result = trustResult(3, 3);
     page.bumpRevision();
@@ -181,7 +187,7 @@ describe("Workboard trust KPIs", () => {
       page.container.querySelector("#workboard-trust-popover"),
       "trust popover",
     );
-    const rows = [...popover.querySelectorAll("tbody")[2]!.querySelectorAll("tr")].map((row) =>
+    const rows = [...popover.querySelectorAll("tbody")[3]!.querySelectorAll("tr")].map((row) =>
       [...row.querySelectorAll("th, td")].map((cell) => cell.textContent?.trim()),
     );
     expect(rows[0]).toEqual(["ios-ui", "a", "25 / 18 clean", "15 / 8 clean", "–", "10 more clean"]);
