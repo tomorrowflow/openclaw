@@ -72,7 +72,7 @@ function operatorRound(card: WorkboardCard): WorkboardCard {
 describe("projectWorkboardMergeDigest", () => {
   it("lists the window's merges of rung c agent accepts per class, oldest first, with a revert command", () => {
     const cards = [
-      mergedCard(12, "ios-logic", { at: NOW - 1 * HOUR, autoMerged: true }, {}),
+      mergedCard(12, "ios-logic", { at: NOW - HOUR, autoMerged: true }, {}),
       mergedCard(11, "ios-logic", { at: NOW - 3 * HOUR, regression: true }, { sampled: true }),
       mergedCard(10, "docs", { at: NOW - 2 * HOUR, autoMerged: true }, {}),
       // Before the window, accepted at b, and an operator's round: left out.
