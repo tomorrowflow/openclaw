@@ -24,6 +24,9 @@ import type { WorkboardStore } from "./store.js";
 
 const WORKBOARD_LIFECYCLE_SWEEP_MS = 60_000;
 const WORKBOARD_STALE_SESSION_MS = 30 * 60 * 1000;
+// A start this process prepared settles its own launch, accepted or failed;
+// past this a start that never settled is failed like one a restart cut off.
+const WORKBOARD_PREPARED_LAUNCH_GRACE_MS = 10 * 60 * 1000;
 const WORKBOARD_SESSION_SWEEP_LIMIT = 10_000;
 const WORKBOARD_WORKTREE_CLEANUP_SWEEP_LIMIT = 32;
 // Prepared hook generations share the active service reader, never a worker's
@@ -334,6 +337,8 @@ async function syncWorkboardLifecycleSessions(params: {
   sessions: readonly WorkboardLifecycleSession[];
   complete?: boolean;
   now?: number;
+  /** When this service started: launches prepared before it have no start left to settle them. */
+  serviceStartedAt: number;
   onMatched?: WorkboardLifecycleMatchHandler;
 }): Promise<number> {
   const now = params.now ?? Date.now();
@@ -386,8 +391,15 @@ async function syncWorkboardLifecycleSessions(params: {
       launch?.phase === "prepared" &&
       (preparedAcceptanceAt === undefined || preparedAcceptanceAt < launch.preparedAt)
     ) {
+      // A launch prepared since the service started may still be inside its
+      // session create, before the session shows in the snapshot (IOS-A45,
+      // failed 3 seconds after its prepare during back-to-back starts).
+      const orphaned =
+        launch.preparedAt <= params.serviceStartedAt ||
+        now - launch.preparedAt >= WORKBOARD_PREPARED_LAUNCH_GRACE_MS;
       if (
         params.complete &&
+        orphaned &&
         (await params.store.failPreparedLaunch(card.id, {
           expectedLaunch: launch,
           reason: "Gateway did not accept the prepared Workboard session before restart.",
@@ -611,6 +623,7 @@ export function createWorkboardLifecycleService(params: {
     },
     start(ctx) {
       const owner = ++generation;
+      const serviceStartedAt = params.now?.() ?? Date.now();
       serviceReader = AsyncResource.bind(params.readSessions);
       workboardLifecycleGatewayState.readSessions = serviceReader;
       let begun = false;
@@ -678,6 +691,7 @@ export function createWorkboardLifecycleService(params: {
                   cards,
                   ...snapshot,
                   now: params.now?.() ?? Date.now(),
+                  serviceStartedAt,
                   onMatched,
                 });
                 cards = await params.store.list();

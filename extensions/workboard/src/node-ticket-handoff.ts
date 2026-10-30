@@ -390,7 +390,14 @@ async function runNodeTicketHandoff(params: {
           `workboard could not record the changed files of card ${card.id}: ${numstat.stderr.trim() || `exit ${numstat.code}`}`,
         );
       }
-      const verifier = (await store.boardOrchestration(cardBoardId(card)))?.verifier;
+      const orchestration = await store.boardOrchestration(cardBoardId(card));
+      const verifier = orchestration?.verifier;
+      // The same rounds nodeVerificationStep cross-verifies: rung c, no probe.
+      const crossVerify =
+        verifier &&
+        orchestration?.crossVerifier &&
+        worktree.rung === "c" &&
+        !card.metadata?.automation?.probe;
       await store.setNodeHandoff(
         card.id,
         {
@@ -400,6 +407,7 @@ async function runNodeTicketHandoff(params: {
             headCommit,
             importedAt: params.now(),
             ...(verifier ? { verify: true as const } : {}),
+            ...(crossVerify ? { crossVerify: true as const } : {}),
           },
           ...(imported.reworkUnchanged ? { reworkUnchanged: true } : {}),
         },
@@ -645,36 +653,42 @@ export function createNodeTicketHandoffs(params: {
   const inFlight = new Set<string>();
   const now = params.now ?? Date.now;
   const syncPullRequests = createPullRequestStateSync({ ...params, now });
-  const verifierOf = (card: WorkboardCard) => async () =>
-    (await params.store.boardOrchestration(cardBoardId(card)))?.verifier;
+  const verifiersOf = (card: WorkboardCard) => async () =>
+    await params.store.boardOrchestration(cardBoardId(card));
   /**
-   * The review a card in review waits on: its verification where the board
-   * has a verifier, and the board automation's review (`onReview`) once that
-   * verification is done or when there is none.
+   * The review a card in review waits on: its verifications where the board
+   * has verifiers, and the board automation's review (`onReview`) once they
+   * are done or when there are none. A finished verification can lead to the
+   * next one (a rung c round's cross-verification), so steps run until one
+   * is still running or none is left.
    */
   const reviewReached = async (card: WorkboardCard, warn: (message: string) => void) => {
-    const readVerifier = verifierOf(card);
-    const step = await nodeVerificationStep(card, readVerifier);
-    if (
-      step &&
-      (await runNodeVerification(
+    const readVerifiers = verifiersOf(card);
+    let current: WorkboardCard | undefined = card;
+    for (
+      let step = await nodeVerificationStep(card, readVerifiers);
+      step && current;
+      step = current ? await nodeVerificationStep(current, readVerifiers) : undefined
+    ) {
+      const ran = await runNodeVerification(
         {
           store: params.store,
           runtime: params.runtime,
           readSessions: params.readSessions,
-          card,
+          card: current,
           now,
           warn,
         },
         step,
-      )) === "running"
-    ) {
-      return;
+      );
+      if (ran === "running") {
+        return;
+      }
+      current = await params.store.get(card.id);
     }
-    const current = step ? await params.store.get(card.id) : card;
     // A probe is archived when its round ended; nobody reviews it.
     if (current?.metadata?.automation?.probe) {
-      const verifier = await readVerifier();
+      const verifier = (await readVerifiers())?.verifier;
       const probeEnd = nodeProbeEnd(current, verifier);
       if (probeEnd) {
         await endNodeProbe({
@@ -699,7 +713,7 @@ export function createNodeTicketHandoffs(params: {
         const publish = item ? undefined : publishCandidate(card);
         // A probe never gets answers, a grill session, or a review.
         const probing = !item && !publish && card.metadata?.automation?.probe !== undefined;
-        const probeVerifier = probing ? await verifierOf(card)() : undefined;
+        const probeVerifier = probing ? (await verifiersOf(card)())?.verifier : undefined;
         const probeEnd = probing ? nodeProbeEnd(card, probeVerifier) : undefined;
         // The queue drain below owns a queued reopen's start.
         const reopen =
@@ -711,7 +725,7 @@ export function createNodeTicketHandoffs(params: {
         const verifying =
           item || publish || probeEnd || reopen || unanswered || grilling
             ? undefined
-            : await nodeVerificationStep(card, verifierOf(card));
+            : await nodeVerificationStep(card, verifiersOf(card));
         if (
           (!item && !publish && !probeEnd && !reopen && !unanswered && !grilling && !verifying) ||
           inFlight.has(card.id)

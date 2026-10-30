@@ -128,8 +128,15 @@ function normalizeOrchestration(
     ? normalizeClassRungs(record.classRungs, fallback?.classRungs, now)
     : fallback?.classRungs;
   const verifier = Object.hasOwn(record, "verifier")
-    ? normalizeVerifier(record.verifier)
+    ? normalizeVerifier(record.verifier, "verifier")
     : fallback?.verifier;
+  const crossVerifier = Object.hasOwn(record, "crossVerifier")
+    ? normalizeVerifier(record.crossVerifier, "crossVerifier")
+    : fallback?.crossVerifier;
+  // It runs only after the verifier passed, so alone it would never run.
+  if (crossVerifier && !verifier) {
+    throw new Error("crossVerifier needs a verifier: it runs after the verifier passed.");
+  }
   const next: WorkboardOrchestrationSettings = {
     ...(autoDecompose !== undefined ? { autoDecompose } : {}),
     ...(autoDecomposePerDispatch ? { autoDecomposePerDispatch } : {}),
@@ -139,6 +146,7 @@ function normalizeOrchestration(
     ...(targetRoutes?.length ? { targetRoutes } : {}),
     ...(classRungs && Object.keys(classRungs).length ? { classRungs } : {}),
     ...(verifier ? { verifier } : {}),
+    ...(crossVerifier ? { crossVerifier } : {}),
   };
   return Object.keys(next).length ? next : undefined;
 }
@@ -146,21 +154,24 @@ function normalizeOrchestration(
 // The same `provider/model` shape a session's `model` takes; `verifier: null` removes it.
 const VERIFIER_MODEL_PATTERN = /^[^\s/]+\/\S+$/;
 
-function normalizeVerifier(value: unknown): WorkboardVerifierSettings | undefined {
+function normalizeVerifier(
+  value: unknown,
+  field: "verifier" | "crossVerifier",
+): WorkboardVerifierSettings | undefined {
   if (value === null || value === undefined) {
     return undefined;
   }
   const agentId = isRecord(value)
-    ? normalizeBoundedString(value.agentId, undefined, 120, "verifier agentId")
+    ? normalizeBoundedString(value.agentId, undefined, 120, `${field} agentId`)
     : undefined;
   const model = isRecord(value)
-    ? normalizeBoundedString(value.model, undefined, 160, "verifier model")
+    ? normalizeBoundedString(value.model, undefined, 160, `${field} model`)
     : undefined;
   if (!agentId || !model) {
-    throw new Error("verifier needs a non-empty agentId and a model.");
+    throw new Error(`${field} needs a non-empty agentId and a model.`);
   }
   if (!VERIFIER_MODEL_PATTERN.test(model)) {
-    throw new Error(`verifier model ${model} must be provider/model.`);
+    throw new Error(`${field} model ${model} must be provider/model.`);
   }
   return { agentId, model };
 }

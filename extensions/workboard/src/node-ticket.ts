@@ -30,6 +30,7 @@ import {
   type ImportedHandoff,
   nodeReviewReadiness,
   reviewVerdictOf,
+  type VerificationSlot,
 } from "./review-readiness.js";
 import {
   MAX_BLOCK_REASON_CHARS,
@@ -85,9 +86,10 @@ export function isVerificationComment(comment: WorkboardComment): boolean {
 
 /**
  * Who accepts an imported node ticket on its move to done. The operator does
- * unless an agent moves it; an agent may only for a class at rung b on the
- * board whose round also ran at rung b, after posting its verdict, and, on a
- * board with a verifier, once the round's verification passed. An accept
+ * unless an agent moves it; an agent may only for a class at rung b or c on
+ * the board whose round also ran at b or c, after posting its verdict, and, on
+ * a board with a verifier, once the round's verification passed, plus at c
+ * its cross-verification on a board with a cross-verifier. An accept
  * verdict then picks whether a person reads the PR: every reworked ticket,
  * and 1 in `sampleEvery` others, chosen by the card id so the sample is not
  * the reader's choice. Throws the refusal an agent gets.
@@ -97,7 +99,7 @@ export function nodeTicketAcceptance(params: {
   worktree: WorkboardNodeWorktree;
   handoff: ImportedHandoff;
   actor?: WorkboardAgentActor;
-  board?: Pick<WorkboardOrchestrationSettings, "classRungs" | "verifier">;
+  board?: Pick<WorkboardOrchestrationSettings, "classRungs" | "verifier" | "crossVerifier">;
 }): ImportedHandoff {
   const { card, worktree, actor, board } = params;
   const { decidedBy: _decidedBy, sampled: _sampled, ...imported } = params.handoff;
@@ -127,26 +129,39 @@ export function nodeTicketAcceptance(params: {
     return { ...imported, decidedBy: actor };
   }
   if (board?.verifier) {
-    const verification = currentNodeVerification(worktree, imported);
-    if (verification?.phase !== "done") {
-      throw new Error("Verification is still running; wait for its comment.");
-    }
-    if (verification.verdict === "fail") {
-      throw new Error(
-        `The verification failed: ${verification.summary || "see its comment"}. Post \`Verdict: rework: …\` and rework it.`,
-      );
-    }
-    if (verification.verdict === "error") {
-      throw new Error(
-        `The verification could not finish (${verification.summary || "no reason recorded"}). Leave the card in review; the operator decides or re-runs it.`,
-      );
-    }
+    requirePassedVerification(worktree, imported, "verification");
+  }
+  // A probe never reaches here: it is archived, never accepted.
+  if (board?.crossVerifier && worktree.rung === "c") {
+    requirePassedVerification(worktree, imported, "crossVerification");
   }
   const sampleEvery = classRung.sampleEvery ?? DEFAULT_SAMPLE_EVERY;
   const sampled =
     (worktree.rework?.round ?? 0) > 0 ||
     createHash("sha256").update(card.id).digest().readUInt32BE(0) % sampleEvery === 0;
   return { ...imported, decidedBy: actor, sampled };
+}
+
+function requirePassedVerification(
+  worktree: WorkboardNodeWorktree,
+  imported: ImportedHandoff,
+  slot: VerificationSlot,
+): void {
+  const verification = currentNodeVerification(worktree, imported, slot);
+  const name = slot === "crossVerification" ? "cross-verification" : "verification";
+  if (verification?.phase !== "done") {
+    throw new Error(`The ${name} is still running; wait for its comment.`);
+  }
+  if (verification.verdict === "fail") {
+    throw new Error(
+      `The ${name} failed: ${verification.summary || "see its comment"}. Post \`Verdict: rework: …\` and rework it.`,
+    );
+  }
+  if (verification.verdict === "error") {
+    throw new Error(
+      `The ${name} could not finish (${verification.summary || "no reason recorded"}). Leave the card in review; the operator decides or re-runs it.`,
+    );
+  }
 }
 
 /**
@@ -162,7 +177,9 @@ export async function withImportedNodeTicketMove(params: {
   next: WorkboardCard;
   actor?: WorkboardAgentActor;
   now: number;
-  board: () => Promise<Pick<WorkboardOrchestrationSettings, "classRungs" | "verifier"> | undefined>;
+  board: () => Promise<
+    Pick<WorkboardOrchestrationSettings, "classRungs" | "verifier" | "crossVerifier"> | undefined
+  >;
 }): Promise<WorkboardCard> {
   const { existing, next, actor } = params;
   const target = nodeTicketTarget(next);
@@ -418,9 +435,12 @@ export async function createNodeTicketWorktree(params: {
     ...(previous?.grill ? { grill: previous.grill } : {}),
     ...(previous?.reviews ? { reviews: previous.reviews } : {}),
     ...(previous?.rounds ? { rounds: previous.rounds } : {}),
-    // The previous round's verifier may still run on the node; the handoff
+    // The previous round's verifiers may still run on the node; the handoff
     // pass settles it from this record once its session ends.
     ...(previous?.verification?.phase === "running" ? { verification: previous.verification } : {}),
+    ...(previous?.crossVerification?.phase === "running"
+      ? { crossVerification: previous.crossVerification }
+      : {}),
   };
   const git = (...args: string[]) =>
     runNodeCommand(runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);
@@ -732,7 +752,7 @@ export async function applyNodeTicketReport(params: {
   }
   if (workboardAgentDecides(worktree?.rung) && !report.review) {
     await blockReport(
-      `Reported done without the standards review its rung b brief asked for: ${report.summary || "no summary given"}\nRe-run the card; the next run reuses the node worktree, and its brief asks for the reviewer against CODING_STANDARDS.md and a \`review\` in the report.`,
+      `Reported done without the standards review its rung ${worktree?.rung} brief asked for: ${report.summary || "no summary given"}\nRe-run the card; the next run reuses the node worktree, and its brief asks for the reviewer against CODING_STANDARDS.md and a \`review\` in the report.`,
     );
     return;
   }

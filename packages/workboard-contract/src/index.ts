@@ -324,6 +324,11 @@ export type WorkboardNodeHandoff =
       /** The board had a verifier at import, so the round waits for its verification before it can be decided. */
       verify?: true;
       /**
+       * The round ran at rung c on a board with a `crossVerifier` at import,
+       * so once its verification passed it also waits for the cross-verification.
+       */
+      crossVerify?: true;
+      /**
        * The agent whose move to done accepted the round at rung b; absent when
        * an operator did. `sampled` is set when that agent's verdict was
        * accept: whether the PR is in the human review sample.
@@ -472,6 +477,13 @@ export type WorkboardNodeReviewVerdict = {
   readAt?: number;
   /** When the board automation's first verdict comment on the round arrived. */
   verdictAt?: number;
+  /** The round's cross-verification result, when the board ran one before the publish. */
+  crossVerification?: {
+    verdict: WorkboardVerificationVerdict;
+    model?: string;
+    startedAt?: number;
+    endedAt?: number;
+  };
   /** The round's verification result, when the board ran one before the publish. */
   verification?: {
     verdict: WorkboardVerificationVerdict;
@@ -633,6 +645,8 @@ export type WorkboardNodeWorktree = {
   /** Recent rounds, oldest first; kept across rework rounds. */
   rounds?: WorkboardNodeRound[];
   verification?: WorkboardNodeVerification;
+  /** The second, independent verification of a rung c round, run after `verification` passed. */
+  crossVerification?: WorkboardNodeVerification;
   /**
    * The round runs at rung b or c: its class was there on the board when it
    * launched, so its brief asked for the standards review. Absent = rung a.
@@ -778,6 +792,12 @@ export type WorkboardOrchestrationSettings = {
    * Operator-set only.
    */
   verifier?: WorkboardVerifierSettings;
+  /**
+   * A second, independent verifier for rounds that ran at rung c: it runs
+   * after `verifier` passed, and an agent's accept at c needs both to pass.
+   * Needs `verifier`. Rounds at a or b never run it. Operator-set only.
+   */
+  crossVerifier?: WorkboardVerifierSettings;
 };
 
 /**
