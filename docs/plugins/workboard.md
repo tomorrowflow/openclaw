@@ -810,8 +810,10 @@ A board's `orchestration.classRungs`, also set only through
 `workboard.boards.upsert`, sets the trust-ladder rung of each task class (a
 card's first `class:<name>` label, keyed without the `class:` prefix). A class
 not listed is at rung a. Rung c is for classes trusted to merge their own
-PRs; today it runs every round the way rung b does (standards review, agent
-decision, sampling), plus the board's cross-verifier (see below):
+PRs: it runs every round the way rung b does (standards review, agent
+decision, sampling), plus the board's cross-verifier (see below), and
+Workboard merges a PR an agent accepted at c itself (see
+[Auto-merge at rung c](#auto-merge-at-rung-c)):
 
 ```json5
 {
@@ -1271,6 +1273,40 @@ commit; that counts too. `workboard.cards.dismissRegression {id}`
 it out, and a demotion it caused stays. Merges recorded before the merge facts
 existed are not watched.
 
+<a id="auto-merge-at-rung-c" />
+
+**Auto-merge at rung c:** in the same pass, between the state read and the
+regression watch, Workboard merges the PRs of done tickets whose last round an
+agent accepted at rung c (`reviews` entry with `decidedBy: "agent"`,
+`verdict: "accept"`, `rung: "c"`) and whose PR is open. The accept gate already
+required the verdict and the passed verifications. Per repository it reads,
+in one GraphQL query, the default branch head's combined checks and the oldest
+10 candidates by publish time: state, mergeability, head commit, and the
+head's combined checks. Then:
+
+- The base branch head red (`FAILURE` or `ERROR`) halts the queue; the oldest
+  candidate gets one notice, and the queue resumes on its own once the base
+  branch is green. Anything other than `SUCCESS` holds it silently, including
+  the pending checks of the merge commit the previous pass made, so PRs merge
+  one at a time, each after the previous one's merge commit went green.
+- A candidate whose head is no longer the commit the agent accepted
+  (`head_moved`), whose checks failed (`checks_failed`), or whose head has no
+  checks (`checks_missing`) is passed over with one notice per reason and
+  stays open for the operator; the PRs behind it go on.
+- Pending checks or a mergeability GitHub has not computed yet hold the
+  queue; a conflict is the conflict rework's (above).
+- The first candidate that is open, mergeable, and green merges with
+  `PUT /repos/{repo}/pulls/{number}/merge` (`merge_method: "merge"`, `sha` set
+  to the accepted commit, so a push that lands meanwhile makes GitHub refuse
+  it). At most one PR merges per repository per pass. The merge records
+  `state: "merged"`, `mergedAt`, `mergeCommit`, and `autoMerged: true` with a
+  notice, and the regression watch follows it from then on.
+
+`autoMergeWait: {reason, since}` on `pullRequest` records the reason a PR is
+passed over or the queue halts, so each notice is posted once. A failure warns,
+and the next pass retries. An operator's decision at c, a rework verdict, and
+rounds at a or b never merge here.
+
 **Conflicts:** when the read finds a done ticket's open PR `CONFLICTING` with
 its base, Workboard reopens the ticket for a rework round in the same write:
 it adds a comment asking to merge the base branch into the PR branch as a new
@@ -1712,8 +1748,9 @@ does. Rows and the status counts leave out archived cards and cards on archived
 boards, and an agent's pending verdict never shows. Whether you agreed with a
 shadow verdict shows in the trust KPIs once a later rework round does or does
 not follow. A sampled PR stays in **Needs you** until you press **Mark read**
-on its row, the [PR state sync](#pr-state-sync) sees it merged or closed, or
-for 7 days after its publish. **Mark read** calls `workboard.cards.sampleRead {id}`
+on its row, the [PR state sync](#pr-state-sync) sees it closed or merged (a
+PR merged at rung c merged without your read, so it stays until you read it),
+or for 7 days after its publish. **Mark read** calls `workboard.cards.sampleRead {id}`
 (`operator.write`), which records `readAt` on the round's entry in `reviews`;
 the first read of a round stands, and a rework round's next publish waits for
 its own read. The method refuses a card whose latest published round is not an
