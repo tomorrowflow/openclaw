@@ -40,6 +40,9 @@ export function firstVerdictAt(
 
 export type ImportedHandoff = Extract<WorkboardNodeHandoff, { phase: "imported" }>;
 
+/** Where a verifier's record lives: the board's `verifier` or its `crossVerifier`. */
+export type VerificationSlot = "verification" | "crossVerification";
+
 /**
  * The verification of the imported round the card waits on. A record of
  * another head or round is stale: it is ignored and the next import replaces it.
@@ -47,8 +50,9 @@ export type ImportedHandoff = Extract<WorkboardNodeHandoff, { phase: "imported" 
 export function currentNodeVerification(
   worktree: WorkboardNodeWorktree,
   handoff: ImportedHandoff,
+  slot: VerificationSlot = "verification",
 ): WorkboardNodeVerification | undefined {
-  const verification = worktree.verification;
+  const verification = worktree[slot];
   return verification &&
     verification.headCommit === handoff.headCommit &&
     verification.round === (worktree.rework?.round ?? 0)
@@ -86,11 +90,34 @@ export type NodeReviewReadiness =
   | { kind: "incomplete"; since: number; missing: ReadonlyArray<"verification" | "verdict"> };
 
 /**
- * Whether an imported round has what its decision needs: the verification
- * when the board had a verifier at import, and the board automation's verdict
- * comment. Past the deadline a round still missing either is `incomplete`,
- * and the operator may decide it anyway. Reads comments only for whether a
- * verdict exists.
+ * When the imported round's verifications finished (its import when it waits
+ * on none), or undefined while one it waits on is outstanding: the verification when the board had a verifier at
+ * import, then the cross-verification of a rung c round, which runs only
+ * after the verification passed.
+ */
+function nodeVerifiedAt(
+  worktree: WorkboardNodeWorktree,
+  handoff: ImportedHandoff,
+): number | undefined {
+  if (handoff.verify !== true) {
+    return handoff.importedAt;
+  }
+  const verification = currentNodeVerification(worktree, handoff);
+  if (verification?.phase !== "done") {
+    return undefined;
+  }
+  if (handoff.crossVerify !== true || verification.verdict !== "pass") {
+    return verification.endedAt;
+  }
+  const cross = currentNodeVerification(worktree, handoff, "crossVerification");
+  return cross?.phase === "done" ? cross.endedAt : undefined;
+}
+
+/**
+ * Whether an imported round has what its decision needs: its verifications
+ * (see `nodeVerifiedAt`) and the board automation's verdict comment. Past the
+ * deadline a round still missing either is `incomplete`, and the operator may
+ * decide it anyway. Reads comments only for whether a verdict exists.
  */
 export function nodeReviewReadiness(
   card: WorkboardCard,
@@ -98,14 +125,12 @@ export function nodeReviewReadiness(
   handoff: ImportedHandoff,
   now: number,
 ): NodeReviewReadiness {
-  const verification =
-    handoff.verify === true ? currentNodeVerification(worktree, handoff) : undefined;
-  const verifiedAt = verification?.phase === "done" ? verification.endedAt : undefined;
-  const noVerification = handoff.verify === true && verifiedAt === undefined;
+  const verifiedAt = nodeVerifiedAt(worktree, handoff);
+  const noVerification = verifiedAt === undefined;
   const verdictAt = firstVerdictAt(card, handoff.importedAt);
   const noVerdict = verdictAt === undefined;
   if (!noVerification && !noVerdict) {
-    return { kind: "ready", since: Math.max(handoff.importedAt, verifiedAt ?? 0, verdictAt) };
+    return { kind: "ready", since: Math.max(verifiedAt, verdictAt) };
   }
   if (now - handoff.importedAt >= REVIEW_READINESS_DEADLINE_MS) {
     return {

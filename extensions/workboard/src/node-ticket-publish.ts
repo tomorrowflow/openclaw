@@ -53,6 +53,8 @@ type PublishCard = {
   sampled?: boolean;
   /** The round's finished verification, copied into its review entry. */
   verification?: NonNullable<WorkboardNodeReviewVerdict["verification"]>;
+  /** The round's finished cross-verification, copied into its review entry. */
+  crossVerification?: WorkboardNodeReviewVerdict["crossVerification"];
   /** The round ran at rung b or c; copied into its review entry. */
   rung?: WorkboardAgentRung;
 };
@@ -73,6 +75,7 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
     return undefined;
   }
   const verification = currentNodeVerification(worktree, handoff);
+  const cross = currentNodeVerification(worktree, handoff, "crossVerification");
   return {
     card,
     hostRepoPath: target.hostRepoPath,
@@ -102,6 +105,16 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
           },
         }
       : {}),
+    ...(cross?.phase === "done"
+      ? {
+          crossVerification: {
+            verdict: cross.verdict,
+            ...(cross.model ? { model: cross.model } : {}),
+            startedAt: cross.startedAt,
+            endedAt: cross.endedAt,
+          },
+        }
+      : {}),
   };
 }
 
@@ -126,6 +139,7 @@ function reviewVerdict(item: PublishCard): WorkboardNodeReviewVerdict {
     ...(item.decidedByAgent ? { decidedBy: "agent" as const } : {}),
     ...(item.sampled === undefined ? {} : { sampled: item.sampled }),
     ...(item.verification ? { verification: item.verification } : {}),
+    ...(item.crossVerification ? { crossVerification: item.crossVerification } : {}),
     ...(item.rung ? { rung: item.rung } : {}),
   };
 }

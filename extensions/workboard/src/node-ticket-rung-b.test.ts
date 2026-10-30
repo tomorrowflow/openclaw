@@ -316,7 +316,9 @@ describe("Workboard rung b", () => {
     const move = agentTools(store)("workboard_move");
     const accept = () => move.execute("accept", { id: card.id, status: "done" });
 
-    await expect(accept()).rejects.toThrow("Verification is still running; wait for its comment.");
+    await expect(accept()).rejects.toThrow(
+      "The verification is still running; wait for its comment.",
+    );
     await verified({
       phase: "running",
       round: 0,
@@ -325,7 +327,9 @@ describe("Workboard rung b", () => {
       sessionKey: "agent:verifier:verify-x-r0",
       path: "/wt/verify",
     });
-    await expect(accept()).rejects.toThrow("Verification is still running; wait for its comment.");
+    await expect(accept()).rejects.toThrow(
+      "The verification is still running; wait for its comment.",
+    );
     await verified({
       phase: "done",
       ...facts,
@@ -347,7 +351,9 @@ describe("Workboard rung b", () => {
       verdict: "pass",
       summary: "",
     });
-    await expect(accept()).rejects.toThrow("Verification is still running; wait for its comment.");
+    await expect(accept()).rejects.toThrow(
+      "The verification is still running; wait for its comment.",
+    );
 
     // A rework verdict is never gated: the agent moves the card on to publish the draft.
     await verified({ phase: "done", ...facts, verdict: "fail", summary: "broken" });
@@ -440,6 +446,78 @@ describe("Workboard rung b", () => {
       expect((await store.get(card.id))?.status).toBe("done");
       await expect(handoffOf(store, card)).resolves.toMatchObject({ decidedBy: "agent:dev" });
     }
+  });
+
+  it("gates an agent's accept of a rung c round on its cross-verification too, never a rung b round's", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({
+      id: "default",
+      orchestration: {
+        verifier: { agentId: "verifier", model: "openai/gpt-6-sol" },
+        crossVerifier: { agentId: "verifier-claude", model: "anthropic/claude-opus-5-5" },
+      },
+    });
+    const atC = await importedDocsTicket(store, { classRungs: { docs: { rung: "c" } } });
+    const atB = await importedDocsTicket(store, {
+      classRungs: { docs: { rung: "b" } },
+      later: { docs: { rung: "c" } },
+    });
+    const facts = { round: 0, headCommit: "b".repeat(40), startedAt: 1, endedAt: 2, findings: [] };
+    const record = async (
+      card: WorkboardCard,
+      slot: "verification" | "crossVerification",
+      verdict: "pass" | "fail",
+    ) => {
+      const worktreePath = expectDefined(
+        nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree?.path,
+        "worktree path",
+      );
+      await store.setNodeVerification(card.id, {
+        worktreePath,
+        slot,
+        verification: { phase: "done", ...facts, verdict, summary: `${verdict} summary` },
+      });
+    };
+    const move = agentTools(store)("workboard_move");
+    for (const card of [atC, atB]) {
+      await record(card, "verification", "pass");
+      await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
+    }
+
+    await move.execute("accept", { id: atB.id, status: "done" });
+    expect((await store.get(atB.id))?.status).toBe("done");
+
+    const accept = () => move.execute("accept", { id: atC.id, status: "done" });
+    await expect(accept()).rejects.toThrow(
+      "The cross-verification is still running; wait for its comment.",
+    );
+    await record(atC, "crossVerification", "fail");
+    await expect(accept()).rejects.toThrow(
+      "The cross-verification failed: fail summary. Post `Verdict: rework: …` and rework it.",
+    );
+    await record(atC, "crossVerification", "pass");
+    await accept();
+    expect((await store.get(atC.id))?.status).toBe("done");
+    await expect(handoffOf(store, atC)).resolves.toMatchObject({ decidedBy: "agent:dev" });
+  });
+
+  it("refuses a cross-verifier without a verifier", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const crossVerifier = { agentId: "verifier-claude", model: "anthropic/claude-opus-5-5" };
+    await expect(
+      store.upsertBoard({ id: "app", orchestration: { crossVerifier } }),
+    ).rejects.toThrow("crossVerifier needs a verifier: it runs after the verifier passed.");
+    await store.upsertBoard({
+      id: "app",
+      orchestration: {
+        verifier: { agentId: "verifier", model: "openai/gpt-6-sol" },
+        crossVerifier,
+      },
+    });
+    await expect(
+      store.upsertBoard({ id: "app", orchestration: { verifier: null } }),
+    ).rejects.toThrow("crossVerifier needs a verifier");
+    await store.upsertBoard({ id: "app", orchestration: { verifier: null, crossVerifier: null } });
   });
 
   it("samples by the card: stable per card, every reworked round, and 1 in sampleEvery", () => {
