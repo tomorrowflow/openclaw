@@ -1,5 +1,6 @@
 import type {
   WorkboardExecutionTarget,
+  WorkboardMergeRegression,
   WorkboardNodeFeedback,
   WorkboardNodeGrill,
   WorkboardNodeHandoff,
@@ -8,7 +9,6 @@ import type {
   WorkboardNodeRework,
   WorkboardNodeVerification,
   WorkboardNodeWorktree,
-  WorkboardPullRequestState,
   WorkboardVerificationVerdict,
 } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
@@ -111,17 +111,49 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
   };
 }
 
-function normalizePullRequestState(
-  value: unknown,
-): { state: WorkboardPullRequestState; checkedAt: number } | undefined {
+type PullRequestFacts = NonNullable<
+  Extract<WorkboardNodeHandoff, { phase: "published" }>["pullRequest"]
+>;
+
+function normalizePullRequestState(value: unknown): PullRequestFacts | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
   const { state } = value;
   const checkedAt = resolveOptionalIntegerOption(value.checkedAt, { min: 0 });
-  return checkedAt !== undefined &&
-    (state === "open" || state === "draft" || state === "merged" || state === "closed")
-    ? { state, checkedAt }
+  if (
+    checkedAt === undefined ||
+    (state !== "open" && state !== "draft" && state !== "merged" && state !== "closed")
+  ) {
+    return undefined;
+  }
+  const mergedAt = resolveOptionalIntegerOption(value.mergedAt, { min: 0 });
+  const mergeCommit = normalizeBoundedString(value.mergeCommit, undefined, 64, "merge commit");
+  const regression = normalizeMergeRegression(value.regression);
+  return {
+    state,
+    checkedAt,
+    ...(mergedAt === undefined ? {} : { mergedAt }),
+    ...(mergeCommit ? { mergeCommit } : {}),
+    ...(regression ? { regression } : {}),
+  };
+}
+
+function normalizeMergeRegression(value: unknown): WorkboardMergeRegression | undefined {
+  if (!isRecord(value) || (value.kind !== "revert" && value.kind !== "red_main")) {
+    return undefined;
+  }
+  const at = resolveOptionalIntegerOption(value.at, { min: 0 });
+  const commit = normalizeBoundedString(value.commit, undefined, 64, "regression commit");
+  const dismissedAt = resolveOptionalIntegerOption(value.dismissedAt, { min: 0 });
+  return at !== undefined && commit
+    ? {
+        kind: value.kind,
+        at,
+        commit,
+        ...(value.demoted === true ? { demoted: true as const } : {}),
+        ...(dismissedAt === undefined ? {} : { dismissedAt }),
+      }
     : undefined;
 }
 

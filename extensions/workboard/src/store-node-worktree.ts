@@ -1,5 +1,7 @@
 import type {
   WorkboardCard,
+  WorkboardMergeRegression,
+  WorkboardNodeHandoff,
   WorkboardNodeVerification,
   WorkboardNodeWorktree,
   WorkboardPullRequestState,
@@ -16,6 +18,9 @@ import { appendComment, assertCanMutateClaimedCard } from "./store-card-helpers.
 import type { WorkboardMutationScope } from "./store-inputs.js";
 import { WorkboardNotificationStore } from "./store-notifications.js";
 import { type WorkboardNodeHandoffInput, withNodeHandoff } from "./store-target-normalizers.js";
+
+type PublishedHandoff = Extract<WorkboardNodeHandoff, { phase: "published" }>;
+type PublishedPullRequest = NonNullable<PublishedHandoff["pullRequest"]>;
 
 /** Writes to a node ticket's recorded worktree; a replaced worktree is left alone. */
 export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
@@ -40,6 +45,8 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
       pullRequestUrl: string;
       state: WorkboardPullRequestState;
       checkedAt: number;
+      mergedAt?: number;
+      mergeCommit?: string;
     },
   ): Promise<WorkboardCard | undefined> {
     return await this.enqueueMutation(async () => {
@@ -58,7 +65,7 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
           ) {
             return undefined;
           }
-          const pullRequest = { state: input.state, checkedAt: input.checkedAt };
+          const { worktreePath: _path, pullRequestUrl: _url, ...pullRequest } = input;
           return {
             metadata: {
               ...card.metadata,
@@ -141,6 +148,97 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
     scope?: WorkboardMutationScope,
   ): Promise<WorkboardCard | undefined> {
     return await this.updateNodeWorktree(id, input, scope, withNodeRound);
+  }
+
+  /**
+   * Records the regression the watch found on a merged PR with its notice
+   * comment: the first one stands, so a later sync never replaces it or
+   * repeats the notice. Returns undefined when the card no longer holds that
+   * merge or already has a regression.
+   */
+  async recordMergeRegression(
+    id: string,
+    input: { pullRequestUrl: string; regression: WorkboardMergeRegression; notice: string },
+  ): Promise<WorkboardCard | undefined> {
+    const { card, updated } = await this.updatePullRequestFacts(
+      id,
+      (pullRequest, handoff) =>
+        handoff.pullRequestUrl === input.pullRequestUrl &&
+        pullRequest.state === "merged" &&
+        !pullRequest.regression
+          ? { ...pullRequest, regression: input.regression }
+          : undefined,
+      input.notice,
+    );
+    return updated ? card : undefined;
+  }
+
+  /**
+   * The operator's call that a recorded regression was not one: the trust
+   * KPIs leave it out. A demotion it caused stays; the operator promotes the
+   * class again with `workboard.boards.upsert`. A repeat keeps the first time.
+   */
+  async dismissMergeRegression(id: string): Promise<WorkboardCard> {
+    const refusal = "only a merged node ticket PR with a recorded regression can be dismissed.";
+    const { card } = await this.updatePullRequestFacts(id, (pullRequest) => {
+      if (!pullRequest.regression) {
+        throw new Error(refusal);
+      }
+      return pullRequest.regression.dismissedAt === undefined
+        ? { ...pullRequest, regression: { ...pullRequest.regression, dismissedAt: Date.now() } }
+        : undefined;
+    });
+    if (!card?.metadata?.automation?.target?.worktree?.handoff) {
+      throw new Error(refusal);
+    }
+    return card;
+  }
+
+  /**
+   * Rewrites the published handoff's PR facts, with `notice` as a Workboard
+   * comment; `change` returns undefined for no write.
+   */
+  private async updatePullRequestFacts(
+    id: string,
+    change: (
+      pullRequest: PublishedPullRequest,
+      handoff: PublishedHandoff,
+    ) => PublishedPullRequest | undefined,
+    notice?: string,
+  ): Promise<{ card: WorkboardCard | undefined; updated: boolean }> {
+    return await this.enqueueMutation(async () => {
+      let published = false;
+      const result = await this.updateLatestCard(
+        id,
+        (card) => {
+          const target = card.metadata?.automation?.target;
+          const worktree = target?.worktree;
+          const handoff = worktree?.handoff;
+          if (!target || !worktree || handoff?.phase !== "published" || !handoff.pullRequest) {
+            return undefined;
+          }
+          published = true;
+          const pullRequest = change(handoff.pullRequest, handoff);
+          return pullRequest
+            ? {
+                metadata: {
+                  ...card.metadata,
+                  ...(notice ? { comments: appendComment(card.metadata?.comments, notice) } : {}),
+                  automation: {
+                    ...card.metadata?.automation,
+                    target: {
+                      ...target,
+                      worktree: { ...worktree, handoff: { ...handoff, pullRequest } },
+                    },
+                  },
+                },
+              }
+            : undefined;
+        },
+        { allowAutomationLaunch: true },
+      );
+      return { card: published ? result.card : undefined, updated: result.updated };
+    });
   }
 
   /** Records the current round's verification in its slot, replacing the previous record. */

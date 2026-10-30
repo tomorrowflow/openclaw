@@ -7,6 +7,7 @@ import {
   githubRepo,
   type WorkboardGitHubAccess,
 } from "./node-ticket-publish.js";
+import { watchMergeRegressions } from "./node-ticket-regressions.js";
 import { nodeTicketTarget } from "./node-ticket.js";
 import type { WorkboardStore } from "./store.js";
 
@@ -72,7 +73,7 @@ function groupBy<K, T>(items: readonly T[], key: (item: T) => K): Map<K, T[]> {
 const PULL_STATES_QUERY = `query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
     pullRequests(first: ${PULLS_PER_PAGE}, after: $after, orderBy: { field: UPDATED_AT, direction: DESC }) {
-      nodes { number state isDraft mergeable }
+      nodes { number state isDraft mergeable mergedAt mergeCommit { oid } }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -89,6 +90,21 @@ function pullRequestState(pull: Record<string, unknown>): WorkboardPullRequestSt
     default:
       return undefined;
   }
+}
+
+type PullRequestRead = {
+  state: WorkboardPullRequestState;
+  mergedAt?: number;
+  mergeCommit?: string;
+};
+
+/** When a merged PR merged and the commit it put on its base branch, for the regression watch. */
+function mergeFacts(pull: Record<string, unknown>): Omit<PullRequestRead, "state"> {
+  const mergedAt = typeof pull.mergedAt === "string" ? Date.parse(pull.mergedAt) : Number.NaN;
+  const oid = isRecord(pull.mergeCommit) ? pull.mergeCommit.oid : undefined;
+  return pull.state === "MERGED" && Number.isFinite(mergedAt) && typeof oid === "string"
+    ? { mergedAt, mergeCommit: oid }
+    : {};
 }
 
 /** One page of the repository's PRs, newest update first; GraphQL errors arrive with a 200. */
@@ -156,7 +172,7 @@ export async function syncPullRequestStates(params: {
   }
   for (const [repo, { token, items }] of byRepo) {
     const wanted = groupBy(items, (item) => item.number);
-    const found = new Map<number, WorkboardPullRequestState>();
+    const found = new Map<number, PullRequestRead>();
     const conflicting = new Set<number>();
     try {
       let after: string | undefined;
@@ -168,7 +184,7 @@ export async function syncPullRequestStates(params: {
           }
           const state = pullRequestState(pull);
           if (state) {
-            found.set(pull.number, state);
+            found.set(pull.number, { state, ...mergeFacts(pull) });
           }
           // GitHub computes mergeability lazily: UNKNOWN now resolves by a later sync.
           if (pull.state === "OPEN" && pull.mergeable === "CONFLICTING") {
@@ -184,12 +200,12 @@ export async function syncPullRequestStates(params: {
       params.warn(`workboard PR state sync failed for ${repo}: ${formatErrorMessage(error)}`);
     }
     const checkedAt = params.now();
-    for (const [number, state] of found) {
+    for (const [number, read] of found) {
       for (const item of wanted.get(number) ?? []) {
         await params.store.recordPullRequestState(item.card.id, {
           worktreePath: item.worktreePath,
           pullRequestUrl: item.url,
-          state,
+          ...read,
           checkedAt,
         });
       }
@@ -207,7 +223,7 @@ export async function syncPullRequestStates(params: {
 }
 
 /**
- * Runs {@link syncPullRequestStates} at most once per interval from the
+ * Runs {@link syncPullRequestStates}, then {@link watchMergeRegressions}, at most once per interval from the
  * handoff pass, which already runs on card changes and every lifecycle sweep
  * with the plugin's scope for the token read. The first run comes one
  * interval after the Gateway starts.
@@ -227,6 +243,14 @@ export function createPullRequestStateSync(params: {
     lastRunAt = params.now();
     try {
       await syncPullRequestStates({
+        store: params.store,
+        github: params.github,
+        cards: await params.store.list(),
+        now: params.now,
+        warn,
+      });
+      // Re-read: a merge the state sync just recorded is watched from this pass on.
+      await watchMergeRegressions({
         store: params.store,
         github: params.github,
         cards: await params.store.list(),

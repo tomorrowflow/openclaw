@@ -12,6 +12,7 @@ import { expect, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { syncWorkboardAgentEnded, type WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import { createNodeTicketHandoffs } from "./node-ticket-handoff.js";
+import type { BaseBranchCommit } from "./node-ticket-regressions.js";
 import type { WorkboardNodeTicketRuntime } from "./node-ticket.js";
 import { REVIEW_READINESS_DEADLINE_MS } from "./review-readiness.js";
 import type { WorkboardStore } from "./store.js";
@@ -212,7 +213,11 @@ export function createFakeGitHub(remote: string) {
   // Title and body of an open PR by its URL; a PATCH replaces them.
   const pullTexts = new Map<string, { title: string; body: string }>();
   // Closed PRs on the branch, newest first, by their head commit.
-  const closedPulls: Array<{ html_url: string; sha: string; merged: boolean }> = [];
+  // `sha` is also the merge commit of a merged one; `mergedAt` defaults to now.
+  const closedPulls: Array<{ html_url: string; sha: string; merged: boolean; mergedAt?: number }> =
+    [];
+  // The default branch's commits, newest first, for the regression watch.
+  const baseHistory: BaseBranchCommit[] = [];
   const rejectCreate: { value?: { message: string; errors: Array<{ message: string }> } } = {};
   // Open PRs still in draft; the GraphQL ready mutation removes one by its node id.
   const draftPulls = new Set<string>();
@@ -248,10 +253,12 @@ export function createFakeGitHub(remote: string) {
           isDraft: draftPulls.has(html_url),
           mergeable: conflictingPulls.has(html_url) ? "CONFLICTING" : "MERGEABLE",
         })),
-        ...closedPulls.map(({ html_url, merged }) => ({
+        ...closedPulls.map(({ html_url, merged, sha, mergedAt }) => ({
           number: Number(html_url.split("/").at(-1)),
           state: merged ? "MERGED" : "CLOSED",
           isDraft: false,
+          mergedAt: merged ? new Date(mergedAt ?? Date.now()).toISOString() : null,
+          mergeCommit: merged ? { oid: sha } : null,
         })),
       ];
       const first = Number(/first: (\d+)/.exec(String(body.query))?.[1] ?? 100);
@@ -264,6 +271,26 @@ export function createFakeGitHub(remote: string) {
               pullRequests: {
                 nodes: all.slice(start, end),
                 pageInfo: { hasNextPage: end < all.length, endCursor: String(end) },
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      );
+    }
+    if (url.endsWith("/graphql") && String(body?.query).includes("defaultBranchRef")) {
+      const nodes = baseHistory.map(({ oid, message, checks, parentChecks }) => ({
+        oid,
+        message,
+        statusCheckRollup: checks ? { state: checks } : null,
+        parents: { nodes: [{ statusCheckRollup: parentChecks ? { state: parentChecks } : null }] },
+      }));
+      return new Response(
+        JSON.stringify({
+          data: {
+            repository: {
+              defaultBranchRef: {
+                target: { history: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } },
               },
             },
           },
@@ -331,6 +358,7 @@ export function createFakeGitHub(remote: string) {
     openPulls,
     pullTexts,
     closedPulls,
+    baseHistory,
     rejectCreate,
     draftPulls,
     conflictingPulls,

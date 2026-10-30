@@ -43,8 +43,11 @@ export function buildWorkboardTrustFixture(boardId: string, baseTime: number) {
       {
         taskClass: "ios-logic",
         ...counts(40, 36, 31),
-        rung: "a",
-        blind: { a: counts(31, 31, 27), b: counts(32, 32, 28) },
+        rung: "c",
+        rungSince: Date.UTC(2026, 9, 30, 12),
+        // A rung c merge that regressed since the promotion.
+        sinceRung: { ...counts(4, 4, 4), reworkedAccepts: 0, regressions: 1 },
+        blind: { a: counts(31, 31, 27), b: counts(32, 32, 28), c: counts(4, 4, 4) },
       },
       {
         taskClass: "ios-ui",

@@ -356,7 +356,15 @@ export type WorkboardNodeHandoff =
        * writes nothing, so an open PR does not churn the card. Merged is a
        * GitHub fact, not the card's accept verdict.
        */
-      pullRequest?: { state: WorkboardPullRequestState; checkedAt: number };
+      pullRequest?: {
+        state: WorkboardPullRequestState;
+        checkedAt: number;
+        /** With `merged`: when GitHub merged the PR and the commit it put on the base branch. */
+        mergedAt?: number;
+        mergeCommit?: string;
+        /** What the regression watch found within 7 days of `mergedAt` (D37). */
+        regression?: WorkboardMergeRegression;
+      };
       /**
        * When the PR state sync found the PR in conflict with its base and
        * reopened the ticket for a rework round that merges the base: once per
@@ -364,6 +372,22 @@ export type WorkboardNodeHandoff =
        */
       conflictReworkAt?: number;
     };
+
+/**
+ * A merged node ticket PR that broke its base branch: a later commit reverted
+ * its merge commit (`revert`), or the merge commit's own CI failed where its
+ * parent's passed (`red_main`). `commit` is the reverting commit or the failed
+ * merge commit. `demoted` records that the class went from rung c to b
+ * because of it. An operator dismisses a false one; the trust KPIs then leave
+ * it out, and the demotion stays until the operator promotes the class again.
+ */
+export type WorkboardMergeRegression = {
+  kind: "revert" | "red_main";
+  at: number;
+  commit: string;
+  demoted?: true;
+  dismissedAt?: number;
+};
 
 /** A node ticket PR's state on GitHub; `draft` is an open draft. */
 export type WorkboardPullRequestState = "open" | "draft" | "merged" | "closed";

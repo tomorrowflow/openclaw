@@ -271,6 +271,32 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
   }
 
   /**
+   * Moves a class at rung c back to b after a regression of one of its merges
+   * (D37); the rung change stamps its `since`. Returns false when the class is
+   * no longer at c, so a later regression or the operator's own change wins.
+   */
+  async demoteClassFromRungC(boardId: string, taskClass: string): Promise<boolean> {
+    return await this.enqueueMutation(async () => {
+      const existing = await this.boardStore.lookup(boardId);
+      const classRungs = existing?.board.orchestration?.classRungs;
+      const current = classRungs?.[taskClass];
+      if (!existing || !classRungs || current?.rung !== "c") {
+        return false;
+      }
+      const { since: _since, ...kept } = current;
+      const board = normalizeBoardMetadata(
+        {
+          id: boardId,
+          orchestration: { classRungs: { ...classRungs, [taskClass]: { ...kept, rung: "b" } } },
+        },
+        existing.board,
+      );
+      await this.boardStore.register(boardId, { version: 1, board });
+      return true;
+    });
+  }
+
+  /**
    * Checks only writes that set the target or the assignee, so a board saved
    * before its agent's policy changed can still be renamed or archived;
    * dispatch still meets core's refusal for those.

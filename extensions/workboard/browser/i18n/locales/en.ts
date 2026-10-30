@@ -245,6 +245,7 @@ export default {
     trustSinceRung: "Since rung",
     trustAcceptedClean: "{accepted} / {clean} clean",
     trustReopened: "{count} reopened",
+    trustRegressions: "{count} regressed",
     trustToPromotion: "To {accepted} at {percent}",
     trustPromotionMet: "Met",
     trustPromotionGap: "{count} more clean",
