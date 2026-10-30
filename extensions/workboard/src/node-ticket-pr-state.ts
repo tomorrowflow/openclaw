@@ -1,6 +1,7 @@
 import type { WorkboardCard, WorkboardPullRequestState } from "@openclaw/workboard-contract";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { runAutoMergeQueue } from "./node-ticket-auto-merge.js";
 import {
   GITHUB_PULL_URL_PATTERN,
   githubApi,
@@ -223,10 +224,11 @@ export async function syncPullRequestStates(params: {
 }
 
 /**
- * Runs {@link syncPullRequestStates}, then {@link watchMergeRegressions}, at most once per interval from the
- * handoff pass, which already runs on card changes and every lifecycle sweep
- * with the plugin's scope for the token read. The first run comes one
- * interval after the Gateway starts.
+ * Runs {@link syncPullRequestStates}, then {@link runAutoMergeQueue} and
+ * {@link watchMergeRegressions}, at most once per interval from the handoff
+ * pass, which already runs on card changes and every lifecycle sweep with the
+ * plugin's scope for the token read. The first run comes one interval after
+ * the Gateway starts.
  */
 export function createPullRequestStateSync(params: {
   store: WorkboardStore;
@@ -249,7 +251,14 @@ export function createPullRequestStateSync(params: {
         now: params.now,
         warn,
       });
-      // Re-read: a merge the state sync just recorded is watched from this pass on.
+      // Re-read between steps: each one acts on what the previous one recorded.
+      await runAutoMergeQueue({
+        store: params.store,
+        github: params.github,
+        cards: await params.store.list(),
+        now: params.now,
+        warn,
+      });
       await watchMergeRegressions({
         store: params.store,
         github: params.github,

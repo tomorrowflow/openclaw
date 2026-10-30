@@ -129,12 +129,23 @@ function normalizePullRequestState(value: unknown): PullRequestFacts | undefined
   const mergedAt = resolveOptionalIntegerOption(value.mergedAt, { min: 0 });
   const mergeCommit = normalizeBoundedString(value.mergeCommit, undefined, 64, "merge commit");
   const regression = normalizeMergeRegression(value.regression);
+  const wait = isRecord(value.autoMergeWait) ? value.autoMergeWait : undefined;
+  const waitSince = resolveOptionalIntegerOption(wait?.since, { min: 0 });
+  const waitReason = wait?.reason;
   return {
     state,
     checkedAt,
     ...(mergedAt === undefined ? {} : { mergedAt }),
     ...(mergeCommit ? { mergeCommit } : {}),
     ...(regression ? { regression } : {}),
+    ...(value.autoMerged === true ? { autoMerged: true as const } : {}),
+    ...(waitSince !== undefined &&
+    (waitReason === "base_red" ||
+      waitReason === "checks_failed" ||
+      waitReason === "checks_missing" ||
+      waitReason === "head_moved")
+      ? { autoMergeWait: { reason: waitReason, since: waitSince } }
+      : {}),
   };
 }
 

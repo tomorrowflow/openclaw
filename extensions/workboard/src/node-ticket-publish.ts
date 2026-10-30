@@ -204,7 +204,7 @@ function pullRequestBody(item: PublishCard): string {
 export async function githubApi(
   access: WorkboardGitHubAccess,
   token: string,
-  method: "GET" | "POST" | "PATCH",
+  method: "GET" | "POST" | "PATCH" | "PUT",
   path: string,
   body?: Record<string, unknown>,
 ): Promise<unknown> {

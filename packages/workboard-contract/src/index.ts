@@ -359,6 +359,13 @@ export type WorkboardNodeHandoff =
         mergeCommit?: string;
         /** What the regression watch found within 7 days of `mergedAt` (D37). */
         regression?: WorkboardMergeRegression;
+        /** Workboard merged it itself: an agent accepted the round at rung c. */
+        autoMerged?: true;
+        /**
+         * Why the rung c auto-merge passes over this PR, since when; the
+         * notice is posted once per reason.
+         */
+        autoMergeWait?: { reason: WorkboardAutoMergeWait; since: number };
       };
       /**
        * When the PR state sync found the PR in conflict with its base and
@@ -367,6 +374,13 @@ export type WorkboardNodeHandoff =
        */
       conflictReworkAt?: number;
     };
+
+/**
+ * Why the rung c auto-merge does not merge an agent-accepted PR: the base
+ * branch is red (the whole queue halts), the PR's checks failed or never
+ * reported, or its head is no longer the commit the agent accepted.
+ */
+export type WorkboardAutoMergeWait = "base_red" | "checks_failed" | "checks_missing" | "head_moved";
 
 /**
  * A merged node ticket PR that broke its base branch: a later commit reverted

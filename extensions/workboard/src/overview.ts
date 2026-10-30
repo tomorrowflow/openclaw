@@ -164,8 +164,11 @@ function place(
       }
       const shipped = shippedTicket(card, stage.since, stage.pullRequestUrl);
       result.shipped.push(shipped);
-      // A sampled PR waits for the operator's read until it is merged or closed on GitHub.
-      const settled = stage.pullRequestState === "merged" || stage.pullRequestState === "closed";
+      // A sampled PR waits for the operator's read until it is merged or closed on
+      // GitHub; one merged at rung c merged without the read, so it still waits.
+      const settled =
+        stage.pullRequestState === "closed" ||
+        (stage.pullRequestState === "merged" && latest?.rung !== "c");
       if (shipped.sampled && latest?.readAt === undefined && !settled) {
         result.needsYou.push(waiting(card, "sampled", stage.since));
       }

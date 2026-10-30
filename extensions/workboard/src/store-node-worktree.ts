@@ -1,4 +1,5 @@
 import type {
+  WorkboardAutoMergeWait,
   WorkboardCard,
   WorkboardMergeRegression,
   WorkboardNodeHandoff,
@@ -171,6 +172,62 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
       input.notice,
     );
     return updated ? card : undefined;
+  }
+
+  /**
+   * Records the rung c auto-merge of the published PR with its notice. The
+   * merge facts are the ones the PR state sync records for any merge, so the
+   * regression watch starts on it at once.
+   */
+  async recordAutoMerge(
+    id: string,
+    input: { pullRequestUrl: string; mergedAt: number; mergeCommit: string; notice: string },
+  ): Promise<WorkboardCard | undefined> {
+    const { card, updated } = await this.updatePullRequestFacts(
+      id,
+      (pullRequest, handoff) => {
+        if (handoff.pullRequestUrl !== input.pullRequestUrl || pullRequest.state === "merged") {
+          return undefined;
+        }
+        const { autoMergeWait: _wait, ...rest } = pullRequest;
+        return {
+          ...rest,
+          state: "merged",
+          checkedAt: input.mergedAt,
+          mergedAt: input.mergedAt,
+          mergeCommit: input.mergeCommit,
+          autoMerged: true,
+        };
+      },
+      input.notice,
+    );
+    return updated ? card : undefined;
+  }
+
+  /**
+   * Records why the rung c auto-merge passes over the PR, with its notice,
+   * only when the reason changed; undefined clears it without a notice.
+   */
+  async setAutoMergeWait(
+    id: string,
+    input: { pullRequestUrl: string; reason?: WorkboardAutoMergeWait; at: number; notice?: string },
+  ): Promise<void> {
+    await this.updatePullRequestFacts(
+      id,
+      (pullRequest, handoff) => {
+        if (
+          handoff.pullRequestUrl !== input.pullRequestUrl ||
+          pullRequest.autoMergeWait?.reason === input.reason
+        ) {
+          return undefined;
+        }
+        const { autoMergeWait: _wait, ...rest } = pullRequest;
+        return input.reason
+          ? { ...rest, autoMergeWait: { reason: input.reason, since: input.at } }
+          : rest;
+      },
+      input.reason ? input.notice : undefined,
+    );
   }
 
   /**

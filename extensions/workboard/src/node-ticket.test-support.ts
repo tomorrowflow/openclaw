@@ -218,6 +218,13 @@ export function createFakeGitHub(remote: string) {
     [];
   // The default branch's commits, newest first, for the regression watch.
   const baseHistory: BaseBranchCommit[] = [];
+  // The rung c merge queue's view: the base branch head's checks, and each open PR's head and checks.
+  const queue = {
+    baseChecks: "SUCCESS" as string | undefined,
+    pullHeads: new Map<string, string>(),
+    pullChecks: new Map<string, string>(),
+  };
+  const merges: Array<{ url: string; sha: string }> = [];
   const rejectCreate: { value?: { message: string; errors: Array<{ message: string }> } } = {};
   // Open PRs still in draft; the GraphQL ready mutation removes one by its node id.
   const draftPulls = new Set<string>();
@@ -277,6 +284,46 @@ export function createFakeGitHub(remote: string) {
         }),
         { status: 200 },
       );
+    }
+    if (url.endsWith("/graphql") && String(body?.query).includes("pullRequest(number")) {
+      const repository: Record<string, unknown> = {
+        defaultBranchRef: {
+          target: { statusCheckRollup: queue.baseChecks ? { state: queue.baseChecks } : null },
+        },
+      };
+      for (const [, alias, number] of String(body.query).matchAll(
+        /(p\d+): pullRequest\(number: (\d+)\)/g,
+      )) {
+        const html_url = openPulls.find((open) => open.endsWith(`/pull/${number}`));
+        const checks = html_url ? queue.pullChecks.get(html_url) : undefined;
+        repository[alias!] = html_url
+          ? {
+              state: "OPEN",
+              mergeable: conflictingPulls.has(html_url) ? "CONFLICTING" : "MERGEABLE",
+              headRefOid: queue.pullHeads.get(html_url) ?? "",
+              commits: {
+                nodes: [{ commit: { statusCheckRollup: checks ? { state: checks } : null } }],
+              },
+            }
+          : { state: "MERGED" };
+      }
+      return new Response(JSON.stringify({ data: { repository } }), { status: 200 });
+    }
+    const merge = /\/pulls\/(\d+)\/merge$/.exec(url)?.[1];
+    if (merge && method === "PUT") {
+      const html_url = openPulls.find((open) => open.endsWith(`/pull/${merge}`));
+      if (!html_url || body?.sha !== queue.pullHeads.get(html_url)) {
+        return new Response(JSON.stringify({ message: "Head branch was modified" }), {
+          status: 409,
+        });
+      }
+      const sha = `merge-${merge}`.padEnd(40, "0");
+      openPulls.splice(openPulls.indexOf(html_url), 1);
+      closedPulls.unshift({ html_url, sha, merged: true });
+      merges.push({ url: html_url, sha });
+      // The merge commit's checks start pending.
+      queue.baseChecks = "PENDING";
+      return new Response(JSON.stringify({ sha, merged: true }), { status: 200 });
     }
     if (url.endsWith("/graphql") && String(body?.query).includes("defaultBranchRef")) {
       const nodes = baseHistory.map(({ oid, message, checks, parentChecks }) => ({
@@ -359,6 +406,8 @@ export function createFakeGitHub(remote: string) {
     pullTexts,
     closedPulls,
     baseHistory,
+    queue,
+    merges,
     rejectCreate,
     draftPulls,
     conflictingPulls,
