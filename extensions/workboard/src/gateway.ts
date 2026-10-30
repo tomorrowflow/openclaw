@@ -41,6 +41,7 @@ const READ_SCOPE = "operator.read" as const;
 const WRITE_SCOPE = "operator.write" as const;
 const ADMIN_SCOPE = "operator.admin" as const;
 const cardsListFilterSchema = z.object({ sessionKey: z.string().trim().min(1).optional() });
+const mergeDigestParamsSchema = z.object({ since: z.number().int().min(0).optional() });
 const visualCheckParamsSchema = z.object({
   verdict: z.enum(["looks_right", "problem"]),
   note: z.string().optional(),
@@ -508,6 +509,10 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.trust", READ_SCOPE, ({ params: input }) =>
     store.trust({ boardId: input.boardId }),
   );
+  register("workboard.cards.mergeDigest", READ_SCOPE, ({ params: input }) => {
+    const { since } = mergeDigestParamsSchema.parse(input);
+    return store.mergeDigest({ boardId: input.boardId, ...(since === undefined ? {} : { since }) });
+  });
   register("workboard.overview", READ_SCOPE, ({ params: input }) => store.overview(input.boardId));
   register("workboard.transcriptViewer", READ_SCOPE, () => ({ port: transcriptViewerPort }));
   register("workboard.officeViewer", READ_SCOPE, () => ({ port: officeViewerPort }));

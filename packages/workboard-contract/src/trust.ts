@@ -1,4 +1,4 @@
-import type { WorkboardRung } from "./index.js";
+import type { WorkboardMergeRegression, WorkboardRung } from "./index.js";
 
 /**
  * The dev loop trust KPIs (D9/D53), projected from node ticket cards on read.
@@ -129,4 +129,36 @@ export type WorkboardTrustResult = {
   >;
   /** The last 8 weeks, oldest first, including the current one. */
   weeks: WorkboardTrustWeek[];
+};
+
+/** One merged PR whose last round an agent accepted at rung c (D37 digest). */
+export type WorkboardMergeDigestEntry = {
+  cardId: string;
+  title: string;
+  /** The PR's repository, `owner/name`. */
+  repo: string;
+  pullRequestUrl: string;
+  mergedAt: number;
+  mergeCommit: string;
+  /** Workboard merged it; otherwise someone merged it by hand. */
+  autoMerged: boolean;
+  /** The round was in the human review sample; `readAt` is when it was read. */
+  sampled?: true;
+  readAt?: number;
+  regression?: WorkboardMergeRegression;
+  /** Undoes the merge from a checkout of `repo` on its base branch. */
+  revertCommand: string;
+};
+
+/**
+ * What merged at rung c in a window, per task class, projected from node
+ * ticket cards on read. `text` is the same digest as Markdown, for a packet
+ * or message that posts it as is.
+ */
+export type WorkboardMergeDigestResult = {
+  boardId: string;
+  since: number;
+  generatedAt: number;
+  classes: Array<{ taskClass: string; merges: WorkboardMergeDigestEntry[] }>;
+  text: string;
 };
