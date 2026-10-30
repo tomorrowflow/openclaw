@@ -290,6 +290,53 @@ describe("Workboard prepared launch restart recovery", () => {
     }
   });
 
+  it("keeps a launch prepared since the service started while its session is created, failing it past the grace", async () => {
+    const interrupted = await beginPreparedDispatch();
+    const launch = (await interrupted.replacementStore.get(interrupted.card.id))?.metadata
+      ?.automation?.launch;
+    if (launch?.phase !== "prepared") {
+      throw new Error("expected prepared launch");
+    }
+    // The service started before the launch was prepared; the start is still
+    // inside its session create, so the complete snapshot lacks its session.
+    const sweep = async (sweepAt: number) => {
+      let clock = launch.preparedAt - 60_000;
+      const readSessions = vi.fn().mockResolvedValue({ sessions: [], complete: true });
+      const service = createWorkboardLifecycleService({
+        store: interrupted.replacementStore,
+        readSessions,
+        now: () => clock,
+      });
+      const context = { logger: { warn: vi.fn() } } as never;
+      await service.start(context);
+      clock = sweepAt;
+      service.onGatewayStart();
+      await vi.waitFor(() => expect(readSessions).toHaveBeenCalledOnce());
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      service.onGatewayStop();
+      await service.stop?.(context);
+      return await interrupted.replacementStore.get(interrupted.card.id);
+    };
+    try {
+      await expect(sweep(launch.preparedAt + 3_000)).resolves.toMatchObject({
+        status: "running",
+        metadata: { automation: { launch: { phase: "prepared" } } },
+      });
+      await expect(sweep(launch.preparedAt + 10 * 60_000)).resolves.toMatchObject({
+        status: "blocked",
+        metadata: { automation: { launch: { phase: "failed" } } },
+      });
+    } finally {
+      try {
+        await rejectInterruptedDispatch(interrupted);
+      } finally {
+        await interrupted.replacementStore.close();
+      }
+    }
+  });
+
   it("keeps a prepared launch running when the post-restart snapshot is incomplete", async () => {
     const interrupted = await beginPreparedDispatch();
     let lifecycle: Awaited<ReturnType<typeof startLifecycleSweep>> | undefined;

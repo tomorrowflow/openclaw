@@ -6,6 +6,7 @@ import type {
   WorkboardNodeVerificationFinding,
   WorkboardNodeVisualRead,
   WorkboardNodeWorktree,
+  WorkboardOrchestrationSettings,
   WorkboardVerificationVerdict,
   WorkboardVerifierSettings,
 } from "@openclaw/workboard-contract";
@@ -21,7 +22,11 @@ import {
   sessionCreateRunError,
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
-import { currentNodeVerification, type ImportedHandoff } from "./review-readiness.js";
+import {
+  currentNodeVerification,
+  type ImportedHandoff,
+  type VerificationSlot,
+} from "./review-readiness.js";
 import { sanitizeSessionSegment, workboardSessionHasActiveRun } from "./session-link.js";
 import { MAX_COMMENT_BODY_CHARS } from "./store-constants.js";
 import { capText } from "./store-normalizers.js";
@@ -74,43 +79,76 @@ function importedReviewRound(card: WorkboardCard): ImportedReviewRound | undefin
 type RunningVerification = {
   target: ImportedReviewRound["target"];
   worktree: WorkboardNodeWorktree;
+  slot: VerificationSlot;
   verification: Extract<WorkboardNodeVerification, { phase: "running" }>;
 };
 
 function runningNodeVerification(card: WorkboardCard): RunningVerification | undefined {
   const target = nodeTicketTarget(card);
   const worktree = target?.worktree;
-  const verification = worktree?.verification;
-  return target && worktree && verification?.phase === "running"
-    ? { target, worktree, verification }
-    : undefined;
+  if (!target || !worktree) {
+    return undefined;
+  }
+  for (const slot of ["verification", "crossVerification"] as const) {
+    const verification = worktree[slot];
+    if (verification?.phase === "running") {
+      return { target, worktree, slot, verification };
+    }
+  }
+  return undefined;
 }
 
+export type NodeVerifiers = Pick<WorkboardOrchestrationSettings, "verifier" | "crossVerifier">;
+
 export type NodeVerificationStep =
-  | { kind: "start"; round: ImportedReviewRound; verifier: WorkboardVerifierSettings }
+  | {
+      kind: "start";
+      round: ImportedReviewRound;
+      slot: VerificationSlot;
+      verifier: WorkboardVerifierSettings;
+    }
   | ({ kind: "settle" } & RunningVerification);
 
 /**
  * What the handoff pass owes a card's verification: settle the one that runs,
  * in any card status, or start one when the board has a verifier and the
- * imported round in review has none yet. The board is read only for a round
- * that could start one, so a sweep over the board's cards costs no lookup per
- * card. A running record settles even after the operator removed the verifier.
+ * imported round in review has none yet. A rung c round whose verification
+ * passed then gets the board's cross-verifier, one after the other so the two
+ * never share the node's build caches; a probe never does, nobody accepts it.
+ * The board is read only for a round that could start one, so a sweep over
+ * the board's cards costs no lookup per card. A running record settles even
+ * after the operator removed its verifier.
  */
 export async function nodeVerificationStep(
   card: WorkboardCard,
-  verifierOf: () => Promise<WorkboardVerifierSettings | undefined>,
+  verifiersOf: () => Promise<NodeVerifiers | undefined>,
 ): Promise<NodeVerificationStep | undefined> {
   const running = runningNodeVerification(card);
   if (running) {
     return { kind: "settle", ...running };
   }
   const round = importedReviewRound(card);
-  if (!round || currentNodeVerification(round.worktree, round.handoff)) {
+  if (!round) {
     return undefined;
   }
-  const verifier = await verifierOf();
-  return verifier ? { kind: "start", round, verifier } : undefined;
+  const verification = currentNodeVerification(round.worktree, round.handoff);
+  if (!verification) {
+    const verifier = (await verifiersOf())?.verifier;
+    return verifier ? { kind: "start", round, slot: "verification", verifier } : undefined;
+  }
+  if (
+    verification.phase !== "done" ||
+    verification.verdict !== "pass" ||
+    round.worktree.rung !== "c" ||
+    card.metadata?.automation?.probe ||
+    currentNodeVerification(round.worktree, round.handoff, "crossVerification")
+  ) {
+    return undefined;
+  }
+  const crossVerifier = (await verifiersOf())?.crossVerifier;
+  return crossVerifier
+    ? { kind: "start", round, slot: "crossVerification", verifier: crossVerifier }
+    : undefined;
 }
 
 /** The card's verify worktree name for a round: `verify-<card8>-r<round>`. */
@@ -120,21 +158,25 @@ function verificationName(card: WorkboardCard, round: number): string {
 
 /**
  * The session key of the round's next verification run: `agent:<agentId>:
- * verify-<card8>-r<round>-v<n>`, where `n` counts the verification comments
- * the round's earlier runs posted. Each run gets a fresh session, so a re-run
- * never settles on a previous reply. The count is durable: a crash between
- * create and record computes the same key and adopts the session it created.
+ * verify-<card8>-r<round>-v<n>` (`-x<n>` for the cross-verifier, which may be
+ * the same agent on another model), where `n` counts the verification
+ * comments the round's earlier runs posted. Each run gets a fresh session, so
+ * a re-run never settles on a previous reply. The count is durable: a crash
+ * between create and record computes the same key and adopts the session it
+ * created.
  */
 function verificationSessionKey(
   card: WorkboardCard,
   round: ImportedReviewRound,
+  slot: VerificationSlot,
   verifier: WorkboardVerifierSettings,
 ): string {
   const runs = (card.metadata?.comments ?? []).filter(
     (comment) => comment.createdAt >= round.handoff.importedAt && isVerificationComment(comment),
   ).length;
   const agent = sanitizeSessionSegment(verifier.agentId, "agent");
-  return `agent:${agent}:${verificationName(card, round.round)}-v${runs}`;
+  const run = slot === "crossVerification" ? "x" : "v";
+  return `agent:${agent}:${verificationName(card, round.round)}-${run}${runs}`;
 }
 
 export function verificationMessage(params: {
@@ -351,7 +393,7 @@ type NodeVerificationParams = {
  */
 async function finishNodeVerification(
   params: NodeVerificationParams,
-  place: Pick<RunningVerification, "target" | "worktree">,
+  place: Pick<RunningVerification, "target" | "worktree" | "slot">,
   verification: Extract<WorkboardNodeVerification, { phase: "done" }>,
   verifyPath: string | undefined,
 ): Promise<boolean> {
@@ -360,6 +402,7 @@ async function finishNodeVerification(
   // comment; the review cron's schedule is the nudge backstop.
   const recorded = await store.setNodeVerification(card.id, {
     worktreePath: place.worktree.path,
+    slot: place.slot,
     verification,
   });
   if (!recorded) {
@@ -408,8 +451,8 @@ async function startNodeVerification(
   step: Extract<NodeVerificationStep, { kind: "start" }>,
 ): Promise<"running" | "done"> {
   const { card } = params;
-  const { round, verifier } = step;
-  const key = verificationSessionKey(card, round, verifier);
+  const { round, slot, verifier } = step;
+  const key = verificationSessionKey(card, round, slot, verifier);
   const verifyPath = path.posix.join(
     round.target.worktreesRoot,
     verificationName(card, round.round),
@@ -444,7 +487,7 @@ async function startNodeVerification(
   } catch (error) {
     await finishNodeVerification(
       params,
-      round,
+      { ...round, slot },
       {
         phase: "done",
         ...facts,
@@ -460,6 +503,7 @@ async function startNodeVerification(
   }
   const recorded = await params.store.setNodeVerification(card.id, {
     worktreePath: round.worktree.path,
+    slot,
     verification: {
       phase: "running",
       ...facts,
