@@ -1282,6 +1282,17 @@ passed over or the queue halts, so each notice is posted once. A failure warns,
 and the next pass retries. An operator's decision at c, a rework verdict, and
 rounds at a or b never merge here.
 
+**Merge digest:** `workboard.cards.mergeDigest {boardId, since}` lists every PR
+merged at or after `since` (epoch ms; default the last 24 hours) whose last
+round an agent accepted at rung c, per task class and oldest merge first. Each
+entry carries the PR link and repository, `mergedAt`, `mergeCommit`,
+`autoMerged` (false when someone merged it by hand), the sample flags
+`sampled` and `readAt`, any recorded `regression`, and `revertCommand`
+(`git revert -m 1 <mergeCommit>`, run in a checkout of the repository on its
+base branch; a squash merged by hand reverts without `-m 1`). `text` is the
+same digest as Markdown for a daily packet to post as is. A ticket counts by
+the rung of its merged round, wherever its class stands now.
+
 **Conflicts:** when the read finds a done ticket's open PR `CONFLICTING` with
 its base, Workboard reopens the ticket for a rework round in the same write:
 it adds a comment asking to merge the base branch into the PR branch as a new
@@ -1770,7 +1781,7 @@ read/write scopes as boards:
 
 | Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `cards.probes`, `overview`, `transcriptViewer`, `officeViewer`, `architectureViewer`                                                                                                                                                                                                                                           |
+| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.mergeDigest`, `cards.runs`, `cards.probes`, `overview`, `transcriptViewer`, `officeViewer`, `architectureViewer`                                                                                                                                                                                                                      |
 | `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.sampleRead`, `cards.dismissRegression`, `cards.verify`, `cards.visualCheck`, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
 | `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                                                                                                                |

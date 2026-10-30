@@ -112,6 +112,19 @@ describe("rung c auto-merge", () => {
     expect(await ticket.lastComment()).toContain(
       `**Auto-merged** at rung c as ${merge.sha.slice(0, 7)}`,
     );
+    expect((await ticket.store.mergeDigest({}, ticket.now())).classes).toEqual([
+      {
+        taskClass: "docs",
+        merges: [
+          expect.objectContaining({
+            cardId: ticket.card.id,
+            pullRequestUrl: PR,
+            autoMerged: true,
+            revertCommand: `git revert -m 1 ${merge.sha}`,
+          }),
+        ],
+      },
+    ]);
 
     // A sampled rung c PR stays on Needs you after its merge until it is read.
     const card = expectDefined(await ticket.store.get(ticket.card.id), "card");

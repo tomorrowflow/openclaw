@@ -4,6 +4,7 @@ import type {
   WorkboardCard,
   WorkboardChange,
   WorkboardListResult,
+  WorkboardMergeDigestResult,
   WorkboardMetadata,
   WorkboardOperatorCard,
   WorkboardOrchestrationSettings,
@@ -17,6 +18,7 @@ import type {
 import { WORKBOARD_STATUSES } from "@openclaw/workboard-contract";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { redactOperatorCard } from "./card-redaction.js";
+import { MERGE_DIGEST_DEFAULT_WINDOW_MS, projectWorkboardMergeDigest } from "./merge-digest.js";
 import { projectWorkboardOverview } from "./overview.js";
 import type {
   PersistedWorkboardAttachment,
@@ -217,6 +219,20 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
     const boardId = normalizeBoardId(input.boardId);
     const board = boardId ? ((await this.boardOrchestration(boardId)) ?? {}) : undefined;
     return projectWorkboardTrust(await this.list({ boardId }), boardId ?? "all", now, board);
+  }
+
+  /** What merged at rung c since `since` (default: the last day), per class. */
+  async mergeDigest(
+    input: WorkboardListOptions & { since?: number } = {},
+    now = Date.now(),
+  ): Promise<WorkboardMergeDigestResult> {
+    const boardId = normalizeBoardId(input.boardId);
+    return projectWorkboardMergeDigest(
+      await this.list({ boardId }),
+      boardId ?? "all",
+      input.since ?? now - MERGE_DIGEST_DEFAULT_WINDOW_MS,
+      now,
+    );
   }
 
   /** The Factory overview, from the same cached operator read as `listCards`. */

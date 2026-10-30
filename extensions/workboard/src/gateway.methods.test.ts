@@ -60,6 +60,7 @@ describe("workboard gateway method registry", () => {
       "workboard.boards.delete",
       "workboard.cards.stats",
       "workboard.cards.trust",
+      "workboard.cards.mergeDigest",
       "workboard.overview",
       "workboard.transcriptViewer",
       "workboard.officeViewer",
