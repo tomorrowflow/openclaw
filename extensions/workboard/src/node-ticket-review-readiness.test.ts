@@ -1,11 +1,11 @@
 // Workboard tests cover holding an imported round until its verification and verdict exist.
 import { expectDefined } from "@openclaw/normalization-core";
-import type { WorkboardNodeVerification } from "@openclaw/workboard-contract";
+import type { WorkboardCard, WorkboardNodeVerification } from "@openclaw/workboard-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { redactOperatorCard } from "./card-redaction.js";
 import { nodeTicketTarget } from "./node-ticket.js";
 import { postVerdict, startNodeCard } from "./node-ticket.test-support.js";
-import { REVIEW_READINESS_DEADLINE_MS } from "./review-readiness.js";
+import { nodeReviewReadiness, REVIEW_READINESS_DEADLINE_MS } from "./review-readiness.js";
 import type { WorkboardStore } from "./store.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 import { createWorkboardTools } from "./tools.js";
@@ -136,5 +136,52 @@ describe("imported round readiness", () => {
         verdictAt: importedAt + 8 * 60_000,
       },
     ]);
+  });
+});
+
+describe("rung c readiness", () => {
+  it("waits for the cross-verification after a passed verification, not after a failed one", () => {
+    const handoff = {
+      phase: "imported" as const,
+      headCommit: "h",
+      importedAt: 100,
+      verify: true as const,
+      crossVerify: true as const,
+    };
+    const done = (verdict: "pass" | "fail", endedAt: number) => ({
+      phase: "done" as const,
+      round: 0,
+      headCommit: "h",
+      startedAt: 100,
+      endedAt,
+      verdict,
+      summary: "",
+      findings: [],
+    });
+    const card: WorkboardCard = {
+      id: "c",
+      title: "c",
+      status: "review",
+      priority: "normal",
+      labels: ["class:docs"],
+      position: 0,
+      createdAt: 0,
+      updatedAt: 0,
+      metadata: {
+        comments: [{ id: "v", body: "Verdict: accept", createdAt: 150, source: "agent:dev" }],
+      },
+    };
+    const worktree = { path: "/wt", branch: "b", baseCommit: "a", rung: "c" as const, handoff };
+    const readiness = (verification: object) =>
+      nodeReviewReadiness(card, { ...worktree, ...verification }, handoff, 200);
+
+    expect(readiness({ verification: done("pass", 120) })).toEqual({
+      kind: "verifying",
+      since: 100,
+    });
+    expect(
+      readiness({ verification: done("pass", 120), crossVerification: done("pass", 180) }),
+    ).toEqual({ kind: "ready", since: 180 });
+    expect(readiness({ verification: done("fail", 120) })).toEqual({ kind: "ready", since: 150 });
   });
 });

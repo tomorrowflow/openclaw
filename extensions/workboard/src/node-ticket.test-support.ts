@@ -3,7 +3,11 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { WorkboardCard, WorkboardExecutionTarget } from "@openclaw/workboard-contract";
+import type {
+  WorkboardCard,
+  WorkboardClassRung,
+  WorkboardExecutionTarget,
+} from "@openclaw/workboard-contract";
 import { expect, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { syncWorkboardAgentEnded, type WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
@@ -373,6 +377,14 @@ export const doneReport = reportMessages({
   proof: [{ command: "pytest", status: "passed" }],
 });
 
+/** A done report with the standards review a rung b or c brief asks for. */
+export const reviewedDoneReport = reportMessages({
+  outcome: "done",
+  summary: "Parser accepts empty input",
+  proof: [{ command: "pytest", status: "passed" }],
+  review: { findings: 0, fixed: 0 },
+});
+
 export const questionsReport = reportMessages({
   outcome: "needs_input",
   summary: "Empty input handling is ambiguous",
@@ -406,6 +418,8 @@ export async function finishNodeTicket(params: {
   onReview?: (card: WorkboardCard) => Promise<void>;
   readSessions?: WorkboardLifecycleSessionReader;
   now?: () => number;
+  /** Launches the ticket as a `class:docs` card at this rung. */
+  docsRung?: WorkboardClassRung["rung"];
 }) {
   const root = tempRoot("workboard-handoff-");
   const repos = createNodeRepos(root);
@@ -414,7 +428,18 @@ export async function finishNodeTicket(params: {
   }
   const store = createWorkboardSqliteTestStore();
   const gateway = createLocalNodeGateway();
-  const { card, sessionKey, runId } = await startNodeCard(store, gateway, repos.target);
+  if (params.docsRung) {
+    await store.upsertBoard({
+      id: "default",
+      orchestration: { classRungs: { docs: { rung: params.docsRung } } },
+    });
+  }
+  const { card, sessionKey, runId } = await startNodeCard(
+    store,
+    gateway,
+    repos.target,
+    params.docsRung ? ["class:docs"] : undefined,
+  );
   const worktree = path.join(repos.target.worktreesRoot, `wb-${card.id}`);
   const files = Object.entries(params.files ?? { "parser.py": "ok\n" });
   for (const [name, body] of files) {
@@ -426,7 +451,11 @@ export async function finishNodeTicket(params: {
   }
   await syncWorkboardAgentEnded({
     store,
-    event: { runId, success: true, messages: params.messages ?? doneReport },
+    event: {
+      runId,
+      success: true,
+      messages: params.messages ?? (params.docsRung ? reviewedDoneReport : doneReport),
+    },
     context: { runId, sessionKey },
     readSessions: endedSession(),
   });

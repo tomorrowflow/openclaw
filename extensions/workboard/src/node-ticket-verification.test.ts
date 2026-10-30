@@ -19,6 +19,7 @@ afterEach(() => {
 });
 
 const VERIFIER = { agentId: "verifier", model: "openai/gpt-6-sol" };
+const CROSS_VERIFIER = { agentId: "verifier-claude", model: "anthropic/claude-opus-5-5" };
 
 function verificationReply(block: unknown) {
   return [
@@ -35,7 +36,9 @@ function verificationReply(block: unknown) {
  * the verifier session's create, answers `chat.history` with `history`, and
  * the session owner's view says whether that session still runs.
  */
-async function verifiedTicket(params: { notes?: string; failCreate?: string } = {}) {
+async function verifiedTicket(
+  params: { notes?: string; failCreate?: string; docsRung?: "b" | "c"; cross?: boolean } = {},
+) {
   const onReview = vi.fn(async (_card: WorkboardCard) => {});
   const verifier = { running: false, history: [] as unknown[], creates: [] as unknown[] };
   const readSessions: WorkboardLifecycleSessionReader = async (options) => {
@@ -50,8 +53,14 @@ async function verifiedTicket(params: { notes?: string; failCreate?: string } = 
       complete: true,
     };
   };
-  const ticket = await finishNodeTicket({ onReview, readSessions });
-  await ticket.store.upsertBoard({ id: "default", orchestration: { verifier: VERIFIER } });
+  const ticket = await finishNodeTicket({ onReview, readSessions, docsRung: params.docsRung });
+  await ticket.store.upsertBoard({
+    id: "default",
+    orchestration: {
+      verifier: VERIFIER,
+      ...(params.cross ? { crossVerifier: CROSS_VERIFIER } : {}),
+    },
+  });
   if (params.notes) {
     await ticket.store.update(ticket.card.id, { notes: params.notes });
   }
@@ -82,7 +91,10 @@ async function verifiedTicket(params: { notes?: string; failCreate?: string } = 
   });
   const verificationOf = async () =>
     (await ticket.store.get(ticket.card.id))?.metadata?.automation?.target?.worktree?.verification;
-  return { ...ticket, onReview, verifier, verificationOf };
+  const crossVerificationOf = async () =>
+    (await ticket.store.get(ticket.card.id))?.metadata?.automation?.target?.worktree
+      ?.crossVerification;
+  return { ...ticket, onReview, verifier, verificationOf, crossVerificationOf };
 }
 
 describe("node ticket verification", () => {
@@ -213,6 +225,94 @@ describe("node ticket verification", () => {
     expect(onReview).toHaveBeenCalledTimes(2);
     await expect(store.dropNodeVerification(card.id)).resolves.toMatchObject({ id: card.id });
     await expect(ticket.verificationOf()).resolves.toBeUndefined();
+  });
+
+  it("cross-verifies a rung c round after its verification passed, before waking the board automation", async () => {
+    const ticket = await verifiedTicket({ docsRung: "c", cross: true });
+    const { store, card, handoffs, warn, onReview, verifier } = ticket;
+    const name = `verify-${card.id.slice(0, 8)}-r0`;
+
+    await handoffs.resume(warn);
+    expect(
+      (await store.get(card.id))?.metadata?.automation?.target?.worktree?.handoff,
+    ).toMatchObject({ phase: "imported", verify: true, crossVerify: true });
+    expect(verifier.creates).toEqual([
+      expect.objectContaining({ key: `agent:verifier:${name}-v0`, agentId: "verifier" }),
+    ]);
+
+    // The verification passes: the same pass starts the cross-verifier, and the review still waits.
+    verifier.running = false;
+    verifier.history = verificationReply({ verdict: "pass", summary: "pytest green" });
+    await handoffs.resume(warn);
+    expect(verifier.creates).toHaveLength(2);
+    expect(verifier.creates[1]).toMatchObject({
+      key: `agent:verifier-claude:${name}-x1`,
+      agentId: "verifier-claude",
+      model: "anthropic/claude-opus-5-5",
+      cwd: path.join(ticket.repos.target.worktreesRoot, name),
+    });
+    expect(onReview).not.toHaveBeenCalled();
+    await expect(ticket.verificationOf()).resolves.toMatchObject({
+      phase: "done",
+      verdict: "pass",
+    });
+    await expect(ticket.crossVerificationOf()).resolves.toMatchObject({
+      phase: "running",
+      sessionKey: `agent:verifier-claude:${name}-x1`,
+    });
+    expect(workboardCardConsumesNodeTicketSlot((await store.get(card.id))!, Date.now())).toBe(true);
+
+    verifier.running = false;
+    verifier.history = verificationReply({
+      verdict: "fail",
+      summary: "whitespace-only input raises",
+      findings: [{ path: "parser.py", line: 1, body: "whitespace-only input raises" }],
+    });
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(verifier.creates).toHaveLength(2);
+    expect(onReview).toHaveBeenCalledOnce();
+    await expect(ticket.crossVerificationOf()).resolves.toMatchObject({
+      phase: "done",
+      verdict: "fail",
+      sessionKey: `agent:verifier-claude:${name}-x1`,
+    });
+    expect((await store.get(card.id))?.metadata?.comments?.at(-1)).toMatchObject({
+      source: "agent:verifier-claude",
+      body: expect.stringMatching(/^\*\*Verification:\*\* fail/),
+    });
+
+    // The operator's re-run drops both; the cross-verifier runs again after the next pass.
+    await store.dropNodeVerification(card.id);
+    await expect(ticket.crossVerificationOf()).resolves.toBeUndefined();
+  });
+
+  it("never cross-verifies a rung c round whose verification failed, nor a rung b round", async () => {
+    for (const [docsRung, verdict] of [
+      ["c", "fail"],
+      ["b", "pass"],
+    ] as const) {
+      const ticket = await verifiedTicket({ docsRung, cross: true });
+      await ticket.handoffs.resume(ticket.warn);
+      ticket.verifier.running = false;
+      ticket.verifier.history = verificationReply({
+        verdict,
+        summary: verdict,
+        findings: verdict === "fail" ? [{ path: "parser.py", body: "broken" }] : [],
+      });
+      await ticket.handoffs.resume(ticket.warn);
+
+      expect(ticket.verifier.creates).toHaveLength(1);
+      expect(ticket.onReview).toHaveBeenCalledOnce();
+      await expect(ticket.crossVerificationOf()).resolves.toBeUndefined();
+      // A failed verification ends the wait: the cross-verifier would only confirm the rework.
+      const handoff = (await ticket.store.get(ticket.card.id))?.metadata?.automation?.target
+        ?.worktree?.handoff;
+      expect(handoff?.phase === "imported" && handoff.crossVerify).toBe(
+        docsRung === "c" ? true : undefined,
+      );
+    }
   });
 
   it("adopts a running verifier session whose record was lost, and copies the verdict to the publish", async () => {

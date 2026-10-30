@@ -811,7 +811,7 @@ A board's `orchestration.classRungs`, also set only through
 card's first `class:<name>` label, keyed without the `class:` prefix). A class
 not listed is at rung a. Rung c is for classes trusted to merge their own
 PRs; today it runs every round the way rung b does (standards review, agent
-decision, sampling):
+decision, sampling), plus the board's cross-verifier (see below):
 
 ```json5
 {
@@ -852,6 +852,16 @@ whose session verifies and the `provider/model` it runs on, which should
 differ from the ticket model so the proof is re-executed by another model.
 Saving refuses an empty `agentId` or a model that is not `provider/model`;
 `verifier: null` removes it. Without it no round is verified.
+
+A board's `orchestration.crossVerifier`, the same shape, adds a second,
+independent verification for rounds that ran at rung c (never a probe). It
+runs only after the round's verification passed, one after the other so the
+two never share the node's build caches, and an agent's accept at c needs
+both to pass (see **Accept** below). Rounds at a or b never run it, so it
+costs nothing below c. Pick an agent or model other than the verifier's, such
+as `{ agentId: "verifier-claude", model: "anthropic/claude-opus-5-5" }`
+beside a Codex verifier. Saving refuses a `crossVerifier` without a
+`verifier`; `crossVerifier: null` removes it.
 
 The plugin passes the session no tool restriction: the agent's own tools are
 the boundary. `agentId` must name a dedicated agent that has only `exec` and
@@ -1091,9 +1101,20 @@ model, so a verdict always comes from the configured one:
    created records `error` right away, so the card is never held by a
    verifier that cannot run. A record whose head or round is not the imported
    round's is stale: it gates nothing and the next import replaces it.
+   **Cross-verification:** on a board with an `orchestration.crossVerifier`,
+   a rung c round's import also records `crossVerify: true`, and once its
+   verification passed the same pass starts the cross-verifier the same way
+   (same brief and verify worktree path, key
+   `agent:<agentId>:verify-<card8>-r<round>-x<n>`), writing its record to
+   `crossVerification` and its comment from its own agent. The automation is
+   nudged only after it settles; a verification that did not pass nudges it
+   at once, with no cross-verification. The publish copies its verdict, model,
+   and times into the round's `reviews` entry as `crossVerification`. It has
+   no visual read and no trust KPI yet.
    `workboard.cards.verify {id}` (`operator.write`) drops a finished
-   verification of a card in review on an imported round, and the next pass
-   verifies it again in a fresh session: the way back from `error`. A
+   verification of a card in review on an imported round, and its
+   cross-verification, and the next pass verifies it again in a fresh
+   session: the way back from `error`. A
    verification still running when the round is decided, the card archived,
    or a rework round launched settles the same way once its session ends,
    and holds the card's node-ticket slot until then; a round published before
@@ -1149,12 +1170,15 @@ model, so a verdict always comes from the configured one:
    ran at rung b, and an agent posted `Verdict: accept` or
    `Verdict: rework: <finding>` since the import. On a board with a
    `verifier`, an accept also needs the round's verification to have passed:
-   the move is refused while it runs ("Verification is still running; wait
+   the move is refused while it runs ("The verification is still running; wait
    for its comment."), after a `fail` ("The verification failed: <summary>.
    Post `Verdict: rework: …` and rework it."), and after an `error` ("The
    verification could not finish (<summary>). Leave the card in review; the
-   operator decides or re-runs it."). A rework verdict and an operator's move
-   are never gated. Otherwise the move fails and
+   operator decides or re-runs it."). A round that ran at rung c on a board
+   with a `crossVerifier` also needs its cross-verification to have passed,
+   with the same refusals naming the cross-verification. A rework verdict and
+   an operator's move are never gated; the operator's move waits for the
+   cross-verification as it waits for the verification. Otherwise the move fails and
    names the next step: at rung a, post the verdict and let the operator
    decide. The move records `decidedBy` on the imported handoff; any later
    move to done by the operator, such as a retry after a failed publish,

@@ -181,9 +181,10 @@ export function workboardCardConsumesOwnerSlot(card: WorkboardOwnerSlotCard, now
 
 /**
  * A node ticket holds a pool slot while its turn and import run, and while its
- * verification runs on the node (one build at a time there), whatever the
- * card's status, archived included. In review otherwise it waits on a human,
- * not a node, so an un-accepted PR never blocks the next ticket (D52).
+ * verification or cross-verification runs on the node (one build at a time
+ * there), whatever the card's status, archived included. In review otherwise
+ * it waits on a human, not a node, so an un-accepted PR never blocks the next
+ * ticket (D52).
  */
 export function workboardCardConsumesNodeTicketSlot(
   card: WorkboardOwnerSlotCard,
@@ -192,7 +193,11 @@ export function workboardCardConsumesNodeTicketSlot(
   if (!isWorkboardNodeTicket(card)) {
     return false;
   }
-  if (card.metadata?.automation?.target?.worktree?.verification?.phase === "running") {
+  const worktree = card.metadata?.automation?.target?.worktree;
+  if (
+    worktree?.verification?.phase === "running" ||
+    worktree?.crossVerification?.phase === "running"
+  ) {
     return true;
   }
   return (
