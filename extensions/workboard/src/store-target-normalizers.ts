@@ -79,6 +79,7 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
       headCommit,
       importedAt,
       ...(value.verify === true ? { verify: true as const } : {}),
+      ...(value.crossVerify === true ? { crossVerify: true as const } : {}),
       ...(decidedBy && decidedBy !== "operator" ? { decidedBy } : {}),
       ...(typeof value.sampled === "boolean" ? { sampled: value.sampled } : {}),
     };
@@ -242,6 +243,9 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
       const visual = isRecord(entry.verification)
         ? reviewVisual(entry.verification.visual)
         : undefined;
+      const crossVerification = isRecord(entry.crossVerification)
+        ? verificationVerdict(entry.crossVerification.verdict)
+        : undefined;
       return [
         {
           round,
@@ -260,6 +264,15 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
                   ...verificationModel(entry.verification.model),
                   ...verificationSpan(entry.verification),
                   ...(visual ? { visual } : {}),
+                },
+              }
+            : {}),
+          ...(crossVerification && isRecord(entry.crossVerification)
+            ? {
+                crossVerification: {
+                  verdict: crossVerification,
+                  ...verificationModel(entry.crossVerification.model),
+                  ...verificationSpan(entry.crossVerification),
                 },
               }
             : {}),
@@ -375,6 +388,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
   const reviews = normalizeNodeReviews(value.reviews);
   const rounds = normalizeNodeRounds(value.rounds);
   const verification = normalizeNodeVerification(value.verification);
+  const crossVerification = normalizeNodeVerification(value.crossVerification);
   const stopRequestedAt = resolveOptionalIntegerOption(value.stopRequestedAt, { min: 0 });
   return worktreePath && branch && baseCommit
     ? {
@@ -389,6 +403,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         ...(reviews.length > 0 ? { reviews } : {}),
         ...(rounds.length > 0 ? { rounds } : {}),
         ...(verification ? { verification } : {}),
+        ...(crossVerification ? { crossVerification } : {}),
         ...(value.rung === "b" || value.rung === "c" ? { rung: value.rung } : {}),
         ...(stopRequestedAt !== undefined ? { stopRequestedAt } : {}),
       }

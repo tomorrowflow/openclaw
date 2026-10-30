@@ -28,10 +28,11 @@ export type WorkboardNodeVerificationFinding = {
  * `verifier` model re-runs the imported round's proof in a detached worktree
  * of `headCommit` on the ticket's node and tries to break the change. A
  * `running` record holds the card's node-ticket slot; a `done` record with
- * `verdict: "pass"` is what an agent's accept at rung b needs. A record whose
- * `headCommit` or `round` is not the imported round's is stale and ignored.
- * The next round's import replaces it; `workboard.cards.verify` drops a
- * `done` record so the handoff pass runs a fresh one.
+ * `verdict: "pass"` is what an agent's accept at rung b or c needs. A record
+ * whose `headCommit` or `round` is not the imported round's is stale and
+ * ignored. The next round's import replaces it; `workboard.cards.verify` drops
+ * a `done` record so the handoff pass runs a fresh one. The board's
+ * `crossVerifier` writes the same record to `crossVerification`.
  */
 export type WorkboardNodeVerification =
   | {

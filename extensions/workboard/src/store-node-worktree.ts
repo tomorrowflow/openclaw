@@ -11,7 +11,7 @@ import {
   type WorkboardNodeRoundFacts,
   withNodeRound,
 } from "./node-ticket-rounds.js";
-import { visualCheckVerification } from "./review-readiness.js";
+import { type VerificationSlot, visualCheckVerification } from "./review-readiness.js";
 import { appendComment, assertCanMutateClaimedCard } from "./store-card-helpers.js";
 import type { WorkboardMutationScope } from "./store-inputs.js";
 import { WorkboardNotificationStore } from "./store-notifications.js";
@@ -143,21 +143,30 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
     return await this.updateNodeWorktree(id, input, scope, withNodeRound);
   }
 
-  /** Records the current round's verification, replacing the previous record. */
+  /** Records the current round's verification in its slot, replacing the previous record. */
   async setNodeVerification(
     id: string,
-    input: { worktreePath: string; verification: WorkboardNodeVerification },
+    input: {
+      worktreePath: string;
+      slot?: VerificationSlot;
+      verification: WorkboardNodeVerification;
+    },
   ): Promise<WorkboardCard | undefined> {
-    return await this.updateNodeWorktree(id, input, undefined, (worktree, { verification }) => ({
-      ...worktree,
-      verification,
-    }));
+    return await this.updateNodeWorktree(
+      id,
+      input,
+      undefined,
+      (worktree, { slot = "verification", verification }) => ({
+        ...worktree,
+        [slot]: verification,
+      }),
+    );
   }
 
   /**
    * The operator's re-run: drops a finished verification of a ticket waiting
-   * in review on its imported round, so the handoff pass starts a fresh one.
-   * The way back from an `error` verdict.
+   * in review on its imported round, and its cross-verification, so the
+   * handoff pass starts both afresh. The way back from an `error` verdict.
    */
   async dropNodeVerification(id: string): Promise<WorkboardCard> {
     return await this.enqueueMutation(async () => {
@@ -177,14 +186,17 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
               "only a node ticket waiting in review on an imported round can be verified again.",
             );
           }
-          if (worktree.verification?.phase !== "done") {
+          if (
+            worktree.verification?.phase !== "done" ||
+            worktree.crossVerification?.phase === "running"
+          ) {
             throw new Error(
               worktree.verification
                 ? "the verification is still running; wait for its comment."
                 : "this round has no finished verification to re-run; the handoff pass starts one when the board has a verifier.",
             );
           }
-          const { verification: _dropped, ...rest } = worktree;
+          const { verification: _dropped, crossVerification: _droppedCross, ...rest } = worktree;
           return {
             metadata: {
               ...card.metadata,
