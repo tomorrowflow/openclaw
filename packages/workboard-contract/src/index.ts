@@ -463,10 +463,10 @@ export type WorkboardNodeReviewVerdict = {
     visual?: { verifier: WorkboardNodeVisualRead["verdict"]; operator: WorkboardVisualVerdict };
   };
   /**
-   * The round ran at rung b (`WorkboardNodeWorktree.rung`), so its
+   * The round ran at rung b or c (`WorkboardNodeWorktree.rung`), so its
    * verification was visible to whoever decided it. Absent = rung a.
    */
-  rung?: "b";
+  rung?: WorkboardAgentRung;
 };
 
 /**
@@ -610,10 +610,10 @@ export type WorkboardNodeWorktree = {
   rounds?: WorkboardNodeRound[];
   verification?: WorkboardNodeVerification;
   /**
-   * The round runs at rung b: its class was at b on the board when it
+   * The round runs at rung b or c: its class was there on the board when it
    * launched, so its brief asked for the standards review. Absent = rung a.
    */
-  rung?: "b";
+  rung?: WorkboardAgentRung;
   /**
    * When an operator asked to stop the running session. Set before the abort,
    * so the run's end records a stop (card back in todo, worktree kept), not a
@@ -757,12 +757,27 @@ export type WorkboardOrchestrationSettings = {
 };
 
 /**
- * Rung b runs a standards reviewer in the ticket session and lets an agent
- * accept the ticket. `sampleEvery` (default 3) is the share of agent-accepted
+ * The trust ladder: at rung a the operator decides every round; at b a
+ * standards reviewer runs in the ticket session and an agent may accept the
+ * ticket; c keeps b's review and agent decision for classes trusted to merge
+ * their own PRs.
+ */
+export type WorkboardRung = "a" | "b" | "c";
+
+/** The rungs where an agent decides a round. */
+export type WorkboardAgentRung = Exclude<WorkboardRung, "a">;
+
+/** Whether an agent decides a round at this rung; absent is rung a. */
+export function workboardAgentDecides(rung: WorkboardRung | undefined): rung is WorkboardAgentRung {
+  return rung === "b" || rung === "c";
+}
+
+/**
+ * A class's rung. `sampleEvery` (default 3) is the share of agent-accepted
  * PRs a human reads: 1 in `sampleEvery`, chosen by the card.
  */
 export type WorkboardClassRung = {
-  rung: "a" | "b";
+  rung: WorkboardRung;
   sampleEvery?: number;
   /**
    * Epoch ms when the class last changed rung. The store stamps it when a

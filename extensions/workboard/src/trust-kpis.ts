@@ -1,13 +1,14 @@
-import type {
-  WorkboardCard,
-  WorkboardClassRung,
-  WorkboardNodeReviewVerdict,
-  WorkboardNodeRework,
-  WorkboardOrchestrationSettings,
-  WorkboardTrustBlind,
-  WorkboardTrustCounts,
-  WorkboardTrustResult,
-  WorkboardTrustWeek,
+import {
+  workboardAgentDecides,
+  type WorkboardCard,
+  type WorkboardNodeReviewVerdict,
+  type WorkboardNodeRework,
+  type WorkboardOrchestrationSettings,
+  type WorkboardRung,
+  type WorkboardTrustBlind,
+  type WorkboardTrustCounts,
+  type WorkboardTrustResult,
+  type WorkboardTrustWeek,
 } from "@openclaw/workboard-contract";
 import { nodeTicketTarget } from "./node-ticket.js";
 import { SMART_ZONE_TOKENS, workboardClassRung, workboardTaskClass } from "./store-constants.js";
@@ -127,9 +128,10 @@ function verdictAgrees(ticket: TicketFacts, review: WorkboardNodeReviewVerdict):
   return (review.verdict === "rework") === reworkedAfter(ticket, review);
 }
 
-// Rung b lets an agent decide a round; at rung a the operator decides every one.
-function roundRung(review: WorkboardNodeReviewVerdict): WorkboardClassRung["rung"] {
-  return review.decidedBy === "agent" ? "b" : "a";
+// An agent decides a round at the rung it ran at (b before rung c existed);
+// at rung a the operator decides every one.
+function roundRung(review: WorkboardNodeReviewVerdict): WorkboardRung {
+  return review.decidedBy === "agent" ? (review.rung ?? "b") : "a";
 }
 
 /**
@@ -153,7 +155,7 @@ function scopeRounds(
 
 function countBlind(tickets: readonly TicketFacts[]): WorkboardTrustBlind {
   const blind: WorkboardTrustBlind = {};
-  for (const rung of ["a", "b"] as const) {
+  for (const rung of ["a", "b", "c"] as const) {
     const scoped = tickets.flatMap(
       (ticket) =>
         scopeRounds(
@@ -184,7 +186,7 @@ function isAgentAccept(review: WorkboardNodeReviewVerdict): boolean {
 // a rung a round (a rung b round shows it), or the reader of a sampled agent accept.
 function decidedBlindToVerification(review: WorkboardNodeReviewVerdict): boolean {
   return (
-    (review.decidedBy === undefined && review.rung !== "b") ||
+    (review.decidedBy === undefined && !workboardAgentDecides(review.rung)) ||
     (isAgentAccept(review) && review.sampled === true)
   );
 }

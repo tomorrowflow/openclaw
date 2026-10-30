@@ -191,8 +191,8 @@ function normalizeClassRungs(
       if (name.startsWith("class:")) {
         throw new Error(`class rung ${name} must name the class without the class: prefix.`);
       }
-      if (!isRecord(entry) || (entry.rung !== "a" && entry.rung !== "b")) {
-        throw new Error(`class rung ${name} needs rung a or b.`);
+      if (!isRecord(entry) || (entry.rung !== "a" && entry.rung !== "b" && entry.rung !== "c")) {
+        throw new Error(`class rung ${name} needs rung a, b, or c.`);
       }
       let sampleEvery: number | undefined;
       if (entry.sampleEvery !== undefined && entry.sampleEvery !== null) {

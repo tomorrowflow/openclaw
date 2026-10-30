@@ -1,3 +1,5 @@
+import type { WorkboardRung } from "./index.js";
+
 /**
  * The dev loop trust KPIs (D9/D53), projected from node ticket cards on read.
  * The Workboard plugin owns the projection.
@@ -84,12 +86,13 @@ export type WorkboardTrustWeek = {
 /**
  * A class's counts over blind rounds: those published at or after
  * 2026-10-11 13:01 CEST, when the operator stopped seeing the agent's verdict
- * before deciding. A round an agent decided ran at rung b, every other
- * round at rung a. A ticket is in a rung when it has a blind round there, and
+ * before deciding. A round an agent decided ran at the rung it recorded (b
+ * when it predates rung c), every other round at rung a. A ticket is in a
+ * rung when it has a blind round there, and
  * counts as accepted there when its first publish is one of them; its
  * ticket-wide facts (rework, blocks, attempts) come along whole.
  */
-export type WorkboardTrustBlind = Partial<Record<"a" | "b", WorkboardTrustCounts>>;
+export type WorkboardTrustBlind = Partial<Record<WorkboardRung, WorkboardTrustCounts>>;
 
 /**
  * A read-time projection of node ticket card facts, never stored. Task class
@@ -113,7 +116,7 @@ export type WorkboardTrustResult = {
   classes: Array<
     WorkboardTrustCounts & {
       taskClass: string;
-      rung?: "a" | "b";
+      rung?: WorkboardRung;
       rungSince?: number;
       sinceRung?: WorkboardTrustCounts;
       blind: WorkboardTrustBlind;

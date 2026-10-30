@@ -1,15 +1,16 @@
-import type {
-  WorkboardAttachment,
-  WorkboardBoardMetadata,
-  WorkboardCard,
-  WorkboardDiagnostic,
-  WorkboardExecution,
-  WorkboardExecutionStatus,
-  WorkboardLaunchState,
-  WorkboardMetadata,
-  WorkboardNodeWorktree,
-  WorkboardStaleState,
-  WorkboardStatus,
+import {
+  workboardAgentDecides,
+  type WorkboardAttachment,
+  type WorkboardBoardMetadata,
+  type WorkboardCard,
+  type WorkboardDiagnostic,
+  type WorkboardExecution,
+  type WorkboardExecutionStatus,
+  type WorkboardLaunchState,
+  type WorkboardMetadata,
+  type WorkboardNodeWorktree,
+  type WorkboardStaleState,
+  type WorkboardStatus,
 } from "@openclaw/workboard-contract";
 import { asNonArrayRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { createWorkboardSqliteStores } from "./sqlite-store.js";
@@ -213,6 +214,7 @@ export class WorkboardStore extends WorkboardNodeProbeStore {
             preparedAt: card.updatedAt,
           };
           const target = card.metadata?.automation?.target;
+          const classRung = workboardClassRung(orchestration, card.labels)?.rung;
           return {
             sessionKey: input.requestedSessionKey,
             runId: provisionalRunId,
@@ -236,9 +238,7 @@ export class WorkboardStore extends WorkboardNodeProbeStore {
                         ...target,
                         worktree: {
                           ...input.nodeWorktree,
-                          ...(workboardClassRung(orchestration, card.labels)?.rung === "b"
-                            ? { rung: "b" as const }
-                            : {}),
+                          ...(workboardAgentDecides(classRung) ? { rung: classRung } : {}),
                         },
                       },
                     },

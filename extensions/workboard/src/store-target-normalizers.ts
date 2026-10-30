@@ -252,7 +252,7 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
           ...(typeof entry.sampled === "boolean" ? { sampled: entry.sampled } : {}),
           ...(readAt === undefined ? {} : { readAt }),
           ...(verdictAt === undefined ? {} : { verdictAt }),
-          ...(entry.rung === "b" ? { rung: "b" as const } : {}),
+          ...(entry.rung === "b" || entry.rung === "c" ? { rung: entry.rung } : {}),
           ...(verification && isRecord(entry.verification)
             ? {
                 verification: {
@@ -389,7 +389,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         ...(reviews.length > 0 ? { reviews } : {}),
         ...(rounds.length > 0 ? { rounds } : {}),
         ...(verification ? { verification } : {}),
-        ...(value.rung === "b" ? { rung: "b" as const } : {}),
+        ...(value.rung === "b" || value.rung === "c" ? { rung: value.rung } : {}),
         ...(stopRequestedAt !== undefined ? { stopRequestedAt } : {}),
       }
     : undefined;

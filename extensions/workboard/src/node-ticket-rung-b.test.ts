@@ -130,7 +130,7 @@ describe("Workboard rung b", () => {
     await store.upsertBoard({ id: "app", orchestration: { classRungs: { docs: { rung: "a" } } } });
     await expect(rungs()).resolves.toEqual({ docs: { rung: "a", since: expect.any(Number) } });
     for (const [classRungs, error] of [
-      [{ docs: { rung: "c" } }, "class rung docs needs rung a or b."],
+      [{ docs: { rung: "d" } }, "class rung docs needs rung a, b, or c."],
       [
         { docs: { rung: "b", sampleEvery: 0 } },
         "class rung docs sampleEvery must be an integer from 1 to 100.",
@@ -421,6 +421,25 @@ describe("Workboard rung b", () => {
       headCommit: "b".repeat(40),
       importedAt: expect.any(Number),
     });
+  });
+
+  it("runs a rung c class as rung b: the launch records c and an agent accepts after its verdict", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const atC = await importedDocsTicket(store, { classRungs: { docs: { rung: "c" } } });
+    const worktree = nodeTicketTarget(expectDefined(await store.get(atC.id), "card"))?.worktree;
+    expect(worktree?.rung).toBe("c");
+    // A round launched at b stays the agent's to decide once its class reaches c.
+    const promoted = await importedDocsTicket(store, {
+      classRungs: { docs: { rung: "b" } },
+      later: { docs: { rung: "c" } },
+    });
+    const move = agentTools(store)("workboard_move");
+    for (const card of [atC, promoted]) {
+      await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
+      await move.execute("accept", { id: card.id, status: "done" });
+      expect((await store.get(card.id))?.status).toBe("done");
+      await expect(handoffOf(store, card)).resolves.toMatchObject({ decidedBy: "agent:dev" });
+    }
   });
 
   it("samples by the card: stable per card, every reworked round, and 1 in sampleEvery", () => {

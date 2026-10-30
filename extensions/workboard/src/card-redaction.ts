@@ -1,8 +1,9 @@
-import type {
-  WorkboardAutomation,
-  WorkboardCard,
-  WorkboardComment,
-  WorkboardOperatorCard,
+import {
+  workboardAgentDecides,
+  type WorkboardAutomation,
+  type WorkboardCard,
+  type WorkboardComment,
+  type WorkboardOperatorCard,
 } from "@openclaw/workboard-contract";
 import { workboardCardPullRequest, workboardCardStage } from "./card-stage.js";
 import { blindVisualCheckComment, isVisualCheckComment } from "./node-ticket-rounds.js";
@@ -138,7 +139,7 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
   if (decided) {
     return redacted;
   }
-  const rungA = worktree.rung !== "b";
+  const rungA = !workboardAgentDecides(worktree.rung);
   const hideRecord = rungA && currentNodeVerification(worktree, handoff)?.phase === "done";
   const hiddenBody = (comment: WorkboardComment): string | undefined => {
     if (comment.createdAt < handoff.importedAt) {

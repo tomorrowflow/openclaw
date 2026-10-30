@@ -1,4 +1,5 @@
 import type {
+  WorkboardAgentRung,
   WorkboardCard,
   WorkboardNodeReviewVerdict,
   WorkboardNodeRework,
@@ -47,13 +48,13 @@ type PublishCard = {
   headCommit: string;
   importedAt: number;
   rework?: WorkboardNodeRework;
-  /** An agent accepted the round at rung b; `sampled` is set for its accept verdict. */
+  /** An agent accepted the round at rung b or c; `sampled` is set for its accept verdict. */
   decidedByAgent: boolean;
   sampled?: boolean;
   /** The round's finished verification, copied into its review entry. */
   verification?: NonNullable<WorkboardNodeReviewVerdict["verification"]>;
-  /** The round ran at rung b; copied into its review entry. */
-  rung?: "b";
+  /** The round ran at rung b or c; copied into its review entry. */
+  rung?: WorkboardAgentRung;
 };
 
 export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
@@ -144,7 +145,7 @@ function rungBLines(item: PublishCard, from: number | undefined): Array<string |
       ? undefined
       : item.sampled
         ? "Sampled for human review: a person reads this PR before it merges."
-        : "Not sampled for human review: the agent accepted it at rung b.",
+        : `Not sampled for human review: the agent accepted it at rung ${item.rung ?? "b"}.`,
   ];
 }
 
