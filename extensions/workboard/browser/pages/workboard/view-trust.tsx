@@ -217,6 +217,7 @@ function RungWindows(props: { classes: readonly TrustClass[] }) {
           <th scope="col">{t("workboard.trustRung")}</th>
           <th scope="col">{t("workboard.trustBlindAt", { rung: "a" })}</th>
           <th scope="col">{t("workboard.trustBlindAt", { rung: "b" })}</th>
+          <th scope="col">{t("workboard.trustBlindAt", { rung: "c" })}</th>
           <th scope="col">{t("workboard.trustSinceRung")}</th>
           <th scope="col">
             {t("workboard.trustToPromotion", {
@@ -243,12 +244,20 @@ function RungWindows(props: { classes: readonly TrustClass[] }) {
               </td>
               <td>{acceptedClean(entry.blind.a)}</td>
               <td>{acceptedClean(entry.blind.b)}</td>
+              <td>{acceptedClean(entry.blind.c)}</td>
               <td>
                 {acceptedClean(entry.sinceRung)}
                 <Show when={entry.sinceRung?.reworkedAccepts}>
                   {(count) => (
                     <span class="workboard-trust-table__note">
                       {t("workboard.trustReopened", { count: String(count()) })}
+                    </span>
+                  )}
+                </Show>
+                <Show when={entry.sinceRung?.regressions}>
+                  {(count) => (
+                    <span class="workboard-trust-table__note">
+                      {t("workboard.trustRegressions", { count: String(count()) })}
                     </span>
                   )}
                 </Show>

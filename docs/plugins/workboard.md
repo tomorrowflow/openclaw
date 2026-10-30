@@ -1224,7 +1224,28 @@ error such as a rate limit, or a network failure keeps the last known state and
 logs a warning; the next read catches up. A merge is a GitHub fact, not the
 card's verdict: the round's `reviews` entry is unchanged. Archived cards and
 rework rounds in progress are not read; the next publish records the state
-again.
+again. A merge read this way also records `mergedAt` and `mergeCommit`, the
+commit GitHub put on the base branch.
+
+**Regression watch (D37):** after each state read, the same pass watches every
+merge with `mergeCommit` for 7 days after `mergedAt`: one paged GraphQL read
+of each repository's default branch since its oldest watched merge (at most 5
+pages of 100 commits). A merge regressed when a later commit reverts it (git's
+`This reverts commit <mergeCommit>` line, or a title starting
+`Revert "… (#<number>)"` as GitHub's revert button writes for a squash merge),
+or when the merge commit's own combined checks ended `FAILURE` or `ERROR`
+while its parent's ended `SUCCESS`. Pending checks or a red parent are no
+regression of the merge. The watch records `pullRequest.regression`
+(`{kind: "revert" | "red_main", at, commit}`) with a notice comment, once: a
+recorded regression is never read again. When an agent accepted the merged
+round at rung c and its class is still at c, the watch first moves the class
+to rung b on the board (D37), which stamps its `since`, and records
+`demoted: true`. The operator promotes it again with `workboard.boards.upsert`.
+At rung b a batch merged by hand can turn red mid-batch and green at its last
+commit; that counts too. `workboard.cards.dismissRegression {id}`
+(`operator.write`) marks a false one `dismissedAt`: the trust KPIs then leave
+it out, and a demotion it caused stays. Merges recorded before the merge facts
+existed are not watched.
 
 **Conflicts:** when the read finds a done ticket's open PR `CONFLICTING` with
 its base, Workboard reopens the ticket for a rework round in the same write:
@@ -1327,6 +1348,12 @@ count, so a class's verifier agreement at its current rung is read from
 entry carries a visual check with a verifier read other than `not_checked`,
 and `visualAgreedRounds` those where the verifier's visual verdict matched
 the operator's. Rounds decided without a visual check count in neither.
+
+**Regressions:** `regressions` counts merged tickets with a recorded,
+undismissed regression (see the regression watch above). It belongs to the
+ticket's last published round, the one its PR merged with, so `blind` and
+`sinceRung` count it only where that round counts. The rung c entry bar reads
+it from `sinceRung` (zero since the promotion).
 
 **Blind counts:** each class row also carries `blind`, the same counts over
 rounds published since the blind verdict went live (2026-10-11 13:01 CEST),
@@ -1705,13 +1732,13 @@ Diagnostics are computed from local card metadata. Built-in checks flag:
 Gateway RPC methods live under `workboard.*`. Sessions board methods use the same
 read/write scopes as boards:
 
-| Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `cards.probes`, `overview`, `transcriptViewer`, `officeViewer`, `architectureViewer`                                                                                                                                                                                                                |
-| `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.sampleRead`, `cards.verify`, `cards.visualCheck`, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
-| `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `operator.admin` | `cards.probe`                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Scope            | Methods                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operator.read`  | `cards.list`, `cards.export`, `cards.diagnostics`, attachment list/get, notification event reads, `boards.list`, `cards.stats`, `cards.trust`, `cards.runs`, `cards.probes`, `overview`, `transcriptViewer`, `officeViewer`, `architectureViewer`                                                                                                                                                                                                                                           |
+| `operator.read`  | `sessionsBoard.read`                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `operator.write` | `cards.diagnostics.refresh`, create/captureSession/update/move/delete/comment/link/linkDependency/proof/artifact, attachment add/delete, worker log, protocol violation, claim/heartbeat/release/promote/reassign/reclaim/complete/block/unblock/start, `cards.sampleRead`, `cards.dismissRegression`, `cards.verify`, `cards.visualCheck`, `cards.dispatch`, `cards.bulk`, archive, `boards.upsert`/`archive`/`delete`, `cards.specify`/`decompose`, notification subscribe/delete/advance |
+| `operator.write` | `sessionsBoard.update`, `sessionsBoard.move`                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `operator.admin` | `cards.probe`                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
 `workboard.cards.update`, `workboard.cards.move`, `workboard.cards.archive`, and
 `workboard.cards.delete` accept an optional `expectedUpdatedAt` request field.

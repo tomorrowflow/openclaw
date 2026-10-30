@@ -37,6 +37,8 @@ type TicketFacts = {
   /** Turn-end context of each run that recorded one, with when it ended. */
   contexts: ReadonlyArray<{ contextTokens: number; endedAt: number }>;
   reviews: readonly WorkboardNodeReviewVerdict[];
+  /** The merged PR regressed (not dismissed); it carries the ticket's last published round. */
+  regressed: boolean;
 };
 
 function weekStart(at: number): number {
@@ -92,6 +94,10 @@ function ticketFacts(card: WorkboardCard): TicketFacts | undefined {
       contextTokens === undefined ? [] : [{ contextTokens, endedAt: endedAt ?? startedAt }],
     ),
     reviews: worktree?.reviews ?? [],
+    regressed:
+      handoff?.phase === "published" &&
+      handoff.pullRequest?.regression !== undefined &&
+      handoff.pullRequest.regression.dismissedAt === undefined,
   };
 }
 
@@ -150,7 +156,14 @@ function scopeRounds(
   }
   const { acceptedAt, ...rest } = ticket;
   const acceptedHere = acceptedAt !== undefined && reviews.some((review) => review.round === 0);
-  return { ...rest, ...(acceptedHere ? { acceptedAt } : {}), reviews };
+  // The merge carried the last published round; a scope without it did not merge it.
+  const merged = ticket.reviews.at(-1);
+  return {
+    ...rest,
+    ...(acceptedHere ? { acceptedAt } : {}),
+    reviews,
+    regressed: ticket.regressed && merged !== undefined && reviews.includes(merged),
+  };
 }
 
 function countBlind(tickets: readonly TicketFacts[]): WorkboardTrustBlind {
@@ -228,6 +241,7 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
     verifierCatches: 0,
     visualRounds: 0,
     visualAgreedRounds: 0,
+    regressions: 0,
   };
   for (const ticket of tickets) {
     const visual = ticket.reviews.flatMap((review) =>
@@ -275,6 +289,7 @@ function countTickets(tickets: readonly TicketFacts[]): WorkboardTrustCounts {
       counts.verdictAgreedCards += agreed === rounds.length ? 1 : 0;
     }
     const accepted = ticket.acceptedAt !== undefined;
+    counts.regressions += ticket.regressed ? 1 : 0;
     counts.accepted += accepted ? 1 : 0;
     counts.cleanAccepted += accepted && isClean(ticket) ? 1 : 0;
     counts.firstPass += ticket.imported && ticket.blocks === 0 ? 1 : 0;

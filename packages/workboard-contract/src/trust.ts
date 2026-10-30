@@ -68,6 +68,11 @@ export type WorkboardTrustCounts = {
    */
   visualRounds: number;
   visualAgreedRounds: number;
+  /**
+   * Merged tickets whose merge the regression watch found reverted or turning
+   * the base branch red within 7 days, dismissed ones left out (D37).
+   */
+  regressions: number;
 };
 
 /** Accepted tickets in one UTC week (Monday 00:00), by acceptance time. */

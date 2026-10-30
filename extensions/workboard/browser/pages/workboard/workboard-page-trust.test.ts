@@ -44,6 +44,7 @@ function trustResult(accepted: number, autonomous: number): WorkboardTrustResult
     verifierCatches: 0,
     visualRounds: 4,
     visualAgreedRounds: 3,
+    regressions: 0,
   };
   return {
     boardId: "app",
@@ -150,11 +151,17 @@ describe("Workboard trust KPIs", () => {
 
   it("shows each class's blind windows, its since-rung window, and the gap to promotion", async () => {
     const base = trustResult(3, 3);
-    const counts = (accepted: number, cleanAccepted: number, reworkedAccepts = 0) => ({
+    const counts = (
+      accepted: number,
+      cleanAccepted: number,
+      reworkedAccepts = 0,
+      regressions = 0,
+    ) => ({
       ...base.total,
       accepted,
       cleanAccepted,
       reworkedAccepts,
+      regressions,
     });
     const page = mountTrust({ orchestration: { defaultTarget: TARGET } }, () => ({
       ...base,
@@ -179,6 +186,14 @@ describe("Workboard trust KPIs", () => {
           sinceRung: counts(5, 4, 1),
           blind: { a: counts(16, 13), b: counts(5, 4) },
         },
+        {
+          taskClass: "server-fix",
+          ...base.total,
+          rung: "c",
+          rungSince: Date.UTC(2026, 9, 30, 12),
+          sinceRung: counts(4, 4, 0, 1),
+          blind: { a: counts(16, 13), b: counts(30, 28), c: counts(4, 4) },
+        },
       ],
     }));
 
@@ -190,15 +205,25 @@ describe("Workboard trust KPIs", () => {
     const rows = [...popover.querySelectorAll("tbody")[3]!.querySelectorAll("tr")].map((row) =>
       [...row.querySelectorAll("th, td")].map((cell) => cell.textContent?.trim()),
     );
-    expect(rows[0]).toEqual(["ios-ui", "a", "25 / 18 clean", "15 / 8 clean", "–", "10 more clean"]);
+    expect(rows[0]).toEqual([
+      "ios-ui",
+      "a",
+      "25 / 18 clean",
+      "15 / 8 clean",
+      "–",
+      "–",
+      "10 more clean",
+    ]);
     expect(rows[1]?.slice(-1)).toEqual(["Met"]);
     expect(rows[2]?.[0]).toBe("server-refactor");
     expect(rows[2]?.[1]).toMatch(/^b since /);
     expect(rows[2]?.slice(2)).toEqual([
       "16 / 13 clean",
       "5 / 4 clean",
+      "–",
       "5 / 4 clean1 reopened",
       "–",
     ]);
+    expect(rows[3]?.slice(4)).toEqual(["4 / 4 clean", "4 / 4 clean1 regressed", "–"]);
   });
 });

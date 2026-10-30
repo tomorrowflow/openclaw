@@ -3,11 +3,16 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { WorkboardCard, WorkboardExecutionTarget } from "@openclaw/workboard-contract";
+import type {
+  WorkboardCard,
+  WorkboardClassRung,
+  WorkboardExecutionTarget,
+} from "@openclaw/workboard-contract";
 import { expect, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { syncWorkboardAgentEnded, type WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
 import { createNodeTicketHandoffs } from "./node-ticket-handoff.js";
+import type { BaseBranchCommit } from "./node-ticket-regressions.js";
 import type { WorkboardNodeTicketRuntime } from "./node-ticket.js";
 import { REVIEW_READINESS_DEADLINE_MS } from "./review-readiness.js";
 import type { WorkboardStore } from "./store.js";
@@ -208,7 +213,11 @@ export function createFakeGitHub(remote: string) {
   // Title and body of an open PR by its URL; a PATCH replaces them.
   const pullTexts = new Map<string, { title: string; body: string }>();
   // Closed PRs on the branch, newest first, by their head commit.
-  const closedPulls: Array<{ html_url: string; sha: string; merged: boolean }> = [];
+  // `sha` is also the merge commit of a merged one; `mergedAt` defaults to now.
+  const closedPulls: Array<{ html_url: string; sha: string; merged: boolean; mergedAt?: number }> =
+    [];
+  // The default branch's commits, newest first, for the regression watch.
+  const baseHistory: BaseBranchCommit[] = [];
   const rejectCreate: { value?: { message: string; errors: Array<{ message: string }> } } = {};
   // Open PRs still in draft; the GraphQL ready mutation removes one by its node id.
   const draftPulls = new Set<string>();
@@ -244,10 +253,12 @@ export function createFakeGitHub(remote: string) {
           isDraft: draftPulls.has(html_url),
           mergeable: conflictingPulls.has(html_url) ? "CONFLICTING" : "MERGEABLE",
         })),
-        ...closedPulls.map(({ html_url, merged }) => ({
+        ...closedPulls.map(({ html_url, merged, sha, mergedAt }) => ({
           number: Number(html_url.split("/").at(-1)),
           state: merged ? "MERGED" : "CLOSED",
           isDraft: false,
+          mergedAt: merged ? new Date(mergedAt ?? Date.now()).toISOString() : null,
+          mergeCommit: merged ? { oid: sha } : null,
         })),
       ];
       const first = Number(/first: (\d+)/.exec(String(body.query))?.[1] ?? 100);
@@ -260,6 +271,26 @@ export function createFakeGitHub(remote: string) {
               pullRequests: {
                 nodes: all.slice(start, end),
                 pageInfo: { hasNextPage: end < all.length, endCursor: String(end) },
+              },
+            },
+          },
+        }),
+        { status: 200 },
+      );
+    }
+    if (url.endsWith("/graphql") && String(body?.query).includes("defaultBranchRef")) {
+      const nodes = baseHistory.map(({ oid, message, checks, parentChecks }) => ({
+        oid,
+        message,
+        statusCheckRollup: checks ? { state: checks } : null,
+        parents: { nodes: [{ statusCheckRollup: parentChecks ? { state: parentChecks } : null }] },
+      }));
+      return new Response(
+        JSON.stringify({
+          data: {
+            repository: {
+              defaultBranchRef: {
+                target: { history: { nodes, pageInfo: { hasNextPage: false, endCursor: null } } },
               },
             },
           },
@@ -327,6 +358,7 @@ export function createFakeGitHub(remote: string) {
     openPulls,
     pullTexts,
     closedPulls,
+    baseHistory,
     rejectCreate,
     draftPulls,
     conflictingPulls,
@@ -373,6 +405,14 @@ export const doneReport = reportMessages({
   proof: [{ command: "pytest", status: "passed" }],
 });
 
+/** A done report with the standards review a rung b or c brief asks for. */
+export const reviewedDoneReport = reportMessages({
+  outcome: "done",
+  summary: "Parser accepts empty input",
+  proof: [{ command: "pytest", status: "passed" }],
+  review: { findings: 0, fixed: 0 },
+});
+
 export const questionsReport = reportMessages({
   outcome: "needs_input",
   summary: "Empty input handling is ambiguous",
@@ -406,6 +446,8 @@ export async function finishNodeTicket(params: {
   onReview?: (card: WorkboardCard) => Promise<void>;
   readSessions?: WorkboardLifecycleSessionReader;
   now?: () => number;
+  /** Launches the ticket as a `class:docs` card at this rung. */
+  docsRung?: WorkboardClassRung["rung"];
 }) {
   const root = tempRoot("workboard-handoff-");
   const repos = createNodeRepos(root);
@@ -414,7 +456,18 @@ export async function finishNodeTicket(params: {
   }
   const store = createWorkboardSqliteTestStore();
   const gateway = createLocalNodeGateway();
-  const { card, sessionKey, runId } = await startNodeCard(store, gateway, repos.target);
+  if (params.docsRung) {
+    await store.upsertBoard({
+      id: "default",
+      orchestration: { classRungs: { docs: { rung: params.docsRung } } },
+    });
+  }
+  const { card, sessionKey, runId } = await startNodeCard(
+    store,
+    gateway,
+    repos.target,
+    params.docsRung ? ["class:docs"] : undefined,
+  );
   const worktree = path.join(repos.target.worktreesRoot, `wb-${card.id}`);
   const files = Object.entries(params.files ?? { "parser.py": "ok\n" });
   for (const [name, body] of files) {
@@ -426,7 +479,11 @@ export async function finishNodeTicket(params: {
   }
   await syncWorkboardAgentEnded({
     store,
-    event: { runId, success: true, messages: params.messages ?? doneReport },
+    event: {
+      runId,
+      success: true,
+      messages: params.messages ?? (params.docsRung ? reviewedDoneReport : doneReport),
+    },
     context: { runId, sessionKey },
     readSessions: endedSession(),
   });
