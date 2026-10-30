@@ -1582,6 +1582,13 @@ Archiving a linked session does not hide its terminal outcome from this sweep.
 After a restart or missed completion hook, Workboard still reconciles active cards linked
 to archived sessions into `review` or `blocked`.
 
+A start the Gateway accepted only halfway (its launch prepared, no session
+yet) is blocked by the sweep when a restart cut it off: the launch was
+prepared before the sweep's service started. A launch prepared since then
+belongs to a start still running, which settles it itself, so the sweep
+leaves it alone for 10 minutes even when the session list does not show its
+session yet.
+
 Incognito sessions remain absent from session discovery. Explicitly linked
 Incognito cards use authorized exact-session metadata reads, without derived
 titles or message previews, to reconcile their terminal outcomes.
