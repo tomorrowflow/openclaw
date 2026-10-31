@@ -20,8 +20,8 @@ const REPORT_PATTERN = new RegExp("```" + REPORT_FENCE + "\\s*\\n([\\s\\S]*?)\\n
 // One report posts at most this many comments, so a run-on report cannot evict
 // the card's other comments from its metadata budget.
 const MAX_REPORT_COMMENTS = 3;
-// Report comments stay well under the operator note cap for the same budget reason.
-const MAX_REPORT_COMMENT_CHARS = 2000;
+// Three report comments fill at most half of the card's metadata budget.
+export const MAX_REPORT_COMMENT_CHARS = 4000;
 
 const REPORT_PROOF_STATUSES = ["passed", "failed", "skipped"] as const;
 

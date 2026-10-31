@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
 import { runSessionSweep } from "./lifecycle-sync.test-support.js";
+import { MAX_REPORT_COMMENT_CHARS } from "./node-ticket-report.js";
 import { nodeTicketTarget } from "./node-ticket.js";
 import {
   createNodeGateway,
@@ -287,7 +288,7 @@ describe("Workboard node ticket lifecycle", () => {
     },
     {
       name: "a block reason longer than a comment",
-      value: { outcome: "blocked", summary: "x".repeat(1500), questions: ["y".repeat(1500)] },
+      value: { outcome: "blocked", summary: "x".repeat(3000), questions: ["y".repeat(3000)] },
       lead: "Blocked: xxx",
     },
     {
@@ -316,7 +317,7 @@ describe("Workboard node ticket lifecycle", () => {
     // The block comment leads the report; a long one continues in the comments after it.
     const comment = stored?.metadata?.comments?.[before]?.body ?? "";
     expect(comment.startsWith(lead)).toBe(true);
-    expect(comment.length).toBeLessThanOrEqual(2000);
+    expect(comment.length).toBeLessThanOrEqual(MAX_REPORT_COMMENT_CHARS);
     const attempt = stored?.metadata?.attempts?.at(-1);
     expect(attempt?.status).toBe("blocked");
     expect(attempt?.error?.length).toBeLessThanOrEqual(800);
@@ -328,10 +329,10 @@ describe("Workboard node ticket lifecycle", () => {
       name: "a question round",
       value: {
         outcome: "needs_input",
-        summary: `The retry-only gap needs a call. ${"s".repeat(600)}`,
+        summary: `The retry-only gap needs a call. ${"s".repeat(1200)}`,
         questions: [
-          `**Q1 – Delete the marker yourself:** ${"a".repeat(700)} ➡️ Yes; I then capture the run.`,
-          `**Q2 – Or accept the gap:** ${"b".repeat(700)} ➡️ Yes; the README documents it.`,
+          `**Q1 – Delete the marker yourself:** ${"a".repeat(1400)} ➡️ Yes; I then capture the run.`,
+          `**Q2 – Or accept the gap:** ${"b".repeat(1400)} ➡️ Yes; the README documents it.`,
         ],
       },
       status: "review",
@@ -342,8 +343,8 @@ describe("Workboard node ticket lifecycle", () => {
       name: "a blocked report",
       value: {
         outcome: "blocked",
-        summary: `The node lost its clone. ${"s".repeat(600)}`,
-        questions: [`Re-clone? ${"a".repeat(900)}`, `Or move nodes? ${"b".repeat(900)}`],
+        summary: `The node lost its clone. ${"s".repeat(1200)}`,
+        questions: [`Re-clone? ${"a".repeat(1800)}`, `Or move nodes? ${"b".repeat(1800)}`],
       },
       status: "blocked",
       footer: undefined,
@@ -354,9 +355,9 @@ describe("Workboard node ticket lifecycle", () => {
         outcome: "done",
         summary: [
           "**What:**",
-          `- ${"a".repeat(900)}`,
-          `- ${"b".repeat(900)}`,
-          `**Why:** ${"c".repeat(600)}`,
+          `- ${"a".repeat(1800)}`,
+          `- ${"b".repeat(1800)}`,
+          `**Why:** ${"c".repeat(1200)}`,
         ].join("\n"),
         proof: [{ command: "pytest", status: "passed" }],
       },
@@ -368,7 +369,7 @@ describe("Workboard node ticket lifecycle", () => {
       value: {
         outcome: "needs_input",
         summary: "One long fork.",
-        questions: [`**Q1 – Pick the schema:** ${"word ".repeat(700)}➡️ Yes; keep v1.`],
+        questions: [`**Q1 – Pick the schema:** ${"word ".repeat(1400)}➡️ Yes; keep v1.`],
       },
       status: "review",
       footer:
@@ -391,7 +392,7 @@ describe("Workboard node ticket lifecycle", () => {
     const bodies = (stored?.metadata?.comments ?? []).slice(before).map((comment) => comment.body);
     expect(bodies.length).toBeGreaterThan(1);
     for (const body of bodies) {
-      expect(body.length).toBeLessThanOrEqual(2000);
+      expect(body.length).toBeLessThanOrEqual(MAX_REPORT_COMMENT_CHARS);
     }
     // A line too long for one comment continues in the next one.
     const text = bodies.join("").replace(/\s/g, "");
@@ -438,7 +439,7 @@ describe("Workboard node ticket lifecycle", () => {
       /\(cut, \d+ chars dropped; the full report is in the ticket session's final message\)\n\nAnswer in a comment, then move the card to todo; the same session resumes with the answer\.$/,
     );
     for (const body of bodies) {
-      expect(body.length).toBeLessThanOrEqual(2000);
+      expect(body.length).toBeLessThanOrEqual(MAX_REPORT_COMMENT_CHARS);
     }
   });
 

@@ -52,6 +52,7 @@ import {
   MAX_CARD_COMMENTS,
   MAX_CARD_DIAGNOSTICS,
   MAX_CARD_LINKS,
+  MAX_CARD_NOTES_CHARS,
   MAX_CARD_NOTIFICATIONS,
   MAX_CARD_PROOF,
   MAX_CARD_WORKER_LOGS,
@@ -159,8 +160,8 @@ export function normalizeNotes(value: unknown): string | undefined {
   if (!notes) {
     return undefined;
   }
-  if (notes.length > 4000) {
-    throw new Error("notes must be 4000 characters or fewer.");
+  if (notes.length > MAX_CARD_NOTES_CHARS) {
+    throw new Error(`notes must be ${MAX_CARD_NOTES_CHARS} characters or fewer.`);
   }
   return notes;
 }
