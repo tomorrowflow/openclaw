@@ -17,7 +17,6 @@ import {
 import { workboardBoardName } from "../../lib/workboard/board-presentation.ts";
 import { canRestartWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
 import {
-  addWorkboardCardComment,
   getWorkboardDependencyState,
   getWorkboardLifecycle,
   getWorkboardState,
@@ -30,6 +29,7 @@ import { cardAgentLabel } from "./agent-filter.ts";
 import { automationDetailFields, BoardAutomation } from "./view-automation.tsx";
 import { getCardActionState, CardAction, StartExecutionButton } from "./view-card-actions.tsx";
 import { hasCardChanges } from "./view-card-changes.tsx";
+import { CardCommentCompose } from "./view-card-comment-compose.tsx";
 import { CardPullRequest, CardStage } from "./view-card-content.tsx";
 import {
   DependencyDetailList,
@@ -66,7 +66,6 @@ import {
   InlineText,
   type WorkboardInlineText,
 } from "./view-inline-properties.tsx";
-import { liveInputValue } from "./view-input-value.ts";
 import { closeWorkboardPopoverOnAction, workboardPopoverRef } from "./view-popover.ts";
 import { workboardScrollFadeRef } from "./view-scroll-fade.ts";
 
@@ -128,7 +127,6 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
       ? initialActiveElement
       : undefined;
   const state = workboardViewState(() => props);
-  const noteValue = liveInputValue(() => state().detailCommentBody);
   const visibleError = () => workboardErrorMessage(state(), props.pageError);
   const card = () => {
     void props.revision;
@@ -614,49 +612,12 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                     <p class="workboard-detail__empty">{t("workboard.detailNoNotes")}</p>
                   ) : undefined}
                   {action().writable ? (
-                    <div class="workboard-detail__comment-compose">
-                      <textarea
-                        class="settings-input workboard-detail__note"
-                        aria-label={t("workboard.detailOperatorNotes")}
-                        rows="2"
-                        maxlength="8000"
-                        placeholder={t("workboard.detailNotePlaceholder")}
-                        ref={noteValue}
-                        disabled={action().busy}
-                        onInput={(event) => {
-                          state().detailCommentBody = event.currentTarget.value;
-                          state().detailCommentDrafts.set(card().id, state().detailCommentBody);
-                          props.onRequestUpdate?.();
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) {
-                            return;
-                          }
-                          event.preventDefault();
-                          if (!action().busy && state().detailCommentBody.trim()) {
-                            void addWorkboardCardComment({
-                              ...workboardMutationContext(props),
-                              cardId: card().id,
-                              body: state().detailCommentBody,
-                            });
-                          }
-                        }}
-                      />
-                      <button
-                        class="btn"
-                        type="button"
-                        disabled={action().busy || !state().detailCommentBody.trim()}
-                        onClick={() => {
-                          void addWorkboardCardComment({
-                            ...workboardMutationContext(props),
-                            cardId: card().id,
-                            body: state().detailCommentBody,
-                          });
-                        }}
-                      >
-                        {t("workboard.detailAddNote")}
-                      </button>
-                    </div>
+                    <CardCommentCompose
+                      {...props}
+                      card={card()}
+                      busy={action().busy}
+                      archived={action().archived}
+                    />
                   ) : undefined}
                 </section>
               </section>

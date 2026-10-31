@@ -338,6 +338,9 @@ export default {
     detailNoNotes: "No operator notes yet.",
     detailNotePlaceholder: "Add a decision, blocker, or proof note...",
     detailAddNote: "Add note",
+    detailAnswerResume: "Answer and resume",
+    detailAnswerResumeTitle:
+      "Save this note and move the card to Todo, so the ticket continues with your answer.",
     openSession: "Open session",
     openTranscript: "Open transcript",
     defaultAgent: "Default agent",

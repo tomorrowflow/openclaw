@@ -3872,8 +3872,14 @@ workboard-inline-text {
   font-size: 0.73rem;
 }
 
-.workboard-detail__comment-compose > .btn {
-  justify-self: end;
+.workboard-detail__comment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.workboard-detail__comment-actions > .btn {
   min-height: 30px;
   padding: 4px 10px;
   border-radius: var(--radius-sm);
