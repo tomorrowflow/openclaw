@@ -1,5 +1,3 @@
-import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import type {
   WorkboardCard,
@@ -8,8 +6,9 @@ import type {
 } from "@openclaw/workboard-contract";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
-import { fetchNodeFile } from "./node-files.js";
+import { withNodeBundle } from "./node-ticket-bundle.js";
 import {
+  grillBranchRef,
   nodeGrillSessionToOpen,
   openNodeGrillSession,
   readNodeGrillResult,
@@ -45,9 +44,7 @@ import {
 import { capText } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
 
-// file.fetch's hard cap; a larger bundle fails on the node with FILE_TOO_LARGE.
 const MAX_IMPORT_CHECK_FENCE = 16;
-const BUNDLE_MAX_BYTES = 16 * 1024 * 1024;
 
 type HandoffCard = {
   card: WorkboardCard;
@@ -120,7 +117,7 @@ async function importNodeBundle(
   item: HandoffCard,
   assertCurrent: () => Promise<void>,
 ): Promise<ImportedBundle | undefined> {
-  const { nodeId, worktree, bundlePath, hostRepoPath } = item;
+  const { nodeId, worktree, hostRepoPath } = item;
   const git = (...args: string[]) =>
     runNodeCommand(runtime, nodeId, ["git", "-C", worktree.path, ...args]);
   const dirty = await git("status", "--porcelain");
@@ -144,22 +141,7 @@ async function importNodeBundle(
     await assertCurrent();
     return undefined;
   }
-  await git("bundle", "create", bundlePath, `${worktree.baseCommit}..${worktree.branch}`);
-  const bundle = await fetchNodeFile(runtime, nodeId, bundlePath, BUNDLE_MAX_BYTES);
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "workboard-bundle-"));
-  try {
-    const localBundle = path.join(tempDir, path.posix.basename(bundlePath));
-    await fs.writeFile(localBundle, bundle);
-    // The node based the ticket on a freshly fetched origin; the host clone may lag behind it.
-    const hasBase = await hostGit(hostRepoPath, [
-      "cat-file",
-      "-e",
-      `${worktree.baseCommit}^{commit}`,
-    ]);
-    if (hasBase.code !== 0) {
-      await requireHostGit(hostRepoPath, ["fetch", "--quiet", "origin"]);
-    }
-    await requireHostGit(hostRepoPath, ["bundle", "verify", "--quiet", localBundle]);
+  return await withNodeBundle(runtime, item, async (localBundle) => {
     const ref = `refs/heads/${worktree.branch}`;
     const heads = (await requireHostGit(hostRepoPath, ["bundle", "list-heads", localBundle]))
       .split("\n")
@@ -239,9 +221,7 @@ async function importNodeBundle(
       : undefined;
     const reworkUnchanged = ownCommits?.code === 0 && ownCommits.stdout.trim() === "0";
     return { from: checkFrom, headCommit, ...(reworkUnchanged ? { reworkUnchanged: true } : {}) };
-  } finally {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
+  });
 }
 
 /** The import is confirmed on the host, so the node's worktree, branch, and bundle can go. */
@@ -260,6 +240,8 @@ async function cleanupNodeTicket(
   ]);
   await runNodeCommand(runtime, nodeId, ["git", "-C", repoPath, "branch", "-D", worktree.branch]);
   await runNodeCommand(runtime, nodeId, ["rm", "-f", bundlePath]);
+  // The grill session's copy of the branch; the imported branch supersedes it.
+  await hostGit(item.hostRepoPath, ["update-ref", "-d", grillBranchRef(item.card.id)]);
 }
 
 async function runNodeTicketHandoff(params: {

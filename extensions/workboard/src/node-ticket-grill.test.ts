@@ -1,16 +1,25 @@
 // Workboard tests cover a node ticket handing its grilling off to a grill session and back.
+import { existsSync } from "node:fs";
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createWorkboardAutomationNudgeService } from "./automation-nudge.js";
 import { redactOperatorCard } from "./card-redaction.js";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { registerWorkboardGatewayMethods } from "./gateway.js";
 import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
 import { nudgeContext } from "./lifecycle-sync.test-support.js";
+import { grillBranchRef } from "./node-ticket-grill-session.js";
 import { appendGrillLog, GRILL_LOG_FILE_NAME } from "./node-ticket-grill.js";
 import { createNodeTicketHandoffs } from "./node-ticket-handoff.js";
-import { createNodeGateway, endedSession, startNodeCard } from "./node-ticket.test-support.js";
+import {
+  createNodeGateway,
+  endedSession,
+  finishNodeTicket,
+  git,
+  removeTempRoots,
+  startNodeCard,
+} from "./node-ticket.test-support.js";
 import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
 import type { WorkboardStore } from "./store.js";
 import { createGatewayMethodCapture } from "./test/gateway-method-capture.js";
@@ -205,6 +214,52 @@ const worktreeOf = (card: WorkboardCard | undefined) =>
 const untimed = (log: string | undefined) => log?.replace(/\d{4}-\d\d-\d\dT[\d:.]+Z/g, "<t>");
 const HANDOFF_LOG = `## Handoff 1\n\n${HANDOFF}\n`;
 
+afterEach(() => {
+  removeTempRoots();
+});
+
+/** The grill session's opening message from the Gateway fake's recorded `sessions.create` calls. */
+function grillMessage(respond: ReturnType<typeof createNodeGateway>["respond"]) {
+  const create = respond.mock.calls.find(
+    ([method, params]) => method === "sessions.create" && String(params?.key).includes(":grill-"),
+  );
+  return String(create?.[1]?.message);
+}
+
+describe("node ticket grill session's view of the ticket branch", () => {
+  it("copies the branch into the host clone and names the copy in the grill prompt", async () => {
+    const ticket = await finishNodeTicket({ messages: grillReport });
+    const ref = grillBranchRef(ticket.card.id);
+
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect(ticket.warn).not.toHaveBeenCalled();
+    expect(git(ticket.repos.hostRepo, "rev-parse", ref)).toBe(
+      git(ticket.worktree, "rev-parse", "HEAD"),
+    );
+    expect(git(ticket.repos.hostRepo, "show", `${ref}:parser.py`)).toBe("ok");
+    expect(grillMessage(ticket.gateway.respond)).toContain(`is copied into it as \`${ref}\``);
+    expect(existsSync(`${ticket.worktree}.bundle`)).toBe(false);
+    expect((await ticket.store.get(ticket.card.id))?.status).toBe("review");
+  });
+
+  it("still opens the grill session when the copy fails, and says why", async () => {
+    const ticket = await finishNodeTicket({ messages: grillReport });
+    git(ticket.worktree, "checkout", "-q", "--detach");
+    git(ticket.repos.target.repoPath, "branch", "-q", "-D", `factory/${ticket.card.id}`);
+
+    await ticket.handoffs.resume(ticket.warn);
+
+    expect(ticket.warn).toHaveBeenCalledWith(
+      expect.stringContaining(`could not copy card ${ticket.card.id}'s ticket branch`),
+    );
+    expect(grillMessage(ticket.gateway.respond)).toMatch(
+      /on the node and could not be copied here \(.+\)\. Use the handoff and the card's comments instead\./,
+    );
+    expect(worktreeOf(await ticket.store.get(ticket.card.id))?.grill?.sessionKey).toBeDefined();
+  });
+});
+
 describe("node ticket grilling handoff", () => {
   it("logs the handoff and opens a normal grill session of the card's agent on the Gateway", async () => {
     const ticket = await grillingTicket(undefined, false);
@@ -247,7 +302,7 @@ describe("node ticket grilling handoff", () => {
     expect(params?.message).toContain(HANDOFF);
     expect(params?.message).toContain("Interview the operator one question at a time");
     expect(params?.message).toMatch(
-      /The repository is checked out at `[^`]+`; the ticket's own commits are on branch `[^`]+` on the node/,
+      /The repository is checked out at `[^`]+`\. The ticket branch `[^`]+` has no commits yet\./,
     );
     expect(params?.message).toContain("Do not build anything");
     expect(params?.message).toContain("Call `workboard_grill_done`");
