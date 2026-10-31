@@ -1,3 +1,4 @@
+import path from "node:path";
 import type {
   WorkboardCard,
   WorkboardNodeGrill,
@@ -6,10 +7,13 @@ import type {
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
+import { withNodeBundle } from "./node-ticket-bundle.js";
 import { grillHandoffFromLog, grillSessionName, nodeGrillIsLive } from "./node-ticket-grill.js";
 import { lastAssistantReply } from "./node-ticket-report.js";
 import {
   nodeTicketTarget,
+  requireHostGit,
+  runNodeCommand,
   sessionCreateRunError,
   type WorkboardNodeTicketRuntime,
 } from "./node-ticket.js";
@@ -24,18 +28,93 @@ import type { WorkboardStore } from "./store.js";
 
 const GRILL_SESSION_GROUP = "Grilling";
 
+// A failed copy's reason in the grill prompt: its first line, as git's stderr can run long.
+const MAX_COPY_ERROR_CHARS = 300;
+
 // The grill session's last messages hold its last reply; earlier ones are not read.
 const GRILL_HISTORY_LIMIT = 20;
 
-function grillSessionMessage(card: WorkboardCard, handoff: string | undefined): string {
+/**
+ * The grill session runs on the Gateway, which cannot reach the node, so the
+ * ticket branch is copied into the host clone under this ref before the
+ * session opens. Each round overwrites it; the bundle import deletes it.
+ * Accepted edge case: a card archived from review without an import leaves
+ * the ref (and its objects) in the host clone until someone deletes it.
+ */
+export function grillBranchRef(cardId: string): string {
+  return `refs/workboard/grill/${cardId}`;
+}
+
+/** Where the grill session finds the ticket branch: its ref, no commits yet, or why the copy failed. */
+type GrillBranch = { ref: string } | { empty: true } | { error: string };
+
+async function copyGrillBranch(
+  runtime: WorkboardNodeTicketRuntime,
+  card: WorkboardCard,
+): Promise<GrillBranch | undefined> {
   const target = nodeTicketTarget(card);
+  const worktree = target?.worktree;
+  if (!target || !worktree) {
+    return undefined;
+  }
+  const head = await runNodeCommand(runtime, target.nodeId, [
+    "git",
+    "-C",
+    worktree.path,
+    "rev-parse",
+    worktree.branch,
+  ]);
+  if (head === worktree.baseCommit) {
+    return { empty: true };
+  }
+  const ref = grillBranchRef(card.id);
+  const bundlePath = path.posix.join(target.worktreesRoot, `wb-${card.id}.bundle`);
+  await withNodeBundle(
+    runtime,
+    { nodeId: target.nodeId, worktree, bundlePath, hostRepoPath: target.hostRepoPath },
+    async (localBundle) => {
+      await requireHostGit(target.hostRepoPath, [
+        "fetch",
+        "--no-write-fetch-head",
+        localBundle,
+        `+refs/heads/${worktree.branch}:${ref}`,
+      ]);
+    },
+  );
+  // The copy landed; a bundle left behind is replaced by the next one and removed by cleanup.
+  await runNodeCommand(runtime, target.nodeId, ["rm", "-f", bundlePath]).catch(() => undefined);
+  return { ref };
+}
+
+function grillBranchLines(card: WorkboardCard, branch: GrillBranch | undefined): string[] {
+  const target = nodeTicketTarget(card);
+  if (!target || !branch) {
+    return [];
+  }
+  const checkout = `The repository is checked out at \`${target.hostRepoPath}\``;
+  const ticketBranch = target.worktree?.branch ?? "its ticket branch";
+  if ("ref" in branch) {
+    const base = target.worktree?.baseCommit.slice(0, 12) ?? "main";
+    return [
+      `${checkout}. The ticket branch \`${ticketBranch}\` is copied into it as \`${branch.ref}\`, with the commits it had when this session opened (uncommitted work stays on the node). In that checkout, list its changes with \`git diff --stat ${base} ${branch.ref}\` and read a file with \`git show ${branch.ref}:<path>\`.`,
+    ];
+  }
+  if ("empty" in branch) {
+    return [`${checkout}. The ticket branch \`${ticketBranch}\` has no commits yet.`];
+  }
+  return [
+    `${checkout}; the ticket's own commits are on branch \`${ticketBranch}\` on the node and could not be copied here (${branch.error}). Use the handoff and the card's comments instead.`,
+  ];
+}
+
+function grillSessionMessage(
+  card: WorkboardCard,
+  handoff: string | undefined,
+  branch: GrillBranch | undefined,
+): string {
   return [
     `Grill the operator on this Workboard ticket: ${card.title} (card \`${card.id}\`)`,
-    ...(target?.hostRepoPath
-      ? [
-          `The repository is checked out at \`${target.hostRepoPath}\`; the ticket's own commits are on branch \`${target.worktree?.branch ?? "its ticket branch"}\` on the node, not in this checkout.`,
-        ]
-      : []),
+    ...grillBranchLines(card, branch),
     "",
     ...(handoff
       ? [
@@ -79,6 +158,7 @@ async function startNodeGrillSession(
   card: WorkboardCard,
   key: string,
   handoff: string | undefined,
+  branch: GrillBranch | undefined,
 ): Promise<string> {
   const result = await runtime.request(
     "sessions.create",
@@ -88,7 +168,7 @@ async function startNodeGrillSession(
       displayName: grillSessionName(card),
       // Groups the grill sessions in the session list, like an operator-made group.
       category: GRILL_SESSION_GROUP,
-      message: grillSessionMessage(card, handoff),
+      message: grillSessionMessage(card, handoff, branch),
     },
     { scopes: ["operator.admin"] },
   );
@@ -133,7 +213,15 @@ export async function openNodeGrillSession(params: {
       // A handoff the full log cut still opens the session, which reads the card instead.
       const log = await store.readNodeGrillLog(worktree);
       const handoff = log === undefined ? undefined : grillHandoffFromLog(log, round);
-      sessionKey = await startNodeGrillSession(params.runtime, card, key, handoff);
+      // Best effort: without the copy the session still grills from the handoff.
+      const branch = await copyGrillBranch(params.runtime, card).catch((error: unknown) => {
+        params.warn(
+          `workboard: could not copy card ${card.id}'s ticket branch for its grill session: ${formatErrorMessage(error)}`,
+        );
+        const reason = formatErrorMessage(error).split("\n")[0];
+        return { error: capText(reason, MAX_COPY_ERROR_CHARS) ?? "unknown error" };
+      });
+      sessionKey = await startNodeGrillSession(params.runtime, card, key, handoff, branch);
     }
   } catch (error) {
     await store.block(
