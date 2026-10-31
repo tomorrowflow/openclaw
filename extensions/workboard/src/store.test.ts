@@ -1827,6 +1827,16 @@ describe("WorkboardStore", () => {
     });
   });
 
+  it("accepts card notes up to 8000 characters", async () => {
+    const store = createWorkboardSqliteTestStore({ createStores: createKernelStores });
+    const card = await store.create({ title: "Long spec notes", notes: "n".repeat(8000) });
+
+    expect((await store.get(card.id))?.notes).toHaveLength(8000);
+    await expect(store.create({ title: "Too long", notes: "n".repeat(8001) })).rejects.toThrow(
+      "notes must be 8000 characters or fewer.",
+    );
+  });
+
   it("leaves the card unchanged when completion notification validation fails", async () => {
     const store = createWorkboardSqliteTestStore({ createStores: createKernelStores });
     const card = await store.create({

@@ -20,6 +20,7 @@ import {
   MAX_CARD_ATTEMPTS,
   MAX_CARD_COMMENTS,
   MAX_CARD_EVENTS,
+  MAX_CARD_NOTES_CHARS,
   MAX_WORKER_CONTEXT_PARENTS,
   MAX_WORKER_CONTEXT_RECENT_CARDS,
   READY_STRANDED_MS,
@@ -523,7 +524,7 @@ export function buildWorkerContext(
     `Agent: ${card.agentId ?? "(default)"}`,
   ];
   if (card.notes) {
-    lines.push("", "## Notes", capText(card.notes, 4000) ?? "");
+    lines.push("", "## Notes", capText(card.notes, MAX_CARD_NOTES_CHARS) ?? "");
   }
   appendWorkerContextSection(lines, "Recent attempts", card.metadata?.attempts, (attempt) =>
     `- ${attempt.status} ${attempt.model ?? ""} ${attempt.error ? `error=${capText(attempt.error, 240)}` : ""}`.trim(),

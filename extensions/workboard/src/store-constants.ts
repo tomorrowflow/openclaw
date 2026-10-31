@@ -36,6 +36,7 @@ export const MAX_CARD_METADATA_BYTES = 24 * 1024;
 export const MAX_ATTEMPT_ERROR_CHARS = 800;
 export const MAX_BLOCK_REASON_CHARS = 2000;
 export const MAX_COMMENT_BODY_CHARS = 8000;
+export const MAX_CARD_NOTES_CHARS = 8000;
 export const MAX_PROOF_COMMAND_CHARS = 1000;
 export const MAX_PROOF_NOTE_CHARS = 2000;
 export const DEFAULT_CLAIM_TTL_MS = 30 * 60 * 1000;
