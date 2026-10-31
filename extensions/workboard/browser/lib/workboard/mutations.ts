@@ -114,9 +114,9 @@ export async function addWorkboardCardComment(
   const submittedDraft = params.body ?? draftState.draftCommentBody;
   const body = submittedDraft.trim();
   if (!cardId || !body || draftState.draftSaving) {
-    return;
+    return false;
   }
-  await runWorkboardCardMutation(
+  return runWorkboardCardMutation(
     { ...params, cardId, reconcileConflict: false },
     async (state, client) => {
       const payload = await client.request("workboard.cards.comment", {
@@ -141,6 +141,7 @@ export async function addWorkboardCardComment(
       if (draftCardId === cardId && state[draftField] === submittedDraft) {
         state[draftField] = "";
       }
+      return true;
     },
   );
 }

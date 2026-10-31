@@ -821,6 +821,86 @@ describe("WorkboardView", () => {
     );
   });
 
+  it.each([
+    ["questions in review", { status: "review", stage: { kind: "questions", since: 1 } }],
+    ["a blocked card", { status: "blocked" }],
+  ] as const)("answers %s and moves the card to todo in one click", async (_case, waiting) => {
+    const card = createWorkboardCard({ title: "Waiting on the operator", ...waiting });
+    const body = "Yes, as recommended.";
+    const commented = {
+      card: { ...card, metadata: { comments: [{ id: "c", body, createdAt: 2 }] } },
+    };
+    const client = createWorkboardTestClient((method) =>
+      method === "workboard.cards.comment"
+        ? commented
+        : { card: { ...commented.card, status: "todo", stage: undefined } },
+    );
+    const { state, container, renderView } = createWorkboardView({ client });
+    state.cards = [card];
+    renderView();
+    requireButton(container, "View details").click();
+    state.detailTab = "activity";
+    renderView();
+    const note = expectDefined(
+      container.querySelector<HTMLTextAreaElement>(".workboard-detail__note"),
+      ".workboard-detail__note",
+    );
+    note.value = body;
+    note.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    renderView();
+    textButton(container, "Answer and resume").click();
+    await waitForFast(() => expect(state.cards[0]?.status).toBe("todo"));
+    expect(client.request.mock.calls.map(([method]) => method)).toEqual([
+      "workboard.cards.comment",
+      "workboard.cards.move",
+    ]);
+    expect(client.request).toHaveBeenCalledWith("workboard.cards.comment", { id: card.id, body });
+    expect(client.request).toHaveBeenCalledWith(
+      "workboard.cards.move",
+      expect.objectContaining({ id: card.id, status: "todo" }),
+    );
+    expect(state.detailCommentBody).toBe("");
+  });
+
+  it("keeps the card where it is when the answer does not save", async () => {
+    const card = createWorkboardCard({ status: "blocked" });
+    const client = createWorkboardTestClient(() => {
+      throw new Error("Note unavailable");
+    });
+    const { state, container, renderView } = createWorkboardView({ client });
+    state.cards = [card];
+    renderView();
+    requireButton(container, "View details").click();
+    state.detailTab = "activity";
+    renderView();
+    const note = expectDefined(
+      container.querySelector<HTMLTextAreaElement>(".workboard-detail__note"),
+      ".workboard-detail__note",
+    );
+    note.value = "Docker is installed now.";
+    note.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    renderView();
+    textButton(container, "Answer and resume").click();
+    await waitForFast(() => expect(state.error).toBe("Note unavailable"));
+    expect(client.request).not.toHaveBeenCalledWith("workboard.cards.move", expect.anything());
+    expect(state.cards[0]?.status).toBe("blocked");
+    expect(state.detailCommentBody).toBe("Docker is installed now.");
+  });
+
+  it("offers only Add note on a card that is not waiting for an answer", () => {
+    const { state, container, renderView } = createWorkboardView({
+      client: createWorkboardTestClient({}),
+    });
+    state.cards = [createWorkboardCard({ status: "review" })];
+    renderView();
+    requireButton(container, "View details").click();
+    state.detailTab = "activity";
+    renderView();
+    const actions = container.querySelector(".workboard-detail__comment-actions");
+    expect(actions?.textContent).toContain("Add note");
+    expect(actions?.textContent).not.toContain("Answer and resume");
+  });
+
   it("keeps another card's editor draft when an earlier note finishes", async () => {
     const first = createWorkboardCard({ title: "First card" });
     const second = createWorkboardCard({ id: "card-2", title: "Second card" });
