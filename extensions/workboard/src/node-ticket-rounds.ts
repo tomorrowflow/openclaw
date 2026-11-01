@@ -22,7 +22,7 @@ import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { MAX_COMMENT_BODY_CHARS } from "./store-constants.js";
 import { isAbsoluteWorkspacePath } from "./workspace-path.js";
 
-// Round facts ride in the card's metadata, which has a 24 KiB budget shared
+// Round facts ride in the card's metadata, which has a 48 KiB budget shared
 // with comments and proof. A full round serializes to about 11 KiB (decisions
 // 4.9, review 3.1, changes 2.8). The current verification record adds the
 // verifier's visual read, about 2.4 KiB at its caps. The budget trim sheds the

@@ -12,6 +12,7 @@ import {
   parseNumstat,
   withNodeRound,
 } from "./node-ticket-rounds.js";
+import { MAX_CARD_METADATA_BYTES } from "./store-constants.js";
 import { trimMetadataToBudget } from "./store-metadata-budget.js";
 
 const worktree: WorkboardNodeWorktree = {
@@ -209,9 +210,12 @@ function trimRounds(rounds: WorkboardNodeRound[], comments: WorkboardComment[]) 
 }
 
 it("sheds an older round's decisions, then its findings, then the round, before comments", () => {
+  // The comments take the budget above 24 KiB, so the rounds see the
+  // pressure they would in a 24 KiB budget.
+  const padding = (MAX_CARD_METADATA_BYTES - 24 * 1024) / 5;
   const comments = Array.from({ length: 5 }, (_, index) => ({
     id: `comment-${index}`,
-    body: `note ${index} ${"c".repeat(600)}`,
+    body: `note ${index} ${"c".repeat(600 + padding)}`,
     createdAt: index,
   }));
   const round0 = fullRound(0);
