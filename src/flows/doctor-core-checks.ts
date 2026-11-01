@@ -828,6 +828,20 @@ export function createCoreHealthChecks(): readonly DoctorHealthCheck[] {
       },
     },
     browserCheck,
+    {
+      id: "core/doctor/sandbox-secret-mounts",
+      description: "Retired sandbox secretMounts migrate to docker.env store SecretRefs.",
+      async detect(ctx) {
+        const { inspectSandboxSecretMounts } =
+          await import("../commands/doctor/sandbox-secret-mounts.js");
+        return (await inspectSandboxSecretMounts(ctx)).findings;
+      },
+      async repair(ctx) {
+        const { repairSandboxSecretMounts } =
+          await import("../commands/doctor/sandbox-secret-mounts.js");
+        return await repairSandboxSecretMounts(ctx);
+      },
+    },
     openAIOAuthTlsCheck,
     hooksModelCheck,
     bootstrapSizeCheck,

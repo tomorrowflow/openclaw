@@ -43,6 +43,34 @@ provisioning, with no plaintext fallback. Existing lease inspection and cleanup
 remain available. Protected setup secrets keep snapshots enabled; old plaintext
 setup image identities are not adopted as protected images.
 
+## Sandbox secret mount migration
+
+`agents.defaults.sandbox.docker.secretMounts` and the per-agent
+`sandbox.docker.secretMounts` maps (environment name to host file) are retired.
+Sandbox `docker.env` values accept SecretRefs instead. Run `openclaw doctor --fix`
+to replace each `secretMounts.NAME` with
+`docker.env.NAME = { source: "store", provider: "default", id: "NAME" }` in the
+same scope. The provider is `secrets.defaults.store` when you set one.
+
+The shared store must already hold a protected (`kind: "secret"`) entry with
+the same name. Doctor reports each missing entry with the command to create it,
+for example
+`openclaw secrets store set GH_TOKEN --kind secret --value-file - < "/path/to/gh-token"`.
+Reading the value through stdin drops the file's trailing newline, which the
+retired mount also dropped. When the legacy file is readable, Doctor compares
+its content with the store entry and leaves the scope unchanged on a mismatch.
+An existing `docker.env.NAME` that differs from the target ref also stays, and
+Doctor reports it. A scope migrates only when every entry in it is ready;
+other scopes migrate independently. Doctor never creates store entries and
+never prints values. Dry runs leave config untouched.
+
+The repair goes through Doctor's backed-up, include-aware config writer.
+Until it runs, the key still parses, so the Gateway starts, but Docker and
+Podman sandbox creation for an affected agent refuses with a message naming the
+key and `openclaw doctor --fix`. Nothing falls back to reading the host files.
+The retired mount also bind-mounted each file at `/run/secrets/NAME`; the
+migrated value arrives only as an environment variable.
+
 ## Runtime config migration
 
 Runtime config reads require per-model context budgets and current GitHub Copilot

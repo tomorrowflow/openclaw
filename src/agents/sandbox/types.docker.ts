@@ -9,5 +9,11 @@ type RequiredDockerConfigKeys =
   | "network"
   | "capDrop";
 
-export type SandboxDockerConfig = Omit<SandboxDockerSettings, RequiredDockerConfigKeys> &
-  Required<Pick<SandboxDockerSettings, RequiredDockerConfigKeys>>;
+export type SandboxDockerConfig = Omit<
+  SandboxDockerSettings,
+  RequiredDockerConfigKeys | "env" | "secretMounts"
+> &
+  Required<Pick<SandboxDockerSettings, RequiredDockerConfigKeys>> & {
+    /** Resolved container environment; SecretRef inputs arrive as runtime snapshot strings. */
+    env?: Record<string, string>;
+  };

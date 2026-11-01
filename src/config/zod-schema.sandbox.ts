@@ -3,6 +3,8 @@ import { z } from "zod";
 import { splitSandboxBindSpec } from "../agents/sandbox/bind-spec.js";
 import { isSandboxHostPathAbsolute } from "../agents/sandbox/host-paths.js";
 import { getBlockedNetworkModeReason } from "../agents/sandbox/network-mode.js";
+import { SecretInputSchema } from "./zod-schema.secret-input.js";
+import { sensitive } from "./zod-schema.sensitive.js";
 
 function validateSandboxBindEntries(
   binds: readonly string[] | undefined,
@@ -45,7 +47,7 @@ export const SandboxDockerSchema = z
     network: z.string().optional(),
     user: z.string().optional(),
     capDrop: z.array(z.string()).optional(),
-    env: z.record(z.string(), z.string()).optional(),
+    env: z.record(z.string(), SecretInputSchema.register(sensitive)).optional(),
     setupCommand: z
       .union([z.string(), z.array(z.string())])
       .transform((value) => (Array.isArray(value) ? value.join("\n") : value))
@@ -74,6 +76,8 @@ export const SandboxDockerSchema = z
     dns: z.array(z.string()).optional(),
     extraHosts: z.array(z.string()).optional(),
     binds: z.array(z.string()).optional(),
+    // Retired: sandbox creation refuses it and `openclaw doctor --fix` moves it to
+    // docker.env store SecretRefs. Parsing it keeps the Gateway up until then.
     secretMounts: z.record(z.string(), z.string()).optional(),
     dangerouslyAllowReservedContainerTargets: z.boolean().optional(),
     dangerouslyAllowExternalBindSources: z.boolean().optional(),
@@ -81,29 +85,6 @@ export const SandboxDockerSchema = z
   })
   .superRefine((data, ctx) => {
     validateSandboxBindEntries(data.binds, ctx);
-    if (data.secretMounts) {
-      const envVarPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
-      for (const [key, value] of Object.entries(data.secretMounts)) {
-        if (!envVarPattern.test(key)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["secretMounts", key],
-            message:
-              `Sandbox security: secret mount key "${key}" is not a valid environment variable name. ` +
-              "Keys must match /^[A-Za-z_][A-Za-z0-9_]*$/.",
-          });
-        }
-        if (!value.startsWith("/")) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["secretMounts", key],
-            message:
-              `Sandbox security: secret mount "${key}" uses a non-absolute source path "${value}". ` +
-              "Only absolute POSIX paths are supported for secret mounts.",
-          });
-        }
-      }
-    }
     const blockedNetworkReason = getBlockedNetworkModeReason({
       network: data.network,
       allowContainerNamespaceJoin: data.dangerouslyAllowContainerNamespaceJoin === true,
