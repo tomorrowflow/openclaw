@@ -108,4 +108,26 @@ describe("sandbox docker env secret owner", () => {
     );
     expect(cause).not.toContain("second-line");
   });
+
+  it("refuses a container sandbox while the retired secretMounts key remains", async () => {
+    const config: OpenClawConfig = {
+      agents: {
+        defaults: { sandbox: { mode: "all" } },
+        entries: {
+          worker: { sandbox: { docker: { secretMounts: { GH_TOKEN: "/run/gh-token" } } } },
+        },
+      },
+    };
+
+    const error = await resolveSandboxContext({
+      config,
+      agentId: "worker",
+      sessionKey: "agent:worker:main",
+    }).catch((caught: unknown) => caught);
+
+    expect(isSandboxProvisioningError(error)).toBe(true);
+    expect(String((error as { cause?: unknown }).cause)).toContain(
+      "agents.entries.worker.sandbox.docker.secretMounts is retired",
+    );
+  });
 });

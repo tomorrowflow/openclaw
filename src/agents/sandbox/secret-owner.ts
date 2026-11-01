@@ -109,8 +109,20 @@ export function assertSandboxSecretOwnerAvailable(params: {
 
   // Config validation rejects multiline literals; a resolved SecretRef is the
   // first point where its value can be checked against the env-file transport.
-  if (params.backend !== "docker" && params.backend !== "podman") {
+  if (!params.includeContainerEnv || (params.backend !== "docker" && params.backend !== "podman")) {
     return;
+  }
+  // Retired fork key: refuse rather than start a container without the env it
+  // used to carry. Doctor owns the migration to docker.env store SecretRefs.
+  for (const [path, docker] of [
+    [agentPath ? `${agentPath}.sandbox.docker` : undefined, agentSandbox?.docker],
+    ["agents.defaults.sandbox.docker", defaultsSandbox?.docker],
+  ] as const) {
+    if (path && docker?.secretMounts !== undefined) {
+      throw new Error(
+        `${path}.secretMounts is retired. Store each value with \`openclaw secrets store set NAME --kind secret\`, then run \`openclaw doctor --fix\` to move it to ${path}.env store SecretRefs.`,
+      );
+    }
   }
   for (const { key, path, value } of fields.slice(envFieldStart)) {
     if (typeof value === "string" && getContainerEnvFileEntryIssue(key, value)) {

@@ -97,11 +97,6 @@ function resolveSandboxDockerConfig(
 
   const binds = [...(globalDocker?.binds ?? []), ...(agentDocker?.binds ?? [])];
 
-  // Secret mounts: shallow merge (agent overrides global per-key).
-  const secretMounts = agentDocker?.secretMounts
-    ? { ...globalDocker?.secretMounts, ...agentDocker.secretMounts }
-    : globalDocker?.secretMounts;
-
   return {
     image: agentDocker?.image ?? globalDocker?.image ?? DEFAULT_SANDBOX_IMAGE,
     containerPrefix:
@@ -127,7 +122,6 @@ function resolveSandboxDockerConfig(
     dns: agentDocker?.dns ?? globalDocker?.dns,
     extraHosts: agentDocker?.extraHosts ?? globalDocker?.extraHosts,
     binds: binds.length ? binds : undefined,
-    secretMounts: secretMounts && Object.keys(secretMounts).length ? secretMounts : undefined,
     ...resolveDangerousSandboxDockerBooleans(agentDocker, globalDocker),
   };
 }

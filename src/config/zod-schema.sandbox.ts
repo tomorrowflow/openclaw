@@ -76,6 +76,8 @@ export const SandboxDockerSchema = z
     dns: z.array(z.string()).optional(),
     extraHosts: z.array(z.string()).optional(),
     binds: z.array(z.string()).optional(),
+    // Retired: sandbox creation refuses it and `openclaw doctor --fix` moves it to
+    // docker.env store SecretRefs. Parsing it keeps the Gateway up until then.
     secretMounts: z.record(z.string(), z.string()).optional(),
     dangerouslyAllowReservedContainerTargets: z.boolean().optional(),
     dangerouslyAllowExternalBindSources: z.boolean().optional(),
@@ -83,29 +85,6 @@ export const SandboxDockerSchema = z
   })
   .superRefine((data, ctx) => {
     validateSandboxBindEntries(data.binds, ctx);
-    if (data.secretMounts) {
-      const envVarPattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
-      for (const [key, value] of Object.entries(data.secretMounts)) {
-        if (!envVarPattern.test(key)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["secretMounts", key],
-            message:
-              `Sandbox security: secret mount key "${key}" is not a valid environment variable name. ` +
-              "Keys must match /^[A-Za-z_][A-Za-z0-9_]*$/.",
-          });
-        }
-        if (!value.startsWith("/")) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["secretMounts", key],
-            message:
-              `Sandbox security: secret mount "${key}" uses a non-absolute source path "${value}". ` +
-              "Only absolute POSIX paths are supported for secret mounts.",
-          });
-        }
-      }
-    }
     const blockedNetworkReason = getBlockedNetworkModeReason({
       network: data.network,
       allowContainerNamespaceJoin: data.dangerouslyAllowContainerNamespaceJoin === true,
