@@ -50,3 +50,62 @@ describe("sandbox SSH secret owner", () => {
     });
   });
 });
+
+describe("sandbox docker env secret owner", () => {
+  it("rejects an unmaterialized docker env ref before provisioning", async () => {
+    const config: OpenClawConfig = {
+      agents: {
+        defaults: { sandbox: { mode: "all" } },
+        entries: {
+          worker: {
+            sandbox: {
+              docker: {
+                env: { GH_TOKEN: { source: "store", provider: "default", id: "GH_TOKEN" } },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const error = await resolveSandboxContext({
+      config,
+      agentId: "worker",
+      sessionKey: "agent:worker:main",
+    }).catch((caught: unknown) => caught);
+
+    expect(isSandboxProvisioningError(error)).toBe(true);
+    expect(error).toMatchObject({
+      backendId: "docker",
+      cause: {
+        code: "SECRET_SURFACE_UNAVAILABLE",
+        ownerId: "agent-sandbox:worker",
+        paths: ["agents.entries.worker.sandbox.docker.env.GH_TOKEN"],
+      },
+    });
+  });
+
+  it("names the config path when a resolved docker env value cannot cross the env file", async () => {
+    const config: OpenClawConfig = {
+      agents: {
+        entries: { main: {} },
+        defaults: {
+          sandbox: { mode: "all", docker: { env: { GH_TOKEN: "first-line\nsecond-line" } } },
+        },
+      },
+    };
+
+    const error = await resolveSandboxContext({
+      config,
+      agentId: "main",
+      sessionKey: "agent:main:main",
+    }).catch((caught: unknown) => caught);
+
+    expect(isSandboxProvisioningError(error)).toBe(true);
+    const cause = String((error as { cause?: unknown }).cause);
+    expect(cause).toContain(
+      "agents.defaults.sandbox.docker.env.GH_TOKEN resolved to a value the Docker sandbox cannot pass",
+    );
+    expect(cause).not.toContain("second-line");
+  });
+});

@@ -4,11 +4,11 @@ export function resolveSandboxScope(params: { scope?: SandboxScope }): SandboxSc
   return params.scope ?? "agent";
 }
 
-export function resolveSandboxDockerEnv(params: {
+export function resolveSandboxDockerEnv<T>(params: {
   scope: SandboxScope;
-  globalEnv?: Record<string, string>;
-  agentEnv?: Record<string, string>;
-}): Record<string, string> {
+  globalEnv?: Record<string, T>;
+  agentEnv?: Record<string, T>;
+}): Record<string, T | string> {
   const agentEnv = params.scope === "shared" ? undefined : params.agentEnv;
   return agentEnv
     ? { ...(params.globalEnv ?? { LANG: "C.UTF-8" }), ...agentEnv }

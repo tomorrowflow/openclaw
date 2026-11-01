@@ -1,4 +1,4 @@
-/** Collects agent-scoped sandbox SSH SecretRefs during runtime preparation. */
+/** Collects agent-scoped sandbox SecretRefs (SSH material, container env) during runtime preparation. */
 import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import { listAgentEntriesWithSource, resolveDefaultAgentId } from "../agents/agent-scope-config.js";
 import { resolveSandboxScope } from "../agents/sandbox/config.js";
@@ -14,9 +14,48 @@ import {
 } from "./runtime-shared.js";
 import { isRecord } from "./shared.js";
 
-const SANDBOX_SSH_SECRET_KEYS = ["identityData", "certificateData", "knownHostsData"] as const;
+type SandboxSettings = { backend: string; mode: string };
 
-type SandboxSshSecretKey = (typeof SANDBOX_SSH_SECRET_KEYS)[number];
+type SandboxSecretSurface = {
+  /** Config path below `<agent>.sandbox`. */
+  path: string;
+  read: (sandbox: Record<string, unknown> | undefined) => Record<string, unknown> | undefined;
+  keys: (
+    defaults: Record<string, unknown> | undefined,
+    override: Record<string, unknown> | undefined,
+  ) => readonly string[];
+  isActive: (settings: SandboxSettings) => boolean;
+  inactiveReason: string;
+  sharedScopeReason: string;
+};
+
+const SANDBOX_SECRET_SURFACES: readonly SandboxSecretSurface[] = [
+  {
+    path: "ssh",
+    read: (sandbox) => (isRecord(sandbox?.ssh) ? sandbox.ssh : undefined),
+    keys: () => ["identityData", "certificateData", "knownHostsData"],
+    // Existing registry entries remain inspectable/removable after an agent or its
+    // sandbox is disabled, so SSH lifecycle credentials stay materialized while
+    // SSH remains the configured backend.
+    isActive: ({ backend }) => backend === "ssh",
+    inactiveReason: "sandbox SSH backend is not configured for this agent.",
+    sharedScopeReason: "shared sandbox scope ignores agent SSH overrides.",
+  },
+  {
+    path: "docker.env",
+    read: (sandbox) => {
+      const docker = isRecord(sandbox?.docker) ? sandbox.docker : undefined;
+      return isRecord(docker?.env) ? docker.env : undefined;
+    },
+    keys: (defaults, override) => [
+      ...new Set([...Object.keys(defaults ?? {}), ...Object.keys(override ?? {})]),
+    ],
+    // Every sandbox backend forwards docker.env into the runtime it creates.
+    isActive: ({ mode }) => mode !== "off",
+    inactiveReason: "sandbox mode is off for this agent.",
+    sharedScopeReason: "shared sandbox scope ignores agent docker.env overrides.",
+  },
+];
 
 function sandboxSecretOwner(agentId: string, contract: unknown): SecretAssignmentOwner {
   return {
@@ -28,7 +67,17 @@ function sandboxSecretOwner(agentId: string, contract: unknown): SecretAssignmen
   };
 }
 
-/** Collects SSH material once for every agent whose current backend can manage it. */
+function readSandboxSettings(
+  sandbox: Record<string, unknown> | undefined,
+  fallback?: SandboxSettings,
+): SandboxSettings {
+  return {
+    backend: normalizeOptionalLowercaseString(sandbox?.backend) ?? fallback?.backend ?? "docker",
+    mode: typeof sandbox?.mode === "string" ? sandbox.mode : (fallback?.mode ?? "off"),
+  };
+}
+
+/** Collects sandbox secret inputs once for every agent whose current sandbox can consume them. */
 export function collectAgentSandboxAssignments(params: {
   config: OpenClawConfig;
   defaults: SecretDefaults | undefined;
@@ -43,9 +92,8 @@ export function collectAgentSandboxAssignments(params: {
   }
   const defaultsAgent = isRecord(agents.defaults) ? agents.defaults : undefined;
   const defaultsSandbox = isRecord(defaultsAgent?.sandbox) ? defaultsAgent.sandbox : undefined;
-  const defaultsSsh = isRecord(defaultsSandbox?.ssh) ? defaultsSandbox.ssh : undefined;
-  const defaultsBackend = normalizeOptionalLowercaseString(defaultsSandbox?.backend) ?? "docker";
-  const activeDefaultKeys = new Set<SandboxSshSecretKey>();
+  const defaultsSettings = readSandboxSettings(defaultsSandbox);
+  const activeDefaultPaths = new Set<string>();
   const seenAgentIds = new Set<string>();
 
   for (const { entry: rawAgent, source } of listAgentEntriesWithSource(params.config)) {
@@ -64,8 +112,7 @@ export function collectAgentSandboxAssignments(params: {
         : `agents.list[${source.index}]`;
 
     const sandbox = isRecord(rawAgentRecord.sandbox) ? rawAgentRecord.sandbox : undefined;
-    const ssh = isRecord(sandbox?.ssh) ? sandbox.ssh : undefined;
-    const backend = normalizeOptionalLowercaseString(sandbox?.backend) ?? defaultsBackend;
+    const settings = readSandboxSettings(sandbox, defaultsSettings);
     const scope = resolveSandboxScope({
       scope:
         typeof sandbox?.scope === "string"
@@ -74,67 +121,69 @@ export function collectAgentSandboxAssignments(params: {
             ? (defaultsSandbox.scope as "agent" | "session" | "shared")
             : undefined,
     });
-    // Existing registry entries remain inspectable/removable after an agent or its
-    // sandbox is disabled, so SSH lifecycle credentials stay materialized while
-    // SSH remains the configured backend.
-    const active = backend === "ssh";
     const owner = sandboxSecretOwner(agentId, {
       defaults: defaultsSandbox,
       override: sandbox,
       agentEnabled: rawAgentRecord["enabled"],
     });
 
-    for (const key of SANDBOX_SSH_SECRET_KEYS) {
-      const hasAgentOverride = Boolean(ssh && Object.hasOwn(ssh, key));
-      if (hasAgentOverride && ssh) {
-        collect(ssh, key, `${agentPath}.sandbox.ssh.${key}`, {
-          active: scope !== "shared" && active,
-          inactiveReason:
-            scope === "shared"
-              ? "shared sandbox scope ignores agent SSH overrides."
-              : "sandbox SSH backend is not configured for this agent.",
-          owner,
-        });
-        if (scope !== "shared") {
+    for (const surface of SANDBOX_SECRET_SURFACES) {
+      const active = surface.isActive(settings);
+      const defaultsTarget = surface.read(defaultsSandbox);
+      const agentTarget = surface.read(sandbox);
+      for (const key of surface.keys(defaultsTarget, agentTarget)) {
+        const keyPath = appendConfigPathSegment(surface.path, key);
+        if (agentTarget && Object.hasOwn(agentTarget, key)) {
+          collect(agentTarget, key, `${agentPath}.sandbox.${keyPath}`, {
+            active: scope !== "shared" && active,
+            inactiveReason: scope === "shared" ? surface.sharedScopeReason : surface.inactiveReason,
+            owner,
+          });
+          if (scope !== "shared") {
+            continue;
+          }
+        }
+        if (!defaultsTarget || !Object.hasOwn(defaultsTarget, key) || !active) {
           continue;
         }
+        const defaultsPath = `agents.defaults.sandbox.${keyPath}`;
+        activeDefaultPaths.add(defaultsPath);
+        collect(defaultsTarget, key, defaultsPath, { active: true, owner });
       }
-
-      if (!defaultsSsh || !Object.hasOwn(defaultsSsh, key)) {
-        continue;
-      }
-      if (!active) {
-        continue;
-      }
-      activeDefaultKeys.add(key);
-      collect(defaultsSsh, key, `agents.defaults.sandbox.ssh.${key}`, {
-        active: true,
-        inactiveReason: "sandbox SSH backend is not configured for this agent.",
-        owner,
-      });
     }
   }
 
-  if (!defaultsSsh) {
-    return;
-  }
-  for (const key of SANDBOX_SSH_SECRET_KEYS) {
-    if (!Object.hasOwn(defaultsSsh, key) || activeDefaultKeys.has(key)) {
-      continue;
-    }
-    // Unlisted agents and stale registry entries still resolve through defaults,
-    // even when every current list entry overrides this credential.
-    const active = defaultsBackend === "ssh";
-    const fallbackAgentId =
+  // Unlisted agents and stale registry entries still resolve through defaults,
+  // even when every current list entry overrides a value. Resolving the default
+  // agent throws for multi-agent rosters, so only an active ref resolves it.
+  let fallbackOwner: SecretAssignmentOwner | undefined;
+  const resolveFallbackOwner = () =>
+    (fallbackOwner ??= sandboxSecretOwner(
       params.agentId === undefined
         ? resolveDefaultAgentId(params.config)
-        : normalizeAgentId(params.agentId);
-    collect(defaultsSsh, key, `agents.defaults.sandbox.ssh.${key}`, {
-      active,
-      inactiveReason: "no enabled agent uses the sandbox SSH material.",
-      owner: sandboxSecretOwner(fallbackAgentId, {
-        defaults: defaultsSandbox,
-      }),
-    });
+        : normalizeAgentId(params.agentId),
+      { defaults: defaultsSandbox },
+    ));
+  for (const surface of SANDBOX_SECRET_SURFACES) {
+    const defaultsTarget = surface.read(defaultsSandbox);
+    if (!defaultsTarget) {
+      continue;
+    }
+    for (const key of surface.keys(defaultsTarget, undefined)) {
+      const defaultsPath = `agents.defaults.sandbox.${appendConfigPathSegment(surface.path, key)}`;
+      if (
+        !Object.hasOwn(defaultsTarget, key) ||
+        typeof defaultsTarget[key] === "string" ||
+        activeDefaultPaths.has(defaultsPath)
+      ) {
+        continue;
+      }
+      const active = surface.isActive(defaultsSettings);
+      collect(defaultsTarget, key, defaultsPath, {
+        active,
+        inactiveReason: `no enabled agent uses ${defaultsPath}.`,
+        ...(active ? { owner: resolveFallbackOwner() } : {}),
+      });
+    }
   }
 }

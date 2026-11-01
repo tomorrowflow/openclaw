@@ -11,7 +11,7 @@ import {
 } from "./remote-shell-backend.js";
 import type { RemoteShellSandboxSession } from "./remote-shell-transport.js";
 import { sanitizeEnvVars } from "./sanitize-env-vars.js";
-import { assertSshSandboxSecretOwnerAvailable } from "./secret-owner.js";
+import { assertSandboxSecretOwnerAvailable } from "./secret-owner.js";
 import { resolveSandboxAgentId } from "./shared.js";
 import {
   buildRemoteCommand,
@@ -34,10 +34,12 @@ export const sshSandboxBackendManager: SandboxBackendManager = {
         configLabelMatch: false,
       };
     }
-    assertSshSandboxSecretOwnerAvailable({
+    assertSandboxSecretOwnerAvailable({
       config,
       scope: cfg.scope,
       agentId: effectiveAgentId,
+      backend: "ssh",
+      includeContainerEnv: false,
     });
     const runtimePaths = resolveSshRuntimePaths(cfg.ssh.workspaceRoot, entry.sessionKey);
     const session = await createSshSandboxSessionFromSettings({
@@ -70,10 +72,12 @@ export const sshSandboxBackendManager: SandboxBackendManager = {
     if (cfg.backend !== "ssh" || !cfg.ssh.target) {
       return;
     }
-    assertSshSandboxSecretOwnerAvailable({
+    assertSandboxSecretOwnerAvailable({
       config,
       scope: cfg.scope,
       agentId: effectiveAgentId,
+      backend: "ssh",
+      includeContainerEnv: false,
     });
     const runtimePaths = resolveSshRuntimePaths(cfg.ssh.workspaceRoot, entry.sessionKey);
     const session = await createSshSandboxSessionFromSettings({

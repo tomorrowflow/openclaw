@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.ts";
+import { resolveSandboxConfigForAgent } from "../agents/sandbox/config.js";
 import { setConfigResolutionFacts } from "../config/resolution-facts.js";
 import { getRuntimeConfigSnapshotRefreshHandler } from "../config/runtime-snapshot.js";
 import { redactSensitiveText } from "../logging/redact.js";
@@ -550,6 +551,108 @@ describe("secrets runtime snapshot", () => {
     expectWarning(snapshot, {
       code: "SECRETS_REF_IGNORED_INACTIVE_SURFACE",
       path: "agents.defaults.sandbox.ssh.identityData",
+    });
+  });
+
+  it("resolves sandbox docker env SecretRefs into the env each agent's sandbox receives", async () => {
+    const snapshot = await prepareSecretsRuntimeSnapshot({
+      config: asConfig({
+        agents: {
+          defaults: {
+            sandbox: {
+              mode: "all",
+              docker: {
+                env: {
+                  LANG: "C.UTF-8",
+                  GH_TOKEN: { source: "env", provider: "default", id: "DEFAULT_GH_TOKEN" },
+                },
+              },
+            },
+          },
+          entries: {
+            main: {},
+            worker: {
+              sandbox: {
+                docker: {
+                  env: {
+                    GH_TOKEN: { source: "env", provider: "default", id: "WORKER_GH_TOKEN" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+      env: { DEFAULT_GH_TOKEN: "default-gh-token", WORKER_GH_TOKEN: "worker-gh-token" },
+      includeAuthStoreRefs: false,
+      loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+    });
+
+    expect(resolveSandboxConfigForAgent(snapshot.config, "main").docker.env).toEqual({
+      LANG: "C.UTF-8",
+      GH_TOKEN: "default-gh-token",
+    });
+    expect(resolveSandboxConfigForAgent(snapshot.config, "worker").docker.env).toEqual({
+      LANG: "C.UTF-8",
+      GH_TOKEN: "worker-gh-token",
+    });
+    expect(snapshot.degradedOwners).toEqual([]);
+  });
+
+  it("isolates only the agent whose sandbox docker env SecretRef is unavailable", async () => {
+    const missingRef = { source: "env", provider: "default", id: "MISSING_GH_TOKEN" } as const;
+    const snapshot = await prepareSecretsRuntimeSnapshot({
+      config: asConfig({
+        agents: {
+          defaults: { sandbox: { mode: "all" } },
+          entries: {
+            cold: { sandbox: { docker: { env: { GH_TOKEN: missingRef } } } },
+            healthy: {},
+          },
+        },
+      }),
+      env: {},
+      includeAuthStoreRefs: false,
+      allowUnavailableSecretOwners: true,
+      loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+    });
+
+    expect(snapshot.config.agents?.entries?.cold?.sandbox?.docker?.env?.GH_TOKEN).toEqual(
+      missingRef,
+    );
+    expect(snapshot.degradedOwners).toMatchObject([
+      {
+        ownerKind: "capability",
+        ownerId: "agent-sandbox:cold",
+        state: "unavailable",
+        paths: ["agents.entries.cold.sandbox.docker.env.GH_TOKEN"],
+      },
+    ]);
+  });
+
+  it("keeps sandbox docker env SecretRefs inactive for agents whose sandbox is off", async () => {
+    const snapshot = await prepareSecretsRuntimeSnapshot({
+      config: asConfig({
+        agents: {
+          defaults: {
+            sandbox: {
+              docker: {
+                env: { GH_TOKEN: { source: "env", provider: "default", id: "UNSET_GH_TOKEN" } },
+              },
+            },
+          },
+          entries: { main: {} },
+        },
+      }),
+      env: {},
+      includeAuthStoreRefs: false,
+      loadablePluginOrigins: EMPTY_LOADABLE_PLUGIN_ORIGINS,
+    });
+
+    expect(snapshot.degradedOwners).toEqual([]);
+    expectWarning(snapshot, {
+      code: "SECRETS_REF_IGNORED_INACTIVE_SURFACE",
+      path: "agents.defaults.sandbox.docker.env.GH_TOKEN",
     });
   });
 

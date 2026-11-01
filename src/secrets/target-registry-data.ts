@@ -155,6 +155,11 @@ const CORE_SECRET_TARGET_REGISTRY: SecretTargetRegistryEntry[] = [
         includeInAudit: false,
       }),
   ),
+  // Interactive configure would offer every container variable, most of them ordinary settings.
+  ...["agents.defaults.sandbox.docker.env.*", "agents.entries.*.sandbox.docker.env.*"].map(
+    (pathPattern) =>
+      createOpenClawConfigSecretTargetEntry(pathPattern, { includeInConfigure: false }),
+  ),
   ...["tts", "agents.entries.*.tts"].flatMap((prefix) =>
     ["providers.*", "personas.*.providers.*"].map((providerPath): SecretTargetRegistryEntry => {
       const path = `${prefix}.${providerPath}.apiKey`;

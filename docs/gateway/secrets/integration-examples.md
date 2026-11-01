@@ -1,12 +1,12 @@
 ---
-summary: "Exec provider recipes for external secret managers, MCP server environment variables, and sandbox SSH"
+summary: "Exec provider recipes for external secret managers, MCP server environment variables, sandbox container env, and sandbox SSH"
 read_when:
   - Wiring an external secret manager through the exec provider
-  - Passing secrets to MCP servers or sandbox SSH auth material
+  - Passing secrets to MCP servers, sandbox containers, or sandbox SSH auth material
 title: "Secrets integration examples"
 ---
 
-This page collects working integration examples: exec provider recipes for external secret managers, MCP server environment variables, and sandbox SSH auth material.
+This page collects working integration examples: exec provider recipes for external secret managers, MCP server environment variables, sandbox container environment variables, and sandbox SSH auth material.
 
 ## Exec integration examples
 
@@ -267,6 +267,40 @@ MCP server env vars configured via `plugins.entries.acpx.config.mcpServers` acce
 ```
 
 Plaintext string values still work. Env-template refs like `${MCP_SERVER_API_KEY}` and SecretRef objects resolve during gateway activation, before the MCP server process spawns. As with other SecretRef surfaces, unresolved refs only block activation when the `acpx` plugin is effectively active.
+
+## Sandbox container environment variables
+
+`sandbox.docker.env` values accept SecretRefs, at `agents.defaults` and per agent. Store the value once in the shared secret store, then reference it by name:
+
+```bash
+openclaw secrets store set GH_TOKEN --kind secret --value-file - < ./gh-token.txt
+```
+
+```json5
+{
+  agents: {
+    defaults: {
+      sandbox: {
+        mode: "all",
+        docker: {
+          env: {
+            LANG: "C.UTF-8",
+            GH_TOKEN: { source: "store", provider: "default", id: "GH_TOKEN" },
+          },
+        },
+      },
+    },
+  },
+}
+```
+
+Runtime behavior:
+
+- OpenClaw resolves these refs during gateway activation and passes the resolved strings to the sandbox runtime. Docker and Podman receive them through a private, short-lived env file, never through process arguments.
+- A failed ref isolates only the affected agent's sandbox (`agent-sandbox:<agentId>`). That agent's sandbox refuses to start until the ref resolves; run `openclaw secrets reload` after fixing the store or provider.
+- Docker and Podman env files are line-delimited. A ref that resolves to a multiline value fails at sandbox creation with an error naming its config path.
+- Refs are inactive while that agent's sandbox mode is `off`. With `scope: "shared"`, per-agent `docker.env` overrides are ignored and their refs stay inactive.
+- Resolved values still land in the container environment. Anyone with Docker daemon access can read them with `docker inspect`.
 
 ## Sandbox SSH auth material
 

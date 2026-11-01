@@ -1,6 +1,7 @@
-/** Guards SSH sandbox use against unresolved runtime SecretRefs. */
+/** Guards sandbox use against unresolved runtime SecretRefs. */
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { coerceSecretRef } from "../../config/types.secrets.js";
+import { getContainerEnvFileEntryIssue } from "../../infra/container-env-file.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import { secretRefKey } from "../../secrets/ref-contract.js";
 import { SecretSurfaceUnavailableError } from "../../secrets/runtime-degraded-state.js";
@@ -13,11 +14,30 @@ import type { SandboxScope } from "./types.js";
 
 const SSH_SECRET_KEYS = ["identityData", "certificateData", "knownHostsData"] as const;
 
-/** Rejects cold or unmaterialized SSH credentials before any host SSH fallback is possible. */
-export function assertSshSandboxSecretOwnerAvailable(params: {
+type SandboxSecretField = { key: string; path: string; value: unknown };
+
+function resolveAgentConfigPath(config: OpenClawConfig, agentId: string): string | undefined {
+  const normalizedAgentId = normalizeAgentId(agentId);
+  const source = listAgentEntriesWithSource(config).find(
+    ({ entry }) => normalizeAgentId(entry.id) === normalizedAgentId,
+  )?.source;
+  if (!source) {
+    return undefined;
+  }
+  return source.kind === "entries" ? `agents.entries.${source.key}` : `agents.list.${source.index}`;
+}
+
+/**
+ * Rejects cold or unmaterialized sandbox secrets before any host SSH fallback
+ * or container creation is possible. Lifecycle-only callers (inspect, remove)
+ * skip container env, which they never forward.
+ */
+export function assertSandboxSecretOwnerAvailable(params: {
   config?: OpenClawConfig;
   scope: SandboxScope;
   agentId?: string;
+  backend: string;
+  includeContainerEnv: boolean;
 }): void {
   if (params.agentId) {
     assertRuntimeSandboxSecretOwnerAvailable(params.agentId);
@@ -26,35 +46,56 @@ export function assertSshSandboxSecretOwnerAvailable(params: {
     return;
   }
 
-  const defaultsSsh = params.config.agents?.defaults?.sandbox?.ssh;
-  const agentSsh =
+  const defaultsSandbox = params.config.agents?.defaults?.sandbox;
+  const agentSandbox =
     params.agentId && params.scope !== "shared"
-      ? resolveAgentConfig(params.config, params.agentId)?.sandbox?.ssh
+      ? resolveAgentConfig(params.config, params.agentId)?.sandbox
       : undefined;
-  const normalizedAgentId = params.agentId ? normalizeAgentId(params.agentId) : undefined;
-  const agentSource = normalizedAgentId
-    ? listAgentEntriesWithSource(params.config).find(
-        ({ entry }) => normalizeAgentId(entry.id) === normalizedAgentId,
-      )?.source
-    : undefined;
-  const unresolved: Array<{ path: string; refKey: string }> = [];
-  for (const key of SSH_SECRET_KEYS) {
-    const usesAgentValue = Boolean(agentSsh && Object.hasOwn(agentSsh, key));
-    const value = usesAgentValue ? agentSsh?.[key] : defaultsSsh?.[key];
-    const ref = coerceSecretRef(value, params.config.secrets?.defaults);
-    if (!ref) {
-      continue;
+  const agentPath =
+    agentSandbox && params.agentId
+      ? resolveAgentConfigPath(params.config, params.agentId)
+      : undefined;
+  const fields: SandboxSecretField[] = [];
+  const collect = (
+    surface: string,
+    keys: Iterable<string>,
+    defaults: Readonly<Record<string, unknown>> | undefined,
+    override: Readonly<Record<string, unknown>> | undefined,
+  ) => {
+    for (const key of keys) {
+      const usesAgentValue = Boolean(override && Object.hasOwn(override, key));
+      if (!usesAgentValue && !(defaults && Object.hasOwn(defaults, key))) {
+        continue;
+      }
+      fields.push({
+        key,
+        path:
+          usesAgentValue && agentPath
+            ? `${agentPath}.sandbox.${surface}.${key}`
+            : `agents.defaults.sandbox.${surface}.${key}`,
+        value: usesAgentValue ? override?.[key] : defaults?.[key],
+      });
     }
-    unresolved.push({
-      path:
-        usesAgentValue && agentSource
-          ? agentSource.kind === "entries"
-            ? `agents.entries.${agentSource.key}.sandbox.ssh.${key}`
-            : `agents.list.${agentSource.index}.sandbox.ssh.${key}`
-          : `agents.defaults.sandbox.ssh.${key}`,
-      refKey: secretRefKey(ref),
-    });
+  };
+  if (params.backend === "ssh") {
+    collect("ssh", SSH_SECRET_KEYS, defaultsSandbox?.ssh, agentSandbox?.ssh);
   }
+  const envFieldStart = fields.length;
+  if (params.includeContainerEnv) {
+    const defaultsEnv = defaultsSandbox?.docker?.env;
+    const agentEnv = agentSandbox?.docker?.env;
+    collect(
+      "docker.env",
+      new Set([...Object.keys(defaultsEnv ?? {}), ...Object.keys(agentEnv ?? {})]),
+      defaultsEnv,
+      agentEnv,
+    );
+  }
+
+  const unresolved = fields.flatMap(({ path, value }) => {
+    const ref = coerceSecretRef(value, params.config?.secrets?.defaults);
+    return ref ? [{ path, refKey: secretRefKey(ref) }] : [];
+  });
   if (unresolved.length > 0) {
     throw new SecretSurfaceUnavailableError({
       ownerKind: "capability",
@@ -62,7 +103,20 @@ export function assertSshSandboxSecretOwnerAvailable(params: {
       state: "unavailable",
       paths: unresolved.map((entry) => entry.path),
       refKeys: unresolved.map((entry) => entry.refKey),
-      reason: "configured SSH secret reference was not materialized",
+      reason: "configured sandbox secret reference was not materialized",
     });
+  }
+
+  // Config validation rejects multiline literals; a resolved SecretRef is the
+  // first point where its value can be checked against the env-file transport.
+  if (params.backend !== "docker" && params.backend !== "podman") {
+    return;
+  }
+  for (const { key, path, value } of fields.slice(envFieldStart)) {
+    if (typeof value === "string" && getContainerEnvFileEntryIssue(key, value)) {
+      throw new Error(
+        `${path} resolved to a value the ${params.backend === "podman" ? "Podman" : "Docker"} sandbox cannot pass: container env-file values must be single-line and free of NUL bytes. Store a single-line value, or deliver multiline material through a mounted file or custom image.`,
+      );
+    }
   }
 }

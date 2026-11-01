@@ -3,6 +3,8 @@ import { z } from "zod";
 import { splitSandboxBindSpec } from "../agents/sandbox/bind-spec.js";
 import { isSandboxHostPathAbsolute } from "../agents/sandbox/host-paths.js";
 import { getBlockedNetworkModeReason } from "../agents/sandbox/network-mode.js";
+import { SecretInputSchema } from "./zod-schema.secret-input.js";
+import { sensitive } from "./zod-schema.sensitive.js";
 
 function validateSandboxBindEntries(
   binds: readonly string[] | undefined,
@@ -45,7 +47,7 @@ export const SandboxDockerSchema = z
     network: z.string().optional(),
     user: z.string().optional(),
     capDrop: z.array(z.string()).optional(),
-    env: z.record(z.string(), z.string()).optional(),
+    env: z.record(z.string(), SecretInputSchema.register(sensitive)).optional(),
     setupCommand: z
       .union([z.string(), z.array(z.string())])
       .transform((value) => (Array.isArray(value) ? value.join("\n") : value))

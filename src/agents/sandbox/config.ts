@@ -1,7 +1,7 @@
 import { resolveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import type { SandboxSshSettings } from "../../config/types.sandbox.js";
+import type { SandboxDockerSettings, SandboxSshSettings } from "../../config/types.sandbox.js";
 import { normalizeSecretInputString } from "../../config/types.secrets.js";
 import { resolveAgentConfig } from "../agent-scope-config.js";
 import { resolveSandboxDockerEnv, resolveSandboxScope } from "./config-contract.js";
@@ -43,8 +43,8 @@ type DangerousSandboxDockerBooleanKey = (typeof DANGEROUS_SANDBOX_DOCKER_BOOLEAN
 type DangerousSandboxDockerBooleans = Pick<SandboxDockerConfig, DangerousSandboxDockerBooleanKey>;
 
 function resolveDangerousSandboxDockerBooleans(
-  agentDocker?: Partial<SandboxDockerConfig>,
-  globalDocker?: Partial<SandboxDockerConfig>,
+  agentDocker?: Partial<SandboxDockerSettings>,
+  globalDocker?: Partial<SandboxDockerSettings>,
 ): DangerousSandboxDockerBooleans {
   const resolved: DangerousSandboxDockerBooleans = {};
   for (const key of DANGEROUS_SANDBOX_DOCKER_BOOLEAN_KEYS) {
@@ -75,14 +75,21 @@ export { resolveSandboxScope } from "./config-contract.js";
 
 function resolveSandboxDockerConfig(
   scope: SandboxScope,
-  globalDocker?: Partial<SandboxDockerConfig>,
-  agentDocker?: Partial<SandboxDockerConfig>,
+  globalDocker?: Partial<SandboxDockerSettings>,
+  agentDocker?: Partial<SandboxDockerSettings>,
 ): SandboxDockerConfig {
-  const env = resolveSandboxDockerEnv({
-    scope,
-    globalEnv: globalDocker?.env,
-    agentEnv: agentDocker?.env,
-  });
+  // The runtime snapshot replaces resolved SecretRefs with strings. A ref left
+  // here is unresolved, and the sandbox secret guard rejects it before any
+  // backend consumes this env.
+  const env = Object.fromEntries(
+    Object.entries(
+      resolveSandboxDockerEnv({
+        scope,
+        globalEnv: globalDocker?.env,
+        agentEnv: agentDocker?.env,
+      }),
+    ).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
 
   const ulimits = agentDocker?.ulimits
     ? { ...globalDocker?.ulimits, ...agentDocker.ulimits }

@@ -333,7 +333,8 @@ function collectSandboxContainerEnvIssues(
     });
     const authoredAgent = agent ? (authoredById.get(agent.entry.id) ?? agent) : undefined;
     for (const [key, value] of Object.entries(env)) {
-      const reason = getContainerEnvFileEntryIssue(key, value);
+      // SecretRef values are checked after resolution, at sandbox creation.
+      const reason = getContainerEnvFileEntryIssue(key, typeof value === "string" ? value : "");
       if (!reason) {
         continue;
       }

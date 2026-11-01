@@ -315,6 +315,34 @@ describe("secrets audit", () => {
     ).toEqual(["talk.providers.inactive.apiKey", "talk.realtime.providers.inactive.apiKey"]);
   });
 
+  it("checks sandbox docker env refs and flags only credential-named plaintext", async () => {
+    await writeJsonFile(fixture.configPath, {
+      agents: {
+        defaults: {
+          sandbox: {
+            docker: {
+              env: {
+                LANG: "C.UTF-8",
+                NPM_TOKEN: "plaintext-npm-token",
+                GH_TOKEN: { source: "env", provider: "default", id: "MISSING_SANDBOX_GH_TOKEN" },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const report = await runSecretsAudit({ env: fixture.env });
+
+    const sandboxFindings = report.findings
+      .filter((finding) => finding.jsonPath?.startsWith("agents.defaults.sandbox"))
+      .map((finding) => [finding.code, finding.jsonPath]);
+    expect(sandboxFindings.toSorted()).toEqual([
+      ["PLAINTEXT_FOUND", "agents.defaults.sandbox.docker.env.NPM_TOKEN"],
+      ["REF_UNRESOLVED", "agents.defaults.sandbox.docker.env.GH_TOKEN"],
+    ]);
+  });
+
   it("reports plaintext that duplicates the store while resolving store refs", async () => {
     await writeSecretStoreEntry({
       scope: { kind: "team" },

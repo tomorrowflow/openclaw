@@ -46,7 +46,7 @@ import {
   resolveSandboxRuntimeStatusAsync,
   withSandboxRuntimeStatusInWorker,
 } from "./runtime-status.js";
-import { assertSshSandboxSecretOwnerAvailable } from "./secret-owner.js";
+import { assertSandboxSecretOwnerAvailable } from "./secret-owner.js";
 import { resolveSandboxWorkspaceLayoutPaths } from "./shared.js";
 import { captureSandboxStateOwner, SandboxStateOwnerRequiredError } from "./state-owner.js";
 import type { SandboxContext, SandboxWorkspaceInfo } from "./types.js";
@@ -247,15 +247,14 @@ function assertSandboxSessionSecretOwnerAvailable(
   config: OpenClawConfig | undefined,
   resolved: ResolvedSandboxSession,
 ): void {
-  if (resolved.cfg.backend !== "ssh") {
-    return;
-  }
   // Never let an unresolved inline SSH credential silently fall through to
-  // ambient host SSH identities for this agent.
-  assertSshSandboxSecretOwnerAvailable({
+  // ambient host SSH identities, or a sandbox start without its configured env.
+  assertSandboxSecretOwnerAvailable({
     config,
     scope: resolved.cfg.scope,
     agentId: resolved.runtime.agentId,
+    backend: resolved.cfg.backend,
+    includeContainerEnv: true,
   });
 }
 

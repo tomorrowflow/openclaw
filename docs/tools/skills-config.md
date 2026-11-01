@@ -442,7 +442,13 @@ roots.
   is given the variable separately.
 </Warning>
 
-Pass secrets into a Docker sandbox with:
+Pass secrets into a Docker sandbox through `sandbox.docker.env`. Keep the
+value in the shared secret store and reference it, so it never sits as
+plaintext in `openclaw.json`:
+
+```bash
+openclaw secrets store set GEMINI_API_KEY --kind secret --value-file - < ./gemini-key.txt
+```
 
 ```json5
 {
@@ -450,7 +456,9 @@ Pass secrets into a Docker sandbox with:
     defaults: {
       sandbox: {
         docker: {
-          env: { GEMINI_API_KEY: "your-key-here" },
+          env: {
+            GEMINI_API_KEY: { source: "store", provider: "default", id: "GEMINI_API_KEY" },
+          },
         },
       },
     },
@@ -458,10 +466,15 @@ Pass secrets into a Docker sandbox with:
 }
 ```
 
+Plain string values still work. See
+[sandbox container environment variables](/gateway/secrets/integration-examples#sandbox-container-environment-variables)
+for resolution and failure behavior.
+
 <Note>
-  Users with Docker daemon access can inspect `sandbox.docker.env` values
-  through Docker metadata. Use a mounted secret file, a custom image, or
-  another delivery path when that exposure is not acceptable.
+  Users with Docker daemon access can inspect resolved `sandbox.docker.env`
+  values through Docker metadata (`docker inspect`), including values that came
+  from SecretRefs. Use a mounted secret file, a custom image, or another
+  delivery path when that exposure is not acceptable.
 </Note>
 
 ## Loading order reminder
