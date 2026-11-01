@@ -21,7 +21,9 @@
 # with claude/library (removed when the profile has none), then runs
 # the profile's tools.manifest checks as the node user. A failed check installs
 # nothing: the satellite reports a WARNING and the script exits 3 (or 1 if a
-# satellite failed).
+# satellite failed). It also copies claude/settings.<os>.json for both OSes to
+# $OPENCLAW_NODE_RULES_DIR (default: the factory workspace's node-tool-rules/)
+# as the openclaw user, so card drafting can see what each node may run.
 #
 # Satellites are listed one per line in $OPENCLAW_SATELLITES_FILE
 # (default ~/.config/openclaw-deploy/satellites.conf), so adding a node needs no
@@ -48,6 +50,7 @@ PHASE="${1:-}"
 SATELLITES_FILE="${OPENCLAW_SATELLITES_FILE:-$HOME/.config/openclaw-deploy/satellites.conf}"
 LOG_DIR="${OPENCLAW_SATELLITES_LOG_DIR:-$HOME/logs/satellites}"
 PROFILE_DIR="${OPENCLAW_NODE_PROFILE_DIR:-$HOME/.config/openclaw-deploy/node-profile}"
+NODE_RULES_DIR="${OPENCLAW_NODE_RULES_DIR:-/home/openclaw/.openclaw/workspace/factory/node-tool-rules}"
 NODE_USER=factory
 GLOBAL_ROOT="$(npm root -g)/openclaw"
 # The Mac build stays silent for minutes (output goes to /dev/null), and an idle
@@ -325,6 +328,24 @@ $PROVISION_SCRIPT"
 if [[ "$PHASE" == provision && ! -f "$PROFILE_DIR/tools.manifest" ]]; then
   echo "[satellites] no node profile at $PROFILE_DIR" >&2
   exit 1
+fi
+
+# Card drafters (the openclaw user) can't read this profile, so provision also
+# publishes each OS's tool rules into the factory workspace, where the drafting
+# skill checks Proof: commands against them. Best effort: nodes still provision.
+publish_node_rules() {
+  sudo -n -u openclaw mkdir -p "$NODE_RULES_DIR" || return 1
+  local os
+  for os in linux macos; do
+    sudo -n -u openclaw tee "$NODE_RULES_DIR/settings.$os.json" >/dev/null <"$PROFILE_DIR/claude/settings.$os.json" || return 1
+  done
+}
+if [[ "$PHASE" == provision ]]; then
+  if publish_node_rules; then
+    echo "[satellites] provision: node tool rules published to $NODE_RULES_DIR"
+  else
+    echo "[satellites] provision: WARNING — could not publish node tool rules to $NODE_RULES_DIR"
+  fi
 fi
 
 if [[ "$PHASE" == prepare ]] && grep -qE '^[^#[:space:]]+[[:space:]]+linux-tarball' "$SATELLITES_FILE"; then
