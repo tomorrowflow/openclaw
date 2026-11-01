@@ -1030,7 +1030,7 @@ model, so a verdict always comes from the configured one:
    `binary`) and a rename's old path, plus totals over every file. When that
    diff fails, the import still completes and the Gateway logs a warning. A
    card keeps the facts of its last five rounds; when the card's metadata
-   outgrows its 24 KiB budget, round facts are dropped first, oldest round
+   outgrows its 48 KiB budget, round facts are dropped first, oldest round
    first, before comments or proof. The oldest round loses its decision
    trail, then its review items, and goes only after that, so its review
    findings outlast its decision trail. When the board has an

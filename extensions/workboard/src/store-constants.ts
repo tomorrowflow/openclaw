@@ -32,7 +32,10 @@ export const MAX_CARD_DIAGNOSTICS = 12;
 export const MAX_CARD_NOTIFICATIONS = 20;
 export const MAX_NODE_REVIEW_VERDICTS = 20;
 export const MAX_RUN_ID_LENGTH = 512;
-export const MAX_CARD_METADATA_BYTES = 24 * 1024;
+// Every card rides in one cards.list frame (MAX_PAYLOAD_BYTES, 25 MiB): 247
+// cards were 7.3 MB on 2026-11-01, metadata 3.1 MB of it, so 48 KiB leaves
+// headroom for a few hundred more full cards.
+export const MAX_CARD_METADATA_BYTES = 48 * 1024;
 export const MAX_ATTEMPT_ERROR_CHARS = 800;
 export const MAX_BLOCK_REASON_CHARS = 2000;
 export const MAX_COMMENT_BODY_CHARS = 8000;

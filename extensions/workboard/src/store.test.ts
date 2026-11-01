@@ -1019,7 +1019,8 @@ describe("WorkboardStore", () => {
       title: "Keep proof under metadata pressure",
       status: "running",
       metadata: {
-        artifacts: Array.from({ length: 12 }, (_, index) => ({
+        // One ~2 KiB artifact per 2 KiB of budget: the next write must trim.
+        artifacts: Array.from({ length: MAX_CARD_METADATA_BYTES / 2048 }, (_, index) => ({
           id: `artifact-${index}`,
           createdAt: index + 1,
           url: `https://example.com/${index}/${"x".repeat(1900)}`,
@@ -1046,7 +1047,7 @@ describe("WorkboardStore", () => {
     ).rejects.toThrow("proof is required to resolve a pending proof.");
     expect(pending.metadata?.artifacts?.length ?? 0).toBeLessThan(artifactCountBefore);
     expect(Buffer.byteLength(JSON.stringify(pending.metadata), "utf8")).toBeLessThanOrEqual(
-      24 * 1024,
+      MAX_CARD_METADATA_BYTES,
     );
 
     const completed = await store.complete(card.id, {
@@ -1059,7 +1060,7 @@ describe("WorkboardStore", () => {
 
     expect(completed.metadata?.proof).toEqual([{ ...pendingProof, status: "passed" }]);
     expect(Buffer.byteLength(JSON.stringify(completed.metadata), "utf8")).toBeLessThanOrEqual(
-      24 * 1024,
+      MAX_CARD_METADATA_BYTES,
     );
   });
 
@@ -1763,7 +1764,8 @@ describe("WorkboardStore", () => {
       status: "running",
       execution: codexExecution("exec-max-run", 1_000, { runId }),
       metadata: {
-        artifacts: Array.from({ length: 12 }, (_, index) => ({
+        // One ~2 KiB artifact per 2 KiB of budget: the next write must trim.
+        artifacts: Array.from({ length: MAX_CARD_METADATA_BYTES / 2048 }, (_, index) => ({
           id: `artifact-${index}`,
           createdAt: index + 1,
           url: `https://example.com/${index}/${"x".repeat(1900)}`,
@@ -3221,7 +3223,8 @@ describe("WorkboardStore attachments", () => {
       metadata: {
         comments: Array.from({ length: 12 }, (_, index) => ({
           id: `comment-${index}`,
-          body: "x".repeat(1970),
+          // Twelve entries sized to sit just under the budget.
+          body: "x".repeat(MAX_CARD_METADATA_BYTES / 12 - 78),
           createdAt: 1,
         })),
       },
