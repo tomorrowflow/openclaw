@@ -127,7 +127,7 @@ function grillSessionMessage(
         ]),
     "",
     "## How to grill",
-    "- Interview the operator one question at a time until you share an understanding of what to build. Give your recommended answer with each question, and start with the handoff's first question.",
+    "- Follow the `grilling` skill to interview the operator until you share an understanding of what to build. Start the first round with the handoff's open questions.",
     "- Look facts up yourself (the repository, the docs, the card with `workboard_read`) instead of asking the operator for them.",
     "- Do not build anything, change files, or move the card. This session only settles what to build.",
     "- When the operator confirms the shared understanding, write the result as a handoff for the ticket session: the settled decisions, the terms you agreed on, open risks, and what the ticket session should do next. Call `workboard_grill_done` with it as `handoff`; the ticket session then resumes with it.",
