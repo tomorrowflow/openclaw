@@ -668,6 +668,15 @@ function setRegisteredHealthChecks(
 }
 
 describe("doctor health contributions", () => {
+  it("runs every registered core health check from some contribution", async () => {
+    const claimed = new Set(
+      (await resolveDoctorContributionHealthChecks()).map((check) => check.id),
+    );
+    expect(CORE_HEALTH_CHECKS.map((check) => check.id).filter((id) => !claimed.has(id))).toEqual(
+      [],
+    );
+  });
+
   async function withProcessPlatform<T>(
     platform: NodeJS.Platform,
     run: () => Promise<T>,

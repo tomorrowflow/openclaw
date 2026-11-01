@@ -172,6 +172,10 @@ export function resolveInitialDoctorHealthContributions(params: {
       healthCheckIds: ["core/doctor/legacy-state", "core/doctor/removed-workspaces-state"],
       run: params.runLegacyStateHealth,
     }),
+    createDoctorHealthContribution("doctor:sandbox-secret-mounts", "Sandbox secret mounts", {
+      healthCheckIds: ["core/doctor/sandbox-secret-mounts"],
+      run: coreHealthRunner("core/doctor/sandbox-secret-mounts"),
+    }),
     createDoctorHealthContribution("doctor:session-transcripts", "Session transcripts", {
       healthChecks: {
         description: "Legacy or branchy session transcript files are represented as findings.",
