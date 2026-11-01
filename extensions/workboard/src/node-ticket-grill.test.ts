@@ -300,7 +300,7 @@ describe("node ticket grilling handoff", () => {
       "Grill the operator on this Workboard ticket: Fix the parser",
     );
     expect(params?.message).toContain(HANDOFF);
-    expect(params?.message).toContain("Interview the operator one question at a time");
+    expect(params?.message).toContain("Follow the `grilling` skill");
     expect(params?.message).toMatch(
       /The repository is checked out at `[^`]+`\. The ticket branch `[^`]+` has no commits yet\./,
     );
