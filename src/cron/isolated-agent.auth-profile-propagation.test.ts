@@ -381,6 +381,54 @@ describe("runCronIsolatedAgentTurn auth profile propagation (#20624, #90991)", (
     },
   );
 
+  it.each([false, true])(
+    "lets a bound job fall back to an unaccounted provider only when opted in (%s)",
+    async (allowFallbackWithoutAccount) => {
+      await saveProfiles({ "openai:work": apiKey() });
+      const cfg = config();
+      const binding = await captureCronInferenceBinding({
+        cfg,
+        agentId: "main",
+        model: "openai/gpt-4.1@openai:work",
+      });
+      cfg.cron = { allowFallbackWithoutAccount };
+      resolveConfiguredModelRefMock.mockReturnValue({ provider: "openai", model: "gpt-4.1" });
+      runWithModelFallbackMock.mockImplementation(
+        async (params: TestModelFallbackRunnerParams) => ({
+          result: await runFallbackModelAttempt(params, "ollama", "glm-5.3:cloud", "rate_limit"),
+          provider: "ollama",
+          model: "glm-5.3:cloud",
+          attempts: [],
+        }),
+      );
+      runEmbeddedAgentMock.mockImplementation(async (request: RunEmbeddedAgentInternalParams) => {
+        request.userTurnTranscriptRecorder?.markBlocked();
+        return { payloads: [{ text: "fallback reply" }], meta: { agentMeta: {} } };
+      });
+
+      const result = await runWithConfig(
+        cfg,
+        makeIsolatedAgentJobFixture({ agentId: "main", inferenceBinding: binding }),
+      );
+
+      if (!allowFallbackWithoutAccount) {
+        expect(result.status).toBe("error");
+        expect(result.error).toContain("cron.allowFallbackWithoutAccount");
+        expect(runEmbeddedAgentMock).not.toHaveBeenCalled();
+        return;
+      }
+      expect(result.status, result.error).toBe("ok");
+      const request = runEmbeddedAgentMock.mock.lastCall?.[0];
+      expect(request).toMatchObject({
+        provider: "ollama",
+        model: "glm-5.3:cloud",
+        automationFallbackWithoutAccount: true,
+      });
+      expect(request?.authProfileId).toBeUndefined();
+      expect(request?.authProfileBinding).toBeUndefined();
+    },
+  );
+
   it.each(["cron", "event"] as const)(
     "fails closed for a bound account on a %s CLI route (#144047)",
     async (trigger) => {

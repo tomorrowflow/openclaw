@@ -59,6 +59,8 @@ core/doctor/sandbox-secret-mounts | src/flows/doctor-core-checks.ts | Doctor mig
 
 # --- Cron Hardening ---
 MAX_JOBS_PER_AGENT | src/cron/service/ops-mutations.ts | Per-agent cron job count limit
+allowFallbackWithoutAccount === true | src/cron/run-inference.ts | cron.allowFallbackWithoutAccount (default false = upstream) lets a job bound to a stored inference account fall back to another provider's model when that run selects no stored account; without it a usage-limited account (ChatGPT weekly cap) fails every bound job although an Ollama fallback chain is configured.
+automationFallbackWithoutAccount | src/agents/embedded-agent-runner/run/auth-plan.ts | The admitted fallback run refuses stored profiles and ambient credentials at the auth plan, the point of effect; config-declared (Ollama SecretRef key) and credentialless routes run.
 configuredTimeoutMs <= 0 | src/cron/service/timeout-policy.ts | Timeout hardening (<=0 falls back to default)
 createCronScheduleSchema | src/agents/tools/cron-tool-schema.ts | Explicit TypeBox schema for cron job/patch objects (upstreamed 2026.7.2; schema split out of cron-tool.ts)
 

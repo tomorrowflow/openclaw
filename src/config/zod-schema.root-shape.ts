@@ -390,6 +390,11 @@ export const OpenClawSchemaShape = {
       enabled: z.boolean().optional(),
       /** Skip missed recurring slots at startup; one-shot catch-up is unchanged. Default: false. */
       skipMissedJobs: z.boolean().optional(),
+      /**
+       * Let jobs bound to a stored inference account fall back to configured models that use no
+       * stored account (local models, provider-config keys). Default: false.
+       */
+      allowFallbackWithoutAccount: z.boolean().optional(),
       triggers: z
         .strictObject({
           enabled: z.boolean().optional(),

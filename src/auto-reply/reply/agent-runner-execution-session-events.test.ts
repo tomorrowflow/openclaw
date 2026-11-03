@@ -227,13 +227,13 @@ describe("ordinary session event execution", () => {
       revalidate: vi.fn(async () => {}),
     };
     const acquire = vi.spyOn(cronInference, "prepareCronRunInference").mockResolvedValue({
-      runParams: {
+      runParamsFor: () => ({
         authProfileId: "scheduled-profile",
         authProfileIdSource: "auto",
         authProfileBinding,
         allowAuthProfileFallback: false,
         onSuccessfulAuthProfile,
-      },
+      }),
       assertCandidate,
       dispose,
     });

@@ -176,6 +176,11 @@ export type RunEmbeddedAgentParams = {
     assertCurrent(): void;
     revalidate(): Promise<void>;
   };
+  /**
+   * Opted-in automation fallback outside its bound account's provider: config-declared and
+   * credentialless routes may run; stored accounts and ambient credentials stay refused.
+   */
+  automationFallbackWithoutAccount?: boolean;
   /** Disable fallback from the user-selected auth profile for a verification run. */
   allowAuthProfileFallback?: boolean;
   verboseLevel?: VerboseLevel;

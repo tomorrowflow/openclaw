@@ -130,7 +130,7 @@ export async function prepareEmbeddedRunAuthPlan(params: {
   const createAuthPreparation = (): PreparedAgentRuntimeAuth => {
     const harness = params.getAgentHarness();
     if (params.nativeSessionRuntime?.auth === "native") {
-      if (runParams.authProfileBinding) {
+      if (runParams.authProfileBinding || runParams.automationFallbackWithoutAccount) {
         throw new Error(
           "A native connection cannot replace the automation’s recorded inference account.",
         );
@@ -190,23 +190,46 @@ export async function prepareEmbeddedRunAuthPlan(params: {
           context,
         }),
     });
-    // Legacy jobs have no trustworthy account history. Native authority and
-    // credentialless execution remain valid, but ambient credentials need adoption.
     if (
       runParams.trigger === "cron" &&
       !runParams.authProfileBinding &&
-      !runParams.scheduledRuntimeAuthority &&
-      prepared.attempts.some(({ plan }) => {
-        const source = plan.credentialSource;
-        return (
-          source?.kind === "profile" ||
-          (source?.kind === "direct" && source.evidence !== "synthetic")
-        );
-      })
+      !runParams.scheduledRuntimeAuthority
     ) {
-      throw new Error(
-        "Automation has no recorded inference account. Explicitly select its account with a model@profile update before running it.",
-      );
+      // An opted-in fallback never reaches another stored account or an undeclared credential.
+      if (runParams.automationFallbackWithoutAccount) {
+        // Harness-owned logins and runtime-discovered keys are accounts config never named.
+        if (
+          harness.authBootstrap === "harness" ||
+          prepared.attempts.some(({ plan }) => {
+            const source = plan.credentialSource;
+            return (
+              source?.kind === "profile" ||
+              (source?.kind === "direct" &&
+                (source.authorization === "ambient" || source.evidence === "runtime"))
+            );
+          })
+        ) {
+          throw new Error(
+            "Automation fallback would use a stored, ambient, or runtime-owned account; fallbacks without an account only run on credentialless or config-declared models.",
+          );
+        }
+        return prepared;
+      }
+      // Legacy jobs have no trustworthy account history. Native authority and
+      // credentialless execution remain valid, but ambient credentials need adoption.
+      if (
+        prepared.attempts.some(({ plan }) => {
+          const source = plan.credentialSource;
+          return (
+            source?.kind === "profile" ||
+            (source?.kind === "direct" && source.evidence !== "synthetic")
+          );
+        })
+      ) {
+        throw new Error(
+          "Automation has no recorded inference account. Explicitly select its account with a model@profile update before running it.",
+        );
+      }
     }
     return prepared;
   };

@@ -128,7 +128,8 @@ export async function runAgentFallbackCandidates(params: AgentFallbackCycleParam
         model,
         agentId: turn.followupRun.run.agentId,
         authProfileId:
-          params.scheduledInference?.runParams.authProfileId ?? selectedAuthProfile.authProfileId,
+          params.scheduledInference?.runParamsFor(provider).authProfileId ??
+          selectedAuthProfile.authProfileId,
         sessionRuntimeOverride,
         pinnedHarnessId: resolveSessionPinnedHarnessId(activeEntry),
       }),

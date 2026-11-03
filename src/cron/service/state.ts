@@ -408,6 +408,8 @@ export type CronWakeMode = "now" | "next-heartbeat";
 export type CronStatusSummary = {
   enabled: boolean;
   triggersEnabled: boolean;
+  /** Bound jobs may fall back to models that use no stored account (`cron.allowFallbackWithoutAccount`). */
+  fallbackWithoutAccount?: boolean;
   /** @deprecated Alias for `sqlitePath`. */
   storePath: string;
   storage: "sqlite";
