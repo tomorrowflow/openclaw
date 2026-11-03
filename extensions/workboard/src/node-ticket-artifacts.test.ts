@@ -217,12 +217,11 @@ it("lists no rounds, without failing, when the readable rounds committed no imag
   expect(await listScreenshots(noNode, card, COMMITTED)).toEqual(committed([]));
 });
 
-it("reports the committed screenshots unavailable when every round's commits are gone", async () => {
+it("reports the committed screenshots removed when every round's commits are gone", async () => {
   const card = nodeCard([{ round: 0, changes: changes("e".repeat(40), "f".repeat(40)) }]);
 
   expect((await listScreenshots(noNode, card, COMMITTED)).committed).toEqual({
-    state: "unavailable",
-    reason: `no round's commits are left in ${repo}`,
+    state: "removed",
   });
 });
 

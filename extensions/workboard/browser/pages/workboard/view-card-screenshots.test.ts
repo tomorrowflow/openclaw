@@ -187,6 +187,16 @@ it("keeps the tab hidden when no round committed an image", async () => {
   expect(page.tab()).toBeNull();
 });
 
+it("keeps the tab and says why when the rounds' commits were removed", async () => {
+  const page = screenshotsPage({ list: () => ({ committed: { state: "removed" } }), get: image });
+
+  await vi.waitFor(() =>
+    expect(page.panel()?.textContent).toContain("no longer in the repository"),
+  );
+  expect(page.tab()?.getAttribute("aria-selected")).toBe("true");
+  expect(page.calls(GET)).toHaveLength(0);
+});
+
 it("reads at most three screenshots at a time", async () => {
   const paths = Array.from({ length: 8 }, (_, index) => `docs/shot-${index}.png`);
   const reads: Array<ReturnType<typeof deferred<unknown>>> = [];

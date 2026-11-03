@@ -135,11 +135,14 @@ it("lists live and committed prototypes and renders the picked one through the h
   });
 });
 
-it("offers no Prototype tab when neither source lists a file", async () => {
+it.each([
+  ["neither source lists a file", { state: "available", rounds: [] }],
+  ["the rounds' commits were removed", { state: "removed" }],
+])("offers no Prototype tab when %s", async (_case, committed) => {
   const page = prototypesPage(
     {
       list: () => ({
-        committed: { state: "available", rounds: [] },
+        committed,
         live: { state: "available", files: [] },
       }),
       get: echo,

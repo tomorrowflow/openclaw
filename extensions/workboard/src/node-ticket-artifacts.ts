@@ -170,10 +170,7 @@ async function listCommitted(
     return { state: "unavailable", reason: formatErrorMessage(error) };
   }
   if (missing === rounds.length) {
-    return {
-      state: "unavailable",
-      reason: `no round's commits are left in ${target.hostRepoPath}`,
-    };
+    return { state: "removed" };
   }
   return { state: "available", rounds: listed };
 }
