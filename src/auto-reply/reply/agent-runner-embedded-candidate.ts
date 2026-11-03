@@ -142,7 +142,7 @@ export async function runEmbeddedFallbackCandidate(
     const result = await params.timing.measure("embedded_run", () => {
       const embeddedRunParams: RunEmbeddedAgentInternalParams = {
         ...runBaseParams,
-        ...params.scheduledInference?.runParams,
+        ...params.scheduledInference?.runParamsFor(params.provider),
         lifecycleGeneration: params.getLifecycleGeneration(),
         allowGatewaySubagentBinding: true,
         cronCreatorAuthorityCapability: turn.opts?.cronCreatorAuthorityCapability,
@@ -346,7 +346,9 @@ export async function runEmbeddedFallbackCandidate(
           : undefined,
       };
       embeddedRunParams.onSuccessfulAuthProfile = (profileId) => {
-        params.scheduledInference?.runParams.onSuccessfulAuthProfile?.(profileId);
+        params.scheduledInference
+          ?.runParamsFor(params.provider)
+          .onSuccessfulAuthProfile?.(profileId);
         maintenanceAuthProfile = {
           authProfileId: profileId,
           authProfileIdSource: profileId

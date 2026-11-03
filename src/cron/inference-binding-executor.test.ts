@@ -247,3 +247,121 @@ it.each(["native", "credentialless", "synthetic-marker"] as const)(
     );
   },
 );
+
+it.each([
+  { route: "config-declared", admitted: true },
+  { route: "credentialless", admitted: true },
+  { route: "stored-profile", admitted: false },
+  { route: "ambient-env", admitted: false },
+  { route: "harness-owned", admitted: false },
+  { route: "native-session", admitted: false },
+] as const)(
+  "decides an opted-in account-free fallback on a $route route (admitted: $admitted)",
+  async ({ route, admitted }) => {
+    await withOpenClawTestState(
+      {
+        label: "cron-fallback-without-account",
+        env: { OPENAI_API_KEY: route === "ambient-env" ? "synthetic-ambient-key" : undefined },
+      },
+      async (state) => {
+        await state.writeAuthProfiles({
+          version: 1,
+          profiles:
+            route === "stored-profile"
+              ? {
+                  "ollama:cloud": {
+                    type: "api_key",
+                    provider: "ollama",
+                    key: "synthetic-stored-key",
+                  },
+                }
+              : {},
+        });
+        const fallbackModel: Model =
+          route === "ambient-env"
+            ? model
+            : {
+                ...model,
+                id: "glm-5.3:cloud",
+                provider: "ollama",
+                api: "ollama",
+                baseUrl: "http://127.0.0.1:11434",
+              };
+        const stores = modelRuntime.createEmptyAgentDiscoveryStores();
+        vi.spyOn(modelRuntime, "resolveModelAsync").mockResolvedValue({
+          ...stores,
+          model: fallbackModel,
+          logicalRef: { provider: fallbackModel.provider, model: fallbackModel.id },
+        });
+        const fallbackHarness: AgentHarness =
+          route === "harness-owned" ? { ...harness, authBootstrap: "harness" } : harness;
+        const prepare = () =>
+          withPluginRuntimeGenerationScope(
+            { metadataSnapshot: createPluginMetadataSnapshotFixture() },
+            () =>
+              prepareEmbeddedRunAuthPlan({
+                assertCurrent() {},
+                runParams: {
+                  sessionId: "fallback-fire",
+                  runId: "fallback-fire",
+                  workspaceDir: state.workspaceDir,
+                  prompt: "Synthetic fallback work",
+                  timeoutMs: 1_000,
+                  trigger: "cron",
+                  automationFallbackWithoutAccount: true,
+                  config:
+                    route === "config-declared"
+                      ? {
+                          models: {
+                            providers: {
+                              ollama: {
+                                api: "ollama",
+                                apiKey: "synthetic-declared-key",
+                                baseUrl: fallbackModel.baseUrl,
+                                models: [],
+                              },
+                            },
+                          },
+                        }
+                      : {},
+                },
+                provider: fallbackModel.provider,
+                modelId: fallbackModel.id,
+                model: fallbackModel,
+                agentDir: state.agentDir(),
+                workspaceDir: state.workspaceDir,
+                nativeModelOwned: false,
+                ...stores,
+                ...(route === "native-session"
+                  ? {
+                      nativeSessionRuntime: {
+                        auth: "native" as const,
+                        harness,
+                        assertCurrent: async () => {},
+                      },
+                    }
+                  : {}),
+                getAgentHarness: () => fallbackHarness,
+                setAgentHarness() {},
+                getRuntimeModel: () => fallbackModel,
+                getEffectiveModel: () => fallbackModel,
+                applyResolvedRuntimeModel() {},
+                selectHarnessForPreparedAttempts: () => harness,
+              }),
+          );
+
+        if (admitted) {
+          const prepared = await prepare();
+          expect(prepared.preparedAuthAttempts.map(({ kind }) => kind)).not.toContain("profile");
+          expect(prepared.lockedProfileId).toBeUndefined();
+        } else {
+          await expect(prepare()).rejects.toThrow(
+            route === "native-session"
+              ? "A native connection cannot replace"
+              : "would use a stored, ambient, or runtime-owned account",
+          );
+        }
+      },
+    );
+  },
+);

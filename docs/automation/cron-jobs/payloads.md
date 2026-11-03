@@ -204,6 +204,15 @@ from current defaults. Environment-only and provider-config API keys have no dur
 account ownership, so new host-managed jobs reject them at creation. Store the key
 in an auth profile and select that profile instead. Credentialless models remain
 usable without an account.
+By default a job with a recorded account only runs candidates from that account's
+provider, so its fallback chain stops at the first model from another provider. Set
+`cron.allowFallbackWithoutAccount: true` to let those jobs fall back to models that use
+no stored account: credentialless local models, or providers whose key is declared in
+config (for example Ollama). Such a fallback never selects another stored auth profile
+an ambient credential that config does not name, or a key a provider runtime discovers on its own; CLI runtimes, native connections, and harness-owned logins stay refused.
+`openclaw cron status` reports the setting as `fallbackWithoutAccount`, and each run's
+history entry records the provider and model that actually ran.
+
 Native runtime-owned jobs retain their runtime’s existing authorization checks, and a
 native connection cannot silently replace a job’s recorded host-managed inference account.
 An explicit update from an authorized native creator can adopt its runtime authority.

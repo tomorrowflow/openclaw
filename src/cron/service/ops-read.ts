@@ -44,6 +44,7 @@ async function readSnapshot(
     status: Object.freeze({
       enabled: state.deps.cronEnabled,
       triggersEnabled: state.deps.cronConfig?.triggers?.enabled !== false,
+      fallbackWithoutAccount: state.deps.cronConfig?.allowFallbackWithoutAccount === true,
       storePath: sqlitePath,
       storage: "sqlite" as const,
       sqlitePath,

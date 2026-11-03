@@ -567,6 +567,7 @@ export const FIELD_LABELS: Record<string, string> = {
   cron: "Automations",
   "cron.enabled": "Automations Enabled",
   "cron.skipMissedJobs": "Skip Missed Recurring Automations",
+  "cron.allowFallbackWithoutAccount": "Allow Automation Fallback Without Account",
   "cron.webhookToken": "Automations Webhook Bearer Token",
   "cron.webhookSsrfPolicy": "Automations Webhook SSRF Policy",
   "cron.webhookSsrfPolicy.dangerouslyAllowPrivateNetwork":

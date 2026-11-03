@@ -108,6 +108,8 @@ export const AUTOMATION_FIELD_HELP: Record<string, string> = {
     "Enables automation execution for stored schedules managed by the gateway. Keep enabled for normal reminder/automation flows, and disable only to pause all automation execution without deleting jobs.",
   "cron.skipMissedJobs":
     "Skips missed recurring cron/every slots at Gateway startup and schedules their next future occurrence instead of catching up. Default: false. Enable to avoid stale reminders after downtime; one-shot at jobs still catch up.",
+  "cron.allowFallbackWithoutAccount":
+    "Lets automation jobs bound to a stored inference account fall back to configured models that use no stored account, such as local models or providers keyed in config (for example Ollama). Default: false, which stops a bound job when its account is unavailable. Fallbacks never switch the job to another stored account.",
   "cron.webhookToken":
     "Bearer token attached to automation webhook POST deliveries when webhook mode is used. Prefer secret/env substitution and rotate this token regularly if shared webhook endpoints are internet-reachable.",
   "cron.webhookSsrfPolicy":
