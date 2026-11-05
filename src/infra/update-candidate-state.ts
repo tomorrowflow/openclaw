@@ -22,6 +22,7 @@ import { executeSqliteQuerySync, getNodeSqliteKysely } from "./kysely-sync.js";
 import { openNodeSqliteDatabase } from "./node-sqlite.js";
 import { normalizeWindowsPathPreservingCase } from "./path-guards.js";
 import { resolvePrivateSqliteSnapshotStagingRoot } from "./sqlite-private-directory.js";
+import { tryInspectSqliteReadOnlyInProcess } from "./sqlite-readonly-inspection.js";
 import {
   retainSnapshotWork,
   withPreparedSqliteSnapshot,
@@ -275,7 +276,7 @@ function publishStateDatabaseVersions(
   return versions;
 }
 
-/** Read registrations and plugin ownership from one private shared copy before budgeting. */
+/** Read registrations and plugin ownership from one shared generation before budgeting. */
 export async function readUpdateCandidateStateInventoryInProcess(
   input: StateInput & {
     targetStateDir: string;
@@ -301,17 +302,18 @@ export async function readUpdateCandidateStateInventoryInProcess(
     progressAt = now;
     await fs.utimes(planPath, new Date(now), new Date(now));
   };
-  const { prepareUpdateCandidatePlugins } = await import("./update-candidate-plugins.js");
+  const { prepareUpdateCandidatePlugins, readUpdateCandidatePluginIndex } =
+    await import("./update-candidate-plugins.js");
   const files = await collectStateDatabasePaths(input);
   const shared = path.resolve(input.stateDir, "state", "openclaw.sqlite");
-  const measure = async (
-    sharedStateDatabasePath?: string,
-  ): Promise<z.infer<typeof UpdateCandidateSnapshotInventorySchema>> => {
+  const measure = async (sharedPluginIndex?: {
+    value: ReturnType<typeof readUpdateCandidatePluginIndex>;
+  }): Promise<z.infer<typeof UpdateCandidateSnapshotInventorySchema>> => {
     // Database discovery is complete; plugin failures must retain their own phase.
     input.onProgress?.({ phase: "plugin inventory", path: input.stateDir });
     const plugins = await prepareUpdateCandidatePlugins({
       ...input,
-      sharedStateDatabasePath,
+      sharedPluginIndex,
       onProgress,
     });
     await fs.writeFile(planPath, JSON.stringify(plugins));
@@ -323,16 +325,22 @@ export async function readUpdateCandidateStateInventoryInProcess(
     };
   };
   if (await updateStateDatabaseExists(shared)) {
+    // The isolated inventory worker needs metadata, not a full private image.
+    // Pin both reads together and close before asynchronous filesystem projection.
+    input.onProgress?.({ phase: "shared database inspection", path: shared });
+    const metadata = tryInspectSqliteReadOnlyInProcess(shared, (db) => {
+      collectRegisteredPaths(db, shared, files);
+      return readUpdateCandidatePluginIndex(db);
+    });
+    if (metadata) {
+      return measure(metadata);
+    }
     return withStateDatabaseSnapshot(
       shared,
       async (location) => {
-        const db = openNodeSqliteDatabase(location, { readOnly: true });
-        try {
-          collectRegisteredPaths(db, shared, files);
-        } finally {
-          db.close();
-        }
-        return measure(location);
+        using db = openNodeSqliteDatabase(location, { readOnly: true });
+        collectRegisteredPaths(db, shared, files);
+        return measure({ value: readUpdateCandidatePluginIndex(db) });
       },
       input.targetStateDir,
       input.onProgress,
@@ -346,16 +354,12 @@ function readSharedDatabaseVersion(
   shared: string,
   files: Map<string, StateDatabaseDiscovery>,
 ): Omit<UpdateStateSchemaVersion, "path"> {
-  const db = openNodeSqliteDatabase(location, { readOnly: true });
-  try {
-    collectRegisteredPaths(db, shared, files);
-    return {
-      userVersion: readSqliteUserVersion(db),
-      contentVersion: readStateSchemaContentVersion(db),
-    };
-  } finally {
-    db.close();
-  }
+  using db = openNodeSqliteDatabase(location, { readOnly: true });
+  collectRegisteredPaths(db, shared, files);
+  return {
+    userVersion: readSqliteUserVersion(db),
+    contentVersion: readStateSchemaContentVersion(db),
+  };
 }
 
 /** Discover registered stores from the same private shared-database generation used for inspection. */
@@ -626,7 +630,7 @@ export async function snapshotUpdateCandidateState(
   },
 ): Promise<z.infer<typeof UpdateCandidateStateSnapshotSchema>> {
   const { createVerifiedSqliteSnapshot } = await import("./sqlite-snapshot.js");
-  const { OPENCLAW_AGENT_FTS_SCHEMAS } = await import("../state/openclaw-agent-fts-schema.js");
+  const { AGENT_FTS_SCHEMAS } = await import("../state/openclaw-agent-fts-schema.js");
   const { copyUpdateCandidatePlugins, UpdateCandidatePluginPlanSchema } =
     await import("./update-candidate-plugins.js");
   const plugins = UpdateCandidatePluginPlanSchema.parse(
@@ -667,7 +671,7 @@ export async function snapshotUpdateCandidateState(
       targetPath: target,
       sourceAcquisition: { mode: "isolated-process", stagingRoot: input.targetStateDir },
       integrity: discovery.owners?.some((owner) => owner.role === "agent")
-        ? { ftsSchemas: OPENCLAW_AGENT_FTS_SCHEMAS }
+        ? { ftsSchemas: AGENT_FTS_SCHEMAS }
         : undefined,
       // The rehearsal is private and disposable; compaction would create another
       // full image and alter implicit row IDs before candidate migrations run.

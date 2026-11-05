@@ -13,6 +13,7 @@ import {
 } from "../../agents/cron-creator-authority-context.js";
 import { resolveFastModeState } from "../../agents/fast-mode.js";
 import { runAgentHarnessBeforeMessageWriteHook } from "../../agents/harness/hook-helpers.js";
+import { bindReplyInputChannel } from "../../agents/harness/host-private-capabilities.js";
 import { resolveOwnerPromptNumbers } from "../../agents/owner-display.js";
 import { revokeRequesterCronAuthority } from "../../agents/subagents/requester-cron-authority.js";
 import {
@@ -40,6 +41,7 @@ import { isConfiguredCommandOwner } from "../command-auth.js";
 import { bindCommandOwnerAuthority, getCommandOwnerAuthority } from "../command-owner-authority.js";
 import { getGroupThreadTurn } from "../group-thread-context.js";
 import { resolveInternalTurnTranscript } from "../internal-turn-source.js";
+import { transferRequesterProfile } from "../requester-profile.js";
 import type { OriginatingChannelType } from "../templating.js";
 import { resolveReplyScheduledToolPolicy } from "./agent-runner-run-params.js";
 import { resolveCurrentTurnImages } from "./current-turn-images.js";
@@ -242,10 +244,9 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission) 
       ctx.SenderIsSelf !== true);
   const ctxMediaForPersistence = normalizeMediaFacts(ctx.media);
   const unresolvedSourceIndexes = new Set(currentTurnImages.unresolvedSourceIndexes ?? []);
-  const persistedCtxMedia = ctxMediaForPersistence.map((fact, index) =>
-    unresolvedSourceIndexes.has(index) ? { ...fact, hydrationSuppressed: true } : fact,
-  );
-  const userTurnMediaForPersistence = [...persistedCtxMedia, ...(opts?.media ?? [])];
+  // Keep failed pre-reads retryable in the transcript. Only this run skips them:
+  // plugin, CLI, and worker runners can reject unreadable image input.
+  const userTurnMediaForPersistence = [...ctxMediaForPersistence, ...(opts?.media ?? [])];
   const promptMediaForRun = suppressUnresolvedPromptMedia({
     promptMedia: promptMedia ?? [],
     inboundMediaIndexes,
@@ -583,6 +584,13 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission) 
     },
   };
   const sourceReplyDeliveryRuntimeOptions = opts as SourceReplyDeliveryRuntimeOptions | undefined;
+  if (!inputProvenance || inputProvenance.kind === "external_user") {
+    transferRequesterProfile(ctx, followupRun);
+    bindReplyInputChannel(
+      followupRun.run,
+      ctx.SenderIsBot ? undefined : (ctx.Provider ?? ctx.Surface),
+    );
+  }
   copyChildSessionPublication(sessionCtx, followupRun.run);
   const channelOwnerAuthority = getCommandOwnerAuthority(sessionCtx);
   if (command.senderIsOwner && channelOwnerAuthority) {

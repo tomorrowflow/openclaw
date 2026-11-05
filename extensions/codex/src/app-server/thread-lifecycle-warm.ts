@@ -1,12 +1,20 @@
-import { AgentHarnessPreflightError } from "openclaw/plugin-sdk/agent-harness-runtime";
+import {
+  AgentHarnessPreflightError,
+  embeddedAgentLog,
+} from "openclaw/plugin-sdk/agent-harness-runtime";
 import { isIncognitoSessionKey } from "openclaw/plugin-sdk/session-key-runtime";
 import { racePromiseWithAbortSignal } from "openclaw/plugin-sdk/time-runtime";
 import {
+  CODEX_APP_SERVER_INTERRUPT_TIMEOUT_MS,
   CODEX_APP_SERVER_UNSUBSCRIBE_TIMEOUT_MS,
   closeCodexStartupClientBestEffort,
   CodexAppServerUnsafeSubscriptionError,
   unsubscribeCodexThreadBestEffort,
 } from "./attempt-client-cleanup.js";
+import {
+  isCodexAppServerLiveThreadBackgroundOnly,
+  waitForCodexAppServerThreadBackgroundCleanup,
+} from "./client-runtime-thread-state.js";
 import {
   consumeCodexAppServerLiveThread,
   isCodexAppServerClientRuntimeLive,
@@ -30,7 +38,10 @@ import {
 import { isJsonObject, type CodexThread } from "./protocol.js";
 import type { CodexAppServerThreadBinding } from "./session-binding.js";
 import { retainSharedCodexAppServerClientByInstanceId } from "./shared-client.js";
-import { fingerprintCodexThreadConfig } from "./thread-fingerprints.js";
+import {
+  fingerprintCodexThreadConfig,
+  fingerprintRestrictedThreadConfig,
+} from "./thread-fingerprints.js";
 import { CodexThreadBindingConflictError } from "./thread-lifecycle-errors.js";
 import {
   buildCodexThreadRequestConfig,
@@ -57,6 +68,7 @@ type CodexWarmThreadReuseParams = CodexThreadRequestContext & {
   params: CodexStartOrResumeThreadParams;
   binding: CodexAppServerThreadBinding;
   clientId?: string;
+  requireRestrictedThreadConfigFingerprint?: boolean;
   buildLoadedPluginThreadConfig: (
     binding: CodexAppServerThreadBinding,
   ) => Promise<CodexPluginThreadConfig | undefined>;
@@ -160,6 +172,8 @@ export async function releaseCodexBoundLiveThread(
   options: CodexLiveThreadReleaseParams & {
     clientId?: string;
     ownerClientId?: string;
+    /** Cold resume may join asynchronous Stop cleanup, never force its release. */
+    waitForBackgroundCleanup?: boolean;
     /** Runs synchronously when `signal` ends a wait for the previous owner's exit. */
     onExitWaitCancelled?: () => void;
   },
@@ -181,6 +195,7 @@ export async function releaseCodexBoundLiveThread(
   }
   const client = previous?.client ?? options.client;
   let threadClosed: Promise<void> | undefined;
+  let released = false;
   let stopWatching: (() => void) | undefined;
   let stopReading: (() => void) | undefined;
   if (previous) {
@@ -206,14 +221,46 @@ export async function releaseCodexBoundLiveThread(
   }
   try {
     if (
-      isCodexAppServerLiveThreadClaimed(client, options.threadId) ||
-      isCodexAppServerLiveThreadProtected(client, options.threadId)
+      options.waitForBackgroundCleanup &&
+      !isCodexAppServerLiveThreadClaimed(client, options.threadId) &&
+      isCodexAppServerLiveThreadBackgroundOnly(client, options.threadId)
     ) {
+      const deadline = AbortSignal.timeout(CODEX_APP_SERVER_INTERRUPT_TIMEOUT_MS);
+      const signal = options.signal ? AbortSignal.any([options.signal, deadline]) : deadline;
+      try {
+        await options.lifecycleTiming.measure("background-thread-cleanup", () =>
+          waitForCodexAppServerThreadBackgroundCleanup(client, options.threadId, signal),
+        );
+      } catch (error) {
+        throwIfCodexThreadLifecycleAborted(options.signal);
+        if (!deadline.aborted) {
+          throw error;
+        }
+        // A deadline is not settlement: the existing ownership guard still decides.
+      }
+      options.assertCurrent?.();
+      const closed = client.getCloseError();
+      if (closed) {
+        throw closed;
+      }
+    }
+    const claimed = isCodexAppServerLiveThreadClaimed(client, options.threadId);
+    const protectedWork = isCodexAppServerLiveThreadProtected(client, options.threadId);
+    if (claimed || protectedWork) {
+      embeddedAgentLog.debug("codex app-server retained thread release blocked", {
+        threadId: options.threadId,
+        changedClient: Boolean(changedClient),
+        claimed,
+        protected: protectedWork,
+        backgroundOnly: isCodexAppServerLiveThreadBackgroundOnly(client, options.threadId),
+      });
       throw new AgentHarnessPreflightError(
-        `Codex thread ${options.threadId} is claimed by active work; stop it first.`,
+        options.waitForBackgroundCleanup && !claimed && protectedWork
+          ? `Codex thread ${options.threadId} still has background work after waiting for cleanup; stop its running work and retry.`
+          : `Codex thread ${options.threadId} is claimed by active work; stop it first.`,
       );
     }
-    return await releaseCodexRetainedLiveThread({
+    released = await releaseCodexRetainedLiveThread({
       ...options,
       client,
       abandonClient: previous ? undefined : options.abandonClient,
@@ -227,6 +274,7 @@ export async function releaseCodexBoundLiveThread(
           }
         : undefined,
     });
+    return released;
   } finally {
     try {
       // Rejection must free the lane so the claimed run can still be stopped.
@@ -266,6 +314,21 @@ export async function releaseCodexBoundLiveThread(
         }
         // Siblings may keep the old process alive after this exact thread stops.
         await racePromiseWithAbortSignal(Promise.race(stopped), options.signal, exitWaitAbortError);
+      } else if (released && threadClosed) {
+        // A live previous owner keeps the per-home writer lock until it unloads the thread
+        // (codex rollout/src/writer_lock.rs); managed clients unload on unsubscribe. A
+        // missed close stays visible as the resume's active-writer error.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await racePromiseWithAbortSignal(
+          Promise.race([
+            threadClosed,
+            new Promise<void>((resolve) => {
+              timer = setTimeout(resolve, CODEX_APP_SERVER_UNSUBSCRIBE_TIMEOUT_MS);
+            }),
+          ]),
+          options.signal,
+          exitWaitAbortError,
+        ).finally(() => clearTimeout(timer));
       }
     } finally {
       stopReading?.();
@@ -341,7 +404,12 @@ export async function tryReuseCodexLiveThread(
     return { kind: "rotate" };
   }
 
-  if (!binding.clientId || binding.clientId !== clientId || (ringZeroActive && !incognito)) {
+  if (
+    !binding.clientId ||
+    binding.clientId !== clientId ||
+    (params.inferenceRoute && !getCodexInferenceThread(params.client, binding.threadId)) ||
+    (ringZeroActive && !incognito)
+  ) {
     return { kind: "resume" };
   }
 
@@ -494,14 +562,6 @@ export async function tryReuseCodexLiveThread(
           ? nativeThread?.modelProvider?.trim() || binding.modelProvider
           : undefined),
     );
-    const liveThreadConfigFingerprint = incognito
-      ? retainedThread.configFingerprint
-      : fingerprintCodexThreadConfig(
-          resumeParams,
-          resumeAuthProfileId,
-          dynamicToolsFingerprint,
-          binding,
-        );
     const ephemeralPolicy = retainedThread.ephemeralPolicy;
     if (
       incognito &&
@@ -518,6 +578,35 @@ export async function tryReuseCodexLiveThread(
       preserveSubscription = true;
       throw new CodexIncognitoPolicyChangeError();
     }
+    if (
+      options.requireRestrictedThreadConfigFingerprint &&
+      (Boolean(binding.nativeToolPolicyRestricted) !== restrictedToolSurface ||
+        params.nativeCodeModeEnabled !== false ||
+        binding.restrictedThreadConfigFingerprint !==
+          fingerprintRestrictedThreadConfig(
+            resumeParams,
+            resumeAuthProfileId,
+            dynamicToolsFingerprint,
+            params.params,
+            options.hostSystemAgentActive,
+            binding,
+          ))
+    ) {
+      // Refusal must leave the original ephemeral or protected owner available.
+      preserveSubscription = true;
+      if (incognito) {
+        throw new CodexIncognitoPolicyChangeError("creation policy");
+      }
+      return { kind: "rotate" };
+    }
+    const liveThreadConfigFingerprint = incognito
+      ? retainedThread.configFingerprint
+      : fingerprintCodexThreadConfig(
+          resumeParams,
+          resumeAuthProfileId,
+          dynamicToolsFingerprint,
+          binding,
+        );
     if (!incognito && retainedThread.configFingerprint !== liveThreadConfigFingerprint) {
       // Return the same owner first: cold-resume preparation must observe native teardown
       // before releasing it, otherwise a loaded resume can silently ignore new policy.

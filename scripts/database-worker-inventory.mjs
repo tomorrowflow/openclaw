@@ -78,6 +78,14 @@ const reviewed = new Map([
     },
   ],
   [
+    "src/infra/update-managed-service-handoff-cancellation.ts",
+    {
+      tier: "T3",
+      evidence:
+        "readCancelledUpdateFamily is called only by reclamation.ts prepareCancelledCustodyRepair, reached through the lease store's prepareRepair from the `openclaw update repair` CLI (update-repair-command.ts).",
+    },
+  ],
+  [
     "src/infra/update-managed-service-handoff-database.ts",
     {
       tier: "T2",
@@ -1139,6 +1147,28 @@ const reviewedOperations = new Map([
         operations: ["recoverManagedUpdateLeaseJournal.read"],
         evidence:
           "Explicit update recover CLI -> recoverImmutableUpdate -> withImmutableUpdateOwner({ recover: true }) only; ordinary lease and Gateway readers never call this cold-journal admission",
+      },
+    ],
+  ],
+  [
+    "src/config/sessions/session-claim-repair-copy.ts",
+    [
+      {
+        tier: "T2",
+        operations: ["copySessionClaimForRepair"],
+        evidence:
+          "Extracted from legacy-main-session-migration-operations.ts:copyClaimCrossStore. Its only callers are processIdenticalClaims after doctor-fix admission and doctor-relative-session-store.ts under exclusive Doctor maintenance; detect mode returns before copying. Source claims are rechecked inside the destination write transaction.",
+      },
+    ],
+  ],
+  [
+    "src/config/sessions/session-accessor.sqlite-delivery-repair.ts",
+    [
+      {
+        tier: "T2",
+        operations: ["copySessionDeliveriesForRepair", "readSessionDeliveryRepairInventory"],
+        evidence:
+          "Copy extracted from the reviewed copySqliteSessionOwnedStateForRepair operation in canonical-repair.ts; its other caller is Doctor-only copySessionClaimForRepair. Inventory is called only by doctor-relative-session-store-preservation.ts for offline pre-copy verification and completion fingerprints. No Gateway runtime caller.",
       },
     ],
   ],

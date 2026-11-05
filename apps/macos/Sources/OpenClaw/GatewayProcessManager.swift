@@ -373,16 +373,18 @@ final class GatewayProcessManager {
         if let restoration = request.serviceForRestoration {
             let cli = restoration.retained
             do { try await request.mutationCheck?() } catch { return .failed(error.localizedDescription) }
-            guard self.isCurrentGatewayStart(request.generation), let bun = cli.prefix.first else { return .skipped }
-            let runtime = BundledRuntime(root: URL(fileURLWithPath: bun)
-                .deletingLastPathComponent().deletingLastPathComponent())
+            guard self.isCurrentGatewayStart(request.generation), let bun = cli.prefix.first,
+                  let runtime = cli.prefix.last.flatMap(BundledRuntime.init(serviceEntrypoint:))
+            else { return .skipped }
+            // Restoration keeps the retained executable; only the stable path needs this build's Bun.
             error = await GatewayLaunchAgentManager.runDaemonCommand(
                 GatewayLaunchAgentManager.installArguments(
                     port: request.port,
                     allowUnconfigured: request.allowUnconfigured,
-                    runtime: runtime,
-                    launchAgentExists: false),
+                    runtime: nil,
+                    launchAgentExists: false) + ["--runtime", "bun", "--runtime-path", bun],
                 runtime: restoration.installer,
+                serviceRuntime: bun == runtime.serviceBun.path ? runtime : nil,
                 restoring: cli,
                 expectedServiceAuthority: request.expectedServiceAuthority,
                 checkCurrent: request.mutationCheck)
@@ -659,13 +661,18 @@ final class GatewayProcessManager {
                         if self.installation == .external { return }
                         let custody = try await self.retainManagedServiceForResume(
                             expectedServiceAuthority: expectedServiceAuthority)
-                        failure = self.launchAgentDisableGeneration == stopGeneration
-                            ? await GatewayLaunchAgentManager.set(
+                        guard self.launchAgentDisableGeneration == stopGeneration else { return }
+                        // Passive stop owns only the captured profile definition. A direct low-level
+                        // disable still handles label-based ghost recovery when explicitly requested.
+                        if custody.definition.plist == nil {
+                            failure = nil
+                        } else {
+                            failure = await GatewayLaunchAgentManager.set(
                                 enabled: false,
                                 port: GatewayEnvironment.gatewayPort(),
                                 expectedServiceAuthority: custody,
                                 checkCurrent: mutationCheck)
-                            : nil
+                        }
                     } else {
                         failure = nil
                     }

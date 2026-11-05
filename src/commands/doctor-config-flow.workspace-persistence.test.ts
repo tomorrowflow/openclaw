@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readAgentRosterProperty } from "../agents/agent-roster.js";
 import { resolveAgentWorkspaceDir } from "../agents/agent-scope-config.js";
 import { promoteConfigSnapshotToLastKnownGood, readConfigFileSnapshot } from "../config/config.js";
@@ -27,6 +27,58 @@ import { withDoctorConfigPreflightHome } from "./doctor-config-preflight.test-su
 describe("Doctor workspace persistence", () => {
   afterEach(() => {
     closeOpenClawStateDatabaseForTest();
+  });
+
+  it("keeps a valid Kubernetes reseed without metadata and still recovers a later invalid config", async () => {
+    await withDoctorConfigPreflightHome(async (home) => {
+      await withEnvAsync({ OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1" }, async () => {
+        const configPath = await writeOpenClawConfig(home, {
+          gateway: { mode: "local", port: 19091 },
+          plugins: { enabled: false },
+        });
+        await runInitialConfigWriteHealth(await prepareDoctorContext(configPath));
+        const baseline = await readConfigFileSnapshot();
+        expect(await promoteConfigSnapshotToLastKnownGood(baseline)).toBe(true);
+        for (const suffix of [".bak", ".bak.1"]) {
+          await fs.copyFile(configPath, `${configPath}${suffix}`);
+        }
+        const { meta: _meta, ...reseeded } = JSON.parse(await fs.readFile(configPath, "utf8"));
+        reseeded.gateway.port = 19092;
+        const reseededRaw = JSON.stringify(reseeded, null, 2);
+        await fs.unlink(configPath);
+        await fs.writeFile(configPath, reseededRaw);
+
+        const ctx = await prepareDoctorContext(configPath);
+        expect(ctx.cfg.gateway?.port).toBe(19092);
+        expect(await fs.readFile(configPath, "utf8")).toBe(reseededRaw);
+        expect(await fs.readdir(path.dirname(configPath))).not.toEqual(
+          expect.arrayContaining([expect.stringContaining(".clobbered.")]),
+        );
+        // Gateway startup promotes the accepted config; the meta-less reseed must qualify.
+        expect(await promoteConfigSnapshotToLastKnownGood(await readConfigFileSnapshot())).toBe(
+          true,
+        );
+
+        const invalidRaw = '{ "gateway": { "mode": 123 } }';
+        await fs.writeFile(configPath, invalidRaw);
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+          const recovered = await prepareDoctorContext(configPath);
+          expect(recovered.cfg.gateway?.port).toBe(19092);
+          const clobbered = (await fs.readdir(path.dirname(configPath))).filter((name) =>
+            name.includes(".clobbered."),
+          );
+          expect(clobbered).toHaveLength(1);
+          const originalPath = path.join(path.dirname(configPath), clobbered[0]!);
+          expect(await fs.readFile(originalPath, "utf8")).toBe(invalidRaw);
+          const warnings = warn.mock.calls.flat().join("\n");
+          expect(warnings).toContain(originalPath);
+          expect(warnings).toContain("to undo, stop the Gateway and copy it back");
+        } finally {
+          warn.mockRestore();
+        }
+      });
+    });
   });
 
   it("refuses retired config until the bridge release migrates it", async () => {
@@ -298,12 +350,64 @@ describe("Doctor workspace persistence", () => {
     },
   );
 
-  it("repairs noncanonical workspace and heartbeat values through persistence", async () => {
+  it.each(["agent", "defaults"] as const)(
+    "preserves invalid %s heartbeat hours until corrected through persistence",
+    async (scope) => {
+      await withDoctorConfigPreflightHome(async (home) => {
+        await withEnvAsync({ OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1" }, async () => {
+          const hours = { start: "22:00", end: "6:00" };
+          const heartbeat = { every: "30m", activeHours: hours };
+          const configPath = await writeOpenClawConfig(home, {
+            agents: {
+              defaults:
+                scope === "defaults"
+                  ? { heartbeat }
+                  : {
+                      heartbeat: { activeHours: { start: "08:00", end: "20:00" } },
+                    },
+              entries: { main: scope === "agent" ? { heartbeat } : {} },
+            },
+            gateway: { mode: "local" },
+            plugins: { enabled: false },
+          });
+          const original = await fs.readFile(configPath, "utf8");
+          {
+            await using ctx = await prepareDoctorContext(configPath);
+            await runInitialConfigWriteHealth(ctx);
+            expect(ctx.configWriteRefusal).toBe("validation");
+            expect(await fs.readFile(configPath, "utf8")).toBe(original);
+            const warning = ctx.configResult.warnings?.join("\n") ?? "";
+            expect(warning).toContain(
+              scope === "agent"
+                ? "agents.entries.main.heartbeat.activeHours.end"
+                : "agents.defaults.heartbeat.activeHours.end",
+            );
+            expect(warning).toContain('"6:00"');
+            expect(warning).toContain("openclaw doctor --fix");
+          }
+          await fs.writeFile(configPath, original.replace('"6:00"', '"06:00"'));
+          {
+            await using ctx = await prepareDoctorContext(configPath);
+            await runInitialConfigWriteHealth(ctx);
+          }
+          const saved = await readConfigFileSnapshot();
+          expect(saved.valid).toBe(true);
+          const effective =
+            scope === "agent"
+              ? saved.config.agents?.entries?.main?.heartbeat
+              : saved.config.agents?.defaults?.heartbeat;
+          expect(effective?.activeHours).toEqual({ start: "22:00", end: "06:00" });
+        });
+      });
+    },
+  );
+
+  it("repairs noncanonical workspace while preserving valid heartbeat hours through persistence", async () => {
     await withDoctorConfigPreflightHome(async (home) => {
       await withEnvAsync({ OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1" }, async () => {
         const agent = {
           workspace: null,
-          heartbeat: { every: "30m", activeHours: { start: "99:99", end: "17:00" } },
+          heartbeat: { every: "30m", activeHours: { start: "09:00", end: "17:00" } },
         };
         const configPath = await writeOpenClawConfig(home, {
           agents: { list: [{ id: " Ops ", ...agent }] },
@@ -316,11 +420,11 @@ describe("Doctor workspace persistence", () => {
 
         await using ctx = await prepareDoctorContext(configPath);
         expect(ctx.configResult.shouldWriteConfig).toBe(true);
-        expect(ctx.cfg.agents?.entries?.ops).toEqual({ heartbeat: { every: "30m" } });
+        expect(ctx.cfg.agents?.entries?.ops).toEqual({ heartbeat: agent.heartbeat });
         await runInitialConfigWriteHealth(ctx);
 
         const saved = JSON.parse(await fs.readFile(configPath, "utf-8"));
-        expect(saved.agents.entries.ops).toEqual({ heartbeat: { every: "30m" } });
+        expect(saved.agents.entries.ops).toEqual({ heartbeat: agent.heartbeat });
         expect(saved.agents).not.toHaveProperty("list");
         expect((await readConfigFileSnapshot()).valid).toBe(true);
         await using repeated = await prepareDoctorContext(configPath);

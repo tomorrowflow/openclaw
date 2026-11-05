@@ -2,7 +2,7 @@ import type { WorkboardCard } from "@openclaw/workboard-contract";
 import type {
   WorkboardLifecycleSession,
   WorkboardLifecycleSessionReader,
-} from "./lifecycle-sync.js";
+} from "./lifecycle-sessions.js";
 import { nodeTicketReportOwnsRound, nodeTicketTarget } from "./node-ticket.js";
 import { cardBoardId, cardRunId, cardSessionKey } from "./store-card-helpers.js";
 

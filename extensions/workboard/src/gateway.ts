@@ -16,7 +16,7 @@ import {
   WorkboardUploadsDisabledError,
   type GatewayMethodContext,
 } from "./gateway-helpers.js";
-import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
+import type { WorkboardLifecycleSessionReader } from "./lifecycle-sessions.js";
 import {
   listNodeTicketArtifacts,
   type NodeTicketArtifactKind,

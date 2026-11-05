@@ -114,6 +114,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/managed-image-record-store.test.ts",
   "src/gateway/managed-outgoing-gc-availability.test.ts",
   "src/gateway/mcp-http.completion-lineage.test.ts",
+  "src/gateway/mcp-http.configured-mcp-authority.test.ts",
   "src/gateway/mcp-http.exec-completion.test.ts",
   "src/gateway/mcp-http.exec-egress.test.ts",
   "src/gateway/mcp-http.loopback-real-recovery.test.ts",
@@ -307,7 +308,6 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/sessions-history-http.model-policy.test.ts",
   "src/gateway/sessions-history-http.physical-source.test.ts",
   "src/gateway/sessions-resolve-store.test.ts",
-  "src/gateway/setup-inference.first-signin.integration.test.ts",
   "src/gateway/skill-library-authoring.test.ts",
   "src/gateway/startup-local-cli-pairing.test.ts",
   "src/gateway/talk/client-agent-consult.terminal-writes.test.ts",
@@ -327,6 +327,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/talk/relay-audio-base64.test.ts",
   "src/gateway/talk/relay/agent-consult.registration.test.ts",
   "src/gateway/talk/relay/barge-in.regression.test.ts",
+  "src/gateway/talk/relay/continuous-output.test.ts",
   "src/gateway/talk/relay/index.test.ts",
   "src/gateway/talk/relay/transcript-readiness.test.ts",
   "src/gateway/test-helpers.acquisition.test.ts",
@@ -574,6 +575,8 @@ export const gatewayMethodsTestExclude = [
 export const gatewayServerIsolatedTestFiles = [
   // Real provider and subagent lifecycle registrations must survive the whole scenario.
   "src/gateway/gateway.prompt-cache.test.ts",
+  // Native provider imports must not retain a previous file's retired shared-state owner.
+  "src/gateway/setup-inference.first-signin.integration.test.ts",
   // Sibling threads can fork and retain listener sockets until exec on Linux.
   "src/gateway/server/plugin-legacy-listeners.test.ts",
   // Native source captures must not retain this fixture's forbidden process constructors.

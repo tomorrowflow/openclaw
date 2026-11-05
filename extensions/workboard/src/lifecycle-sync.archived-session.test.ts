@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  createWorkboardLifecycleService,
-  readWorkboardLifecycleSessions,
-} from "./lifecycle-sync.js";
+import { readWorkboardLifecycleSessions } from "./lifecycle-sessions.js";
+import { createWorkboardLifecycleService } from "./lifecycle-sync.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 
 describe("Workboard archived session recovery", () => {

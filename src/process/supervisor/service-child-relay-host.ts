@@ -19,7 +19,6 @@ import { isOwnedProcessGroupGone } from "./service-child-group-ownership.js";
 import { createOutputRelay } from "./service-child-output-relay.js";
 import {
   readServiceChildMessage,
-  sendServiceChildMessage,
   type ServiceChildAnchorMessage,
   type ServiceChildStart,
 } from "./service-child-protocol.js";
@@ -33,6 +32,7 @@ import {
   createServiceChildRelayRetirement,
   stopServiceChildOwner,
 } from "./service-child-relay-retirement.js";
+import { startServiceChildRelay } from "./service-child-relay-startup.js";
 import type { AwaitedStdoutConsumer, ProcessAdapterStartup } from "./types.js";
 
 type AuthorityState = "starting" | "active" | "closing" | "closed" | "identity-lost";
@@ -261,17 +261,17 @@ export async function createServiceChildRelayAdapter(
     nextSequence: () => ++outboundSequence,
     startedAt: () => cleanupDeadline.startedAt!,
     anchorGone: () => {
-      if (anchorPid === undefined) {
-        return false;
-      }
       try {
-        return isOwnedProcessGroupGone(anchorPid);
+        // A native certificate leaves only the retained owner, without PGID authority.
+        return useLinuxSubreaper
+          ? closingReceipt === "linux-subreaper"
+          : anchorPid !== undefined && isOwnedProcessGroupGone(anchorPid);
       } catch {
         return false;
       }
     },
     canRetire: () =>
-      !useLinuxSubreaper &&
+      (!useLinuxSubreaper || closingReceipt === "linux-subreaper") &&
       state === "closing" &&
       control?.closed === true &&
       lineage?.readableEnded === true &&
@@ -448,6 +448,9 @@ export async function createServiceChildRelayAdapter(
       closingReceipt = message.descendantsReaped === true ? "linux-subreaper" : "process-group";
       state = "closing";
       cleanupDeadline.begin();
+      if (useLinuxSubreaper && closingReceipt === "linux-subreaper") {
+        retirement.request();
+      }
       retirement.reconcile();
       if (control) {
         // Retire cancellation before acknowledging this exact POSIX receipt.
@@ -582,7 +585,7 @@ export async function createServiceChildRelayAdapter(
     args: params.args,
     argv0: params.argv0,
     cwd: params.cwd,
-    env: params.env ? toStringEnv(params.env) : undefined,
+    env: toStringEnv(params.env ?? process.env),
     stdinMode: params.stdinMode,
     secretFd: params.secretInput?.fd,
     terminateOnHostLoss: params.terminateOnHostLoss,
@@ -607,54 +610,27 @@ export async function createServiceChildRelayAdapter(
     params.terminateOnHostLoss ? (error) => events.emitError(error, "stdin") : undefined,
   );
   params.abortSignal?.addEventListener("abort", onConstructionAbort, { once: true });
-  const ready = (async () => {
-    using delivery = preparation.transferSecretInput();
-    try {
-      params.assertCurrent?.();
-      if (params.abortSignal?.aborted) {
-        onConstructionAbort();
-      }
-      params.beforeSpawn?.();
-      await Promise.race([sendServiceChildMessage(child, start), constructionAbort.promise]);
-      params.assertCurrent?.();
-      const [startupResult, secretDeliveryResult] = await Promise.allSettled([
-        startup.promise,
-        delivery?.deliverTo(child, { abortSignal: params.abortSignal }),
-      ]);
-      const startupError = startupResult.status === "rejected" ? startupResult.reason : undefined;
-      const secretDeliveryError =
-        secretDeliveryResult.status === "rejected" ? secretDeliveryResult.reason : undefined;
-      // Preserve admission failure over the secret pipe it closes as a consequence.
-      if (startupError !== undefined || secretDeliveryError !== undefined) {
-        if (startupError !== undefined) {
-          await startupErrorAckDelivery;
-          await cleanup.promise;
-        }
-        throw startupError ?? secretDeliveryError;
-      }
-      if (params.input !== undefined && params.prepareInput) {
-        await params.prepareInput();
-      }
-      if (params.abortSignal?.aborted || waitError) {
-        throw waitError ?? new Error("service child construction aborted");
-      }
-      params.assertCurrent?.();
-      if (params.input !== undefined) {
-        stdin?.write(params.input);
-        stdin?.end();
-      } else if (params.stdinMode === "pipe-closed") {
-        stdin?.end();
-      }
-    } catch (error) {
+  const ready = startServiceChildRelay({
+    params,
+    preparation,
+    child,
+    start,
+    stdin,
+    startup: startup.promise,
+    constructionAbort: constructionAbort.promise,
+    onConstructionAbort,
+    getWaitError: () => waitError,
+    getStartupErrorAckDelivery: () => startupErrorAckDelivery,
+    cleanup: cleanup.promise,
+    onFailure: () => {
       void stdoutRelay.drain();
       unpipeStderr?.();
       void stderrRelay.drain();
-      stopServiceChildOwner(child, useLinuxSubreaper);
-      throw error;
-    } finally {
-      removeConstructionAbortListener();
-    }
-  })();
+      // Ready assigns commandPid after native admission; retain transport for its closing/ACK join.
+      stopServiceChildOwner(child, useLinuxSubreaper, commandPid ? kill : undefined);
+    },
+    removeConstructionAbortListener,
+  });
   void ready.catch(() => {});
 
   function kill(signal: NodeJS.Signals = "SIGKILL") {

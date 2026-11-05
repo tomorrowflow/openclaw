@@ -216,6 +216,7 @@ async function runDoctorConfigPreflightOperation(
       cfg: automaticConfigRepair?.config ?? baseConfig,
       env: process.env,
       retainedPluginIds: pluginMigrations.retainedPluginIds(),
+      deferPackageRepair: options.deferPluginPackageRepair,
       measure: options.measure,
       snapshotRead: { ...configSnapshotRead, snapshot },
       readRefreshedSnapshot: () => readConfigSnapshotForPreflight(false),
@@ -349,6 +350,18 @@ async function runDoctorConfigPreflightOperation(
     snapshot = configSnapshotRead.snapshot;
     baseConfig = snapshot.sourceConfig ?? snapshot.config ?? {};
     automaticConfigRepair = await planAdmittedConfigRepair(snapshot);
+  }
+  if (stateDirMigrations && options.doctorOnlyStateMigrations === true) {
+    const { repairRelativeSessionStores } = await import("./doctor-relative-session-store.js");
+    noteDoctorStateMigrationResult(
+      await measurePreflightStep("relative-session-store", () =>
+        repairRelativeSessionStores({
+          cfg: automaticConfigRepair?.config ?? baseConfig,
+          env: process.env,
+          registeredDatabases: options.agentDatabaseMigrationDiscovery?.registeredAgentDatabases,
+        }),
+      ),
+    );
   }
   if (automaticConfigRepair && !skipLegacyParentConfigWrite) {
     modelBillingRouteMigrationSource ??=

@@ -20,11 +20,7 @@ import { hashConfigRaw } from "../config/io.read-helpers.js";
 import { formatConfigIssueLines } from "../config/issue-format.js";
 import { hashRuntimeConfigValue, resolveConfigWriteFollowUp } from "../config/runtime-snapshot.js";
 import type { RuntimeConfigSnapshotRefreshOptions } from "../config/runtime-snapshot.js";
-import {
-  getRuntimeConfigWriteApplication,
-  type RuntimeConfigWriteApplicationClaim,
-  type RuntimeConfigWriteApplicationStatus,
-} from "../config/runtime-write-application.js";
+import { getRuntimeConfigWriteApplication } from "../config/runtime-write-application.js";
 import { createConfigSource, configSourceSnapshotsMatch } from "../config/source.js";
 import type { ConfigFileSnapshot, OpenClawConfig } from "../config/types.openclaw.js";
 import type { GatewayScheduledJob } from "../infra/gateway-scheduler.js";
@@ -54,6 +50,11 @@ import {
 import { OpenClawStateLeaseAcquisitionError } from "../state/openclaw-state-lease-error.js";
 import { createConfigAppliedRevisionTracker } from "./config-applied-revision.js";
 import { diffConfigPaths, diffGatewayReloadPaths } from "./config-diff.js";
+import {
+  candidateApplications,
+  settleCandidateApplications,
+  transferCandidateApplications,
+} from "./config-reload-applications.js";
 import {
   buildGatewayReloadPlan,
   isNoopGatewayReloadPlan,
@@ -88,40 +89,6 @@ const MISSING_CONFIG_RETRY_DELAY_MS = 150;
 const MISSING_CONFIG_MAX_RETRIES = 2;
 const LEASE_RETRY_INITIAL_DELAY_MS = 250;
 const LEASE_RETRY_MAX_DELAY_MS = 5_000;
-
-function candidateApplications(candidate: GatewayConfigReloadCandidate | null | undefined) {
-  return [candidate?.application, ...(candidate?.carriedApplications ?? [])].filter(
-    (application): application is RuntimeConfigWriteApplicationClaim => application !== undefined,
-  );
-}
-
-function settleCandidateApplications(
-  candidate: GatewayConfigReloadCandidate | null | undefined,
-  status: RuntimeConfigWriteApplicationStatus,
-) {
-  for (const application of candidateApplications(candidate)) {
-    application.settle(status);
-  }
-}
-
-function transferCandidateApplications(
-  candidate: GatewayConfigReloadCandidate | null,
-  nextConfig: OpenClawConfig | undefined,
-): RuntimeConfigWriteApplicationClaim[] {
-  const carried: RuntimeConfigWriteApplicationClaim[] = [];
-  for (const application of candidateApplications(candidate)) {
-    if (nextConfig && application.isCarriedBy?.(nextConfig)) {
-      carried.push(application);
-    } else {
-      application.settle("superseded");
-    }
-  }
-  if (candidate) {
-    delete candidate.application;
-    delete candidate.carriedApplications;
-  }
-  return carried;
-}
 
 function createObservedCandidate(
   snapshot: ConfigFileSnapshot,
@@ -382,8 +349,22 @@ export function startGatewayConfigReloader(
     };
     let nextPluginInstallRecords = currentPluginInstallRecords;
     let committedRuntimeConfig: OpenClawConfig | null = null;
-    // The reload queue serializes application. New observations belong to the next pass.
-    const isCurrent = () => !stopped;
+    const isCurrent = () => {
+      if (stopped) {
+        return false;
+      }
+      const pendingWrite = pendingInProcessConfig;
+      // A watcher can see the rename before its RPC writer publishes the receipt.
+      // Let that exact write own precommit reload so drain excludes its waiting root.
+      return !(
+        committedRuntimeConfig === null &&
+        !pluginLifecycle &&
+        candidate?.origin !== "write" &&
+        pendingWrite?.origin === "write" &&
+        (pendingWrite.application || pendingWrite.carriedApplications?.length) &&
+        configSourceSnapshotsMatch(sourceSnapshot, pendingWrite.snapshot)
+      );
+    };
     const assertInvokerOwned = () => {
       // Published work must finish its cleanup and receipt even if its invoker closes.
       if (!committedRuntimeConfig) {
@@ -784,7 +765,9 @@ export function startGatewayConfigReloader(
     run: () => Promise<void>,
     candidate?: GatewayConfigReloadCandidate,
   ) => {
-    const runTransaction = candidate?.application?.runTransaction ?? opts.runTransaction;
+    // Writer continuations identify roots waiting for this receipt, not the reload's
+    // lifecycle owner. Always restore the Gateway context before borrowing those roots.
+    const runTransaction = opts.runTransaction;
     const transaction = () => runWithCandidateWaitingRoots(run, candidate);
     await runOutsideSetupCredentialAccess(() =>
       runTransaction ? runTransaction(transaction) : transaction(),

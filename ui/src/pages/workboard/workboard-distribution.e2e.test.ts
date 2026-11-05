@@ -6,6 +6,7 @@ import {
   readPluginControlUiAssets,
 } from "../../../../src/plugins/control-ui-assets.ts";
 import { loadPluginManifest } from "../../../../src/plugins/manifest.ts";
+import { normalizeControlUiBuildInfo } from "../../build-info-normalizers.ts";
 import { createControlUiE2eSuite } from "../../e2e/control-ui-e2e-suite.test-support.ts";
 import {
   defaultControlUiFeatureMethods,
@@ -34,6 +35,11 @@ const suite = createControlUiE2eSuite({
 
 suite.define(() => {
   it("loads entry, CSS and lazy Workboard chunks from the UI origin with an authenticated remote Gateway", async () => {
+    // The mock Gateway must report the served artifact's identity: a mismatch makes
+    // stale-build recovery reload the page and discard the pending gateway handoff.
+    const buildInfo = normalizeControlUiBuildInfo(
+      JSON.parse(await fs.readFile(path.join(repoRoot, "dist/build-info.json"), "utf8")),
+    );
     const pluginRoot = path.join(repoRoot, "dist/extensions/workboard");
     const manifest = loadPluginManifest(pluginRoot, false);
     if (!manifest.ok || !manifest.manifest.controlUi) {
@@ -54,6 +60,8 @@ suite.define(() => {
       page.on("pageerror", (error) => errors.push(error.message));
       page.on("request", (request) => requests.push(request.url()));
       const gateway = await installMockGateway(page, {
+        serverBuildId: buildInfo.buildId,
+        serverVersion: buildInfo.version ?? undefined,
         controlUiTabs: workboardUi.controlUiTabs,
         pluginAssetsRequireAuth: true,
         featureMethods: [
@@ -87,9 +95,14 @@ suite.define(() => {
       url.hash = new URLSearchParams({ gatewayUrl }).toString();
       await page.goto(url.href);
       const confirmation = await waitForConfirmModal(page);
-      await confirmation
-        .getByRole("button", { name: "Switch to gateway.example", exact: true })
-        .click();
+      const switchGateway = confirmation.getByRole("button", {
+        name: "Switch to gateway.example",
+        exact: true,
+      });
+      // Connection-state renders can replace the modal button while Playwright is
+      // waiting for pointer stability. Invoke the currently resolved control
+      // atomically; the socket, route, and asset assertions below own the effect.
+      await switchGateway.evaluate((button: HTMLButtonElement) => button.click());
       await page.locator(".workboard-page-title").filter({ hasText: "Operations" }).waitFor();
       expect(await page.evaluate(() => window.isSecureContext)).toBe(false);
       expect((await gateway.getSocketUrls()).at(-1)).toBe(gatewayUrl);

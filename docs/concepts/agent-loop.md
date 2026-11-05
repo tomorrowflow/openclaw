@@ -51,9 +51,14 @@ precedes the rejected response in the current turn. Failures that may have cause
 side effects, unfinished tools, and asynchronous work still block it; the
 continuation does not replay the original task or increase the retry budget.
 
+Attempt teardown releases abort and deferred-lifecycle callbacks, even when a
+retained cancellation reason keeps their completed owners reachable.
+
 ## Queueing and concurrency
 
 Runs are serialized per session key (session lane) and optionally through a global lane, preventing tool/session races. Messaging channels choose a queue mode (steer/followup/collect/interrupt) that feeds this lane system; see [Command Queue](/concepts/queue).
+
+Transcript projection rebuilds normally finish before global admission. If hydration finds a rebuild after admission, the same turn releases global capacity while waiting, then rejoins the queue before retrying hydration once. Its session and writer ownership stay intact, and cancellation still stops the wait.
 
 Before streaming, an admitted run records its durable `activeWriterRunId` claim. Every transcript append or rewrite supplies `expectedWriterRunId`, and the synchronous commit transaction verifies that it still matches the active claim. A superseded run therefore cannot commit stale transcript data. The SQLite writer queue orders per-agent mutations, while the Gateway state-directory lock prevents another Gateway or `openclaw agent --local` process from owning the same state directory concurrently.
 
@@ -149,7 +154,7 @@ Final payloads are assembled from assistant text (plus optional reasoning), inli
 
 The host decides whether an input requires a visible reply. Direct requests and accepted group/channel requests require an answer by default. Unaddressed group requests remain optional only when the operator explicitly allows the [silence policy](/concepts/messages#silent-replies); mentions and authorized commands still require a response. Ambient room events and internal helper turns remain optional. Model-authored `NO_REPLY` is empty output, not permission to waive a required response; required turns with no delivered reply still need an answer.
 
-When a required turn exhausts its retries with only reasoning or empty output, OpenClaw reports an error and saves the try-again notice in chat history. This also applies when compaction occurs between retries. Whitespace and zero-width characters alone do not count as a visible answer.
+When a required turn exhausts its retries with only reasoning or empty output, OpenClaw reports an error and saves the try-again notice in chat history. This also applies when compaction occurs between retries. Reasoning cut off at the output token limit gets no continuation, because replay omits that partial turn; the run reports the output-limit outcome instead. Whitespace and zero-width characters alone do not count as a visible answer.
 
 If a required-reply turn ends after a fully settled tool batch without a composed answer, OpenClaw can make a tool-free finalization pass. Earlier tool errors, pre-tool progress, and superseded, undelivered confirmations do not count as a final answer. A progress message fully delivered to the current conversation counts as the answer only when it is the last tool batch of the settled turn and the turn then produces no output: the model wrote it after every other tool result, so a finalization pass could only repeat it. Any later tool work, including work after an asynchronous progress send, still gets a finalization pass. This pass uses the settled results and does not repeat completed tools. Fatal automation failures, including denied execution, remain failures even when finalization produces an answer.
 
@@ -296,6 +301,9 @@ replace that explanation or restart an already-final timed-out turn.
 This includes a timeout during tool execution when no final payload or accepted
 continuation remains. A compaction failure label does not turn that unfinished
 tool timeout into a paused run; completed tool results remain in the transcript.
+Tool execution deadlines identify the outcome as unknown: inspect current state
+before repeating the operation. Continuing is an ordinary new input, not an
+automatic replay of the timed-out tool.
 Earlier tool warnings and reasoning output do not count as a completed reply.
 Quiet or collect-mode children do not suppress a timeout unless another
 continuation owns the reply; accepting a child alone does not promise delivery.
@@ -335,8 +343,14 @@ The abort threshold is at least 5 minutes and 3x the warning threshold. Stale se
 Pending Code Mode `exec` and `wait` calls remain active tool work until they
 settle, including `awaitResults: true` calls waiting for nested work. Nested tool
 completion does not retire the outer call. The normal blocked-tool recovery
-allowance and enforced run/tool deadlines still apply; after the outer call
-settles, an embedded run that stops making progress remains recoverable.
+allowance and enforced run/tool deadlines still apply, except while a nested
+collector wait has verified an owned, pending collector. That wait registers
+with the active embedded run and stays protected until a registry change,
+cancellation, revoked caller authority, or a run deadline. A registry change
+revokes protection before rereading; a stalled read remains recoverable. A
+collector that never settles can retain its parent until Stop or a configured
+run timeout. After the outer call settles, an embedded run that stops making
+progress remains recoverable.
 
 Attention and recovery log lines read optional session context only when their
 log level is enabled. Transcript enrichment runs in the background read worker

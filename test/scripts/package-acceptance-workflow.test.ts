@@ -6563,7 +6563,7 @@ render_github_release_notes() { cp "$2" "$1"; printf '%s\\n' '{"verificationIncl
     );
     const coreWrapper = readFileSync("scripts/openclaw-npm-publish.sh", "utf8");
     expect(coreWrapper).toMatch(
-      /--verify-publication-authority\s*\nfi\s*\n"\$\{publish_cmd\[@\]\}"/u,
+      /--verify-publication-authority\s*\nfi\s*\nif "\$\{publish_cmd\[@\]\}" 2>"\$\{publish_stderr\}"; then/u,
     );
     const authority = readFileSync("scripts/npm-preflight-tooling-identity.mjs", "utf8");
     expect(authority).toContain("releasePublishRunAttempt: env.RELEASE_PUBLISH_RUN_ATTEMPT");
@@ -9045,7 +9045,7 @@ test "$package_manager" = "pnpm@12.1.0"
     expect(releaseChecksWorkflow).toContain(
       "codex_plugin_spec: ${{ needs.resolve_target.outputs.codex_plugin_spec }}",
     );
-    expect(workflow).toContain("full-release-validation-state.mjs verify");
+    expect(workflow).toContain('node "$RELEASE_STATE_SCRIPT" verify');
     expect(workflow).toContain(
       'gh_with_retry api "repos/${GITHUB_REPOSITORY}/commits/${encoded_workflow_ref}" --jq .sha',
     );
@@ -9101,7 +9101,7 @@ test "$package_manager" = "pnpm@12.1.0"
       "Release impact: selected execution failures are blocking",
     ]);
     expect(summaryStep.env?.RELEASE_PROFILE).toBe("${{ inputs.release_profile }}");
-    expect(summaryStep.run).toBe("node scripts/full-release-validation-state.mjs verify");
+    expect(summaryStep.run).toBe('node "$RELEASE_STATE_SCRIPT" verify');
     const manifestStep = workflowStep(
       workflowJob(FULL_RELEASE_VALIDATION_WORKFLOW, "summary"),
       "Write release validation manifest",
@@ -9109,7 +9109,7 @@ test "$package_manager" = "pnpm@12.1.0"
     expect(manifestStep.env?.RELEASE_PROFILE).toBe("${{ inputs.release_profile }}");
     expect(manifestStep.env?.STABLE_SOAK_WAIVER).toBeUndefined();
     expect(manifestStep.env?.GH_TOKEN).toBe("${{ github.token }}");
-    expect(manifestStep.run).toBe("node scripts/full-release-validation-state.mjs write-manifest");
+    expect(manifestStep.run).toBe('node "$RELEASE_STATE_SCRIPT" write-manifest');
   });
 
   it("routes publication controls through the trusted shared gate", () => {
@@ -9394,7 +9394,7 @@ test "$package_manager" = "pnpm@12.1.0"
       FULL_RELEASE_STATE_MODE: "drain",
     });
     expectTextToIncludeAll(decisionStep.run, [
-      'node scripts/full-release-validation-state.mjs "$FULL_RELEASE_STATE_MODE"',
+      'node "$RELEASE_STATE_SCRIPT" "$FULL_RELEASE_STATE_MODE"',
     ]);
     expect(planInputsStep.run).toContain("FULL_RELEASE_PLAN_INPUTS_JSON");
     expect(planInputsStep.env).toMatchObject({
@@ -9460,7 +9460,7 @@ test "$package_manager" = "pnpm@12.1.0"
       path: "${{ runner.temp }}/full-release-diagnostic-attempts",
       pattern: "full-release-diagnostics-${{ github.run_id }}-*",
     });
-    expect(selectState.run).toBe("node scripts/full-release-validation-state.mjs select");
+    expect(selectState.run).toBe('node "$RELEASE_STATE_SCRIPT" select');
     expect(summary.needs).toEqual(expect.arrayContaining(["release_decision", "diagnostic_drain"]));
     for (const jobId of [
       "normal_ci",
@@ -9482,7 +9482,6 @@ test "$package_manager" = "pnpm@12.1.0"
     const manifest = workflowStep(summary, "Write release validation manifest");
     const evidenceDispatch = workflowStep(summary, "Request release evidence update");
 
-    expect(manifest.env).not.toHaveProperty("TARGET_SHA");
     expect(manifest.env).not.toHaveProperty("NORMAL_CI_RUN_ID");
     expect(manifest.env).not.toHaveProperty("EVIDENCE_REUSE");
     expect(manifest.run).not.toContain("needs.evidence_reuse.outputs");
@@ -10515,7 +10514,7 @@ describe("package artifact reuse", () => {
       allow_unreleased_changelog: true,
       docker_lanes: "update-migration",
       published_upgrade_survivor_baselines: "2026.7.1 2026.8.1",
-      published_upgrade_survivor_scenarios: "mobile-pairing-reconnect watchos-direct-node",
+      published_upgrade_survivor_scenarios: "base mobile-pairing-reconnect watchos-direct-node",
       shared_image_artifact_namespace: "scheduled-upgrade-survivors",
       shared_image_policy: "no-push-artifact",
     });
@@ -10958,7 +10957,7 @@ describe("package artifact reuse", () => {
     );
     expect(openCodeGo.command).not.toContain("opencode-go/deepseek-v4-flash");
     expect(openCodeGoSmoke.command).toContain(
-      "OPENCLAW_LIVE_GATEWAY_MODELS=opencode-go/glm-5.3 OPENCLAW_LIVE_GATEWAY_SMOKE=1",
+      "OPENCLAW_LIVE_GATEWAY_MODELS=opencode-go/gpt-5.6-luna OPENCLAW_LIVE_GATEWAY_SMOKE=1",
     );
     expect(openCodeGo.command).not.toContain("opencode-go/deepseek-v4-pro");
   });
@@ -14028,12 +14027,12 @@ printf '%s\\n' "$DEEPSEEK_API_KEY" "$DEEPINFRA_API_KEY"`,
       NPM_TELEGRAM_SCENARIO: "${{ inputs.npm_telegram_scenario }}",
       SKIP_PACKAGE_TELEGRAM_E2E: "${{ needs.resolve_target.outputs.skip_package_telegram_e2e }}",
     });
-    expect(manifestStep.run).toBe("node scripts/full-release-validation-state.mjs write-manifest");
+    expect(manifestStep.run).toBe('node "$RELEASE_STATE_SCRIPT" write-manifest');
     expect(verificationStep.env).toMatchObject({
       RELEASE_PROFILE: "${{ inputs.release_profile }}",
       RERUN_GROUP: "${{ inputs.rerun_group }}",
     });
-    expect(verificationStep.run).toBe("node scripts/full-release-validation-state.mjs verify");
+    expect(verificationStep.run).toBe('node "$RELEASE_STATE_SCRIPT" verify');
     expectTextToIncludeAll(dispatchStep.run, [
       'dispatch_id="full-release-validation-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-npm-telegram"',
       'dispatch_output="$(gh workflow run "$workflow" --ref "$CHILD_WORKFLOW_REF" "$@" 2>&1)"',
@@ -14055,7 +14054,7 @@ printf '%s\\n' "$DEEPSEEK_API_KEY" "$DEEPINFRA_API_KEY"`,
       "cancel-in-progress: false",
       "FULL_RELEASE_PLAN_INPUTS_JSON",
       "full-release-validation-policy.mjs",
-      "full-release-validation-state.mjs verify",
+      'node "$RELEASE_STATE_SCRIPT" verify',
       'FAIL_FAST: "false"',
       "NORMAL_CI_RESULT: ${{ needs.normal_ci.result }}",
     ]);
@@ -16834,6 +16833,7 @@ esac
 
   it("validates the macOS release handoff before the GitHub release page exists", () => {
     const macosRelease = readWorkflow(".github/workflows/macos-release.yml");
+    const publicReleaseBranch = macosRelease.on?.workflow_dispatch?.inputs?.public_release_branch;
     const validateJob = workflowJob(
       ".github/workflows/macos-release.yml",
       "validate_macos_release_request",
@@ -16844,6 +16844,8 @@ esac
     expect(stepNames).not.toContain("Ensure matching GitHub release exists");
     expect(macosRelease.jobs?.validate_macos_release_request).toBeDefined();
     expect(buildControlUi?.env?.OPENCLAW_CONTROL_UI_RELEASE_BUILD).toBe("1");
+    expect(publicReleaseBranch).toMatchObject({ required: true });
+    expect(publicReleaseBranch).not.toHaveProperty("default");
   });
 
   it("classifies fast pretag Control UI output as a release artifact", () => {

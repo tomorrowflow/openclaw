@@ -31,12 +31,11 @@ import {
   buildLegacyScheduledCodexAppRecoveryPrompt,
 } from "./scheduled-app-authority.js";
 import { canResolveScheduledConfiguredMcpCreatorAuthority } from "./scheduled-configured-mcp-authority.js";
+import type { CodexAppServerClientOptions } from "./shared-client-options.js";
 import {
-  createIsolatedCodexAppServerClient,
   getLeasedSharedCodexAppServerClient,
   getSharedCodexAppServerClient,
-  releaseLeasedSharedCodexAppServerClient,
-  type CodexAppServerClientOptions,
+  releaseCodexProbeClient,
 } from "./shared-client.js";
 import { fingerprintJsonObject } from "./thread-fingerprints.js";
 import { resolveCodexAppServerThreadModelSelection } from "./thread-model-selection.js";
@@ -300,11 +299,7 @@ export async function prepareCodexAttemptRuntime(connection: CodexAttemptConnect
         nativeToolSurfaceEnabled = false;
         embeddedAgentLog.info("Codex managed-only hooks require sandbox-backed OpenClaw tools");
       } finally {
-        if (attemptClientFactory === createIsolatedCodexAppServerClient) {
-          await client.closeAndWait();
-        } else {
-          releaseLeasedSharedCodexAppServerClient(client);
-        }
+        await releaseCodexProbeClient(client, attemptClientFactory);
       }
     }
     const configuredMcpSurface =

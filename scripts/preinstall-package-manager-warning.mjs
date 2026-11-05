@@ -158,6 +158,47 @@ function stripBunLifecyclePathPrefix(pathEntries, cwd, pathApi, platform) {
   return pathEntries.slice(expectedPrefix.length);
 }
 
+function stripBunPostinstallPathLayout(pathEntries, cwd, pathApi, platform) {
+  const resolvedCwd = pathApi.resolve(cwd);
+  const firstExpected = pathApi.join(resolvedCwd, "node_modules", ".bin");
+  if (
+    normalizePathForComparison(pathEntries[0] ?? "", pathApi, platform) !==
+    normalizePathForComparison(firstExpected, pathApi, platform)
+  ) {
+    return null;
+  }
+
+  const expectedSuffix = [];
+  for (let directory = pathApi.dirname(resolvedCwd); ; directory = pathApi.dirname(directory)) {
+    expectedSuffix.push(pathApi.join(directory, "node_modules", ".bin"));
+    if (pathApi.dirname(directory) === directory) {
+      break;
+    }
+  }
+  const bunShimIndex = pathEntries.length - expectedSuffix.length - 1;
+  const nodeGypIndex = bunShimIndex - 1;
+  if (nodeGypIndex <= 0) {
+    return null;
+  }
+  for (const [index, expected] of expectedSuffix.entries()) {
+    if (
+      normalizePathForComparison(pathEntries[bunShimIndex + 1 + index] ?? "", pathApi, platform) !==
+      normalizePathForComparison(expected, pathApi, platform)
+    ) {
+      return null;
+    }
+  }
+  if (
+    !/^bun-node-(?:[0-9a-f]+|[0-9]+-(?:[0-9a-f]+|debug)(?:-[0-9a-f]{16})?)$/u.test(
+      pathApi.basename(pathEntries[bunShimIndex] ?? ""),
+    ) ||
+    !/^\.[0-9a-f]+-[0-9]+\.node-gyp$/u.test(pathApi.basename(pathEntries[nodeGypIndex] ?? ""))
+  ) {
+    return null;
+  }
+  return pathEntries.slice(1, nodeGypIndex);
+}
+
 /**
  * Finds persistent Node, or an explicit Bun launcher after exhausting the lifecycle PATH.
  *
@@ -170,6 +211,7 @@ function stripBunLifecyclePathPrefix(pathEntries, cwd, pathApi, platform) {
  *   access?: (path: string, mode: number) => void;
  *   realpath?: (path: string) => string;
  *   run?: PackageCliNodeProbeRun;
+ *   allowUnavailableNodeFallback?: boolean;
  * }} [options]
  * @returns {PackageCliNodeRuntime | null}
  */
@@ -183,14 +225,21 @@ export function probePackageCliNodeRuntime(options = {}) {
     access = accessSync,
     realpath = realpathSync,
     run = spawnSync,
+    allowUnavailableNodeFallback = false,
   } = options;
   const pathApi = platform === "win32" ? win32 : posix;
   const delimiter = platform === "win32" ? ";" : ":";
   const executableName = platform === "win32" ? "node.exe" : "node";
   const seen = new Set();
-  // Bun prepends one cwd-to-root node_modules/.bin path per ancestor before
-  // the original PATH. Strip only that exact prefix; anything else persists.
-  const pathEntries = stripBunLifecyclePathPrefix(pathEnv.split(delimiter), cwd, pathApi, platform);
+  // Bun either prepends the cwd-to-root node_modules/.bin paths or wraps the
+  // original PATH between the package bin and an exact generated shim suffix.
+  // The relaxed layout is accepted only by packaged postinstall recovery.
+  const rawPathEntries = pathEnv.split(delimiter);
+  const pathEntries =
+    stripBunLifecyclePathPrefix(rawPathEntries, cwd, pathApi, platform) ??
+    (allowUnavailableNodeFallback
+      ? stripBunPostinstallPathLayout(rawPathEntries, cwd, pathApi, platform)
+      : null);
   if (!pathEntries) {
     return null;
   }
@@ -253,6 +302,9 @@ export function probePackageCliNodeRuntime(options = {}) {
       continue;
     }
     if (result?.status !== 0) {
+      if (allowUnavailableNodeFallback) {
+        continue;
+      }
       return null;
     }
 
@@ -281,6 +333,7 @@ export function probePackageCliNodeRuntime(options = {}) {
  *   bunVersion?: string | null;
  *   engine?: string | null;
  *   execPath?: string | null;
+ *   bunLauncher?: string | null;
  *   probeNodeRuntime?: () => PackageCliNodeRuntime | null;
  * }} [options]
  * @param {(...data: unknown[]) => void} [reportError]
@@ -292,12 +345,18 @@ export function enforceSupportedNodeRuntime(
     bunVersion = process.versions.bun ?? null,
     engine = readPackageNodeEngine(),
     execPath = process.execPath,
+    bunLauncher = process.env.OPENCLAW_PACKAGE_BUN_LAUNCHER ?? null,
     probeNodeRuntime = probePackageCliNodeRuntime,
   } = {},
   reportError = console.error,
 ) {
-  const detectedRuntime = normalizeEnvValue(bunVersion)
-    ? probeNodeRuntime()
+  const activeBunVersion = normalizeEnvValue(bunVersion);
+  const normalizedExecPath = normalizeEnvValue(execPath);
+  const canonicalBunLauncher = normalizeEnvValue(bunLauncher);
+  const detectedRuntime = activeBunVersion
+    ? canonicalBunLauncher && canonicalBunLauncher === normalizedExecPath
+      ? { version: null, bunVersion: activeBunVersion, execPath: normalizedExecPath }
+      : probeNodeRuntime()
     : { version, execPath };
   if (detectedRuntime?.bunVersion) {
     if (
@@ -306,7 +365,7 @@ export function enforceSupportedNodeRuntime(
       return true;
     }
     reportError(
-      `[openclaw] error: Bun launcher ${detectedRuntime.execPath ?? execPath} requires Bun 1.4.3+ (detected ${detectedRuntime.bunVersion}).`,
+      `[openclaw] error: Bun launcher ${detectedRuntime.execPath ?? execPath} requires Bun 1.4.4+ (detected ${detectedRuntime.bunVersion}).`,
     );
     return false;
   }

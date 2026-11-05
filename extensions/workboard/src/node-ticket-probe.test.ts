@@ -5,7 +5,8 @@ import path from "node:path";
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
-import { syncWorkboardAgentEnded, type WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
+import type { WorkboardLifecycleSessionReader } from "./lifecycle-sessions.js";
+import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
 import { createNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import {
   createFakeGitHub,

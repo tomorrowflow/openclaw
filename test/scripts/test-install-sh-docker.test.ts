@@ -731,8 +731,8 @@ describe("test-install-sh-docker", () => {
       writeCommand(
         "npm",
         `#!/usr/bin/env node
-const fs = require("node:fs");
-const path = require("node:path");
+import fs from "node:fs";
+import path from "node:path";
 const args = process.argv.slice(2);
 const pack = args.indexOf("pack");
 if (pack >= 0) {
@@ -751,9 +751,9 @@ if (pack >= 0) {
       writeCommand(
         "python3",
         `#!/usr/bin/env node
-const fs = require("node:fs");
-const http = require("node:http");
-const path = require("node:path");
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
 http.createServer((request, response) => {
   const file = path.join(process.cwd(), new URL(request.url, "http://localhost").pathname.slice(1));
   fs.createReadStream(file).on("error", () => {
@@ -773,7 +773,7 @@ http.createServer((request, response) => {
       writeCommand(
         "docker",
         `#!/usr/bin/env node
-const fs = require("node:fs");
+import fs from "node:fs";
 const args = process.argv.slice(2);
 if (args[0] !== "run") throw new Error("Unexpected Docker invocation");
 const env = new Map();
@@ -1413,6 +1413,36 @@ printf 'status=%s\\n' "$status"
     );
   });
 
+  it("retries failed non-root package indexes without installing from incomplete lists", () => {
+    const dockerfile = readFileSync(NONROOT_DOCKERFILE_PATH, "utf8");
+    const start = dockerfile.indexOf("  set -eux;");
+    const end = dockerfile.indexOf("\n\n", start);
+    const install = dockerfile.slice(start, end).replace(/\\\r?\n/gu, " ");
+    const result = spawnSync(
+      "bash",
+      [
+        "-c",
+        `
+      apt-get() {
+        if [[ "$1" == update ]]; then
+          echo update
+          # APT normally tolerates failed indexes; strict mode must reject them.
+          [[ " $* " != *" APT::Update::Error-Mode=any "* ]]
+        else
+          echo unexpected-install
+        fi
+      }
+      sleep() { :; }
+      ${install}
+    `,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stdout.trim().split("\n")).toEqual(["update", "update", "update"]);
+    expect(result.stderr).toContain("apt-get update failed (attempt 3)");
+  });
+
   it("does not execute or retain a non-root installer after curl fails", () => {
     const fixture = runNonrootInstallerFixture(28);
     const outputPath = readFileSync(fixture.outputPathCapture, "utf8");
@@ -1661,7 +1691,7 @@ printf 'command-status=%s\\n' "$command_result"
       writeFileSync(
         join(bin, "openclaw"),
         `#!${testNodeExecPath}
-const fs = require("node:fs");
+import fs from "node:fs";
 const args = process.argv.slice(2);
 if (args[0] === "--version") {
   console.log("OpenClaw " + fs.readFileSync(process.env.FAKE_VERSION_FILE, "utf8"));
@@ -2205,7 +2235,7 @@ syncBuiltinESMExports();
       `#!/usr/bin/env bash
 set -euo pipefail
 if [ "\${1:-}" = "--version" ]; then
-  echo "1.4.3"
+  echo "1.4.4"
   exit 0
 fi
 if [ "\${1:-}" = "pm" ] && [ "\${2:-}" = "-g" ] && [ "\${3:-}" = "untrusted" ]; then
@@ -2352,7 +2382,7 @@ node -e 'const fs=require("node:fs");const p=process.argv[1];const value=JSON.pa
       expect(result.stdout).not.toContain("Gateway runtime OK");
     } else if (statusExit === 0) {
       expect(result.stdout).toContain(
-        `bun-global-install-smoke: Bun 1.4.3 install with ${bunRuntime === "supported" ? "Bun" : "Node"} CLI, local agent, and Gateway runtime OK`,
+        `bun-global-install-smoke: Bun 1.4.4 install with ${bunRuntime === "supported" ? "Bun" : "Node"} CLI, local agent, and Gateway runtime OK`,
       );
     } else {
       expect(result.stderr).toContain("bun global install smoke failed with exit code 23");

@@ -30,6 +30,11 @@ source under current identity and access policy; a revoked source cannot resume.
 The existing source-authorization and delivery checks still apply; a transcript
 message alone cannot restore missing sender authority.
 
+An accepted child continuation keeps the restored operator's current identity and
+permission checks independently of the parent's recovery claim. Completing the
+parent does not cancel that child. Revoking the operator, replacing the source
+session, or stopping the Gateway still invalidates the child's authority.
+
 This includes automation turns running in dashboard main sessions. If a restart
 exhausts its drain budget, cancellation preserves restart recovery even when the
 provider reports an error and the turn settles before shutdown discovers it.
@@ -358,7 +363,13 @@ that will replace the Gateway. Ordinary
 cancellation keeps its five-second grace before forced termination. During
 shutdown, a relay that needs forced termination after its owned processes are
 confirmed gone produces a warning. Completed cleanup leaves the Gateway's exit
-status at zero; an unconfirmed process cleanup boundary still reports failure.
+status at zero; an unconfirmed process cleanup boundary still reports failure. After
+clean process-owned shutdown retires its deadline watchdogs, the CLI waits ten
+seconds past its own final cleanup. If a leaked handle still keeps the process
+alive, it prints the active resource types to stderr. On Linux and macOS, an exit
+status of zero then ends with SIGTERM, which supervisors count as a clean stop.
+Non-zero statuses (including supervisor restart instructions) and Windows keep
+the report only. Natural exits are not delayed.
 
 The process's cgroup selects the system or user manager, independently of the
 account running the Gateway or its restart owner. This also covers hand-written
@@ -956,6 +967,7 @@ Subagent runs are persisted in the shared SQLite state database, so the
 subagent registry survives the process. On boot, interrupted child runs settle
 through their normal completion path as soon as startup restores requester ownership,
 without waiting for the periodic registry sweep. The sweep remains a retry backstop.
+Accepted launches that have not recorded a child lifecycle run also settle as interrupted under the same ownership checks, without waiting for the lost-run sweep. A different recorded child run is never claimed as unstarted.
 The crash-loop breaker pauses this settlement too; the same sweep retries when
 the breaker's recovery window ends.
 Startup restores completed runs directly from the registry. Any retained delivery
@@ -965,6 +977,7 @@ Human follow-ups in retained child sessions take native custody under the actual
 executing run ID and follow-up prompt, including browser chat. The completed
 original run keeps its own outcome. Human ownership and dashboard nesting do not
 turn a child into a main-session replay candidate.
+A new human message to an interrupted child retires its saved recovery claim and starts normally; main-session recovery claims remain protected.
 They are not automatically relaunched.
 The parent receives the interruption outcome and owns finishing the user's task.
 For native children with completion notifications disabled, recovery sends a

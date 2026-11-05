@@ -17,6 +17,7 @@ import {
 import { getUpdateDoctorConfigFailureReason } from "../../infra/update-doctor-config.js";
 import {
   readGitUpdateFetchTarget,
+  readGitTargetSchemaVersions,
   resolveGitUpdateTrackingRef,
 } from "../../infra/update-git-metadata.js";
 import type { CommandRunner as GlobalCommandRunner } from "../../infra/update-global-command-runner.js";
@@ -36,11 +37,7 @@ import {
   normalizeFallbackFailureReason,
   reportUpdateStepCompletion,
 } from "../../infra/update-runner-command.js";
-import {
-  readBranchName,
-  readGitTargetSchemaVersions,
-  selectChannelTag,
-} from "../../infra/update-runner-git-target.js";
+import { readBranchName, selectChannelTag } from "../../infra/update-runner-git-target.js";
 import { updateGitCheckout } from "../../infra/update-runner-git.js";
 import type {
   CommandRunner as UpdateRunnerCommandRunner,
@@ -306,6 +303,7 @@ export async function inspectGitDryRunTargetSchemaVersions(params: {
   devTarget?: DevUpdateTarget;
 }): Promise<{
   schemaVersions?: OpenClawSchemaVersions;
+  nodeEngine?: string | null;
   metadataUnreadable?: string;
   failureCode?: "target-git-cache-stale";
 }> {
@@ -361,9 +359,7 @@ export async function inspectGitDryRunTargetSchemaVersions(params: {
     timeoutMs: params.timeoutMs,
   });
   return target.status === "ok"
-    ? target.schemaVersions
-      ? { schemaVersions: target.schemaVersions }
-      : {}
+    ? { schemaVersions: target.schemaVersions, nodeEngine: target.nodeEngine }
     : {
         metadataUnreadable: target.reason,
         ...(target.reason.startsWith("git show ")

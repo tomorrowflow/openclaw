@@ -1334,9 +1334,9 @@ publishDiagnostics(artifacts, destination, value => value, "passed");`,
             writeFileSync(
               join(binDir, "openclaw"),
               `#!/usr/bin/env node
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 assert.deepEqual(process.argv.slice(2), ["transcripts", "path", "2026-07-01/design-review", "--dir"]);
 const root = process.env.OPENCLAW_STATE_DIR;
 const sessionDir = path.join(root, "transcripts", "2026-07-01", "design-review");
@@ -1558,7 +1558,7 @@ process.stdout.write(sessionDir + "\\n");
     }
   });
 
-  it("requires every seeded legacy cron specimen before update", () => {
+  it("requires every baseline cron SQLite specimen before update", () => {
     const root = mkdtempSync(join(tmpdir(), "openclaw-upgrade-survivor-cron-"));
     try {
       const stateDir = join(root, "state");
@@ -1572,17 +1572,24 @@ process.stdout.write(sessionDir + "\\n");
       };
       const run = (command: string) =>
         spawnSync(testNodeExecPath, [ASSERTIONS_PATH, command], { env, encoding: "utf8" });
-      const seeded = run("seed");
+      const seeded = spawnSync(testNodeExecPath, [ASSERTIONS_PATH, "seed"], {
+        env: { ...env, OPENCLAW_UPGRADE_SURVIVOR_SCENARIO: "base" },
+        encoding: "utf8",
+      });
       expect(seeded.status, seeded.stderr).toBe(0);
-      const cronStore = join(stateDir, "cron", "jobs.json");
+      mkdirSync(join(stateDir, "state"), { recursive: true });
+      const db = new DatabaseSync(join(stateDir, "state", "openclaw.sqlite"));
+      db.exec("CREATE TABLE cron_jobs(job_id TEXT PRIMARY KEY, job_json TEXT NOT NULL)");
+      for (let index = 0; index < 5; index++) {
+        db.prepare("INSERT INTO cron_jobs VALUES (?, ?)").run(`cron-${index}`, "{}");
+      }
       const baseline = run("assert-state");
       expect(baseline.status, baseline.stderr).toBe(0);
-      const store = JSON.parse(readFileSync(cronStore, "utf8"));
-      store.jobs.pop();
-      writeJson(cronStore, store);
+      db.prepare("DELETE FROM cron_jobs WHERE job_id = ?").run("cron-4");
+      db.close();
       const missingRow = run("assert-state");
       expect(missingRow.status).not.toBe(0);
-      expect(missingRow.stderr).toContain("legacy cron authority fixture row count changed");
+      expect(missingRow.stderr).toContain("baseline cron authority fixture row count changed");
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
@@ -1972,7 +1979,7 @@ process.stdout.write(sessionDir + "\\n");
         writeFileSync(
           join(bin, "openclaw"),
           `#!${testNodeExecPath}
-const fs = require("node:fs");
+import fs from "node:fs";
 const method = process.argv[4];
 const params = JSON.parse(process.argv[process.argv.indexOf("--params") + 1]);
 const outcome = process.env.PROBE_OUTCOME;
@@ -2037,6 +2044,73 @@ process.stdout.write(JSON.stringify(result));
       }
     },
   );
+
+  it("reads migrated ACP metadata from its canonical shared-state owner", () => {
+    expect(() =>
+      runSessionStateAssertion(
+        (stateDir) => {
+          writeMigratedSessionState(stateDir);
+          const databaseDir = join(stateDir, "state");
+          mkdirSync(databaseDir, { recursive: true });
+          const db = new DatabaseSync(join(databaseDir, "openclaw.sqlite"));
+          try {
+            db.exec(`
+              CREATE TABLE acp_sessions (
+                session_key TEXT PRIMARY KEY,
+                session_id TEXT,
+                backend TEXT NOT NULL,
+                agent TEXT NOT NULL,
+                runtime_session_name TEXT NOT NULL,
+                identity_json TEXT,
+                resume_agent_session_id TEXT,
+                resume_acpx_session_id TEXT,
+                mode TEXT NOT NULL,
+                runtime_options_json TEXT,
+                cwd TEXT,
+                state TEXT NOT NULL,
+                last_activity_at INTEGER NOT NULL,
+                last_error TEXT,
+                updated_at INTEGER NOT NULL
+              ) STRICT;
+            `);
+            const sessionKey = "agent:main:slack:channel:cupgrade";
+            const databaseKey = `@acp:v1:${Buffer.from(
+              JSON.stringify(["main", sessionKey]),
+              "utf8",
+            ).toString("base64url")}`;
+            db.prepare(
+              `INSERT INTO acp_sessions (
+                session_key, session_id, backend, agent, runtime_session_name,
+                identity_json, mode, runtime_options_json, state, last_activity_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(
+              databaseKey,
+              "upgrade-group-session",
+              "acpx",
+              "codex",
+              "upgrade-acp-session",
+              JSON.stringify({
+                state: "resolved",
+                acpxRecordId: "upgrade-acpx-record",
+                acpxSessionId: "upgrade-acpx-session",
+                agentSessionId: "upgrade-agent-session",
+                source: "ensure",
+                lastUpdatedAt: 1710000000000,
+              }),
+              "persistent",
+              JSON.stringify({ model: "gpt-5.5", runtimeMode: "plan", thinking: "low" }),
+              "idle",
+              1710000000000,
+              1710000000000,
+            );
+          } finally {
+            db.close();
+          }
+        },
+        { scenario: "acpx-openclaw-tools-bridge" },
+      ),
+    ).not.toThrow();
+  });
 
   it.each([
     { stage: "survival", mutation: "none", error: /metadata prompt was not preserved/ },

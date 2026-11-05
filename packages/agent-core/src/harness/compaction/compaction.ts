@@ -3,7 +3,6 @@ import {
   CHARS_PER_TOKEN_ESTIMATE,
   estimateStringChars,
 } from "@openclaw/normalization-core/cjk-chars";
-import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import type { AgentCoreCompletionRuntimeDeps } from "../../runtime-deps.js";
 import type { AgentMessage, ThinkingLevel } from "../../types.js";
 import { isRuntimeContextCarrier } from "../messages.js";
@@ -13,18 +12,31 @@ import { CompactionError, err, ok, type Result, type SessionTreeEntry } from "..
 import { type CompactionDetails, parseCompactionDetails } from "./compaction-details.js";
 import { formatSplitTurnSourceAsk, resolveLatestUnresolvedUserRequest } from "./request-context.js";
 import { runSummarizationCompletion } from "./summarization-completion.js";
+import {
+  capCompactionSummary,
+  fitCompactionSummary,
+  SUMMARY_TRUNCATED_MARKER,
+} from "./summary-budget.js";
 import { buildSummaryCheckpointPrompt } from "./summary-checkpoint-prompt.js";
 import {
+  clearCompactionPendingAskSection,
   computeFileLists,
   createFileOps,
   extractFileOpsFromMessage,
   type FileOperations,
+  formatCompactionUserLabel,
   formatFileOperations,
-  formatPersistedSenderSuffix,
   getCompactionContent,
   mergeSummaryFileOperations,
+  removeGeneratedCompactionSection,
   stringifyCompactionValue,
 } from "./utils.js";
+export {
+  capCompactionSummary,
+  fitCompactionSummary,
+  MAX_COMPACTION_SUMMARY_CHARS,
+  SUMMARY_TRUNCATED_MARKER,
+} from "./summary-budget.js";
 
 export type { CompactionDetails } from "./compaction-details.js";
 export { formatRequiredAskContext } from "./request-context.js";
@@ -47,65 +59,7 @@ export interface CompactionResult<T = unknown> {
   details?: T;
 }
 
-// Persisted summaries replay on every later request, so their owner enforces
-// this provider-independent 16K hard bound.
-export const MAX_COMPACTION_SUMMARY_CHARS = 16_000;
-export const SUMMARY_TRUNCATED_MARKER = "\n\n[Compaction summary truncated to fit budget]";
 const TURN_CONTEXT_PREFIX = "\n\n---\n\n**Turn Context (split turn):**\n\n";
-
-export function capCompactionSummary(
-  summary: string,
-  maxChars = MAX_COMPACTION_SUMMARY_CHARS,
-  preservedSuffix = "",
-) {
-  if (maxChars <= 0 || summary.length <= maxChars) {
-    return summary;
-  }
-  const suffix = preservedSuffix && summary.endsWith(preservedSuffix) ? preservedSuffix : "";
-  if (maxChars < SUMMARY_TRUNCATED_MARKER.length + suffix.length) {
-    return truncateUtf16Safe(summary, maxChars);
-  }
-  const budget = maxChars - SUMMARY_TRUNCATED_MARKER.length - suffix.length;
-  const prefix = suffix ? summary.slice(0, -suffix.length) : summary;
-  return `${truncateUtf16Safe(prefix, budget)}${SUMMARY_TRUNCATED_MARKER}${suffix}`;
-}
-
-/** Let each summary owner preserve its structure before checking the foreground token budget. */
-export function fitCompactionSummary<T extends { summary: string }>(
-  tokenBudget: number | undefined,
-  render: (maxChars: number) => T | undefined,
-): Result<T, CompactionError> {
-  const fits = (candidate: T) =>
-    tokenBudget === undefined ||
-    estimateStringChars(candidate.summary) / CHARS_PER_TOKEN_ESTIMATE <= tokenBudget;
-  const full = render(MAX_COMPACTION_SUMMARY_CHARS);
-  if (full && fits(full)) {
-    return ok(full);
-  }
-  let low = 1;
-  let high = MAX_COMPACTION_SUMMARY_CHARS - 1;
-  let fitted: T | undefined;
-  while (low <= high) {
-    const mid = Math.floor((low + high) / 2);
-    const candidate = render(mid);
-    if (!candidate) {
-      low = mid + 1;
-    } else if (fits(candidate)) {
-      fitted = candidate;
-      low = mid + 1;
-    } else {
-      high = mid - 1;
-    }
-  }
-  return fitted
-    ? ok(fitted)
-    : err(
-        new CompactionError(
-          "summarization_failed",
-          "The compaction summary cannot fit beside the foreground prompt and retained history.",
-        ),
-      );
-}
 
 export interface CompactionSettings {
   /** Enable automatic compaction decisions. */
@@ -263,8 +217,8 @@ export function estimateTokens(message: AgentMessage): number {
     }
     case "user": {
       chars = countContentChars(message.content);
-      // serializeConversation projects this exact persisted-sender suffix.
-      chars += estimateStringChars(formatPersistedSenderSuffix(message));
+      // Charge the same source and sender label projected into the summary input.
+      chars += estimateStringChars(formatCompactionUserLabel(message)) - "User".length;
       break;
     }
     case "custom":
@@ -724,7 +678,9 @@ export function prepareCompaction(
     messagesToSummarize,
     turnPrefixMessages,
     isSplitTurn: cutPoint.isSplitTurn,
-    ...(requestState ? { requestState } : {}),
+    ...(requestState
+      ? { requestState: latestUnresolvedUserRequest ? ("unresolved" as const) : ("none" as const) }
+      : {}),
     ...(latestUnresolvedUserRequest ? { latestUnresolvedUserRequest } : {}),
     tokensBefore,
     previousSummary,
@@ -859,23 +815,31 @@ function previousSummaryWithoutFileOperations(
     ? `## Latest unresolved user request\n${JSON.stringify(previousRequest)}\n\n`
     : "";
   const summaryWithoutRequest =
-    previousRequestSection && previousSummary?.includes(previousRequestSection)
-      ? previousSummary.replace(previousRequestSection, "")
+    preparation.requestState !== undefined && previousRequestSection
+      ? removeGeneratedCompactionSection(previousSummary, previousRequestSection)
       : previousSummary;
+  const reconciledSummary =
+    preparation.requestState === "none" && summaryWithoutRequest
+      ? clearCompactionPendingAskSection(summaryWithoutRequest)
+      : summaryWithoutRequest;
   const previousFileOperations = previousSummaryDetails
     ? formatFileOperations(previousSummaryDetails.readFiles, previousSummaryDetails.modifiedFiles)
     : "";
-  return previousFileOperations && summaryWithoutRequest?.endsWith(previousFileOperations)
-    ? summaryWithoutRequest.slice(0, -previousFileOperations.length)
-    : summaryWithoutRequest;
+  return previousFileOperations && reconciledSummary?.endsWith(previousFileOperations)
+    ? reconciledSummary.slice(0, -previousFileOperations.length)
+    : reconciledSummary;
 }
 
 function finalizeCompaction(
   preparation: CompactionPreparation,
-  historySummary: string,
+  inputHistorySummary: string,
   latestContext: string,
   requiredContext = "",
 ): Result<CompactionResult, CompactionError> {
+  const historySummary =
+    preparation.requestState === "none"
+      ? clearCompactionPendingAskSection(inputHistorySummary)
+      : inputHistorySummary;
   const { readFiles, modifiedFiles } = computeFileLists(preparation.fileOps);
   const fileOperations = formatFileOperations(readFiles, modifiedFiles);
   // Required prefix content survives fitting; only the history and split-turn context shrink.

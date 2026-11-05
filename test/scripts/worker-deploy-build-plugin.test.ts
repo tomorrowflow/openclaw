@@ -140,6 +140,7 @@ export { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths
 export { readStableSqliteFileGeneration } from "../infra/sqlite-file-generation.js";
 export { recordOpenClawDatabaseQuarantine, readOpenClawDatabaseQuarantineFailure } from "../state/openclaw-quarantine-store.js";
 export { readSecretStoreExecEnvironment } from "../secrets/store/secret-store.js";
+export { createWorkerPlacementTools } from "./worker-placement-tools.js";
 export { rejectUnsafeExecControlShellCommand } from "../infra/exec-control-command-guard.js";
 export { WebSocket } from "../../packages/gateway-client/src/websocket.js";
 export { projectComputerActResult } from "../agents/tools/computer-tool-result.js";
@@ -210,13 +211,14 @@ export { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";`;
     });
 
     it(
-      "reads exec environment and commits authorization through SQLite workers in a relocated archive",
+      "denies unapproved exec and persists authorization through SQLite workers in a relocated archive",
       ({ signal }) =>
         fixtureLifetime.run(async () => {
           const root = fixtureLifetime.createTempDir("openclaw-worker-exec-authorization-");
           const relocated = path.join(root, "dist", "worker");
           fs.mkdirSync(relocated, { recursive: true });
           await tar.extract({ file: preparedArchive, cwd: relocated });
+          expect(fs.existsSync(path.join(relocated, "session-transcript.worker.mjs"))).toBe(false);
           expect(
             fs.readFileSync(path.join(relocated, WORKER_BUNDLE_WINDOWS_SECURITY_HELPER_PATH)),
           ).toEqual(
@@ -242,6 +244,7 @@ const {
   updateExecApprovals,
   readExecApprovalsSnapshot,
   readSecretStoreExecEnvironment,
+  createWorkerPlacementTools,
   closeOpenClawStateDatabaseAsync,
   resolveOpenClawStateSqlitePath,
   readStableSqliteFileGeneration,
@@ -251,6 +254,23 @@ const {
 const match = { id: "portable-exec", pattern: process.execPath };
 const command = "portable exec authorization";
 try {
+  const exec = createWorkerPlacementTools({
+    policy: {
+      workspaceOnly: true, readOnly: false, applyPatchEnabled: false,
+      applyPatchWorkspaceOnly: true, imageSanitization: {},
+    }, cwd: process.cwd(), containmentRoot: process.cwd(),
+    execAuthority: { host: "gateway", security: "full", ask: "off" },
+    permissionMode: "workspace", agentId: "main", sessionKey: "worker:permission-proof",
+    sessionId: "permission-proof", runId: "permission-proof-run",
+    github: {
+      credentialScrubEnv: {}, localIdentityEnv: {}, excludedStoreNames: [], managedLocalIdentity: true,
+    },
+  }).find(tool => tool.name === "exec");
+  const denied = await exec.execute("permission-proof", { command: "echo permission-proof" });
+  assert.match(JSON.stringify(denied), /approval_required.*worker workspace permission mode/is);
+  assert.equal(denied.details.status, "failed");
+  assert.equal(denied.details.failureKind, "approval_required");
+  console.log("relocated worker exec permission denied without Gateway storage");
   await updateExecApprovals({ update: { kind: "replace", file: { version: 1, defaults: { security: "full", ask: "off" }, agents: { main: { allowlist: [match] } } } } });
   assert.deepEqual(await readSecretStoreExecEnvironment({ includeSecretSentinels: false }), {});
   const assertCurrent = await commitExecAuthorizationLocked({
@@ -297,6 +317,9 @@ console.log("relocated exec authorization persisted");
             ),
           );
           expect(result.status, result.stderr).toBe(0);
+          expect(result.stdout).toContain(
+            "relocated worker exec permission denied without Gateway storage",
+          );
           expect(result.stdout).toContain("relocated exec authorization persisted");
         }),
       180_000,

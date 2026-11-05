@@ -6,7 +6,7 @@ import type {
 } from "@openclaw/workboard-contract";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
-import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
+import type { WorkboardLifecycleSessionReader } from "./lifecycle-sessions.js";
 import { withNodeBundle } from "./node-ticket-bundle.js";
 import { grillHandoffFromLog, grillSessionName, nodeGrillIsLive } from "./node-ticket-grill.js";
 import { lastAssistantReply } from "./node-ticket-report.js";

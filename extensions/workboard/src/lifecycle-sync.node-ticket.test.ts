@@ -592,6 +592,47 @@ describe("Workboard node ticket lifecycle", () => {
     expect(projectWorkboardTrust([stored!], "default", Date.now()).total.blocked).toBe(0);
   });
 
+  it("leaves a mapped report and its card alone when the agent-end retry re-reads the session", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    const event = {
+      runId,
+      success: true,
+      messages: report({
+        outcome: "done",
+        summary: "Parser accepts empty input",
+        proof: [{ command: "pytest", status: "passed" }],
+      }),
+    };
+    await syncWorkboardAgentEnded({
+      store,
+      event,
+      context: { runId, sessionKey },
+      readSessions: async () => ({
+        sessions: [{ key: sessionKey, status: "running" as const, hasActiveRun: true }],
+        complete: true,
+      }),
+    });
+    const mapped = await store.get(card.id);
+    const onSessionActive = vi.fn();
+
+    const matched = await syncWorkboardAgentEnded({
+      store,
+      event,
+      context: { runId, sessionKey },
+      allowIdleRunningTerminal: true,
+      readSessions: async () => ({
+        sessions: [{ key: sessionKey, status: "running" as const, hasActiveRun: false }],
+        complete: true,
+      }),
+      onSessionActive,
+    });
+
+    expect(matched).toBe(0);
+    expect(onSessionActive).not.toHaveBeenCalled();
+    expect(await store.get(card.id)).toEqual(mapped);
+  });
+
   it("waits through a failed attempt while fallback continues, then maps the final report", async () => {
     const store = createWorkboardSqliteTestStore();
     const { card, sessionKey, runId } = await startNodeCard(store);

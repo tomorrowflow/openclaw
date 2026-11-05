@@ -5,7 +5,7 @@ import type {
   WorkboardVerifierSettings,
 } from "@openclaw/workboard-contract";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
+import type { WorkboardLifecycleSessionReader } from "./lifecycle-sessions.js";
 import { withNodeBundle } from "./node-ticket-bundle.js";
 import {
   grillBranchRef,
