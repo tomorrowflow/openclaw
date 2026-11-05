@@ -25,7 +25,7 @@ stripReasoningTagsFromText\(projected\.text | src/gateway/server-chat.ts | Gatew
 splitTrailingBlockTagFragment | src/agents/embedded-agent-subscribe.stream-rendering.ts | Streaming partial tag stripping (upstreamed 2026.8.1; the fork's stripTrailingPartialTag DISCARDED a trailing "<..." fragment, upstream buffers it as pendingTagFragment and re-emits it with the next chunk — strictly better, and code-span aware. Do not re-add the fork helper.)
 # RETIRED: the fork helper is gone from that file (and was already gone pre-rebase).
 # Partial-tag handling is upstream's splitTrailingBlockTagFragment, checked above.
-closedOnly | packages/markdown-core/src/code-spans.ts | Code-span closedOnly option (partial tag support)
+# RETIRED 2026.11.1: closedOnly had no caller left; upstream splitTrailingBlockTagFragment owns partial tags.
 
 # --- Sandbox ---
 mapSandboxSkillEntriesForPrompt | src/agents/embedded-agent-runner/sandbox-skills.ts | Sandbox skill prompt rebuild from in-container paths (upstreamed 2026.7.2; fixes host-path SKILL.md leak incl. rw sandboxes)
@@ -69,7 +69,7 @@ ownerAllowAll | src/auto-reply/command-auth.ts | Wildcard (*) support for ownerA
 
 # --- CLI ---
 enablePositionalOptions | src/cli/program/build-program.ts | Positional options fix (prevents option shadowing)
-enablePositionalOptions | src/cli/gateway-cli/register.ts | Positional options fix for gateway register
+# RETIRED 2026.11.1: commander copies the root setting (build-program.ts, checked above) to gateway, so its own call changed nothing.
 deviceId | src/cli/devices-cli.ts | Device ID display in devices list
 
 # --- Local test tooling ---
