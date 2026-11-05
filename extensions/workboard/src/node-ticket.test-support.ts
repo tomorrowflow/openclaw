@@ -10,7 +10,8 @@ import type {
 } from "@openclaw/workboard-contract";
 import { expect, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
-import { syncWorkboardAgentEnded, type WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
+import type { WorkboardLifecycleSessionReader } from "./lifecycle-sessions.js";
+import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
 import { createNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import type { BaseBranchCommit } from "./node-ticket-regressions.js";
 import type { WorkboardNodeTicketRuntime } from "./node-ticket.js";

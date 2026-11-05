@@ -5,9 +5,9 @@ import {
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { describe, expect, it, vi } from "vitest";
 import { createWorkboardAutomationNudgeService } from "./automation-nudge.js";
+import { readWorkboardLifecycleSessions } from "./lifecycle-sessions.js";
 import {
   createWorkboardLifecycleService,
-  readWorkboardLifecycleSessions,
   syncWorkboardAgentEnded,
   syncWorkboardSubagentEnded,
 } from "./lifecycle-sync.js";

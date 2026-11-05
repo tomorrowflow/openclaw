@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WorkboardLifecycleSessionReader } from "./lifecycle-sync.js";
+import type { WorkboardLifecycleSessionReader } from "./lifecycle-sessions.js";
 import { parseVerificationReply } from "./node-ticket-verification.js";
 import {
   finishNodeTicket,

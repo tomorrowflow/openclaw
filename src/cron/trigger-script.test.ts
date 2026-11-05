@@ -315,7 +315,13 @@ describe("cron trigger script evaluator", () => {
     // Only the first preparation's sandbox container is gone.
     const runHeadless = vi.fn(async (): Promise<CodeModeHeadlessResult> =>
       prepared === 1
-        ? { status: "failed", code: "internal_error", error: "No such container: b630c985" }
+        ? {
+            status: "failed",
+            code: "internal_error",
+            error: "No such container: b630c985",
+            output: [],
+            toolCallCount: 0,
+          }
         : completed({ value: { fire: false } }),
     );
     const evaluate = createCronTriggerEvaluator({ config, prepareRuntime, runHeadless });

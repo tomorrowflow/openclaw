@@ -7,10 +7,12 @@ import { createWorkboardChangeEventService } from "./src/change-events.js";
 import { registerWorkboardCommand } from "./src/command.js";
 import { dispatchAndStartWorkboardCards } from "./src/dispatcher.js";
 import {
-  createWorkboardLifecycleService,
   readWorkboardLifecycleSessions,
-  syncWorkboardSubagentEnded,
   type WorkboardLifecycleSessionReader,
+} from "./src/lifecycle-sessions.js";
+import {
+  createWorkboardLifecycleService,
+  syncWorkboardSubagentEnded,
 } from "./src/lifecycle-sync.js";
 import { createNodeTicketHandoffs } from "./src/node-ticket-handoff.js";
 import { createWorkboardSessionsBoardService } from "./src/sessions-board.js";

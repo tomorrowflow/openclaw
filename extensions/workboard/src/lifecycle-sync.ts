@@ -2,14 +2,19 @@ import { AsyncResource } from "node:async_hooks";
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { resolveGlobalSingleton } from "openclaw/plugin-sdk/global-singleton";
 import { isIncognitoSessionKey, parseAgentSessionKey } from "openclaw/plugin-sdk/routing";
-import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
-import type { OpenClawPluginApi, OpenClawPluginService } from "../api.js";
+import type { OpenClawPluginService } from "../api.js";
 import { turnEndContextTokens } from "./agent-end-context.js";
 import {
   cleanupWorkboardCardWorktree,
   isWorkboardWorktreeCleanupCandidate,
   type WorkboardWorktreeCleanupRuntime,
 } from "./dispatcher-workspace.js";
+import type {
+  WorkboardLifecycleSession,
+  WorkboardLifecycleSessionReadOptions,
+  WorkboardLifecycleSessionReader,
+  WorkboardLifecycleSessionSnapshot,
+} from "./lifecycle-sessions.js";
 import type { WorkboardNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import { applyNodeTicketReport, nodeTicketIdleVerdict, nodeTicketTarget } from "./node-ticket.js";
 import {
@@ -29,7 +34,6 @@ const WORKBOARD_STALE_SESSION_MS = 30 * 60 * 1000;
 const WORKBOARD_PREPARED_LAUNCH_GRACE_MS = 10 * 60 * 1000;
 // 100ms doubling through 1.6s: about 3.1s of re-reads, well short of the 60s sweep.
 const AGENT_END_RETRY_MAX_DELAY_MS = 1_600;
-const WORKBOARD_SESSION_SWEEP_LIMIT = 10_000;
 const WORKBOARD_WORKTREE_CLEANUP_SWEEP_LIMIT = 32;
 // Prepared hook generations share the active service reader, never a worker's
 // caller authority. Gateway restart clears both readiness and that reader.
@@ -53,28 +57,6 @@ type WorkboardLifecycleObservation = Partial<
 > & {
   state: keyof typeof LIFECYCLE_TARGETS;
 };
-
-export type WorkboardLifecycleSession = {
-  key: string;
-  updatedAt?: number;
-  status?: "running" | "done" | "failed" | "killed" | "timeout";
-  hasActiveRun?: boolean;
-  abortedLastRun?: boolean;
-};
-
-type WorkboardLifecycleSessionSnapshot = {
-  sessions: WorkboardLifecycleSession[];
-  complete: boolean;
-};
-
-type WorkboardLifecycleSessionReadOptions = {
-  includeUnknown: boolean;
-  sessionKey?: string;
-};
-
-export type WorkboardLifecycleSessionReader = (
-  options: WorkboardLifecycleSessionReadOptions,
-) => Promise<WorkboardLifecycleSessionSnapshot>;
 
 type WorkboardLifecycleMatchHandler = (input: {
   cards: readonly WorkboardCard[];
@@ -483,84 +465,6 @@ async function syncWorkboardLifecycleSessions(params: {
     }
   }
   return count;
-}
-
-function normalizeSession(value: unknown): WorkboardLifecycleSession | undefined {
-  if (!isRecord(value) || typeof value.key !== "string" || !value.key) {
-    return undefined;
-  }
-  const status =
-    value.status === "running" ||
-    value.status === "done" ||
-    value.status === "failed" ||
-    value.status === "killed" ||
-    value.status === "timeout"
-      ? value.status
-      : undefined;
-  return {
-    key: value.key,
-    ...(typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt)
-      ? { updatedAt: value.updatedAt }
-      : {}),
-    ...(status ? { status } : {}),
-    ...(typeof value.hasActiveRun === "boolean" ? { hasActiveRun: value.hasActiveRun } : {}),
-    ...(value.abortedLastRun === true ? { abortedLastRun: true } : {}),
-  };
-}
-
-export async function readWorkboardLifecycleSessions(
-  gateway: Pick<OpenClawPluginApi["runtime"]["gateway"], "isAvailable" | "request">,
-  options: WorkboardLifecycleSessionReadOptions = { includeUnknown: false },
-): Promise<WorkboardLifecycleSessionSnapshot> {
-  if (!(await gateway.isAvailable())) {
-    return { sessions: [], complete: false };
-  }
-  if (options.sessionKey) {
-    const payload = await gateway.request(
-      "sessions.describe",
-      { key: options.sessionKey, includeDerivedTitles: false, includeLastMessage: false },
-      { scopes: ["operator.read"] },
-    );
-    if (!isRecord(payload) || (payload.session !== null && !isRecord(payload.session))) {
-      throw new Error("sessions.describe returned an invalid lifecycle snapshot");
-    }
-    const session = normalizeSession(payload.session);
-    // An exact read establishes no facts about the rest of the catalog.
-    return { sessions: session ? [session] : [], complete: false };
-  }
-  let includeUnknown = false;
-  if (options.includeUnknown) {
-    const agentsPayload = await gateway.request("agents.list", {}, { scopes: ["operator.read"] });
-    if (!isRecord(agentsPayload) || typeof agentsPayload.selectionRequired !== "boolean") {
-      throw new Error("agents.list returned an invalid ownership snapshot");
-    }
-    // The unknown key is a legacy ownerless sentinel. Preserve an existing
-    // captured link only while the Gateway proves that its owner is unambiguous.
-    includeUnknown = !agentsPayload.selectionRequired;
-  }
-  const payload = await gateway.request(
-    "sessions.list",
-    {
-      limit: WORKBOARD_SESSION_SWEEP_LIMIT,
-      configuredAgentsOnly: true,
-      archived: "all",
-      includeGlobal: false,
-      includeUnknown,
-    },
-    { scopes: ["operator.read"] },
-  );
-  if (!isRecord(payload) || !Array.isArray(payload.sessions)) {
-    throw new Error("sessions.list returned an invalid lifecycle snapshot");
-  }
-  return {
-    sessions: payload.sessions.flatMap((value) => {
-      const session = normalizeSession(value);
-      return session ? [session] : [];
-    }),
-    // A short page proves the snapshot is complete. Keep full pages conservative
-    // so absent sessions are never inferred as "missing" when the page is truncated.
-    complete: payload.sessions.length < WORKBOARD_SESSION_SWEEP_LIMIT,
-  };
 }
 
 export function createWorkboardLifecycleService(params: {

@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import { parse as parseSemver } from "semver";
 import { assertAgentRunLifecycleGenerationCurrent } from "../../infra/agent-events.js";
 import { isTruthyEnvValue } from "../../infra/env.js";
 import { formatErrorMessage, toErrorObject } from "../../infra/errors.js";
@@ -9,7 +8,6 @@ import {
   installationTargetEnv,
   LOCAL_INSTALLATION_TARGET_UNSUPPORTED,
 } from "../../infra/installation-target-context.js";
-import { compareValidSemver } from "../../infra/semver.js";
 import { getAgentScopedMediaLocalRoots } from "../../media/local-roots.js";
 import { NODE_CLAUDE_CLEAR_ENV_KEYS } from "../../node-host/invoke-agent-cli-claude-params.js";
 import { enqueueCommandInLane } from "../../process/command-queue.js";
@@ -35,10 +33,14 @@ import {
   buildCliLiveOwnerKey,
   restartCliLiveSession,
 } from "./cli-live-session-registry.js";
-import { buildCliSessionBinding } from "./cli-run-settlement.js";
 import { resolveCliSessionId } from "./cli-run-recovery.js";
+import { buildCliSessionBinding } from "./cli-run-settlement.js";
 import { executeDeps } from "./execute-deps.js";
 import { createCliEventHandlers } from "./execute-events.js";
+import {
+  assertExactToolAvailabilityRuntimeVersion,
+  exactToolAvailabilityError,
+} from "./execute-exact-tool-availability.js";
 import {
   buildCliExecLogLine,
   CLAUDE_SELECTED_AUTH_ENV_KEYS,
@@ -66,50 +68,6 @@ import { createClaudeCliModelCallDiagnostics } from "./model-call-diagnostics.js
 import { composeCliPromptContext } from "./prompt-context.js";
 import { resolveCliNoOutputTimeoutMs, resolveCliRunTimeoutOverrideMs } from "./reliability.js";
 import type { PreparedCliRunContext } from "./types.js";
-
-function exactToolAvailabilityError(params: {
-  code: "unsupported" | "runtime-unavailable";
-  isolatedCompletion: boolean;
-  message: string;
-}): Error {
-  if (!params.isolatedCompletion) {
-    return new Error(params.message);
-  }
-  return Object.assign(new Error(params.message), {
-    name: "IsolatedCompletionRuntimeError",
-    code: params.code,
-  });
-}
-
-function assertExactToolAvailabilityRuntimeVersion(params: {
-  backendId: string;
-  policy: NonNullable<
-    PreparedCliRunContext["backendResolved"]["runtimeArtifact"]
-  >["exactToolAvailabilityVersionPolicy"];
-  executableIdentity: Awaited<ReturnType<typeof resolveCliExecutableIdentity>>;
-  isolatedCompletion: boolean;
-}): void {
-  const artifact = params.executableIdentity?.runtimeArtifact;
-  const packageVersion = artifact?.kind === "package-tree" ? artifact.packageVersion : undefined;
-  const parsedVersion = packageVersion ? parseSemver(packageVersion) : null;
-  const prereleaseChannel = parsedVersion?.prerelease[0];
-  const minimumVersion =
-    parsedVersion?.prerelease.length === 0
-      ? params.policy?.stableMinimum
-      : typeof prereleaseChannel === "string"
-        ? params.policy?.prereleaseMinimums?.[prereleaseChannel]
-        : undefined;
-  const comparison =
-    packageVersion && minimumVersion ? compareValidSemver(packageVersion, minimumVersion) : null;
-  if (comparison !== null && comparison >= 0) {
-    return;
-  }
-  throw exactToolAvailabilityError({
-    code: "unsupported",
-    isolatedCompletion: params.isolatedCompletion,
-    message: `CLI backend ${params.backendId} requires a supported package version for exact per-run tool availability${minimumVersion ? ` (requires >=${minimumVersion}` : " (unsupported release line"}${packageVersion ? `; found ${packageVersion})` : ")"}`,
-  });
-}
 
 type ExecutePreparedCliRunOptions = {
   onPhase?: (phase: "send" | "resolve" | "cleanup") => void;
