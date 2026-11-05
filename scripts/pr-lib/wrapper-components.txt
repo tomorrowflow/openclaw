@@ -630,6 +630,7 @@ src/config/schema.shared.ts
 src/config/schema.walk.ts
 src/config/sensitive-paths.ts
 src/config/sessions/archive-compression.ts
+src/config/sessions/archive-decode.ts
 src/config/sessions/artifacts.ts
 src/config/sessions/transcript-file-names.ts
 src/config/sessions/auth-profile-override-provenance.ts
@@ -1277,6 +1278,7 @@ src/logging/logger-settings-internal.ts
 src/logging/logger.ts
 src/logging/redact-bounded.ts
 src/logging/redact-edit-composition.ts
+src/logging/redact-form-body.ts
 src/logging/redact-json-tokens.ts
 src/logging/redact-json.ts
 src/logging/redact-linear-matchers.ts
@@ -1599,6 +1601,7 @@ src/plugins/web-search-install-catalog.ts
 src/process/child-process-tree.ts
 src/process/child-process.ts
 src/process/command-error.ts
+src/process/darwin-process-inspection.ts
 src/process/exec-output.ts
 src/process/exec-result.ts
 src/process/exec-runner.ts
@@ -2069,6 +2072,7 @@ packages/agent-core/src/harness/session/session.ts
 packages/ai/src/transports/provider-compaction-checkpoint.ts
 src/config/sessions/restart-recovery-state.ts
 src/config/sessions/session-accessor.sqlite-delete-snapshot.ts
+src/config/sessions/session-accessor.sqlite-export-slices.ts
 src/config/sessions/session-accessor.sqlite-entry-cache-projection.ts
 src/config/sessions/session-accessor.sqlite-entry-cache-publication-state.ts
 src/config/sessions/session-accessor.sqlite-entry-cache-publication.ts

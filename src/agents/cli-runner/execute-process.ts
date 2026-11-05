@@ -200,6 +200,7 @@ export async function executeCliProcess(params: {
     ...(runParams.sessionKey ? { sessionKey: runParams.sessionKey } : {}),
     ...(runParams.sessionId ? { sessionId: runParams.sessionId } : {}),
   };
+  let stopForParserRefusal: (() => void) | undefined;
   const consumeStdout = (chunk: string) => {
     const chunkBytes = Buffer.byteLength(chunk);
     params.diagnostics?.observeCliOutput(chunk, "stdout", chunkBytes);
@@ -221,6 +222,7 @@ export async function executeCliProcess(params: {
     streamingParser?.push(chunk);
     if (streamingParser?.getErrorText()) {
       outputRejected.abort();
+      stopForParserRefusal?.();
     }
   };
   const consumeStderr = (chunk: string) => {
@@ -292,7 +294,13 @@ export async function executeCliProcess(params: {
           params.cliSessionIdToUse === undefined && context.openClawHistoryPrompt !== undefined,
         sessionId: params.resolvedSessionId,
         noOutputTimeoutMs: params.noOutputTimeoutMs,
-        consumeStdout,
+        consumeStdout: (chunk) => {
+          consumeStdout(chunk);
+          const errorText = streamingParser?.getErrorText();
+          if (errorText) {
+            throw createCliFailoverError(errorText, "format", failoverContext);
+          }
+        },
         stopSignal: outputRejected.signal,
         onOutstandingWorkChange: backendActivity?.setOutstandingWork,
         activeToolCount: params.events.activeParsedToolCount,
@@ -366,7 +374,6 @@ export async function executeCliProcess(params: {
         supervisor.cancel(runParams.runId, "manual-cancel");
       };
       runParams.abortSignal?.addEventListener("abort", abortManagedRun, { once: true });
-      outputRejected.signal.addEventListener("abort", abortManagedRun, { once: true });
       try {
         params.toolTracking.beginGatewayCapture(
           params.initialGatewayCaptureKey,
@@ -403,10 +410,15 @@ export async function executeCliProcess(params: {
           ),
         );
         managedRunPid = managedRun.pid;
-        const detachReplyBackend = attachCliReplyBackend(runParams, () => {
+        stopForParserRefusal = () => {
           processCancelled = true;
           managedRun.cancel("manual-cancel");
-        });
+        };
+        // Output can arrive before the managed run handle is available.
+        if (streamingParser?.getErrorText()) {
+          stopForParserRefusal();
+        }
+        const detachReplyBackend = attachCliReplyBackend(runParams, stopForParserRefusal);
         try {
           result = await managedRun.wait();
           processCancelled ||= result.reason !== "exit";
@@ -415,7 +427,6 @@ export async function executeCliProcess(params: {
         }
       } finally {
         runParams.abortSignal?.removeEventListener("abort", abortManagedRun);
-        outputRejected.signal.removeEventListener("abort", abortManagedRun);
       }
     }
   } catch (error) {

@@ -1,5 +1,6 @@
 // These consumers need the host-owned SQLite broker, which runs in forked processes.
 export const databaseWorkerCoreTestFiles = [
+  "src/infra/approval-session-audience.sqlite.test.ts",
   "src/sessions/background-session-result.active-turn.test.ts",
   "src/auto-reply/reply/agent-runner-subagent-conflict.test.ts",
   "src/channels/message/ingress-drain.handoff.test.ts",
@@ -37,6 +38,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/tools/sessions-send-tool.incognito.test.ts",
   "src/agents/tools/message-tool.current-prompt-reaction.test.ts",
   "src/agents/tools/message-tool.hosted-transport.test.ts",
+  "src/agents/tools/plugins-reload-handoff.consumer.test.ts",
   "src/agents/tools/sessions-tool.self-archive.test.ts",
   "src/agents/tools/terminal-tool.incognito.test.ts",
   "src/agents/interrupted-input-context.integration.test.ts",
@@ -459,6 +461,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/bootstrap-files.test.ts",
   "src/agents/workspace-attestation.worker.test.ts",
   "src/agents/workspace-bootstrap-publish.test.ts",
+  "src/agents/workspace.missing-templates.test.ts",
   "src/agents/workspace-sqlite-safety.test.ts",
   "src/agents/workspace-state-read.worker.test.ts",
   "src/agents/workspace-state-store.test.ts",
@@ -692,6 +695,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/cli/update-cli/update-repair-command.test.ts",
   "src/cli/update-cli/update-repair-history.test.ts",
   "src/cli/update-cli/update-repair-handoff.test.ts",
+  "src/cli/update-cli/update-repair-cancellation.test.ts",
   "src/commands/auth-choice.test.ts",
   "src/commands/models/auth.test.ts",
   "src/flows/doctor-health.fleet-preflight.test.ts",
@@ -725,6 +729,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/embedded-agent-runner/run/attempt-prompt-submit.steering.test.ts",
   "src/agents/embedded-agent-runner/run/attempt-session-replay.test.ts",
   "src/agents/embedded-agent-runner/run/attempt-session-replay-cohort.test.ts",
+  "src/agents/embedded-agent-runner/run/attempt-session-recovery.test.ts",
   "src/agents/embedded-agent-runner/run/attempt-execution-settle.test.ts",
   "src/agents/embedded-agent-runner/run/attempt-stream-custody.test.ts",
   "src/agents/embedded-agent-runner/run/attempt-stream-prepare.test.ts",

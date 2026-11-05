@@ -1,10 +1,6 @@
-import {
-  AgentHarnessPreflightError,
-  resolveDefaultAgentDir,
-} from "openclaw/plugin-sdk/agent-harness-registration";
+import { AgentHarnessPreflightError } from "openclaw/plugin-sdk/agent-harness-registration";
 import type { AgentHarnessRuntimeArtifactBinding } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
-import type { AuthProfileStore } from "openclaw/plugin-sdk/provider-auth";
 import { codexBuildSymbol } from "../build-state.js";
 import { observeCodexCatalogClient } from "../session-catalog-events.js";
 import {
@@ -14,19 +10,8 @@ import {
 } from "./attempt-timeouts.js";
 import {
   applyCodexAppServerAuthProfile,
-  bridgeCodexAppServerStartOptions,
-  resolveCodexAppServerPreparedAuthProfileSnapshot,
   reconcileCodexComputerUseStartArtifacts,
 } from "./auth-bridge.js";
-import {
-  CodexAppServerAuthProfileUnavailableError,
-  formatCodexAuthProfileUnavailableMessage,
-} from "./auth-profile-recovery.js";
-import {
-  resolveCodexAppServerAuthProfileIdForAgent,
-  resolveCodexAppServerAuthProfileStore,
-} from "./auth-profile.js";
-import type * as codexAuth from "./auth-types.js";
 import {
   ensureCodexAppServerClientRuntime,
   hasCodexAppServerThreadOwnership,
@@ -39,10 +24,6 @@ import {
 } from "./client-startup-retry.js";
 import { CodexAppServerClient, isUnsupportedCodexAppServerVersionError } from "./client.js";
 import type { CodexAppServerStartOptions } from "./config-contracts.js";
-import {
-  resolveCodexAppServerRuntimeOptions,
-  resolveCodexAppServerStartOptionsForAgent,
-} from "./config-runtime.js";
 import type { CodexDesktopGeneration } from "./desktop-generation-owner.js";
 import { waitForCodexDesktopGeneration } from "./desktop-generation.js";
 import { ownCodexInferenceClient } from "./inference-routing.js";
@@ -53,7 +34,6 @@ import {
   INSTALLED_CODEX_START_TIMEOUT_MS,
   readInstalledCodexAppServerStatus,
   rejectInstalledCodexAppServer,
-  resolveManagedCodexAppServerStartOptions,
   resolveManagedCodexNativeCommand,
 } from "./managed-binary.js";
 import {
@@ -82,12 +62,12 @@ import {
   retireSharedCodexAppServerClientIfCurrent,
   retirePendingSharedClientEntryIfUnclaimed,
   waitForUnclaimedSharedClientStartup,
-  type CodexAppServerAcquireObservation,
   type CodexAppServerStartupLifetime,
   type SharedCodexAppServerClientEntry,
   type SharedCodexAppServerClientStartup,
 } from "./shared-client-lifecycle.js";
-import { shouldTrackDesktopGeneration } from "./shared-client-start-policy.js";
+import type { CodexAppServerClientOptions } from "./shared-client-options.js";
+import { resolveCodexAppServerClientStartContext } from "./shared-client-start-context.js";
 import {
   resolveCodexAppServerSpawnIdentity,
   type CodexAppServerClientProcessIdentity,
@@ -180,185 +160,10 @@ export function readCodexAppServerClientDesktopGeneration(
   return getSharedCodexAppServerClientState().startMetadata.get(client)?.desktopGeneration;
 }
 
-export type CodexAppServerClientOptions = {
-  startOptions?: CodexAppServerStartOptions;
-  pluginConfig?: unknown;
-  timeoutMs?: number;
-  authProfileId?: string | null;
-  authProfileStore?: AuthProfileStore;
-  authBindingFingerprint?: string;
-  /** Setup-only generation whose exact local runtime bytes are captured. */
-  runtimeArtifactMode?: "capture";
-  /** Previously minted exact runtime required before the process may start. */
-  expectedRuntimeArtifact?: AgentHarnessRuntimeArtifactBinding;
-  preparedAuth?: codexAuth.CodexAppServerPreparedAuth;
-  authRequirement?: codexAuth.CodexAppServerAuthRequirement;
-  agentId?: string;
-  agentDir?: string;
-  config?: Parameters<typeof resolveCodexAppServerAuthProfileIdForAgent>[0]["config"];
-  onStartedClient?: (client: CodexAppServerClient) => void;
-  onAcquireObservation?: (observation: CodexAppServerAcquireObservation) => void;
-  abandonSignal?: AbortSignal;
-  /** Caller authority for startup of an isolated, caller-owned client. */
-  assertCurrent?: () => void;
-  /** Caller row authority, awaited immediately before isolated startup effects. */
-  assertCurrentAsync?: () => Promise<void>;
-};
-
 /** Factory used by attempt startup and side turns to acquire a leased client. */
 export type CodexAppServerClientFactory = (
   options?: CodexAppServerClientOptions,
 ) => Promise<CodexAppServerClient>;
-
-async function resolveCodexAppServerClientStartContext(
-  options: CodexAppServerClientOptions | undefined,
-  startedAt: number,
-) {
-  const requestedStartOptions =
-    options?.startOptions ??
-    resolveCodexAppServerRuntimeOptions({ pluginConfig: options?.pluginConfig }).start;
-  const agentDir =
-    options?.agentDir ??
-    (requestedStartOptions.homeScope === "user"
-      ? undefined
-      : resolveDefaultAgentDir(options?.config ?? {}));
-  const desktopGeneration = shouldTrackDesktopGeneration(
-    requestedStartOptions,
-    options?.pluginConfig,
-  )
-    ? await waitForCodexDesktopGeneration()
-    : undefined;
-  const preparedAuth = options?.preparedAuth;
-  const preparedApiKey = preparedAuth?.kind === "api-key" ? preparedAuth.apiKey.trim() : undefined;
-  if (preparedAuth && options?.authProfileId !== undefined) {
-    throw new Error("Prepared Codex auth cannot also select a legacy auth profile.");
-  }
-  if (preparedAuth?.kind === "profile" && !preparedAuth.store.profiles[preparedAuth.profileId]) {
-    throw new CodexAppServerAuthProfileUnavailableError(
-      formatCodexAuthProfileUnavailableMessage(preparedAuth.profileId),
-    );
-  }
-  if (preparedAuth?.kind === "api-key" && !preparedApiKey) {
-    throw new Error("Prepared Codex API-key auth is missing its resolved key.");
-  }
-  if (preparedAuth && requestedStartOptions.homeScope === "user") {
-    // Backstop for the auth-bridge handoff: an app-server on the operator's native
-    // home persists api-key logins into CODEX_HOME/auth.json and replaces the live
-    // ChatGPT account for token logins, so prepared auth must never reach it.
-    throw new Error("Prepared Codex auth requires an isolated app-server home.");
-  }
-  const preparedAuthRequirement =
-    preparedAuth &&
-    (preparedAuth.kind === "api-key" || isCodexResponsesOAuth(preparedAuth)
-      ? "api-key"
-      : "subscription");
-  if (
-    options?.authRequirement &&
-    preparedAuthRequirement &&
-    options.authRequirement !== preparedAuthRequirement
-  ) {
-    throw new Error("Prepared Codex auth does not satisfy the requested auth requirement.");
-  }
-  let authRequirement = options?.authRequirement ?? preparedAuthRequirement;
-  const usesNativeAuth =
-    !preparedAuth &&
-    (options?.authProfileId === null || requestedStartOptions.homeScope === "user");
-  const requestedAuthProfileId =
-    preparedAuth?.kind === "profile"
-      ? preparedAuth.profileId
-      : (options?.authProfileId ?? undefined);
-  const authProfileStore =
-    preparedAuth?.kind === "profile"
-      ? preparedAuth.store
-      : !usesNativeAuth && preparedAuth?.kind !== "api-key"
-        ? await resolveCodexAppServerAuthProfileStore({
-            agentDir,
-            authProfileId: requestedAuthProfileId,
-            authProfileStore: options?.authProfileStore,
-            config: options?.config,
-          })
-        : options?.authProfileStore;
-  const authProfileId =
-    preparedAuth?.kind === "profile"
-      ? preparedAuth.profileId
-      : usesNativeAuth || preparedAuth?.kind === "api-key"
-        ? undefined
-        : await resolveCodexAppServerAuthProfileIdForAgent({
-            authProfileId: requestedAuthProfileId,
-            agentDir,
-            config: options?.config,
-            ...(authProfileStore ? { authProfileStore } : {}),
-          });
-  // Resolve the selected profile once: the keyed process must log in with the
-  // same account material, including ordinary catalog callers without prepared auth.
-  const preparedAuthProfileSnapshot =
-    !usesNativeAuth && authProfileId
-      ? ((preparedAuth?.kind === "profile" ? preparedAuth.snapshot : undefined) ??
-        (await resolveCodexAppServerPreparedAuthProfileSnapshot({
-          authProfileId,
-          authProfileStore,
-          agentDir,
-          config: options?.config,
-        })))
-      : undefined;
-  if (preparedAuth?.kind === "profile" && !preparedAuthProfileSnapshot) {
-    throw new CodexAppServerAuthProfileUnavailableError(
-      `Prepared Codex auth profile "${preparedAuth.profileId}" is unusable. Repair or replace the selected OpenAI profile, then retry.`,
-    );
-  }
-  const resolvedPreparedAuth: codexAuth.CodexAppServerResolvedPreparedAuth | undefined =
-    preparedAuth?.kind === "api-key"
-      ? { kind: "api-key", apiKey: preparedApiKey as string }
-      : preparedAuthProfileSnapshot && authProfileId && authProfileStore
-        ? {
-            kind: "profile",
-            profileId: authProfileId,
-            store: authProfileStore,
-            snapshot: preparedAuthProfileSnapshot,
-          }
-        : undefined;
-  if (isCodexResponsesOAuth(resolvedPreparedAuth)) {
-    if (authRequirement && authRequirement !== "api-key") {
-      throw new Error("ChatGPT subscription sharing requires the public OpenAI API route.");
-    }
-    authRequirement = "api-key";
-  }
-  const agentStartOptions = resolveCodexAppServerStartOptionsForAgent({
-    startOptions: requestedStartOptions,
-    agentDir,
-  });
-  const remainingMs = resolveRemainingAcquireTimeout(options?.timeoutMs ?? 0, startedAt);
-  const managedStartOptions = await resolveManagedCodexAppServerStartOptions(agentStartOptions, {
-    selectionTimeoutMs: remainingMs > 0 ? remainingMs / 2 : undefined,
-  });
-  // Preserve ordinary profile environment policy; only explicitly prepared
-  // handoffs clear all inherited auth variables before spawning.
-  const startOptions = await bridgeCodexAppServerStartOptions({
-    startOptions: managedStartOptions,
-    agentId: options?.agentId,
-    agentDir,
-    authProfileId: usesNativeAuth || preparedAuth?.kind === "api-key" ? null : authProfileId,
-    ...((preparedAuth || isCodexResponsesOAuth(resolvedPreparedAuth)) && resolvedPreparedAuth
-      ? { preparedAuth: resolvedPreparedAuth }
-      : {}),
-    authRequirement,
-    config: options?.config,
-    pluginConfig: options?.pluginConfig,
-    ...(authProfileStore ? { authProfileStore } : {}),
-  });
-  return {
-    agentDir,
-    usesNativeAuth,
-    authProfileId,
-    authProfileStore,
-    requestedStartOptions,
-    preparedAuth: resolvedPreparedAuth,
-    authRequirement,
-    startOptions,
-    ...(options?.pluginConfig !== undefined ? { pluginConfig: options.pluginConfig } : {}),
-    ...(desktopGeneration ? { desktopGeneration } : {}),
-  };
-}
 
 /** Gets or starts a shared Codex app-server client without retaining a lease. */
 export function getSharedCodexAppServerClient(
@@ -382,6 +187,18 @@ export function releaseLeasedSharedCodexAppServerClient(client: CodexAppServerCl
   entry.anonymousLeases -= 1;
   releaseSharedClientEntry(entry, "activeLeases");
   return true;
+}
+
+/** Temporary probes own isolated processes but only borrow shared-client leases. */
+export async function releaseCodexProbeClient(
+  client: CodexAppServerClient,
+  factory: CodexAppServerClientFactory,
+): Promise<void> {
+  if (factory === createIsolatedCodexAppServerClient) {
+    await client.closeAndWait();
+  } else {
+    releaseLeasedSharedCodexAppServerClient(client);
+  }
 }
 
 /** Mutable ownership token for one shared-client lease across client replacement. */

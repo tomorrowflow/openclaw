@@ -27,6 +27,8 @@ const WORKBOARD_STALE_SESSION_MS = 30 * 60 * 1000;
 // A start this process prepared settles its own launch, accepted or failed;
 // past this a start that never settled is failed like one a restart cut off.
 const WORKBOARD_PREPARED_LAUNCH_GRACE_MS = 10 * 60 * 1000;
+// 100ms doubling through 1.6s: about 3.1s of re-reads, well short of the 60s sweep.
+const AGENT_END_RETRY_MAX_DELAY_MS = 1_600;
 const WORKBOARD_SESSION_SWEEP_LIMIT = 10_000;
 const WORKBOARD_WORKTREE_CLEANUP_SWEEP_LIMIT = 32;
 // Prepared hook generations share the active service reader, never a worker's
@@ -79,6 +81,14 @@ type WorkboardLifecycleMatchHandler = (input: {
   sessionKey?: string;
 }) => Promise<void>;
 
+type WorkboardAgentEndEvent = {
+  runId?: string;
+  success: boolean;
+  messages?: unknown[];
+  durationMs?: number;
+};
+type WorkboardAgentEndContext = { runId?: string; sessionKey?: string };
+
 type WorkboardLifecycleService = OpenClawPluginService & {
   stop: () => void;
   /** Runs pending node handoffs soon, outside the caller's request authority. */
@@ -86,6 +96,7 @@ type WorkboardLifecycleService = OpenClawPluginService & {
   onGatewayStart: (abortSignal?: AbortSignal) => void;
   onGatewayStop: () => void;
   readSessions: WorkboardLifecycleSessionReader;
+  onAgentEnd: (event: WorkboardAgentEndEvent, context: WorkboardAgentEndContext) => Promise<void>;
 };
 
 function needsWorkboardLifecycleReconciliation(card: WorkboardCard): boolean {
@@ -196,13 +207,16 @@ export async function syncWorkboardSubagentEnded(params: {
 
 export async function syncWorkboardAgentEnded(params: {
   store: WorkboardStore;
-  event: { runId?: string; success: boolean; messages?: unknown[]; durationMs?: number };
-  context: { runId?: string; sessionKey?: string };
+  event: WorkboardAgentEndEvent;
+  context: WorkboardAgentEndContext;
   now?: number;
+  allowIdleRunningTerminal?: boolean;
   readSessions: (
     options: WorkboardLifecycleSessionReadOptions,
   ) => Promise<WorkboardLifecycleSessionSnapshot>;
   onMatched?: WorkboardLifecycleMatchHandler;
+  /** Called when the linked session has not finished yet, so a later read may settle it. */
+  onSessionActive?: () => void;
 }): Promise<number> {
   const now = params.now ?? Date.now();
   // The run's start fences it from rounds claimed after it began.
@@ -222,14 +236,26 @@ export async function syncWorkboardAgentEnded(params: {
       : {}),
   });
   const session = snapshot.sessions.find((entry) => entry.key === params.context.sessionKey);
-  const observation = session ? lifecycleFromSession(session, now) : undefined;
-  const terminal = observation?.state === "succeeded" || observation?.state === "failed";
-  // A node ticket's stalled-turn retry reports under a new run id. Only the
-  // report reads it; the lifecycle writes below keep the run-id fence, so the
-  // card stays linked to the round's launch run.
   const linked = (await params.store.list()).filter(
     (card) => !card.metadata?.archivedAt && workboardCardTakesEndedRunReport(card, source),
   );
+  // A retry only settles a session that outlived its hook. The hook already mapped
+  // a node ticket's report, so applying it again would repeat the round, and the
+  // sweep's idle verdict covers a session that then stays idle.
+  if (params.allowIdleRunningTerminal && linked.some((card) => nodeTicketTarget(card))) {
+    return 0;
+  }
+  const observation = !session
+    ? undefined
+    : params.allowIdleRunningTerminal &&
+        session.status === "running" &&
+        session.hasActiveRun === false
+      ? {
+          state: params.event.success ? ("succeeded" as const) : ("failed" as const),
+          sourceUpdatedAt: session.updatedAt ?? now,
+        }
+      : lifecycleFromSession(session, now);
+  const terminal = observation?.state === "succeeded" || observation?.state === "failed";
   // Node tickets report through their final message, not Workboard tools: a
   // block holds, and a done report leaves the card running with a pending
   // handoff that only the bundle import moves to review. The report exists
@@ -282,6 +308,9 @@ export async function syncWorkboardAgentEnded(params: {
       cards: reported,
       ...(source.sessionKey ? { sessionKey: source.sessionKey } : {}),
     });
+  }
+  if (observation && !terminal) {
+    params.onSessionActive?.();
   }
   // After any lifecycle write, which gives a session-linked attempt its run id.
   const contextTokens = turnEndContextTokens(params.event.messages ?? []);
@@ -337,8 +366,7 @@ async function syncWorkboardLifecycleSessions(params: {
   sessions: readonly WorkboardLifecycleSession[];
   complete?: boolean;
   now?: number;
-  /** When this service started: launches prepared before it have no start left to settle them. */
-  serviceStartedAt: number;
+  recoverPreparedBefore?: number;
   onMatched?: WorkboardLifecycleMatchHandler;
 }): Promise<number> {
   const now = params.now ?? Date.now();
@@ -395,7 +423,8 @@ async function syncWorkboardLifecycleSessions(params: {
       // session create, before the session shows in the snapshot (IOS-A45,
       // failed 3 seconds after its prepare during back-to-back starts).
       const orphaned =
-        launch.preparedAt <= params.serviceStartedAt ||
+        params.recoverPreparedBefore === undefined ||
+        launch.preparedAt < params.recoverPreparedBefore ||
         now - launch.preparedAt >= WORKBOARD_PREPARED_LAUNCH_GRACE_MS;
       if (
         params.complete &&
@@ -547,6 +576,10 @@ export function createWorkboardLifecycleService(params: {
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let begin: (() => void) | undefined;
+  let handleAgentEnd:
+    | ((event: WorkboardAgentEndEvent, context: WorkboardAgentEndContext) => Promise<void>)
+    | undefined;
+  const agentEndRetryTimers = new Set<ReturnType<typeof setTimeout>>();
   let removeDrainListener: (() => void) | undefined;
   let cleanupCursor = 0;
   let scheduleNodeHandoffs: (() => void) | undefined;
@@ -588,6 +621,11 @@ export function createWorkboardLifecycleService(params: {
     removeDrainListener = undefined;
     generation += 1;
     begin = undefined;
+    handleAgentEnd = undefined;
+    for (const retryTimer of agentEndRetryTimers) {
+      clearTimeout(retryTimer);
+    }
+    agentEndRetryTimers.clear();
     if (timer) {
       clearTimeout(timer);
       timer = undefined;
@@ -621,10 +659,14 @@ export function createWorkboardLifecycleService(params: {
       }
       return await reader(options);
     },
+    async onAgentEnd(event, context) {
+      await handleAgentEnd?.(event, context);
+    },
     start(ctx) {
       const owner = ++generation;
-      const serviceStartedAt = params.now?.() ?? Date.now();
+      const recoverPreparedBefore = params.now?.() ?? Date.now();
       serviceReader = AsyncResource.bind(params.readSessions);
+      const readSessions = serviceReader;
       workboardLifecycleGatewayState.readSessions = serviceReader;
       let begun = false;
       const { nodeHandoffs } = params;
@@ -664,7 +706,7 @@ export function createWorkboardLifecycleService(params: {
             }
             if (cards.some((card) => needsWorkboardLifecycleReconciliation(card))) {
               try {
-                const snapshot = await params.readSessions({
+                const snapshot = await readSessions({
                   includeUnknown: cards.some(
                     (card) => !card.metadata?.archivedAt && cardSessionKey(card) === "unknown",
                   ),
@@ -683,7 +725,7 @@ export function createWorkboardLifecycleService(params: {
                     continue;
                   }
                   (describedIncognitoKeys ??= new Set()).add(sessionKey);
-                  const exact = await params.readSessions({ includeUnknown: false, sessionKey });
+                  const exact = await readSessions({ includeUnknown: false, sessionKey });
                   snapshot.sessions.push(...exact.sessions);
                 }
                 await syncWorkboardLifecycleSessions({
@@ -691,7 +733,7 @@ export function createWorkboardLifecycleService(params: {
                   cards,
                   ...snapshot,
                   now: params.now?.() ?? Date.now(),
-                  serviceStartedAt,
+                  recoverPreparedBefore,
                   onMatched,
                 });
                 cards = await params.store.list();
@@ -720,9 +762,77 @@ export function createWorkboardLifecycleService(params: {
           }
         } finally {
           if (generation === owner) {
+            if (timer) {
+              clearTimeout(timer);
+            }
             timer = setTimeout(() => void reconcile(), WORKBOARD_LIFECYCLE_SWEEP_MS);
             timer.unref?.();
           }
+        }
+      };
+      // The run can settle its session after agent_end fires. Re-read with a short backoff
+      // while the session stays active; the bounded sweep remains the backstop.
+      const retryAgentEnd = AsyncResource.bind(
+        (event: WorkboardAgentEndEvent, context: WorkboardAgentEndContext, delayMs = 100) => {
+          const retryTimer = setTimeout(() => {
+            agentEndRetryTimers.delete(retryTimer);
+            if (generation !== owner) {
+              return;
+            }
+            let sessionActive = false;
+            void params.store
+              .runOperation(async () => {
+                const matched = await syncWorkboardAgentEnded({
+                  store: params.store,
+                  event,
+                  context,
+                  readSessions,
+                  allowIdleRunningTerminal: true,
+                  onMatched,
+                  onSessionActive: () => {
+                    sessionActive = true;
+                  },
+                });
+                if (matched > 0) {
+                  await cleanupWorktrees(await params.store.list(), (message) =>
+                    ctx.logger.warn(message),
+                  );
+                }
+              })
+              .catch((error: unknown) => {
+                if (generation === owner) {
+                  ctx.logger.warn(`workboard agent-end retry failed: ${String(error)}`);
+                }
+              })
+              .finally(() => {
+                if (
+                  sessionActive &&
+                  generation === owner &&
+                  delayMs < AGENT_END_RETRY_MAX_DELAY_MS
+                ) {
+                  retryAgentEnd(event, context, delayMs * 2);
+                }
+              });
+          }, delayMs);
+          agentEndRetryTimers.add(retryTimer);
+          retryTimer.unref?.();
+        },
+      );
+      handleAgentEnd = async (event, context) => {
+        if (generation !== owner) {
+          return;
+        }
+        const matched = await params.store.runOperation(() =>
+          syncWorkboardAgentEnded({
+            store: params.store,
+            event,
+            context,
+            readSessions,
+            onMatched,
+          }),
+        );
+        if (matched === 0 && generation === owner) {
+          retryAgentEnd(event, context);
         }
       };
       begin = () => {

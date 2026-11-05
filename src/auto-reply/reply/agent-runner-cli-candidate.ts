@@ -187,6 +187,7 @@ export async function runCliFallbackCandidate(
         cliSessionBinding,
         assertSettlementCurrent,
         settleResult,
+        persistStoppedFirstSession,
       }) => {
         let sessionEntry = initialSessionEntry;
         // A fresh session published mid-run follows the same failure policy as
@@ -489,6 +490,20 @@ export async function runCliFallbackCandidate(
             forkCliSessionOnResume,
             ...forkRunParams,
             persistStartedCliSession,
+            // Room events and preserved provenance never publish a new native session.
+            ...(turn.followupRun.currentInboundEventKind === "room_event" ||
+            shouldPreserveUserFacingSessionStateForInputProvenance(
+              turn.followupRun.run.inputProvenance,
+            )
+              ? {}
+              : {
+                  persistStoppedFirstCliSession: (binding) =>
+                    persistStoppedFirstSession({
+                      binding,
+                      expectedSession: sessionEntry,
+                      sessionStore: turn.activeSessionStore,
+                    }),
+                }),
             authProfileId,
             nativeAuthOnly: turn.followupRun.run.scheduledAutomation ? true : undefined,
             mediaImageLayout: params.currentTurnImages.mediaImageLayout,

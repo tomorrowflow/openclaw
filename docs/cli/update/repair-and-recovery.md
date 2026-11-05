@@ -98,6 +98,10 @@ the current run's latest stop and restarts the installed package after Doctor's
 writers settle. It records the observed recovery outcome while preserving the
 failed update result. Earlier runs' stop receipts never authorize that restart;
 operator-stopped services and explicit data-risk refusals remain stopped.
+Normal Doctor exits do not require a separate process-settlement receipt. On
+Windows, recovery restores the suspended Scheduled Task before restarting the
+Gateway, while preserving the failed Doctor check IDs in the update report.
+This recovery behavior requires the installed updater to contain the fix.
 
 After activation succeeds, a failure to read or publish update reporting leaves
 the updated installation in place. Reporting failures do not trigger package
@@ -200,6 +204,8 @@ capture as restored only when the restoration evidence identifies its manifest.
 Standalone Doctor copies appear as `manual`; their presence does not record a
 successful or failed repair. An unfinished capture appears as `incomplete`
 alongside valid captures, with its directory and no sealed manifest reference.
+Discovery recognizes capture directories by their `.openclaw-private-update-capture`
+marker; unrelated files and unmarked directories do not hide retained captures.
 Keep current data and inspect the originals before attempting restoration.
 Older installed updaters may not preserve or forward an original capture; a
 newer Doctor reports that limitation instead of treating current bytes as the
@@ -462,7 +468,10 @@ handoff when both recorded PID/start identities are provably dead, a complete
 host census finds no remaining references to its run or retained paths, and at
 least 45 minutes have passed since the lease's last recorded activity. A
 recoverable larger recorded timeout extends that grace period. Gateway startup
-and borrowed update processes do not reclaim these leases.
+and borrowed update processes do not reclaim these leases. The census matches
+process arguments and working directories. On macOS it does not read process
+environments, which some macOS releases report without a bounded end; a process
+whose arguments cannot be read still leaves the census incomplete.
 
 Repair also checks legacy update child-lineage leases left after a manual
 installation hop, even when the installation-root lease is absent. Dead PIDs
@@ -477,6 +486,46 @@ authorize reclaiming another child's lease.
 Live or uninspectable owners remain protected. On Linux with restricted `/proc`
 visibility, retry from the original OS account with process-inspection permissions;
 permission errors never prove that an owner died.
+
+An updater that is cancelled, for example by its activation deadline, and then
+exits before releasing the installation leaves cancelled update custody (lease
+version 4). `openclaw update` refuses with `Another update executor owns this
+installation` and names the custody owner, lease version, and last activity.
+Gateway startup and normal update admission never reclaim this custody.
+When an unfinished package publication is also present, repair settles it under
+the same exclusive repair claim before finalization; a second invocation is not
+needed merely to acquire update ownership again.
+
+Explicit `openclaw update repair` settles the whole cancelled family: the
+installation root, a retained service root cancelled by the same updater, the
+occupied-slot and candidate roots bound to that generation, and every child
+lease beneath them. Repair requires the evidence it uses for triage handoffs:
+every recorded updater, child, and command process and process group has exited;
+the update run is identifiable in the selected state and has no unverified
+rollback or restoration; the 45-minute grace, or a longer recorded timeout, has
+passed since the family's latest recorded activity; and the host census finds no
+process referencing the run, its retained paths, or any family key, including the
+installation and service roots. Repair then replaces the custody with
+its own claim in one transaction, records the settled keys in the
+`finalize:handoff-settlement` step, and releases its claim after finalization.
+A failed or deferred repair keeps the original custody record in its claim and
+reports it as retained custody. A later repair resumes that claim once the
+interrupted repair process has exited; the grace still counts from the cancelled
+custody's activity, not from the claim.
+
+When any condition fails, or the family contains custody repair cannot inspect,
+repair leaves every row unchanged and still finishes its other maintenance.
+JSON output reports `status: "warning"`, a `nextAction`, and
+`retainedUpdateCustody` with `key`, `owner`, `leaseVersion`, `lastActivityAt`,
+and `reason`. Standalone repair exits with code **2**. Act on the reason: wait
+for or stop the named processes through their owning terminal or service, retry
+after the stated grace period, or complete the recorded restoration. A census
+match can name any OpenClaw process on the host, such as a Gateway launched from
+the installation; stop it through its service owner before retrying. An installed CLI without this repair cannot
+settle cancelled custody, and its update refuses before staging a candidate.
+Install a version containing this repair manually (the package hop above, or
+[updating a source checkout](/install/updating/update-methods#source-checkout-servers-reference-script)),
+then run `openclaw update repair` from the updated CLI.
 
 An ordinary installation-root update lease is not legacy custody just because it
 has no mutation-protocol marker. Repair leaves that lease to its current owner;
@@ -690,7 +739,8 @@ availability, installation, or load failures appear in
 successfully when required checks pass. Doctor maintenance admission refusals
 also report a warning when no data is at risk. Repair restores any service
 it stopped and leaves migrations pending. A standalone `update repair` exits
-with code **2** when Doctor maintenance is deferred; delegated finalization for
+with code **2** when Doctor maintenance is deferred or cancelled update custody
+remains (see above); delegated finalization for
 an existing update keeps exit code **0**, so an older updater can finish with
 warnings. When Doctor could not run, the saved standalone run is `skipped` with
 reason `doctor-maintenance-pending`, and the report leads with the next action:

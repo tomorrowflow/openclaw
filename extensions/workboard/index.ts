@@ -9,7 +9,6 @@ import { dispatchAndStartWorkboardCards } from "./src/dispatcher.js";
 import {
   createWorkboardLifecycleService,
   readWorkboardLifecycleSessions,
-  syncWorkboardAgentEnded,
   syncWorkboardSubagentEnded,
   type WorkboardLifecycleSessionReader,
 } from "./src/lifecycle-sync.js";
@@ -158,20 +157,12 @@ export default definePluginEntry({
         });
       }),
     );
-    api.on("agent_end", (event, context) =>
-      store.runOperation(async () => {
-        await syncWorkboardAgentEnded({
-          store,
-          event,
-          context,
-          readSessions: lifecycleSync.readSessions,
-          onMatched: automationNudge.nudge,
-        });
-        // Bundling and fetching outlast the agent_end hook budget; the sweep
-        // resumes the handoff if the scheduled run dies with the Gateway.
-        lifecycleSync.scheduleNodeHandoffs();
-      }),
-    );
+    api.on("agent_end", async (event, context) => {
+      await lifecycleSync.onAgentEnd(event, context);
+      // Bundling and fetching outlast the agent_end hook budget; the sweep
+      // resumes the handoff if the scheduled run dies with the Gateway.
+      lifecycleSync.scheduleNodeHandoffs();
+    });
     api.registerTool(
       (context) =>
         guardWorkboardToolsForWorkspaceAccess(

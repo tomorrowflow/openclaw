@@ -60,8 +60,10 @@ transaction custody.
 
 Gateway startup binds existing auth-file observers to its read-only scope and
 spawn broker, including observations retained across an in-process restart.
-New observers capture those resources when admitting a directory. File scans
-publish through the current binding, including scans spanning a restart.
+New observers reuse that binding even when a temporary request admits their
+directory later. Without a Gateway binding, observers capture their caller's
+resources. File scans publish through the current binding, including scans
+spanning a restart.
 Filesystem notifications retire physical replacements and changed legacy sources;
 ordinary database and WAL contents changes do not reload auth rows. Scope retirement
 stops change publications, and the next Gateway generation rebinds retained observers
@@ -145,6 +147,12 @@ tracked DDL and rollback invalidate the catalog before subsequent reads. Schema
 preparation runs under Gateway or exclusive offline ownership, so it does not
 repeat its preflight reads inside the creation transaction. Integrity checks,
 agent ownership checks, and destructive cleanup authority remain in place.
+
+Catalog admission alone does not mean the agent schema exists. Session target
+discovery joins any pending first preparation owned by the agent's native
+execution owner before inspecting that catalog. This covers new databases and
+interrupted empty files without making Gateway readiness depend on every lazy
+agent store. Canceling a discovery request stops its wait, not schema preparation.
 
 The Gateway is the single runtime owner of its databases. Load physical format,
 schema, integrity, and canonical-index facts through the shared admission owner,
@@ -3496,7 +3504,9 @@ migration owner, and missing required tables at the current schema remain an
 admission error.
 
 Durable entry deletion can carry prepared Agents API and Codex binding participants
-through the same executing worker. Binding deletion still commits in shared state
+through the same executing worker. Empty-entry deletion prepares the native binding
+codec in that worker before transaction entry, just like archive reclamation.
+Binding deletion still commits in shared state
 before the agent transaction commits, and can veto that transaction. Confirmed agent
 rollback conditionally restores the actual removed binding without replacing a
 successor. Binding renewal continues during queue waits, drains before transaction

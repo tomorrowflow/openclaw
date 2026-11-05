@@ -107,6 +107,20 @@ OpenClaw release:
         ```bash
         openclaw onboard --anthropic-api-key "$ANTHROPIC_API_KEY"
         ```
+
+        API-key setup asks for an optional **Anthropic workspace ID**. If your key
+        is not scoped to a workspace, enter its `wrkspc_...` ID from the Claude
+        Console. Leave it blank for a workspace-scoped key. Existing workspace
+        headers are preserved.
+
+        This is a provider account setting, separate from an agent's local
+        workspace directory. It applies to all requests through the configured
+        Anthropic provider. Use workspace-scoped keys or separate provider
+        configurations when accounts need different workspaces.
+
+        For non-interactive setup, configure
+        `models.providers.anthropic.headers["anthropic-workspace-id"]` beforehand.
+        See [Anthropic authentication](https://platform.claude.com/docs/en/manage-claude/authentication#select-a-workspace).
       </Step>
       <Step title="Verify the model is available">
         ```bash
@@ -1151,3 +1165,16 @@ More help: [Troubleshooting](/help/troubleshooting) and [FAQ](/help/faq).
     Anthropic models, Claude CLI, and the native Claude session catalog.
   </Card>
 </CardGroup>
+
+### Saved Claude CLI subscriptions and managed native tools
+
+Saved subscription accounts make configured Claude CLI models available without
+requiring a separate native login. API keys saved for `anthropic` still require
+an explicit account selection for CLI forwarding. Existing sessions retain their
+account until it is selected again or removed.
+
+Operators can keep the native `Agent` and `Workflow` orchestration tools with
+`plugins.entries.anthropic.config.managedNativeTools`. This is off by default;
+`default` sets the list and `agents.<id>` replaces it for one agent. Restricted,
+delegated, workspace-only, and explicitly capped runs keep no native tools.
+See [CLI backends](/gateway/cli-backends#keeping-claude-code-orchestration-tools-on-managed-turns).

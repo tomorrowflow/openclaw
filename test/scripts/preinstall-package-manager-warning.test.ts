@@ -79,12 +79,52 @@ describe("install runtime enforcement", () => {
     expect(result.stderr).toContain(`detected Node ${nodeVersion}`);
   });
 
+  it("accepts the executing Bun only when its canonical launcher marker matches", () => {
+    const probeNodeRuntime = vi.fn();
+    const reportError = vi.fn();
+
+    expect(
+      enforceSupportedNodeRuntime(
+        {
+          bunVersion: "1.4.4",
+          bunLauncher: "/opt/bun/bin/bun",
+          engine: EXPECTED_NODE_ENGINE_RANGE,
+          execPath: "/opt/bun/bin/bun",
+          probeNodeRuntime,
+        },
+        reportError,
+      ),
+    ).toBe(true);
+    expect(probeNodeRuntime).not.toHaveBeenCalled();
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it("does not trust a Bun launcher marker for another executable", () => {
+    const probeNodeRuntime = vi.fn(() => null);
+    const reportError = vi.fn();
+
+    expect(
+      enforceSupportedNodeRuntime(
+        {
+          bunVersion: "1.4.4",
+          bunLauncher: "/opt/other/bin/bun",
+          engine: EXPECTED_NODE_ENGINE_RANGE,
+          execPath: "/opt/bun/bin/bun",
+          probeNodeRuntime,
+        },
+        reportError,
+      ),
+    ).toBe(false);
+    expect(probeNodeRuntime).toHaveBeenCalledOnce();
+    expect(reportError).toHaveBeenCalledWith(expect.stringContaining("detected Node missing"));
+  });
+
   it.each(
     [
       {
         name: "no marker",
         launcher: undefined,
-        bun: "1.4.3",
+        bun: "1.4.4",
         persistent: undefined,
         accepted: false,
         error: "detected Node missing",
@@ -93,7 +133,7 @@ describe("install runtime enforcement", () => {
         [true, false].map((shimMatchesBun) => ({
           name: `${shimDirectory} resolving to ${shimMatchesBun ? "running" : "another"} Bun`,
           launcher: "/opt/bun/bin/bun",
-          bun: "1.4.3",
+          bun: "1.4.4",
           persistent: undefined,
           shimDirectory,
           shimMatchesBun,
@@ -107,12 +147,12 @@ describe("install runtime enforcement", () => {
         bun: "1.4.2",
         persistent: undefined,
         accepted: false,
-        error: "Bun launcher /opt/bun/bin/bun requires Bun 1.4.3+",
+        error: "Bun launcher /opt/bun/bin/bun requires Bun 1.4.4+",
       },
       {
         name: "relative launcher",
         launcher: "bin/bun",
-        bun: "1.4.3",
+        bun: "1.4.4",
         persistent: undefined,
         accepted: false,
         error: "detected Node missing",
@@ -120,7 +160,7 @@ describe("install runtime enforcement", () => {
       {
         name: "persistent old Node after the shim",
         launcher: "/opt/bun/bin/bun",
-        bun: "1.4.3",
+        bun: "1.4.4",
         persistent: "old-node",
         accepted: false,
         error: "detected Node 24.14.1",
@@ -166,7 +206,7 @@ describe("install runtime enforcement", () => {
       );
       const result = enforceSupportedNodeRuntime(
         {
-          bunVersion: "1.4.3",
+          bunVersion: "1.4.4",
           engine: EXPECTED_NODE_ENGINE_RANGE,
           probeNodeRuntime: () =>
             probePackageCliNodeRuntime({
@@ -254,7 +294,7 @@ describe("install runtime enforcement", () => {
               status: 0,
               stdout: JSON.stringify({
                 version: nodeVersion ?? "24.3.0",
-                bunVersion: nodeVersion ? null : "1.4.3",
+                bunVersion: nodeVersion ? null : "1.4.4",
                 execPath: executable,
               }),
             }
@@ -264,7 +304,7 @@ describe("install runtime enforcement", () => {
       expect(
         enforceSupportedNodeRuntime(
           {
-            bunVersion: "1.4.3",
+            bunVersion: "1.4.4",
             engine: EXPECTED_NODE_ENGINE_RANGE,
             probeNodeRuntime: () =>
               probePackageCliNodeRuntime({
@@ -319,6 +359,115 @@ describe("install runtime enforcement", () => {
 
     expect(candidates).toEqual(["/work/openclaw/node_modules/.bin/node"]);
     expect(runtime?.version).toBe("24.14.1");
+  });
+
+  it("allows packaged Bun postinstall to pass an unavailable Node sentinel", () => {
+    const run = vi.fn((command: string) =>
+      command === "/opt/sentinel/bin/node"
+        ? { status: 127, stdout: "" }
+        : {
+            status: 0,
+            stdout: JSON.stringify({
+              version: "24.3.0",
+              bunVersion: "1.4.4",
+              execPath: command,
+            }),
+          },
+    );
+    const runtime = probePackageCliNodeRuntime({
+      cwd: "/work/openclaw",
+      access: () => {},
+      pathEnv: [
+        "/work/openclaw/node_modules/.bin",
+        "/work/node_modules/.bin",
+        "/node_modules/.bin",
+        "/opt/sentinel/bin",
+      ].join(":"),
+      platform: "linux",
+      env: { OPENCLAW_PACKAGE_BUN_LAUNCHER: "/opt/bun/bin/bun" },
+      allowUnavailableNodeFallback: true,
+      run,
+    });
+
+    expect(run.mock.calls.map(([command]) => command)).toEqual([
+      "/opt/sentinel/bin/node",
+      "/opt/bun/bin/bun",
+    ]);
+    expect(runtime?.bunVersion).toBe("1.4.4");
+  });
+
+  it("accepts Bun 1.4.4's generated postinstall PATH layout only for recovery", () => {
+    const pathEnv = [
+      "/work/openclaw/node_modules/.bin",
+      "/opt/sentinel/bin",
+      "/usr/bin",
+      "/tmp/.ade21d781aa39b9e-375.node-gyp",
+      "/tmp/bun-node-0-191755ec1",
+      "/work/node_modules/.bin",
+      "/node_modules/.bin",
+    ].join(":");
+    const run = vi.fn((command: string) =>
+      command === "/opt/sentinel/bin/node"
+        ? { status: 127, stdout: "" }
+        : {
+            status: 0,
+            stdout: JSON.stringify({
+              version: "24.3.0",
+              bunVersion: "1.4.4",
+              execPath: command,
+            }),
+          },
+    );
+
+    const runtime = probePackageCliNodeRuntime({
+      cwd: "/work/openclaw",
+      access: (candidate) => {
+        if (candidate === "/usr/bin/node") {
+          throw Object.assign(new Error("absent executable"), { code: "ENOENT" });
+        }
+      },
+      pathEnv,
+      platform: "linux",
+      env: { OPENCLAW_PACKAGE_BUN_LAUNCHER: "/opt/bun/bin/bun" },
+      allowUnavailableNodeFallback: true,
+      run,
+    });
+
+    expect(run.mock.calls.map(([command]) => command)).toEqual([
+      "/opt/sentinel/bin/node",
+      "/opt/bun/bin/bun",
+    ]);
+    expect(runtime?.bunVersion).toBe("1.4.4");
+    expect(
+      probePackageCliNodeRuntime({
+        cwd: "/work/openclaw",
+        access: () => {},
+        pathEnv,
+        platform: "linux",
+        env: { OPENCLAW_PACKAGE_BUN_LAUNCHER: "/opt/bun/bin/bun" },
+        run,
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps preinstall fail-closed on an unavailable Node sentinel", () => {
+    const run = vi.fn(() => ({ status: 127, stdout: "" }));
+    const runtime = probePackageCliNodeRuntime({
+      cwd: "/work/openclaw",
+      access: () => {},
+      pathEnv: [
+        "/work/openclaw/node_modules/.bin",
+        "/work/node_modules/.bin",
+        "/node_modules/.bin",
+        "/opt/sentinel/bin",
+      ].join(":"),
+      platform: "linux",
+      env: { OPENCLAW_PACKAGE_BUN_LAUNCHER: "/opt/bun/bin/bun" },
+      run,
+    });
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(runtime).toBeNull();
   });
 
   it("fails closed when Bun's lifecycle PATH prefix cannot be proven", () => {

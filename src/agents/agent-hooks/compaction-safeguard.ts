@@ -10,6 +10,7 @@ import {
   SUMMARY_TRUNCATED_MARKER,
 } from "../../../packages/agent-core/src/harness/compaction/compaction.js";
 import {
+  clearCompactionPendingAskSection,
   computeFileLists,
   extractCurrentCompactionUserRequest,
   extractCompactionMessageText as extractMessageText,
@@ -33,12 +34,11 @@ import {
   type AgentMessage,
   type SessionTreeEntry as CoreSessionTreeEntry,
 } from "../runtime/index.js";
-import { repairToolUseResultPairing } from "../session-transcript-repair.js";
 import type { SessionModelUsageSink } from "../sessions/compaction/runtime.js";
 import type { ExtensionAPI, ExtensionContext } from "../sessions/index.js";
 import { recordSessionModelUsage } from "../sessions/session-model-usage.js";
-import { extractToolCallsFromAssistant, extractToolResultId } from "../tool-call-id.js";
 import { resolveCompactionInstructions } from "./compaction-instructions.js";
+import { splitPreservedRecentTurns } from "./compaction-preserved-turns.js";
 import {
   appendSummarySection,
   auditSummaryQuality,
@@ -422,73 +422,6 @@ function formatNonTextPlaceholder(content: unknown): string | null {
     : null;
 }
 
-function splitPreservedRecentTurns(params: {
-  messages: AgentMessage[];
-  recentTurnsPreserve: number;
-}): { summarizableMessages: AgentMessage[]; preservedMessages: AgentMessage[] } {
-  const preserveTurns = params.recentTurnsPreserve;
-  if (preserveTurns <= 0) {
-    return { summarizableMessages: params.messages, preservedMessages: [] };
-  }
-  const conversationIndexes = params.messages.flatMap((message, index) =>
-    message.role === "user" || message.role === "assistant" ? [index] : [],
-  );
-  if (conversationIndexes.length === 0) {
-    return { summarizableMessages: params.messages, preservedMessages: [] };
-  }
-
-  const userIndexes = conversationIndexes.filter(
-    (index) => params.messages[index]?.role === "user",
-  );
-  const boundaryStartIndex = userIndexes.at(-preserveTurns);
-  const preservedIndexSet = new Set(
-    boundaryStartIndex === undefined
-      ? userIndexes
-      : conversationIndexes.filter((index) => index >= boundaryStartIndex),
-  );
-  if (boundaryStartIndex === undefined) {
-    for (const index of conversationIndexes.toReversed()) {
-      preservedIndexSet.add(index);
-      if (preservedIndexSet.size >= preserveTurns * 2) {
-        break;
-      }
-    }
-  }
-  const preservedToolCallIds = new Set<string>();
-  for (const index of preservedIndexSet) {
-    const message = params.messages[index];
-    if (message?.role === "assistant") {
-      for (const toolCall of extractToolCallsFromAssistant(message)) {
-        preservedToolCallIds.add(toolCall.id);
-      }
-    }
-  }
-  if (preservedToolCallIds.size > 0) {
-    const preservedStartIndex = conversationIndexes.find((index) => preservedIndexSet.has(index))!;
-    for (let index = preservedStartIndex; index < params.messages.length; index += 1) {
-      const message = params.messages[index];
-      if (message?.role !== "toolResult") {
-        continue;
-      }
-      const toolResultId = extractToolResultId(message);
-      if (toolResultId && preservedToolCallIds.has(toolResultId)) {
-        preservedIndexSet.add(index);
-      }
-    }
-  }
-  const summarizableMessages: AgentMessage[] = [];
-  const preservedMessages: AgentMessage[] = [];
-  for (const [index, message] of params.messages.entries()) {
-    (preservedIndexSet.has(index) ? preservedMessages : summarizableMessages).push(message);
-  }
-  // Preserving recent assistant turns can orphan downstream toolResult messages.
-  // Repair pairings here so compaction summarization doesn't trip strict providers.
-  return {
-    summarizableMessages: repairToolUseResultPairing(summarizableMessages).messages,
-    preservedMessages,
-  };
-}
-
 function formatContextMessage(message: AgentMessage): string | null {
   let roleLabel: string;
   if (message.role === "assistant") {
@@ -632,6 +565,10 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
       preparation.turnPrefixMessages ?? [],
     );
     const latestUnresolvedUserRequest = preparation.latestUnresolvedUserRequest;
+    const reconcileRequestSelection = (summary: string) =>
+      preparation.requestState !== undefined && !latestUnresolvedUserRequest
+        ? clearCompactionPendingAskSection(summary)
+        : summary;
     if (!containsRealConversation([...baseMessagesToSummarize, ...baseTurnPrefixMessages])) {
       // Safety net for a preparation that dropped real conversation from the
       // range it covers: summarize that boundary-scoped range instead. It is
@@ -812,7 +749,7 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
               messages: baseMessagesToSummarize,
               recentTurnsPreserve,
             });
-            const finalized = await finalizeSummaryText(providerResult, {
+            const finalized = await finalizeSummaryText(reconcileRequestSelection(providerResult), {
               splitTurnSection: preparation.isSplitTurn
                 ? buildSplitTurnContextSection(turnPrefixMessages)
                 : undefined,
@@ -946,6 +883,8 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
                   previousSummary,
                 })
               : buildStructuredFallbackSummary(previousSummary);
+
+          historySummary = reconcileRequestSelection(historySummary);
 
           if (preparation.isSplitTurn && turnPrefixMessages.length > 0) {
             const splitTurnFocusLabel = "Additional context from /compact";

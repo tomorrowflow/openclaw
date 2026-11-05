@@ -144,10 +144,18 @@ OpenClaw records the current policy when the next turn completes.
 
 ## Timeouts and long-running work
 
+The runner immediately cancels a subprocess when streamed output exceeds a parser limit
+or is refused by the parser; it does not wait for process exit.
+
 CLI backends have two independent limits:
 
 - `agents.defaults.timeoutSeconds` limits the whole agent turn. Normal Gateway turns inherit the 48-hour default. `0` makes the turn budget unlimited. A stored override such as `600` replaces that default.
 - The CLI no-output watchdog stops a subprocess that remains silent. Each backend plugin owns separate fresh/resume profiles, and the watchdog remains active even when the overall turn budget is unlimited.
+
+Cancellation also reaches `before_agent_reply` hooks that run before the CLI
+subprocess starts. When a cron deadline aborts the turn, the hook's next admission
+check rejects further work. This is cooperative cancellation; it does not interrupt
+an already-dispatched operation that has no cancellation checkpoint.
 
 Remove a short overall-timeout override to return to the 48-hour default, or set an explicit budget such as 12 hours:
 
@@ -178,6 +186,7 @@ Plugin tools such as remote SSH do not become background jobs automatically.
 
 When Claude Code moves a foreground Bash command to the background after its tool timeout,
 OpenClaw keeps the turn active until Claude processes the completion and returns its final answer.
+Stopped native tasks release their holds. Native task result ownership is retained across inputs.
 Nested Agent and Workflow completions stay within their running parent; if that background parent ends first,
 the turn waits for the forwarded result. Completions from earlier inputs do not acquire newer input holds.
 Follow-up tools still require the current turn's host permissions. Commands started explicitly
@@ -195,6 +204,73 @@ are not sent again at final settlement; failed deliveries remain eligible for re
 an answer does not end the admitted turn or grant its background work another turn's permissions.
 
 The `openclaw agent` command also has its own request deadline. Its 600-second fallback default applies to that command invocation, not to ordinary Gateway turns. See [`openclaw agent`](/cli/agent).
+
+Local bundled Claude turns use the same policy-filtered OpenClaw tool catalog for
+ordinary requests and verified child completions. Configured MCP servers are
+bridged through that catalog, with their instructions preserved; every request
+still checks the current turn's grant. Explicit native tool selections, node
+execution, and tool-free side questions retain their own contracts.
+
+### Keeping Claude Code orchestration tools on managed turns
+
+Managed turns expose no Claude-native tools by default. Operators who want
+Claude Code's native subagents or workflows can opt in per agent, or for every
+agent, through the Anthropic plugin config:
+
+```json5
+{
+  plugins: {
+    entries: {
+      anthropic: {
+        config: {
+          managedNativeTools: {
+            default: ["Agent", "Workflow"],
+            agents: { ops: [] }, // per-agent list replaces the default
+          },
+        },
+      },
+    },
+  },
+}
+```
+
+Only `Agent` and `Workflow` are accepted: they add orchestration without
+granting file, shell, or network authority, so descendants act through the same
+policy-filtered OpenClaw tools as the parent. File and shell tools stay with
+OpenClaw. `Skill` is not offered because managed turns load no Claude skills.
+Managed turns also load no user or project settings, so `Agent` offers Claude
+Code's built-in subagent types only; custom subagents in `~/.claude/agents/` or
+a project's `.claude/agents/` are not loaded.
+
+- The same list applies to ordinary turns, verified child completions, and cron
+  turns in a session, so the tool definitions and cached prefix stay stable.
+  Changing the list keeps the native session; its next turn rebuilds the
+  cached prefix once.
+- Managed isolation stays in force: Claude settings, hooks, plugins, slash
+  commands, Chrome, and Claude-only MCP servers remain excluded, and scheduled
+  wake-ups, cron creation, background shell commands, and monitors stay blocked.
+- Restricted senders, delegated execution, turns with an explicit tool cap, and
+  `tools.fs.workspaceOnly` still receive no native tools. A capped turn in an
+  opted-in session therefore launches with different tool definitions.
+- Each native call still passes `before_tool_call` and exec policy: ask
+  `on-miss` or `always` routes it through approval, and exec security `deny`,
+  or `allowlist` with ask `off`, refuses it. Under those two settings the
+  opt-in has no effect, because `Agent` and `Workflow` are refused before any
+  descendant starts.
+- Descendants see the managed turn's tool list: the selected orchestration
+  tools plus OpenClaw's policy-filtered tools, never Claude-native file or
+  shell tools. Their OpenClaw tool calls pass the same grant and hooks as the
+  parent's.
+- Known limitations: native calls made by descendants (nested `Agent` or
+  `Workflow`) reach `before_tool_call` but do not emit `after_tool_call`, and the
+  parent sees only the descendant's result. OpenClaw does not track native
+  descendants as tasks, so `sessions_yield` does not wait for them. If an
+  `Agent` or `Workflow` descendant is still running when the turn ends,
+  OpenClaw closes the warm Claude Code process instead of reusing it, so that
+  descendant stops and can never act under a later turn's authority; the next
+  turn resumes the stored session in a fresh process. A
+  `Workflow` call can read its script from a workspace path through
+  `scriptPath`; the script itself can only orchestrate agents.
 
 ### Claude CLI specifics
 
@@ -215,9 +291,11 @@ executable over its structured stdio protocol. Claude Code owns its existing loc
 subscription. OpenClaw uses a non-secret route marker. It never reads, persists,
 refreshes, or forwards native tokens, or sends synthesized Anthropic API
 requests. Compatible agent turns share one warm Claude Code subprocess.
-A changed model, system prompt, or tool policy starts a
+A changed model, system prompt, or configured tool surface starts a
 new subprocess. Persisted Claude session IDs still provide
 conversation continuity when the Gateway or subprocess restarts.
+Per-turn owner-only and completion requester restrictions gate bridged tool calls
+without removing their definitions from the session's MCP catalog.
 
 For local plugin-managed turns, prompt-build hook context stays private: Claude
 receives it as a native hook attachment, while OpenClaw history preserves the original user message. The

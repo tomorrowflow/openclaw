@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { nodeRuntimePathEntries } from "../../node-runtime-env.mjs";
+import {
+  hasNodeStartupHooks,
+  nodeRuntimePathEntries,
+  stripNodeStartupHooks,
+} from "../../node-runtime-env.mjs";
 import { mockProcessPlatform } from "../test-utils/vitest-spies.js";
 import { resolveNodeRuntimeExecutable } from "./node-runtime-executable.js";
 
@@ -23,6 +27,29 @@ vi.mock("node:path", async (importOriginal) => {
         (process.platform === "win32" ? actual.win32 : actual.posix).join(...parts),
     },
   };
+});
+
+it("strips startup hooks while preserving unrelated Node options", () => {
+  expect(
+    stripNodeStartupHooks(
+      '--im"port" "file:///instrumentation hook.mjs" --loader ./loader.mjs --max-old-space-size=256 --no-warnings',
+    ),
+  ).toBe('"--max-old-space-size=256" "--no-warnings"');
+  expect(stripNodeStartupHooks(undefined)).toBeUndefined();
+  expect(stripNodeStartupHooks("--no-warnings")).toBe("--no-warnings");
+  expect(() => stripNodeStartupHooks('"unterminated')).toThrow(
+    "Invalid NODE_OPTIONS for process owner",
+  );
+});
+
+it("detects startup hooks from argv and NODE_OPTIONS, not source filenames", () => {
+  // Native type stripping runs .ts process owners without a loader hook.
+  expect(hasNodeStartupHooks(["--no-warnings"], undefined)).toBe(false);
+  expect(hasNodeStartupHooks([], "--max-old-space-size=256")).toBe(false);
+  expect(hasNodeStartupHooks(["--import", "./scripts/tsx.mjs"], undefined)).toBe(true);
+  expect(hasNodeStartupHooks([], '--loader "./loader.mjs"')).toBe(true);
+  expect(hasNodeStartupHooks(["-r", "./preload.cjs"], undefined)).toBe(true);
+  expect(hasNodeStartupHooks([], '"unterminated')).toBe(true);
 });
 
 beforeEach(() => probe.mockReset());

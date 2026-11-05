@@ -7,7 +7,6 @@ import { isEmbeddedMode } from "../infra/embedded-mode.js";
 import { getActiveSecretsRuntimeConfigSnapshot } from "../secrets/runtime-state.js";
 import { getActiveRuntimeWebToolsMetadataFromState } from "../secrets/runtime-web-tools-state.js";
 import { isCronRunSessionKey } from "../sessions/session-key-utils.js";
-import { resolveSkillWorkshopToolConstructionBlock } from "../skills/workshop/tool-availability.js";
 import { hasMultipleSessionSharingIdentitiesNative } from "../state/user-profile-list.native.js";
 import { hasConfiguredWebSearchProvider } from "../web-search/runtime.js";
 import {
@@ -71,7 +70,7 @@ import {
   createGetGoalTool,
   createUpdateGoalTool,
 } from "./tools/goal-tools.js";
-import { createHeartbeatResponseTool } from "./tools/heartbeat-response-tool.js";
+import { resolveHeartbeatResponseTool } from "./tools/heartbeat-response-tool.js";
 import { createImageGenerateTool } from "./tools/image-generate-tool.js";
 import { createImageTool } from "./tools/image-tool.js";
 import { callAgentToolGatewayRequest } from "./tools/in-process-gateway.js";
@@ -386,7 +385,7 @@ function* createOpenClawToolsSteps(
           workspaceDir,
         },
       })[0] ?? null);
-  const heartbeatTool = options?.enableHeartbeatTool ? createHeartbeatResponseTool() : null;
+  const heartbeatTool = resolveHeartbeatResponseTool(options);
   options?.recordToolPrepStage?.("openclaw-tools:message-tool");
   const nodesToolBase = createNodesTool({
     ...options,
@@ -554,10 +553,7 @@ function* createOpenClawToolsSteps(
     ...[createGetGoalTool, createCreateGoalTool, createUpdateGoalTool].map((createTool) =>
       createTool({ ...options, sessionAgentId }),
     ),
-    resolveSkillWorkshopToolConstructionBlock({
-      sandboxed: options?.sandboxed,
-      libraryAuthoring: options?.skillWorkshop?.libraryAuthoring,
-    }) || !resolvedConfig
+    !resolvedConfig
       ? null
       : createConfiguredSkillWorkshopTool({
           config: resolvedConfig,
@@ -565,6 +561,7 @@ function* createOpenClawToolsSteps(
           sessionKey: options?.runSessionKey ?? options?.agentSessionKey,
           runId: options?.runId,
           run: options?.skillWorkshop,
+          sandboxed: options?.sandboxed,
         }),
     progressCardTool,
     ...swarmToolGroups.structuredOutput,

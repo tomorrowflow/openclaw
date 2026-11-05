@@ -161,7 +161,7 @@ describe("runDaemonInstall", () => {
           const probe = nodeProbeOutput("26.12.1");
           runExecMock.mockResolvedValue({
             ...probe,
-            stdout: JSON.stringify({ ...JSON.parse(probe.stdout), bunVersion: "1.4.3" }),
+            stdout: JSON.stringify({ ...JSON.parse(probe.stdout), bunVersion: "1.4.4" }),
           });
         }
         installDaemonServiceAndEmitMock.mockImplementationOnce(async (params) => {
@@ -474,6 +474,22 @@ describe("runDaemonInstall reinstall", () => {
     }
     expect(actionState.warnings).toContain(
       "Gateway service OPENCLAW_GATEWAY_TOKEN differs from the current install plan; refreshing the install.",
+    );
+  });
+
+  it("refreshes a loaded service when its definition is missing", async () => {
+    service.isLoaded.mockResolvedValue(true);
+    service.readCommand.mockResolvedValue(null);
+
+    await runDaemonInstall({ json: true });
+
+    expect(service.readCommand).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ requireEffective: true, allowMissingDefinition: true }),
+    );
+    expect(installDaemonServiceAndEmitMock).toHaveBeenCalledTimes(1);
+    expect(actionState.warnings).toContain(
+      "Gateway service definition is missing; refreshing the install.",
     );
   });
 

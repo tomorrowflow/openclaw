@@ -1,5 +1,5 @@
-// Covers agent harness selection, fallback behavior, and compaction routing.
 import path from "node:path";
+// Covers agent harness selection, fallback behavior, and compaction routing.
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import type { Model } from "openclaw/plugin-sdk/llm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,7 +14,6 @@ import {
 import type { TranscriptEntryAnchor } from "../../config/sessions/transcript-entry-anchor.js";
 import { OPENCLAW_EMBEDDED_CONTEXT_ENGINE_HOST } from "../../context-engine/host-compat.js";
 import type { ContextEngine } from "../../context-engine/types.js";
-import type { GatewayRequestContext } from "../../gateway/server-methods/types.js";
 import { resetAgentRunRegistryForTest } from "../../infra/agent-run-registry.js";
 import { sha256HexPrefixCore } from "../../infra/crypto-digest.js";
 import {
@@ -22,14 +21,7 @@ import {
   persistHeartbeatOutcome,
 } from "../../infra/heartbeat-outcome-store.js";
 import { createOpenClawCodingTools } from "../../plugin-sdk/agent-harness.js";
-import { createPluginRecord } from "../../plugins/loader-records.js";
 import { getActivePluginRegistry } from "../../plugins/runtime.js";
-import {
-  bindGatewayContextResolver,
-  clearGatewayContextResolver,
-  getPluginRuntimeGatewayRequestScope,
-  withPluginRuntimeGatewayRequestScope,
-} from "../../plugins/runtime/gateway-request-scope.js";
 import { mintSecretSentinel } from "../../secrets/sentinel.js";
 import { createUserTurnTranscriptRecorder } from "../../sessions/user-turn-transcript.js";
 import type { UserTurnTranscriptRecorder } from "../../sessions/user-turn-transcript.types.js";
@@ -72,7 +64,6 @@ import { createEmbeddedRunHandle } from "../embedded-agent-runner/runs.test-supp
 import { createAgentRunRestartAbortError } from "../run-termination.js";
 import { createZeroUsageFixture } from "../test-helpers/usage-fixtures.js";
 import { attachToolAllowlistIntersection } from "../tool-policy.js";
-import { getGatewayToolCallerIdentity } from "../tools/gateway-caller-context.js";
 import { callGatewayTool } from "../tools/gateway.js";
 import type { SystemAgentToolOptions } from "../tools/system-agent-tool.js";
 import type { ContextEngineLogicalTurnLease } from "./context-engine-logical-turn.js";
@@ -84,6 +75,7 @@ import {
   registerAgentHarness,
 } from "./registry.js";
 import { ensureSelectedAgentHarnessPlugin } from "./runtime-plugin.js";
+import { registerHarnessAuthorityCases } from "./selection-authority.test-harness.js";
 import {
   resolveAvailableAgentHarnessPolicy,
   runAgentHarnessAttempt,
@@ -733,141 +725,13 @@ describe("runAgentHarnessAttempt", () => {
     },
   );
 
-  it("uses registry ownership rather than declared harness metadata for approvals", async () => {
-    let observedApprovalOwner: string | undefined;
-    mockCallGatewayTool.mockImplementationOnce(async () => {
-      observedApprovalOwner = getGatewayToolCallerIdentity()?.approvalOwnerPluginId;
-      return undefined;
-    });
-    registerAgentHarness(
-      {
-        id: "spoofed",
-        label: "Spoofed",
-        pluginId: "codex",
-        supports: () => ({ supported: true, priority: 100 }),
-        runAttempt: async (attempt) => {
-          await attempt.hostCapabilities?.requestApproval({
-            title: "Approval",
-            description: "Registry owner proof",
-            severity: "warning",
-            toolName: "exec",
-            timeoutMs: 1_000,
-          });
-          return createAttemptResult("spoofed");
-        },
-      },
-      { ownerPluginId: "actual-owner" },
-    );
-    const params = createAttemptParams(providerRuntimeConfig("codex", "spoofed"));
-    params.agentId = "main";
-    params.sessionKey = "agent:main:session-1";
-
-    await runAgentHarnessAttempt(params);
-
-    expect(observedApprovalOwner).toBe("actual-owner");
+  registerHarnessAuthorityCases({
+    createAttemptParams,
+    createAttemptResult,
+    providerRuntimeConfig,
+    trajectoryTempDirs,
+    getAdmittedRunContext: () => selectionAdmittedRunContext,
   });
-
-  it.each(["declared", "missing", "expanded"] as const)(
-    "limits selected harness Full authority to its captured node commands (%s)",
-    async (descriptor) => {
-      const root = trajectoryTempDirs.make("openclaw-harness-node-authority-");
-      const sessionTarget = {
-        agentId: "main",
-        sessionId: "session-1",
-        sessionKey: "agent:main:session-1",
-        storePath: path.join(root, "agents", "main", "sessions", "sessions.json"),
-      };
-      await replaceSessionEntry(sessionTarget, {
-        sessionId: sessionTarget.sessionId,
-        updatedAt: 10,
-        permissionMode: "full",
-      });
-      const workspace = {
-        workspaceDir: path.join(root, "workspace"),
-        sessionId: sessionTarget.sessionId,
-        sessionKey: sessionTarget.sessionKey,
-        environmentId: "environment-1",
-        ownerEpoch: 1,
-      };
-      const launchCommand = "fixture.exec.launch";
-      const unrelatedCommand = "fixture.maintenance.apply";
-      const requiredNodeCommands = [launchCommand];
-      const command = descriptor === "expanded" ? unrelatedCommand : launchCommand;
-      const effect = vi.fn(async (assertCurrent: () => void) => {
-        assertCurrent();
-        return "launched";
-      });
-      registerAgentHarness(
-        {
-          id: "node-harness",
-          label: "Node harness",
-          cloudPlacement: {
-            mode: "remote-exec",
-            ...(descriptor !== "missing"
-              ? { devicePlacement: { requiredNodeCommands, consumesWorkerSlot: false } }
-              : {}),
-          },
-          supports: () => ({ supported: true, priority: 100 }),
-          runAttempt: async () => {
-            const invoke = getPluginRuntimeGatewayRequestScope()?.invokeWithSessionNodeAuthority;
-            if (!invoke) {
-              throw new Error("Expected the selected harness's admitted node invocation scope");
-            }
-            // Plugin initialization cannot widen the descriptor captured before its handoff.
-            if (descriptor === "expanded") {
-              requiredNodeCommands.push(unrelatedCommand);
-            }
-            const result = await invoke(
-              { source: "session-full", pluginId: "fixture", nodeId: "node-1", command, workspace },
-              effect,
-            );
-            expect(result).toBe(descriptor === "declared" ? "launched" : undefined);
-            return createAttemptResult("node-harness");
-          },
-        },
-        { ownerPluginId: "fixture" },
-      );
-      const registry = getActivePluginRegistry();
-      if (!registry) {
-        throw new Error("Expected the registered harness's plugin registry");
-      }
-      const record = createPluginRecord({
-        id: "fixture",
-        source: "fixture",
-        origin: "bundled",
-        enabled: true,
-        configSchema: true,
-      });
-      registry.plugins.push(record);
-      const context = {} as GatewayRequestContext;
-      bindGatewayContextResolver(selectionAdmittedRunContext, () => context);
-      try {
-        const params = createAttemptParams(providerRuntimeConfig("codex", "node-harness"));
-        params.agentId = sessionTarget.agentId;
-        params.sessionKey = sessionTarget.sessionKey;
-        params.sessionTarget = sessionTarget;
-        params.permissionMode = "full";
-        await withPluginRuntimeGatewayRequestScope(
-          {
-            isWebchatConnect: () => false,
-            assertNodeExecutionCurrent: (request) => {
-              expect(request).toMatchObject({
-                runId: params.runId,
-                agentId: sessionTarget.agentId,
-                nodeId: "node-1",
-                workspace,
-              });
-            },
-          },
-          () => runAgentHarnessAttempt(params),
-        );
-        expect(effect).toHaveBeenCalledTimes(descriptor === "declared" ? 1 : 0);
-      } finally {
-        clearGatewayContextResolver(selectionAdmittedRunContext);
-        registry.plugins.splice(registry.plugins.indexOf(record), 1);
-      }
-    },
-  );
 
   it("routes settled turns through an explicit finalizer without private state", async () => {
     const runAttempt = vi.fn<AgentHarness["runAttempt"]>(async () => createAttemptResult("run"));
@@ -1257,12 +1121,14 @@ describe("runAgentHarnessAttempt", () => {
       toolsAllow: string[] | undefined;
       extraSystemPrompt: string | undefined;
       hostScopeActive: boolean;
+      policyScope: EmbeddedRunAttemptParams["pluginHarnessToolPolicyScope"];
     }> = [];
     const pluginRunAttempt = vi.fn<AgentHarness["runAttempt"]>(async (attemptParams) => {
       received.push({
         toolsAllow: attemptParams.toolsAllow,
         extraSystemPrompt: attemptParams.extraSystemPrompt,
         hostScopeActive: isHostScopedAgentToolActive("openclaw"),
+        policyScope: attemptParams.pluginHarnessToolPolicyScope,
       });
       return createAttemptResult("codex");
     });
@@ -1304,9 +1170,24 @@ describe("runAgentHarnessAttempt", () => {
     }
 
     expect(received).toEqual([
-      { toolsAllow: ["openclaw"], extraSystemPrompt: undefined, hostScopeActive: true },
-      { toolsAllow: ["openclaw"], extraSystemPrompt: undefined, hostScopeActive: true },
-      { toolsAllow: ["openclaw"], extraSystemPrompt: undefined, hostScopeActive: true },
+      {
+        toolsAllow: ["openclaw"],
+        extraSystemPrompt: undefined,
+        hostScopeActive: true,
+        policyScope: "conversation",
+      },
+      {
+        toolsAllow: ["openclaw"],
+        extraSystemPrompt: undefined,
+        hostScopeActive: true,
+        policyScope: "conversation",
+      },
+      {
+        toolsAllow: ["openclaw"],
+        extraSystemPrompt: undefined,
+        hostScopeActive: true,
+        policyScope: "conversation",
+      },
     ]);
     expect(isHostScopedAgentToolActive("openclaw")).toBe(false);
   });
@@ -1597,12 +1478,14 @@ describe("runAgentHarnessAttempt", () => {
     const received: Array<{
       conversationToolPolicy: EmbeddedRunAttemptParams["conversationToolPolicy"];
       pluginHarnessToolPolicyRestricted: boolean | undefined;
+      pluginHarnessToolPolicyScope: EmbeddedRunAttemptParams["pluginHarnessToolPolicyScope"];
       toolsAllow: string[] | undefined;
     }> = [];
     const runAttempt = vi.fn<AgentHarness["runAttempt"]>(async (attempt) => {
       received.push({
         conversationToolPolicy: attempt.conversationToolPolicy,
         pluginHarnessToolPolicyRestricted: attempt.pluginHarnessToolPolicyRestricted,
+        pluginHarnessToolPolicyScope: attempt.pluginHarnessToolPolicyScope,
         toolsAllow: attempt.toolsAllow,
       });
       return createAttemptResult("codex");
@@ -1626,11 +1509,13 @@ describe("runAgentHarnessAttempt", () => {
       {
         conversationToolPolicy: { deny: ["exec"] },
         pluginHarnessToolPolicyRestricted: true,
+        pluginHarnessToolPolicyScope: "conversation",
         toolsAllow: undefined,
       },
       {
         conversationToolPolicy: { deny: ["exec"] },
         pluginHarnessToolPolicyRestricted: true,
+        pluginHarnessToolPolicyScope: "turn",
         toolsAllow: ["Read", "Bash"],
       },
     ]);
@@ -1848,6 +1733,7 @@ describe("runAgentHarnessAttempt", () => {
       name: "empty runtime allowlist",
       policy: { toolsAllow: [] },
       restricted: true,
+      scope: "turn",
       tools: [],
       denyAll: true,
     },
@@ -1856,6 +1742,7 @@ describe("runAgentHarnessAttempt", () => {
       name: "disabled tools with wildcard",
       policy: { disableTools: true, toolsAllow: ["*"] },
       restricted: true,
+      scope: "turn",
       tools: [],
       denyAll: true,
     },
@@ -1864,19 +1751,31 @@ describe("runAgentHarnessAttempt", () => {
       name: "overlapping runtime globs",
       policy: { toolsAllow: attachToolAllowlistIntersection([], [["web_*"], ["*_search"]]) },
       restricted: true,
+      scope: "turn",
       tools: [],
+      denyAll: false,
+    },
+    {
+      name: "additive plugin grant",
+      policy: {
+        runtimePluginToolGrant: { pluginId: "grant-plugin", toolNames: ["proof_optional"] },
+      },
+      restricted: false,
+      scope: "turn",
+      tools: undefined,
       denyAll: false,
     },
     {
       name: "wildcard runtime allowlist",
       policy: { toolsAllow: ["*"] },
       restricted: false,
+      scope: "conversation",
       tools: ["*"],
       denyAll: false,
     },
   ])(
     "preserves $name semantics at plugin handoff",
-    async ({ policy, restricted, tools, denyAll }) => {
+    async ({ policy, restricted, scope, tools, denyAll }) => {
       const runAttempt = vi.fn<AgentHarness["runAttempt"]>(async () =>
         createAttemptResult("codex"),
       );
@@ -1897,6 +1796,8 @@ describe("runAgentHarnessAttempt", () => {
       expect(runAttempt).toHaveBeenCalledTimes(1);
       const attempt = runAttempt.mock.calls[0]?.[0];
       expect(attempt?.pluginHarnessToolPolicyRestricted).toBe(restricted);
+      expect(attempt?.pluginHarnessToolPolicyScope).toBe(scope);
+      expect(attempt).not.toHaveProperty("runtimePluginToolGrant");
       expect(attempt?.toolsAllow).toEqual(tools);
       expect(attempt?.extraSystemPrompt).toContain("Existing operator note.");
       if (denyAll) {

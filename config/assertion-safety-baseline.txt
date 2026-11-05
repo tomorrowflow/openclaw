@@ -143,7 +143,7 @@ extensions/codex/src/app-server/runtime-artifact.ts	1
 extensions/codex/src/app-server/sandbox-exec-server/http.ts	2
 extensions/codex/src/app-server/sandbox-exec-server/json-rpc.ts	3
 extensions/codex/src/app-server/scheduled-app-authority.ts	5
-extensions/codex/src/app-server/shared-client.ts	2
+extensions/codex/src/app-server/shared-client.ts	1
 extensions/codex/src/app-server/side-question.ts	1
 extensions/codex/src/app-server/startup-binding.ts	1
 extensions/codex/src/app-server/thread-lifecycle-run.ts	1
@@ -367,7 +367,7 @@ extensions/google/music-generation-provider.ts	1
 extensions/google/oauth-token-shared.ts	1
 extensions/google/provider-registration.ts	2
 extensions/google/realtime-voice-provider.ts	4
-extensions/google/transport-stream.ts	13
+extensions/google/transport-stream.ts	12
 extensions/google/vertex-adc.ts	4
 extensions/google/video-generation-provider.ts	13
 extensions/googlechat/src/approval-card-actions.ts	1
@@ -1472,7 +1472,7 @@ src/agents/transcript-policy.ts	1
 src/agents/transport-message-transform.ts	2
 src/agents/utils/frontmatter.ts	2
 src/agents/workspace-legacy-state.ts	2
-src/agents/workspace.ts	4
+src/agents/workspace.ts	3
 src/agents/worktrees/run-lease.ts	1
 src/audit/execution-identity-admission.ts	3
 src/audit/execution-identity-context-build.ts	3
@@ -1517,7 +1517,6 @@ src/auto-reply/reply/get-reply-fast-path.ts	1
 src/auto-reply/reply/get-reply-run-execute.ts	3
 src/auto-reply/reply/inbound-context.ts	8
 src/auto-reply/reply/mentions.ts	1
-src/auto-reply/reply/queue/drain.ts	1
 src/auto-reply/reply/queue/enqueue.ts	1
 src/auto-reply/reply/reply-config-runtime-mode.ts	2
 src/auto-reply/reply/reply-operation-run-state.ts	1
@@ -1703,7 +1702,6 @@ src/commands/doctor-agent-memory-schema.ts	1
 src/commands/doctor-auth-migration-receipts.ts	3
 src/commands/doctor-auth-profile-config.ts	2
 src/commands/doctor-config-preflight.cron.ts	4
-src/commands/doctor-gateway-services.ts	1
 src/commands/doctor-heartbeat-scratch-migration.ts	4
 src/commands/doctor-main-session-recovery.ts	1
 src/commands/doctor-model-catalog-credentials.ts	1
@@ -1716,7 +1714,6 @@ src/commands/doctor-session-incognito-key-repair-state.ts	4
 src/commands/doctor-session-snapshots.ts	3
 src/commands/doctor-session-sqlite-recover-report.ts	1
 src/commands/doctor-session-transcript-headers.ts	4
-src/commands/doctor-session-transcript-labels.ts	1
 src/commands/doctor-session-transcripts.ts	1
 src/commands/doctor-skills.ts	1
 src/commands/doctor-sqlite-compact.ts	1
@@ -1931,7 +1928,6 @@ src/gateway/probe.ts	1
 src/gateway/restart-trace.ts	2
 src/gateway/secret-input-paths.ts	1
 src/gateway/server-broadcast.ts	1
-src/gateway/server-channels.ts	1
 src/gateway/server-chat-state.ts	1
 src/gateway/server-chat.ts	3
 src/gateway/server-core-runtime.ts	1
@@ -2170,7 +2166,7 @@ src/infra/state-migrations.mcp-oauth.ts	2
 src/infra/state-migrations.meeting-transcripts-detection.ts	4
 src/infra/state-migrations.meeting-transcripts-files.ts	5
 src/infra/state-migrations.meeting-transcripts.ts	2
-src/infra/state-migrations.session-store.ts	5
+src/infra/state-migrations.session-store.ts	4
 src/infra/state-migrations.shared-auth-store.ts	1
 src/infra/state-migrations.state-dir.ts	1
 src/infra/state-migrations.tui-last-session.ts	2

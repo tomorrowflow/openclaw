@@ -54,12 +54,18 @@ import {
 } from "./shared-client.js";
 import { createClientHarness } from "./test-support.js";
 import { fingerprintEnvironmentSelection } from "./thread-fingerprints.js";
+import {
+  createNetworkProxyThreadLifecycleAppServerOptions,
+  createThreadLifecycleAppServerOptions,
+} from "./thread-lifecycle-options.test-support.js";
 import { registerThreadPolicyRefreshTests } from "./thread-lifecycle-policy-refresh.test-support.js";
 import { registerRequiredRootThreadPolicyTests } from "./thread-lifecycle-rooted.test-support.js";
 import { startOrResumeThread as startOrResumeThreadImpl } from "./thread-lifecycle-run.js";
 import { registerThreadWebSearchBindingTests } from "./thread-lifecycle-web-search.test-support.js";
 import {
+  createFixedThreadRequest,
   createLeasedCodexLifecycleHarness,
+  createLifecycleRequest,
   startOrResumeAttemptThreadWithoutSkills as startOrResumeAttemptThread,
   twoStartsThenResumeMethods,
   type CodexAttemptThreadInput as LifecycleInput,
@@ -71,28 +77,8 @@ import {
 import { CodexIncognitoPolicyChangeError } from "./thread-policy.js";
 import { buildThreadResumeParams } from "./thread-requests.js";
 
-function createLifecycleRequest(
-  respond: (method: string, requestParams?: unknown) => Promise<unknown>,
-) {
-  return vi.fn((method: string, requestParams?: unknown) => {
-    if (method === "config/read") {
-      return Promise.resolve({ config: {}, origins: {}, layers: [] });
-    }
-    if (method === "configRequirements/read") {
-      return Promise.resolve({ requirements: null });
-    }
-    return respond(method, requestParams);
-  });
-}
-
-function createFixedThreadRequest(threadId: string, methods: string[]) {
-  return createLifecycleRequest(async (method) => {
-    if (methods.includes(method)) {
-      return threadStartResult(threadId);
-    }
-    throw new Error(`unexpected method: ${method}`);
-  });
-}
+// Mirrors the production budget: Codex reports a slow thread shutdown only after 10s.
+const CODEX_THREAD_UNLOAD_CONFIRMATION_TIMEOUT_MS = 10_000;
 
 const PREFLIGHT_METHODS = ["config/read", "configRequirements/read"];
 const COLD_RESUME_METHODS = [
@@ -167,56 +153,6 @@ function retainThread(
     undefined,
     binding.liveThreadConfigFingerprint,
   );
-}
-
-function createThreadLifecycleAppServerOptions(): LifecycleInput["appServer"] {
-  return {
-    start: {
-      transport: "stdio",
-      command: "codex",
-      args: ["app-server"],
-      headers: {},
-    },
-    requestTimeoutMs: 60_000,
-    approvalPolicy: "never",
-    approvalsReviewer: "user",
-    sandbox: "workspace-write",
-    codeModeOnly: false,
-    loopDetectionPreToolUseRelay: true,
-    connectionClass: "local-loopback",
-  };
-}
-
-function createNetworkProxyThreadLifecycleAppServerOptions() {
-  const configPatch = {
-    "features.network_proxy.enabled": true,
-    default_permissions: "openclaw-network",
-    permissions: {
-      "openclaw-network": {
-        filesystem: {
-          ":minimal": "read",
-          ":project_roots": {
-            ".": "write",
-          },
-        },
-        network: {
-          enabled: true,
-          domains: {
-            "api.openai.com": "allow",
-          },
-          proxy_url: "http://127.0.0.1:3128",
-        },
-      },
-    },
-  };
-  return {
-    ...createThreadLifecycleAppServerOptions(),
-    networkProxy: {
-      profileName: "openclaw-network",
-      configFingerprint: "test-network-proxy",
-      configPatch,
-    },
-  };
 }
 
 function createPaths() {
@@ -346,7 +282,7 @@ async function createManualResumeFixture(
   options: {
     active?: boolean;
     cold?: boolean;
-    receipt?: "none" | "stale" | "unrelated";
+    receipt?: "none" | "stale" | "unrelated" | "slow";
     dynamicTools?: CodexDynamicToolFunctionSpec[];
     recordedTools?: JsonValue;
     missingMetadata?: boolean;
@@ -372,7 +308,8 @@ async function createManualResumeFixture(
   }
   const response = threadStartResult(threadId, { cwd: workspaceDir });
   const thread = { ...response.thread, path: rolloutPath };
-  let resumes = 0;
+  const unsubscribed = createDeferred<void>();
+  let unloaded = false;
   const harness = createFakeCodexAppServerClient(async (method: string) => {
     if (method === "config/read") {
       return { config: {}, origins: {}, layers: [] };
@@ -386,8 +323,8 @@ async function createManualResumeFixture(
     if (method === "thread/read") {
       if (options.receipt === "stale") {
         await harness.notify({
-          method: "thread/status/changed",
-          params: { threadId, status: { type: "notLoaded" } },
+          method: "thread/closed",
+          params: { threadId },
         });
       }
       return {
@@ -395,23 +332,38 @@ async function createManualResumeFixture(
           ...thread,
           status: options.active
             ? { type: "active", activeFlags: [] }
-            : { type: options.cold ? "notLoaded" : "idle" },
+            : { type: options.cold || unloaded ? "notLoaded" : "idle" },
         },
       };
     }
     if (method === "thread/unsubscribe") {
-      return { status: "unsubscribed" };
-    }
-    if (method === "thread/resume") {
-      if (resumes++ > 0 && options.receipt !== "none" && options.receipt !== "stale") {
+      if (
+        options.receipt === "unrelated" ||
+        options.receipt === "stale" ||
+        options.receipt === "slow"
+      ) {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      }
+      if (options.receipt === "slow") {
+        // Live Codex teardown with MCP servers emits thread/closed about 2s after unsubscribe.
+        setTimeout(() => {
+          unloaded = true;
+          void harness.notify({ method: "thread/closed", params: { threadId } });
+        }, 3_000);
+      } else if (options.receipt !== "none" && options.receipt !== "stale") {
+        unloaded = options.receipt !== "unrelated";
         await harness.notify({
-          method: "thread/status/changed",
+          method: "thread/closed",
           params: {
             threadId: options.receipt === "unrelated" ? "other-thread" : threadId,
-            status: { type: "notLoaded" },
           },
         });
       }
+      unsubscribed.resolve();
+      return { status: "unsubscribed" };
+    }
+    if (method === "thread/resume") {
+      unloaded = false;
       return { ...response, thread };
     }
     if (method === "thread/inject_items") {
@@ -532,6 +484,7 @@ async function createManualResumeFixture(
     common,
     sessionFile,
     threadId,
+    unsubscribed: unsubscribed.promise,
     identity: {
       kind: "session" as const,
       agentId: "main",
@@ -683,7 +636,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
     expect(bindingStore.read(current)).toEqual(binding);
   });
 
-  it("resumes idle A with current policy while B stays active and catalog leases come and go", async () => {
+  it("resumes unloaded A with current policy while B stays active and catalog leases come and go", async () => {
     const sessionFile = path.join(tempDir, "parallel-policy.jsonl");
     const workspaceDir = path.join(tempDir, "workspace");
     const threadId = "parallel-policy-a";
@@ -709,7 +662,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
         throw new Error(`unexpected method: ${method}`);
       },
     });
-    fixture.seed(threadStartResult(threadId), { loaded: true, subscribed: false });
+    fixture.seed(threadStartResult(threadId));
     const siblingResponse = threadStartResult(siblingId);
     fixture.seed(
       {
@@ -1057,6 +1010,21 @@ describe("Codex app-server thread lifecycle bindings", () => {
     });
   });
 
+  it("waits for a slow native unload before configuring the resumed thread", async () => {
+    const fixture = await createManualResumeFixture({ receipt: "slow" });
+    try {
+      const started = fixture.start();
+      await fixture.unsubscribed;
+      await vi.advanceTimersByTimeAsync(3_000);
+      await expect(started).resolves.toMatchObject({
+        threadId: fixture.threadId,
+        lifecycle: { action: "resumed" },
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
   it.each([
     {
       label: "cold native thread with no stored tools",
@@ -1118,7 +1086,12 @@ describe("Codex app-server thread lifecycle bindings", () => {
           userProfile: fixture.common.appServer.start.env?.USERPROFILE,
         });
         const handlers = [...fixture.notifications];
-        await expect(fixture.start()).rejects.toThrow(error);
+        const rejected = expect(fixture.start()).rejects.toThrow(error);
+        if (options.receipt) {
+          await fixture.unsubscribed;
+          await vi.advanceTimersByTimeAsync(CODEX_THREAD_UNLOAD_CONFIRMATION_TIMEOUT_MS);
+        }
+        await rejected;
         expect(await readCodexAppServerBinding(fixture.sessionFile)).toEqual(before);
         expect(fixture.request.mock.calls.some(([method]) => method === "thread/start")).toBe(
           false,
@@ -1205,6 +1178,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
     async (operation) => {
       const fixture = await createManualResumeFixture({ wireClient: true });
       await fixture.start();
+      await fixture.client.request("thread/unsubscribe", { threadId: fixture.threadId });
       fixture.wire!.writes.length = 0;
       const entered = createDeferred<void>();
       const proceed = createDeferred<void>();
@@ -3241,6 +3215,10 @@ describe("Codex app-server thread lifecycle bindings", () => {
 
     await startOrResumeThread({
       client,
+      params: {
+        ...createParams(sessionFile, workspaceDir),
+        pluginHarnessToolPolicyScope: "turn",
+      },
       dynamicTools: [createNamedDynamicTool("read"), createNamedDynamicTool("apply_patch")],
       nativeCodeModeEnabled: false,
       pluginThreadConfig: {

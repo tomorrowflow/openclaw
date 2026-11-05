@@ -32,6 +32,7 @@ import {
 } from "./run-attempt-test-harness.js";
 import { testCodexAppServerBindingStore } from "./session-binding.test-helpers.js";
 import {
+  getLeasedSharedCodexAppServerClient,
   retainSharedCodexAppServerClientIfCurrent,
   retireSharedCodexAppServerClientIfCurrent,
 } from "./shared-client.js";
@@ -71,6 +72,7 @@ function runOneShot(
   client: CodexAppServerClient,
   abortSignal?: AbortSignal,
   onExecutionPhase?: ReturnType<typeof createParams>["onExecutionPhase"],
+  forceSharedClient = false,
 ) {
   vi.spyOn(CodexAppServerClient, "start").mockResolvedValueOnce(client);
   const params = createParams(path.join(tempDir, "session.jsonl"), path.join(tempDir, "workspace"));
@@ -81,7 +83,10 @@ function runOneShot(
   if (abortSignal) {
     params.abortSignal = abortSignal;
   }
-  return runCodexAppServerAttempt(params, { bindingStore: testCodexAppServerBindingStore });
+  return runCodexAppServerAttempt(params, {
+    bindingStore: testCodexAppServerBindingStore,
+    ...(forceSharedClient ? { clientFactory: getLeasedSharedCodexAppServerClient } : {}),
+  });
 }
 
 setupRunAttemptTestHooks();
@@ -135,7 +140,12 @@ describe("Codex one-shot cleanup receipts", () => {
       // has recorded thread/start once the turn is accepted.
       await run.waitForTurnAccepted();
       const start = await waitForHarnessRequest(harness, "thread/start");
-      expect(start.params).toMatchObject({ config: { "features.code_mode": false } });
+      expect(start.params).toMatchObject({
+        config: {
+          "features.shell_tool": false,
+          "features.code_mode": false,
+        },
+      });
       const { dynamicTools } = start.params as { dynamicTools: CodexDynamicToolSpec[] };
       expect(
         flattenCodexDynamicToolFunctions(dynamicTools)
@@ -235,7 +245,7 @@ describe("Codex one-shot cleanup receipts", () => {
       const harness = createInferenceReadyClientHarness();
       const warning = vi.spyOn(embeddedAgentLog, "warn");
       let releasePeer: (() => void) | undefined;
-      const run = runOneShot(harness.client);
+      const run = runOneShot(harness.client, undefined, undefined, true);
       try {
         const initialize = await waitForHarnessRequest(harness, "initialize");
         harness.send({
@@ -281,7 +291,7 @@ describe("Codex one-shot cleanup receipts", () => {
 
   it
     .skipIf(process.platform === "win32")
-    .for(["confirmed", "unknown", "forced", "signalled", "retired-command"])(
+    .for(["confirmed", "delayed-confirmed", "unknown", "forced", "signalled", "retired-command"])(
     "records one-shot cleanup accurately after %s app-server shutdown",
     async (shutdown, { signal }) => {
       const rootPath = path.join(tempDir, "cleanup-root.mjs");
@@ -321,7 +331,7 @@ const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
 createInterface({ input: process.stdin }).on("line", (line) => {
   const request = JSON.parse(line);
   if (request.method === "test/complete") {
-    ${shutdown === "retired-command" ? 'send({ method: "item/completed", params: { threadId: "thread-1", turnId: "turn-1", item: { type: "commandExecution", id: "retired-command", command: "fixture", cwd: process.cwd(), status: "completed", exitCode: 0, aggregatedOutput: "" } } });' : ""}
+    ${shutdown !== "forced" ? 'send({ method: "item/completed", params: { threadId: "thread-1", turnId: "turn-1", item: { type: "commandExecution", id: "fixture-command", command: "fixture", cwd: process.cwd(), status: "completed", exitCode: 0, aggregatedOutput: "" } } });' : ""}
     send({ method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", status: "completed", items: [] } } });
   } else if (request.id !== undefined) {
     send({ id: request.id, result: results[request.method] ?? {} });
@@ -335,7 +345,9 @@ process.stdin.on("end", () => ${
             ? "setInterval(() => {}, 1_000)"
             : shutdown === "signalled"
               ? 'process.kill(process.pid, "SIGKILL")'
-              : "process.exit(0)"
+              : shutdown === "delayed-confirmed"
+                ? "setTimeout(() => process.exit(0), 500)"
+                : "process.exit(0)"
         });
 `,
       );
@@ -389,10 +401,11 @@ process.stdin.on("end", () => ${
           await waitForTaskOwnedProcessExit(descendantPid, signal);
         }
         expect(isPidAlive(descendantPid)).toBe(retained);
-        // This is the cleanup guard that also records the one-shot recovery
-        // receipt; a clean root exit must not bypass its failure path.
-        if (shutdown === "confirmed") {
-          expect(warning).not.toHaveBeenCalled();
+        if (shutdown === "forced") {
+          expect(warning).toHaveBeenCalledWith(
+            "Codex app-server required forced shutdown; process cleanup confirmed",
+          );
+          expect(warning).not.toHaveBeenCalledWith(expect.stringMatching(/agent cleanup failed:/));
         } else {
           expect(warning).toHaveBeenCalledWith(
             expect.stringMatching(/agent cleanup failed:.*step=codex-shared-client-release/),

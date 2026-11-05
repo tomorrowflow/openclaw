@@ -7,6 +7,7 @@ import { readQaMockRequestCursor } from "../shared/debug-request-cursor.js";
 import { adaptAnthropicToolCallIds } from "./mock-anthropic-wire.js";
 import type { StreamEvent } from "./mock-openai-contracts.js";
 import { QA_TOOL_SEARCH_SECONDARY_TARGET, readTargetFromPrompt } from "./mock-openai-tooling.js";
+import { registerImageCompletionTests } from "./server.image-completion.test-support.js";
 import {
   type MockServer,
   type AnthropicResponse,
@@ -76,7 +77,7 @@ const QA_EMPTY_RESPONSE_SIDE_EFFECT_EXHAUSTION_PROMPT =
 const QA_ANTHROPIC_THINKING_ERROR_RECOVERY_PROMPT =
   "Anthropic thinking error QA check: read QA_KICKOFF_TASK.md, then answer with exactly ANTHROPIC-THINKING-ERROR-RECOVERED-OK.";
 const QA_REASONING_ONLY_RETRY_INSTRUCTION =
-  "The previous assistant turn recorded reasoning but did not produce a user-visible answer. Continue from that partial turn and produce the visible answer now. Do not restate the reasoning or restart from scratch.";
+  "Your turn ended without a final reply. Continue from the current conversation and answer the user's request now. Do not repeat completed actions or restart the task. Do not restate your reasoning.";
 const QA_COMPACTION_RETRY_CODE_MODE_WRITE_RESULT = {
   status: "completed",
   value: {
@@ -2729,56 +2730,9 @@ describe("qa mock openai server", () => {
     expect(outputText(await toolResult.json())).toContain("Attachment: /tmp/qa-lighthouse.png");
   });
 
-  it("completes an image without replaying a tool unavailable to the completion turn", async () => {
-    const server = await startMockServer();
-    const prompt = "Image generation check: generate a QA lighthouse image.";
-    const imagePlan = await expectNonStreamingResponsesJson<unknown>(server, {
-      tools: [IMAGE_GENERATE_TOOL],
-      input: [makeUserInput(prompt)],
-    });
-    const imageCall = outputToolCall(imagePlan, "image_generate");
-    const callId = outputToolCallId(imageCall, "call_mock_image_generate_unavailable");
-    const completionEvent = [
-      "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>",
-      "OpenClaw runtime context (internal):",
-      "",
-      "[Internal task completion event]",
-      "source: image_generation",
-      "task: A QA lighthouse on a dark sea with a tiny protocol droid silhouette.",
-      "status: completed successfully",
-      "Generated media:",
-      "MEDIA:/tmp/qa-lighthouse.png",
-      "<<<END_OPENCLAW_INTERNAL_CONTEXT>>>",
-    ].join("\n");
-    const completion = await expectNonStreamingResponsesJson<unknown>(server, {
-      tools: [MESSAGE_TOOL],
-      input: [
-        makeUserInput(prompt),
-        {
-          type: "function_call",
-          name: "image_generate",
-          call_id: callId,
-          arguments: String(imageCall.arguments),
-        },
-        makeToolOutputWithCallId(
-          callId,
-          JSON.stringify({
-            content: [{ type: "text", text: "Background image generation started." }],
-            details: { async: true, status: "started" },
-          }),
-        ),
-        makeUserInput(completionEvent),
-      ],
-    });
-
-    expect(
-      outputItems(completion).some(
-        (item) => item.type === "function_call" && item.name === "image_generate",
-      ),
-    ).toBe(false);
-    expect(outputText(completion)).toBe(
-      "Protocol note: generated the QA lighthouse image successfully.\nMEDIA:/tmp/qa-lighthouse.png",
-    );
+  registerImageCompletionTests({
+    startMockServer,
+    tools: [MESSAGE_TOOL, IMAGE_GENERATE_TOOL],
   });
 
   it.each([

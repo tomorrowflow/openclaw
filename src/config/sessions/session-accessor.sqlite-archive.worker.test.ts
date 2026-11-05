@@ -15,7 +15,8 @@ import {
 } from "../../state/openclaw-agent-db.js";
 import { appendSqliteTrajectoryRuntimeEvents } from "../../trajectory/runtime-store.test-support.js";
 import type { TrajectoryEvent } from "../../trajectory/types.js";
-import { decodeSessionArchiveBytes, readSessionArchiveContentSync } from "./archive-compression.js";
+import { readSessionArchiveContentSync } from "./archive-compression.js";
+import { decodeSessionArchiveBytes } from "./archive-decode.js";
 import { measureSessionPhysicalDiskUsage } from "./disk-budget.js";
 import {
   applySessionEntryLifecycleMutation,
@@ -187,6 +188,7 @@ describe("SQLite transcript archive worker", () => {
     const content = decodeSessionArchiveBytes(
       archive?.bytes ?? new Uint8Array(),
       archive?.encoding === "zstd",
+      Buffer.byteLength(expectedContent),
     );
     expect(Buffer.byteLength(content)).toBe(Buffer.byteLength(expectedContent));
     expect(sha256(content)).toBe(sha256(expectedContent));
@@ -254,7 +256,10 @@ describe("SQLite transcript archive worker", () => {
       });
       const archivePath = path.join(path.dirname(storePath), archive?.archive_name ?? "");
       expect(sha256(fs.readFileSync(archivePath))).toBe(archive?.archive_sha256);
-      const content = readSessionArchiveContentSync(archivePath);
+      const content = readSessionArchiveContentSync(
+        archivePath,
+        Buffer.byteLength(JSON.stringify(session.event) + "\n"),
+      );
       const expected = `${JSON.stringify(session.event)}\n`;
       expect(Buffer.byteLength(content)).toBe(Buffer.byteLength(expected));
       expect(sha256(content)).toBe(sha256(expected));

@@ -28,18 +28,30 @@ minimumReleaseAgeExclude:
   - "@openclaw/fs-safe-linux-x64-musl@0.26.5"
   - "@openclaw/fs-safe-win32-arm64-msvc@0.26.5"
   - "@openclaw/fs-safe-win32-x64-msvc@0.26.5"
-  # Reviewed proc-safe 0.3.0 release and native helpers; remove after 2026-10-20T18:53:55.137Z.
-  - "@openclaw/proc-safe@0.3.0"
-  - "@openclaw/proc-safe-darwin-arm64@0.3.0"
-  - "@openclaw/proc-safe-darwin-x64@0.3.0"
-  - "@openclaw/proc-safe-freebsd-arm64@0.3.0"
-  - "@openclaw/proc-safe-freebsd-x64@0.3.0"
-  - "@openclaw/proc-safe-linux-arm64-gnu@0.3.0"
-  - "@openclaw/proc-safe-linux-arm64-musl@0.3.0"
-  - "@openclaw/proc-safe-linux-x64-gnu@0.3.0"
-  - "@openclaw/proc-safe-linux-x64-musl@0.3.0"
-  - "@openclaw/proc-safe-win32-arm64-msvc@0.3.0"
-  - "@openclaw/proc-safe-win32-x64-msvc@0.3.0"
+  # Reviewed proc-safe 0.4.2 release and native helpers; remove after 2026-10-26T00:51:31.079Z.
+  - "@openclaw/proc-safe@0.4.2"
+  - "@openclaw/proc-safe-darwin-arm64@0.4.2"
+  - "@openclaw/proc-safe-darwin-x64@0.4.2"
+  - "@openclaw/proc-safe-freebsd-arm64@0.4.2"
+  - "@openclaw/proc-safe-freebsd-x64@0.4.2"
+  - "@openclaw/proc-safe-linux-arm64-gnu@0.4.2"
+  - "@openclaw/proc-safe-linux-arm64-musl@0.4.2"
+  - "@openclaw/proc-safe-linux-x64-gnu@0.4.2"
+  - "@openclaw/proc-safe-linux-x64-musl@0.4.2"
+  - "@openclaw/proc-safe-win32-arm64-msvc@0.4.2"
+  - "@openclaw/proc-safe-win32-x64-msvc@0.4.2"
+  # Claude ACP adapter bump for CVE-2026-111497 (brotli fix in SDK 0.3.309 binaries); remove after 2026-10-30T20:00:57.929Z.
+  - "@agentclientprotocol/claude-agent-acp@0.95.0"
+  - "@agentclientprotocol/sdk@2.0.1"
+  - "@anthropic-ai/claude-agent-sdk@0.3.309"
+  - "@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.309"
+  - "@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.309"
+  - "@anthropic-ai/claude-agent-sdk-linux-arm64-musl@0.3.309"
+  - "@anthropic-ai/claude-agent-sdk-linux-arm64@0.3.309"
+  - "@anthropic-ai/claude-agent-sdk-linux-x64-musl@0.3.309"
+  - "@anthropic-ai/claude-agent-sdk-linux-x64@0.3.309"
+  - "@anthropic-ai/claude-agent-sdk-win32-arm64@0.3.309"
+  - "@anthropic-ai/claude-agent-sdk-win32-x64@0.3.309"
 
 # Isolated installs let pnpm reuse whole-package APFS clones instead of relinking every file.
 nodeLinker: isolated
@@ -59,7 +71,7 @@ overrides:
   "chevrotain>lodash-es": 4.18.1
   "@chevrotain/cst-dts-gen>lodash-es": 4.18.1
   "@chevrotain/gast>lodash-es": 4.18.1
-  "@agentclientprotocol/codex-acp@2.1.1>@openai/codex": 0.160.0
+  "@agentclientprotocol/codex-acp@2.1.1>@openai/codex": 0.164.0
   "@codemirror/commands@6.11.1>@codemirror/view": 6.43.13
   "@codemirror/view@6.43.13>@codemirror/state": 6.7.6
   "@anthropic-ai/sdk": 0.131.0

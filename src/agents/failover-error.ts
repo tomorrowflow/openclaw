@@ -8,6 +8,7 @@ import { containsAsciiControlCharacter } from "@openclaw/normalization-core/stri
 import { isChannelRunAuthorizationError } from "../channels/message-access/run-authorization-error.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { isSqliteTranscriptMutationConflict } from "../config/sessions/session-mutation-conflict-error.js";
+import { isSessionWorkStartInvalidatedError } from "../config/sessions/work-start-error.js";
 import { isAgentRunStaleLifecycleError } from "../infra/agent-lifecycle-error.js";
 import { copyErrorDiagnostic } from "../infra/error-diagnostics.js";
 import { collectErrorGraphCandidates, readErrorName } from "../infra/errors.js";
@@ -54,6 +55,7 @@ const MAX_FAILOVER_CAUSE_DEPTH = 25;
 const MISSING_TOOL_RESULT_REASON = "missing_tool_result";
 const MISSING_TOOL_RESULT_TEXT_RE = /native Codex tool\.call without a matching tool\.result/i;
 const RUNTIME_COORDINATION_ERROR_NAMES = new Set([
+  "SessionCapabilityMetadataChangedError",
   "CodexNodeExecServerDisconnectedError",
   "GatewayDrainingError",
   "NodeRunnerUpdateRequiredError",
@@ -61,6 +63,8 @@ const RUNTIME_COORDINATION_ERROR_NAMES = new Set([
   "WorkerRunnerCapacityError",
   "WorkerWorkspaceReconciliationError",
   "ActiveTurnClaimError",
+  "CliHistoryOwnerChangedError",
+  "SessionTranscriptReadFenceError",
   "SqliteWorkerError",
 ]);
 
@@ -304,6 +308,7 @@ function hasRuntimeCoordinationFailure(err: unknown): boolean {
   }
   return collectErrorGraphCandidates(err, resolveNestedErrors).some(
     (candidate) =>
+      isSessionWorkStartInvalidatedError(candidate) ||
       RUNTIME_COORDINATION_ERROR_NAMES.has(readErrorName(candidate)) ||
       resolveExecutionApprovalFailureMessage(readDirectErrorMessage(candidate)) !== undefined,
   );

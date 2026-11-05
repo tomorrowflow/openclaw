@@ -37,6 +37,7 @@ import {
   isLiveTestEnabled,
   readLiveTestConfig,
   resolveLiveCredentialPrecedence,
+  useLiveTestRuntimeConfig,
 } from "../agents/live-test-helpers.js";
 import { shouldSkipLiveProviderDrift } from "../agents/live-test-provider-drift.js";
 import {
@@ -128,6 +129,7 @@ import { findFinalTagMatches, stripFinalTags } from "../shared/text/final-tags.j
 import { deleteTestEnvValue, setTestEnvValue, withEnvAsync } from "../test-utils/env.js";
 import { getFreePort, isPortFree } from "../test-utils/ports.js";
 import { cleanupSessionStateForTest } from "../test-utils/session-state-cleanup.js";
+import { loadSqliteTrajectoryRuntimeEvents } from "../trajectory/runtime-store.sqlite.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
 import { GatewayClient } from "./client.js";
 import { enterIsolatedGatewayLiveDiscoveryState } from "./gateway-models.profiles.live.discovery.test-helpers.js";
@@ -3781,7 +3783,8 @@ async function verifyGatewayUltraSubagentHandoff(params: {
   const existingRunIds = new Set(
     listSubagentRunsForRequester(params.sessionKey).map((entry) => entry.runId),
   );
-  const nonce = randomBytes(3).toString("hex").toUpperCase();
+  // This proves exact child/parent routing, not long random-token copy fidelity.
+  const nonce = randomBytes(2).toString("hex").toUpperCase();
   const childToken = `ULTRA-CHILD-${nonce}`;
   const parentToken = `ULTRA-PARENT-${nonce}`;
   const message = [
@@ -4342,7 +4345,7 @@ type OpenAIUltraWireObservation = {
   traceparent?: string;
   dispatch?: {
     runId: string;
-    callId: string;
+    callId?: string;
     sessionId?: string;
     sessionKey?: string;
     isHeartbeat?: boolean;
@@ -4406,6 +4409,55 @@ function readOpenAIUltraWireObservation(body: string): OpenAIUltraWireObservatio
   } catch {
     return {};
   }
+}
+
+async function loadOpenAIUltraTrajectoryObservations(
+  ultraRuns: ReadonlyMap<string, string>,
+): Promise<OpenAIUltraWireObservation[]> {
+  const observations: OpenAIUltraWireObservation[] = [];
+  for (const sessionKey of new Set(ultraRuns.values())) {
+    const { storePath, entry } = await loadSessionEntryAsync(sessionKey);
+    if (!entry?.sessionId) {
+      continue;
+    }
+    const events = await loadSqliteTrajectoryRuntimeEvents({
+      agentId: GATEWAY_LIVE_AGENT_ID,
+      sessionId: entry.sessionId,
+      storePath,
+    });
+    for (const event of events) {
+      if (event.type !== "provider.prompt.observed" || !isRecord(event.data)) {
+        continue;
+      }
+      const model = typeof event.data.model === "string" ? event.data.model : undefined;
+      const reasoningEffort =
+        typeof event.data.reasoningEffort === "string" ? event.data.reasoningEffort : undefined;
+      const rawSpawn = isRecord(event.data.sessionsSpawn) ? event.data.sessionsSpawn : undefined;
+      observations.push({
+        ...(model ? { model } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(rawSpawn
+          ? {
+              sessionsSpawn: {
+                ...(typeof rawSpawn.strict === "boolean" ? { strict: rawSpawn.strict } : {}),
+                categoryRequired: rawSpawn.categoryRequired === true,
+              },
+            }
+          : {}),
+        requestIndex: observations.length + 1,
+        ...(typeof event.runId === "string"
+          ? {
+              dispatch: {
+                runId: event.runId,
+                ...(typeof event.sessionId === "string" ? { sessionId: event.sessionId } : {}),
+                ...(typeof event.sessionKey === "string" ? { sessionKey: event.sessionKey } : {}),
+              },
+            }
+          : { dispatch: null }),
+      });
+    }
+  }
+  return observations;
 }
 
 function startOpenAIUltraWireCapture(upstreamBaseUrls: readonly string[]): OpenAIUltraWireCapture {
@@ -5566,14 +5618,9 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
           }
         : {}),
     };
-    if (ultraCandidates.length > 0) {
-      await import("../agents/ai-transport-runtime-host.js");
-      ultraWireCapture = startOpenAIUltraWireCapture(
-        ultraCandidates.map((candidate) =>
-          resolveOpenAIUltraUpstreamBaseUrl({ candidate, cfg: sanitizedCfg }),
-        ),
-      );
-    }
+    const ultraWireBaseUrls = ultraCandidates.map((candidate) =>
+      resolveOpenAIUltraUpstreamBaseUrl({ candidate, cfg: sanitizedCfg }),
+    );
     const nextCfg = buildLiveGatewayConfig({
       cfg: sanitizedCfg,
       candidates: params.candidates.map(({ model }) => model),
@@ -5618,7 +5665,12 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
         }),
         `${params.label}: gateway-connect`,
       );
-      if (ultraWireCapture) {
+      if (ultraWireBaseUrls.length > 0) {
+        // The agent transport host is installed lazily on the first embedded run,
+        // after gateway startup. Load that final owner before wrapping it so the
+        // live sweep observes requests instead of having its capture replaced.
+        await import("../agents/ai-transport-runtime-host.js");
+        ultraWireCapture = startOpenAIUltraWireCapture(ultraWireBaseUrls);
         openAIUltraRunsByClient.set(client, new Map());
       }
     } catch (error) {
@@ -6343,16 +6395,26 @@ async function runGatewayModelSuite(params: GatewayModelSuiteParams) {
       await server.close({ reason: "live test complete" });
       server = undefined;
       await waitForDiagnosticEventsDrained();
-      const observations = ultraWireCapture.observations;
+      const ultraRuns = expectDefined(
+        openAIUltraRunsByClient.get(client),
+        "Ultra admission receipts",
+      );
+      const wireObservations = ultraWireCapture.observations;
+      if (wireObservations.length === 0) {
+        // Closing the native harness retires its runtime-config owner; restore
+        // the fixture before reading trajectory-backed session state.
+        useLiveTestRuntimeConfig(params.cfg);
+      }
+      const observations =
+        wireObservations.length > 0
+          ? wireObservations
+          : await loadOpenAIUltraTrajectoryObservations(ultraRuns);
       for (const model of filterAttemptedGatewayLiveModels(ultraCandidates, attemptedModelKeys)) {
         try {
           assertOpenAIUltraWireEffort({
             expectedModel: model.id,
             observations,
-            ultraRuns: expectDefined(
-              openAIUltraRunsByClient.get(client),
-              "Ultra admission receipts",
-            ),
+            ultraRuns,
           });
         } catch (error) {
           failures.push({ model: `${model.provider}/${model.id}`, error: String(error) });

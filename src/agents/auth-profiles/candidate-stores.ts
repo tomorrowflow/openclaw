@@ -146,12 +146,21 @@ export async function listCandidateAuthProfileStores(params: {
   );
 }
 
+function assertCandidateDatabaseIdentity(candidate: CandidateAuthProfileStore): void {
+  if (candidate.databaseIdentity.key.startsWith("path:")) {
+    // Discovery captured no file; startup or another operation may create it before first use.
+    candidate.databaseIdentity = readDatabasePathIdentitySync(candidate.databasePath);
+  } else {
+    assertDatabasePathIdentity(candidate.databasePath, candidate.databaseIdentity);
+  }
+}
+
 /** Read an already-discovered candidate without creating a missing database. */
 export function loadCandidateAuthProfileStore(
   candidate: CandidateAuthProfileStore,
 ): AuthProfileStore | null {
   try {
-    assertDatabasePathIdentity(candidate.databasePath, candidate.databaseIdentity);
+    assertCandidateDatabaseIdentity(candidate);
     return loadPersistedAuthProfileStoreAtDatabasePath(candidate.databasePath, "agent");
   } finally {
     if (!candidate.configured) {
@@ -164,12 +173,12 @@ export function loadCandidateAuthProfileStore(
 export async function loadCandidateAuthProfileStoreAsync(
   candidate: CandidateAuthProfileStore,
 ): Promise<AuthProfileStore | null> {
-  assertDatabasePathIdentity(candidate.databasePath, candidate.databaseIdentity);
+  assertCandidateDatabaseIdentity(candidate);
   const reader = prepareAgentAuthProfileRowsRead(candidate);
   try {
     const rows = await reader.read();
     reader.assertCurrent();
-    assertDatabasePathIdentity(candidate.databasePath, candidate.databaseIdentity);
+    assertCandidateDatabaseIdentity(candidate);
     return loadPersistedAuthProfileStoreFromRows(rows, candidate.databasePath);
   } finally {
     await reader.dispose();
@@ -183,10 +192,22 @@ type CandidateAuthProfileUpdate = {
   updater: (store: AuthProfileStore) => boolean;
 };
 
-/** The writer can skip unrelated generations without opening a write transaction. */
+/** Skip unrelated generations before write admission; possible matches still use the writer. */
 export async function fenceCandidateAuthProfileStore(
   params: CandidateAuthProfileUpdate & { generation: OAuthCredential },
 ): Promise<void> {
+  const store = await loadCandidateAuthProfileStoreAsync(params.candidate);
+  const credential = store?.profiles[params.profileId];
+  if (
+    credential?.type !== "oauth" ||
+    !isSameOAuthRefreshGeneration({
+      profileId: params.profileId,
+      left: credential,
+      right: params.generation,
+    })
+  ) {
+    return;
+  }
   await runCandidateAuthProfileUpdate(params, {
     profileId: params.profileId,
     generation: params.generation,
@@ -223,7 +244,7 @@ async function runCandidateAuthProfileUpdate(
   if (workerWrites) {
     const assertCurrent = () => {
       workerWrites.assertOwner(candidate.env);
-      assertDatabasePathIdentity(candidate.databasePath, candidate.databaseIdentity);
+      assertCandidateDatabaseIdentity(candidate);
     };
     return runAuthProfileUsage(() =>
       workerWrites.run(() => {
@@ -301,8 +322,7 @@ async function runCandidateAuthProfileUpdate(
     envOnly: false,
     peerGeneration,
     options: { env: candidate.env },
-    assertCurrent: () =>
-      assertDatabasePathIdentity(candidate.databasePath, candidate.databaseIdentity),
+    assertCurrent: () => assertCandidateDatabaseIdentity(candidate),
     update(prepared) {
       const store = prepared.store;
       const changed = params.updater(store);

@@ -80,6 +80,7 @@ import { itemNotification, rawItemCompleted, turnCompleted } from "./protocol.te
 import { readCodexRateLimitsRevision, rememberCodexRateLimitsRead } from "./rate-limit-cache.js";
 import { registerCodexFastModeTests } from "./run-attempt-fast-mode.test-support.js";
 import {
+  expectResumeRequest,
   expectRetainedSuccessfulThread,
   observeAttemptProjectionReady,
   startClockControlledAttempt,
@@ -127,8 +128,8 @@ import {
   readCodexAppServerBinding,
   writeCodexAppServerBinding,
 } from "./session-binding.test-helpers.js";
+import type { CodexAppServerClientOptions } from "./shared-client-options.js";
 import * as sharedClientModule from "./shared-client.js";
-import type { CodexAppServerClientOptions } from "./shared-client.js";
 import {
   appendSqliteHistoryMessage,
   attachSqliteSessionTarget,
@@ -152,19 +153,8 @@ import { buildTurnStartParams } from "./turn-params.js";
 import { readMirrorIdentity } from "./upstream-prompt-provenance.js";
 import * as userInputBridge from "./user-input-bridge.js";
 
-function expectResumeRequest(
-  requests: Array<{ method: string; params: unknown }>,
-  params: Record<string, unknown>,
-) {
-  const request = requests.find((entry) => entry.method === "thread/resume");
-  if (!request) {
-    throw new Error("Expected thread/resume request");
-  }
-  const requestParams = request.params as Record<string, unknown> | undefined;
-  for (const [key, value] of Object.entries(params)) {
-    expect(requestParams?.[key]).toEqual(value);
-  }
-}
+// Mirrors the production budget: Codex reports a slow thread shutdown only after 10s.
+const CODEX_THREAD_UNLOAD_CONFIRMATION_TIMEOUT_MS = 10_000;
 
 const DISABLED_CODEX_WEB_SEARCH_THREAD_CONFIG_FINGERPRINT = JSON.stringify({
   "features.standalone_web_search": false,
@@ -657,6 +647,7 @@ async function runSettledFailureClientReplacementTest(
   const requests = options.requests ?? [];
   const clients: Array<ReturnType<typeof createCodexLifecycleHarness>> = [];
   const turnStarted = createDeferred<ReturnType<typeof createCodexLifecycleHarness>>();
+  const failedThreadRead = createDeferred<void>();
   onTestFinished(async () => {
     await Promise.all(clients.map(({ client }) => client.closeAndWait()));
   });
@@ -700,7 +691,11 @@ async function runSettledFailureClientReplacementTest(
       if (method !== "initialize") {
         methods.push(method);
       }
-      return nativeRequest(method, params, requestOptions);
+      const response = nativeRequest(method, params, requestOptions);
+      if (startIndex === 0 && method === "thread/read") {
+        void response.then(() => failedThreadRead.resolve());
+      }
+      return response;
     });
     clients.push(wire);
     return wire.client;
@@ -723,6 +718,8 @@ async function runSettledFailureClientReplacementTest(
       }),
   );
   const { run, started } = startClockControlledAttempt(createParams(sessionFile, workspaceDir));
+  await failedThreadRead.promise;
+  await vi.advanceTimersByTimeAsync(CODEX_THREAD_UNLOAD_CONFIRMATION_TIMEOUT_MS);
   const [readyClient] = await Promise.all([turnStarted.promise, started]);
   readyClient.notify({
     method: "turn/completed",
@@ -2342,6 +2339,10 @@ describe("runCodexAppServerAttempt", () => {
     expect(retireSpy).toHaveBeenCalledOnce();
     expect(retireSpy).toHaveBeenCalledWith(state.client);
     expect(closeAndWait).toHaveBeenCalledOnce();
+    expect(closeAndWait).toHaveBeenCalledWith({
+      exitTimeoutMs: 6_000,
+      forceKillDelayMs: 5_000,
+    });
     expect(removeAbortListener).toHaveBeenCalledWith("abort", expect.any(Function));
   });
 
