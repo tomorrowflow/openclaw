@@ -301,6 +301,35 @@ describe("cron trigger script evaluator", () => {
     });
   });
 
+  it("prepares the runtime again after a failed script so a replaced sandbox cannot fail every tick", async () => {
+    const config = {} as OpenClawConfig;
+    const disposed: number[] = [];
+    let prepared = 0;
+    const prepareRuntime = vi.fn(async () => {
+      const generation = ++prepared;
+      return {
+        ...createPreparedRuntime(config),
+        [Symbol.dispose]: () => void disposed.push(generation),
+      };
+    });
+    // Only the first preparation's sandbox container is gone.
+    const runHeadless = vi.fn(async (): Promise<CodeModeHeadlessResult> =>
+      prepared === 1
+        ? { status: "failed", code: "internal_error", error: "No such container: b630c985" }
+        : completed({ value: { fire: false } }),
+    );
+    const evaluate = createCronTriggerEvaluator({ config, prepareRuntime, runHeadless });
+    const tick = () =>
+      evaluate({ jobId: "job-stale-sandbox", script: "return result", state: null });
+
+    await expect(tick()).resolves.toMatchObject({ kind: "error", code: "internal_error" });
+    expect(disposed).toEqual([1]);
+    await expect(tick()).resolves.toEqual({ kind: "evaluated", fire: false });
+    await expect(tick()).resolves.toEqual({ kind: "evaluated", fire: false });
+    expect(prepareRuntime).toHaveBeenCalledTimes(2);
+    expect(disposed).toEqual([1]);
+  });
+
   it("retries shared runtime preparation for a still-live evaluator after its owner aborts", async () => {
     const config = {} as OpenClawConfig;
     const prepareRuntime = vi.fn(async (params: PrepareParams) => {

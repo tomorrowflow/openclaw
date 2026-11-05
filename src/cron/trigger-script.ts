@@ -651,6 +651,11 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
           signal: evaluationScope.signal,
         });
         if (result.status === "failed") {
+          // The cached preparation pins live resources this cache cannot observe, such as
+          // the sandbox container id; prune or recreate replaces that container under a
+          // retained runtime. Prepare the next tick cold instead of failing on it until the
+          // job auto-disables. Accepted: a script that swallows tool failures keeps it.
+          selectedRuntime.invalidate();
           // A failed server is absent from `MCP`; name why when the script fails.
           return scriptFailure(
             mcpUnavailable ? `${result.error} (${mcpUnavailable})` : result.error,
