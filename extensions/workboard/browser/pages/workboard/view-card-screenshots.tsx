@@ -254,11 +254,14 @@ function ScreenshotFigures(props: ScreenshotsView & { refs: readonly ScreenshotR
   );
 }
 
-/** Whether the drawer offers its Screenshots tab: a round committed an image, or listing failed. */
+/**
+ * Whether the drawer offers its Screenshots tab: a round committed an image, listing
+ * failed, or the rounds' commits were removed (the tab says so instead of vanishing).
+ */
 export function hasCommittedScreenshots(state: SettledList): boolean {
   return (
     state.status === "unavailable" ||
-    state.result.committed.state === "unavailable" ||
+    state.result.committed.state !== "available" ||
     state.result.committed.rounds.length > 0 ||
     (state.result.linked?.length ?? 0) > 0
   );
@@ -281,9 +284,9 @@ export function ScreenshotRounds(
       when={rounds()}
       fallback={
         <p class="workboard-detail__empty">
-          {t("workboard.screenshotsUnavailable", {
-            error: props.committed.state === "unavailable" ? props.committed.reason : "",
-          })}
+          {props.committed.state === "unavailable"
+            ? t("workboard.screenshotsUnavailable", { error: props.committed.reason })
+            : t("workboard.screenshotsRemoved")}
         </p>
       }
     >

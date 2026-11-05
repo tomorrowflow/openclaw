@@ -544,6 +544,8 @@ export default {
     eventUnarchived: "Unarchived",
     eventStale: "Stale session",
     screenshotsUnavailable: "Screenshots could not be listed: {error}",
+    screenshotsRemoved:
+      "This card's commits are no longer in the repository (its history was rewritten or its branch deleted), so its screenshots cannot be shown.",
     screenshotLoading: "Loading…",
     screenshotFailed: "Could not load this image",
     screenshotLight: "Light",

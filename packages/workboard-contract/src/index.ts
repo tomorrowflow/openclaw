@@ -552,6 +552,9 @@ export type WorkboardNodeFileRound = {
 /** The committed files, or why the host clone could not list them. */
 export type WorkboardCommittedNodeFiles =
   | { state: "available"; rounds: WorkboardNodeFileRound[] }
+  // Every round's commits are gone from the host clone (history rewritten or
+  // branches pruned): nothing can be listed again, which is not a listing failure.
+  | { state: "removed" }
   | { state: "unavailable"; reason: string };
 
 /** A file the running agent wrote under one of the dirs listed for its kind, newest first. */
