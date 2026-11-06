@@ -127,7 +127,7 @@ describe("node ticket verification", () => {
         category: "Verification",
       }),
     ]);
-    const message = String((verifier.creates[0] as { message: string }).message);
+    const message = (verifier.creates[0] as { message: string }).message;
     expect(message).toContain(card.title);
     expect(message).toContain(notes);
     expect(message).toContain(`${base}..${head}`);

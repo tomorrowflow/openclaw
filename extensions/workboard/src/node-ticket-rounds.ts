@@ -203,8 +203,8 @@ export function parseNumstat(output: string, from: string, to: string): Workboar
 }
 
 function hasControlCharacter(value: string): boolean {
-  return [...value].some((char) => {
-    const code = char.charCodeAt(0);
+  return value.split("").some((unit) => {
+    const code = unit.charCodeAt(0);
     return code < 0x20 || code === 0x7f;
   });
 }

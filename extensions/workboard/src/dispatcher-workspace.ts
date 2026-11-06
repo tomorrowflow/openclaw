@@ -1,5 +1,7 @@
-import type { WorkboardCard } from "@openclaw/workboard-contract";
+import path from "node:path";
+import type { WorkboardCard, WorkboardWorkspace } from "@openclaw/workboard-contract";
 // Workboard dispatch workspace helpers keep authority resolution outside the orchestration loop.
+import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
 import {
   canonicalPathFromExistingAncestor,
@@ -8,11 +10,14 @@ import {
 import type { WorkboardStore } from "./store.js";
 import {
   assertCanonicalWorkboardRootAccess,
+  assertWorkboardWorkspaceSourceAccess,
   canonicalizeWorkboardWorkspaceAccess,
   intersectWorkboardWorkspaceAccess,
   type WorkboardTargetWorkspaceRuntime,
   type WorkboardWorkspaceAccess,
 } from "./workspace-access.js";
+
+export type WorkboardWorktreeRuntime = PluginRuntime["worktrees"];
 
 export type ResolveAgentWorkspaceRuntime = (
   agentId: string | undefined,
@@ -194,4 +199,80 @@ export async function assertRestrictedWorkboardTarget(params: {
   ) {
     throw new Error("restricted workspace Git metadata must be contained inside its root.");
   }
+}
+
+export async function materializeWorkspace(params: {
+  card: WorkboardCard;
+  worktrees?: WorkboardWorktreeRuntime;
+  materializeWorktree: boolean;
+  workspaceAccess: WorkboardWorkspaceAccess;
+  assertOwnerCurrent?: () => void;
+}): Promise<{ workspace?: WorkboardWorkspace; cwd?: string }> {
+  const workspace = params.card.metadata?.automation?.workspace;
+  if (!workspace || workspace.kind === "scratch") {
+    return {};
+  }
+  const sourcePath = workspace.sourcePath ?? workspace.path;
+  const sourceBranch = workspace.sourcePath ? workspace.sourceBranch : workspace.branch;
+  if (!sourcePath || !path.isAbsolute(sourcePath)) {
+    throw new Error("worktree workspace path must be an absolute git checkout path");
+  }
+  // Persisted cards can outlive the caller that created them. Keep the exact
+  // canonical path that passes this dispatcher's current boundary check.
+  const canonicalSourcePath = await assertWorkboardWorkspaceSourceAccess(
+    workspace,
+    params.workspaceAccess,
+  );
+  if (!canonicalSourcePath) {
+    throw new Error("worktree workspace path is required");
+  }
+  if (workspace.kind === "dir" || !params.workspaceAccess.unrestricted) {
+    await assertCanonicalWorkboardRootAccess(canonicalSourcePath, params.workspaceAccess);
+    return workspace.kind === "worktree"
+      ? { cwd: canonicalSourcePath, workspace: { kind: "dir", path: canonicalSourcePath } }
+      : { cwd: canonicalSourcePath };
+  }
+  if (!params.materializeWorktree) {
+    throw new Error("managed worktree materialization was not explicitly authorized");
+  }
+  if (!params.worktrees) {
+    throw new Error("managed worktree runtime is unavailable");
+  }
+  params.assertOwnerCurrent?.();
+  const worktree = await params.worktrees.create({
+    repoRoot: canonicalSourcePath,
+    name: managedWorktreeName(params.card.id),
+    ...(sourceBranch ? { baseRef: sourceBranch } : {}),
+    ownerKind: "workboard",
+    ownerId: params.card.id,
+    ...(params.assertOwnerCurrent ? { commitGuard: params.assertOwnerCurrent } : {}),
+  });
+  let cwd: string;
+  try {
+    cwd = await canonicalPathFromExistingAncestor(worktree.path);
+  } catch (error) {
+    const removed = await params.worktrees
+      .removeIfLossless({
+        path: worktree.path,
+        ownerKind: "workboard",
+        ownerId: params.card.id,
+      })
+      .catch(() => false);
+    if (!removed) {
+      throw new Error(`${formatErrorMessage(error)}; managed worktree cleanup failed`, {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  return {
+    cwd,
+    workspace: {
+      kind: "worktree",
+      path: worktree.path,
+      branch: worktree.branch,
+      sourcePath,
+      ...(sourceBranch ? { sourceBranch } : {}),
+    },
+  };
 }

@@ -109,7 +109,7 @@ export function nodeTicketStartWaitRefusal(wait: NodeTicketStartWait): string {
       return wait.refusal;
     case "touches":
       return `Card waits for open tickets touching the same paths to merge: ${overlapList(wait.tickets)}.`;
-    case "slot":
+    default:
       return workboardSlotBusyMessage(wait.slot, wait.full);
   }
 }

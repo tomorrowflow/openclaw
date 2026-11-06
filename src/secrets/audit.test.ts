@@ -337,7 +337,7 @@ describe("secrets audit", () => {
     const sandboxFindings = report.findings
       .filter((finding) => finding.jsonPath?.startsWith("agents.defaults.sandbox"))
       .map((finding) => [finding.code, finding.jsonPath]);
-    expect(sandboxFindings.toSorted()).toEqual([
+    expect(sandboxFindings.toSorted((a, b) => String(a).localeCompare(String(b)))).toEqual([
       ["PLAINTEXT_FOUND", "agents.defaults.sandbox.docker.env.NPM_TOKEN"],
       ["REF_UNRESOLVED", "agents.defaults.sandbox.docker.env.GH_TOKEN"],
     ]);

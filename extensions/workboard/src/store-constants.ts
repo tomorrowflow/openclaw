@@ -94,8 +94,8 @@ export type WorkboardNodeTicketRouteSlot = {
  * The route a card's labels select: the first one sharing any of them. Card
  * creation takes its target from it and a capped route counts its tickets by it.
  */
-export function findWorkboardTargetRoute<Route extends Pick<WorkboardTargetRoute, "labels">>(
-  routes: readonly Route[] | undefined,
+export function findWorkboardTargetRoute(
+  routes: readonly Pick<WorkboardTargetRoute, "labels">[] | undefined,
   labels: readonly string[],
 ): number {
   return (routes ?? []).findIndex((route) => route.labels.some((label) => labels.includes(label)));
