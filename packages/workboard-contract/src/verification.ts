@@ -7,8 +7,9 @@
 /**
  * The board's verifier: a session of `agentId` on `model` (`provider/model`).
  * `sampleEvery`, allowed on the `crossVerifier` only, cross-verifies every
- * reworked rung c round and 1 in `sampleEvery` others, chosen by the card id;
- * without it every rung c round is cross-verified.
+ * reworked rung c round and 1 in `sampleEvery` others, chosen by the card id
+ * independently of the review sample; without it every rung c round is
+ * cross-verified.
  */
 export type WorkboardVerifierSettings = {
   agentId: string;

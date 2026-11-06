@@ -114,9 +114,12 @@ export type NodeVerificationStep =
  * Whether a round's import picks it for cross-verification: it ran at rung c
  * on a board with a cross-verifier, is no probe (nobody accepts one), and is
  * in the cross-verifier's sample: every round without `sampleEvery`, else
- * every reworked round and 1 in `sampleEvery` others by card id. The import
- * stamps the answer as `handoff.crossVerify`, the one owner the verification
- * step, the readiness gate, and the accept read.
+ * every reworked round and 1 in `sampleEvery` others by card id. The pick is
+ * salted so it is independent of the review sample: with the same hash the
+ * cross-verified cards would be exactly the ones a person reads, and the
+ * rest would get neither. The import stamps the answer as
+ * `handoff.crossVerify`, the one owner the verification step, the readiness
+ * gate, and the accept read.
  */
 export function crossVerifies(
   card: WorkboardCard,
@@ -130,7 +133,10 @@ export function crossVerifies(
   if (card.metadata?.automation?.probe) {
     return false;
   }
-  return (worktree.rework?.round ?? 0) > 0 || cardInSample(card.id, crossVerifier.sampleEvery ?? 1);
+  return (
+    (worktree.rework?.round ?? 0) > 0 ||
+    cardInSample(`cross:${card.id}`, crossVerifier.sampleEvery ?? 1)
+  );
 }
 
 /**
@@ -236,8 +242,8 @@ export function verificationMessage(params: {
       : ["The card has no notes; the commit messages and the diff are the spec."]),
     "",
     "## What to do",
-    "1. Re-run the proof the notes name from this worktree and note what each command printed. Run each command in the foreground, one call per command, with a timeout that covers it (a full iOS test suite takes about ten minutes); never start a run in the background and poll for it, and never repeat a run that finished.",
-    "   Where the proof runs a test suite on the base commit and again on the head, run the head first and the base only when the head fails, to tell a failure the round caused from one it inherited; a green head needs no base run.",
+    "1. Re-run the proof the notes name from this worktree and note what each command printed. Run each command as one exec call and wait for that call's result, with a timeout that covers it (a full iOS test suite can run past ten minutes); never wrap a run in a background script of your own that you poll with sleeps, and never re-run a step whose result you already have.",
+    "   Where the proof runs the same test suite on the base commit and again on the head only to show the suite was green before the change, run the head first and the base only when the head fails, to tell a failure the round caused from one it inherited. A base run the notes need for its own result (a new test that must fail on the base) still runs.",
     "2. Then try to break the change: check each acceptance criterion with a `file:line` or a command that shows it; try the sibling entry points of what changed; async, cancel, and restart state; the boundaries against the other side of each interface; and drift between the code and its docs or ADRs.",
     "3. Throwaway probe tests and scratch files are fine inside this worktree. Never commit, push, or touch other worktrees or branches.",
     "4. A proof the notes mark `Operator-run` is not a failure when you cannot run it. A style preference is not a failure.",

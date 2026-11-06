@@ -299,7 +299,9 @@ describe("node ticket verification", () => {
   it("cross-verifies only the rung c rounds in the cross-verifier's sample, chosen at import", async () => {
     const ticket = await verifiedTicket({ docsRung: "c", cross: { sampleEvery: 100 } });
     // A sample size that leaves this card out; all six at once would need a 1-in-30030 id.
-    const left = [2, 3, 5, 7, 11, 13].find((every) => !cardInSample(ticket.card.id, every))!;
+    const left = [2, 3, 5, 7, 11, 13].find(
+      (every) => !cardInSample(`cross:${ticket.card.id}`, every),
+    )!;
     await ticket.store.upsertBoard({
       id: "default",
       orchestration: {
@@ -635,7 +637,7 @@ describe("node ticket verification", () => {
 describe("crossVerifies", () => {
   const card = { id: "card-1", metadata: {} } as WorkboardCard;
   const board = { verifier: VERIFIER, crossVerifier: { ...CROSS_VERIFIER, sampleEvery: 2 } };
-  const sampled = cardInSample(card.id, 2);
+  const sampled = cardInSample(`cross:${card.id}`, 2);
 
   it("picks every rung c round without a sample, else reworked rounds and 1 in sampleEvery", () => {
     expect(

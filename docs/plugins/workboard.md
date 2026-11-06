@@ -859,11 +859,13 @@ A board's `orchestration.crossVerifier`, the same shape, adds a second,
 independent verification for rounds that ran at rung c (never a probe). It
 runs only after the round's verification passed, one after the other so the
 two never share the node's build caches, and an agent's accept at c needs
-both to pass (see **Accept** below). Rounds at a or b never run it, so it
+both to pass where the round was cross-verified (see **Accept** below).
+Rounds at a or b never run it, so it
 costs nothing below c. Pick an agent or model other than the verifier's, such
 as `{ agentId: "verifier-claude", model: "anthropic/claude-opus-5-5" }`
 beside a Codex verifier. Its optional `sampleEvery` (an integer from 1 to 100) cross-verifies every reworked rung c round and 1 in `sampleEvery` of
-the others, chosen by the card id like the review sample; without it every
+the others, chosen by the card id with its own salt, so the cross-verified
+cards are not the ones the review sample picks; without it every
 rung c round is cross-verified. The pick is made at the round's import and
 stamped as `crossVerify` on the handoff, so a `sampleEvery` change applies
 to rounds imported after it. Saving refuses a `crossVerifier` without a
@@ -1060,10 +1062,11 @@ model, so a verdict always comes from the configured one:
    (the spec and its Proof section), the round's range, node, and working
    directory, and never the ticket session's summary, proof, decisions,
    review, or verdict. It tells the verifier to re-run the proof the notes
-   name (each command in the foreground, one call per command, never started
-   in the background and polled, never repeated once finished; where the
-   proof runs a suite on the base commit and on the head, the head first and
-   the base only when the head fails), then try to break the change (acceptance criteria with a `file:line`
+   name (each command as one exec call whose result it waits for, never a
+   background script of its own polled with sleeps, never a step re-run once
+   its result is known; where the proof runs a suite on the base commit only
+   to show it was green before, the head first and the base only when the
+   head fails), then try to break the change (acceptance criteria with a `file:line`
    or a command, sibling entry points, async/cancel/restart state, interface
    boundaries, drift against docs or ADRs), that throwaway probes in the
    worktree are fine but committing, pushing, or touching other worktrees is
