@@ -1262,7 +1262,9 @@ pages of 100 commits). A merge regressed when a later commit reverts it (git's
 `Revert "… (#<number>)"` as GitHub's revert button writes for a squash merge),
 or when the merge commit's own combined checks ended `FAILURE` or `ERROR`
 while its parent's ended `SUCCESS`. Pending checks or a red parent are no
-regression of the merge. The watch records `pullRequest.regression`
+regression of the merge, and neither is a combined state that is red only
+because a job was cancelled: at least one check must have failed. The watch
+records `pullRequest.regression`
 (`{kind: "revert" | "red_main", at, commit}`) with a notice comment, once: a
 recorded regression is never read again. When an agent accepted the merged
 round at rung c and its class is still at c, the watch first moves the class

@@ -17,6 +17,15 @@ export const REGRESSION_WATCH_MS = 7 * 24 * 60 * 60_000;
 const COMMITS_PER_PAGE = 100;
 // Bounds one read of a busy base branch; a merge beyond it is read on the next sync.
 const MAX_PAGES_PER_REPO = 5;
+const CHECKS_PER_COMMIT = 100;
+/** Check outcomes that are a failing verdict on the commit; a cancelled or stale check is none. */
+const FAILED_CHECK_OUTCOMES: ReadonlySet<unknown> = new Set([
+  "FAILURE",
+  "ERROR",
+  "TIMED_OUT",
+  "STARTUP_FAILURE",
+  "ACTION_REQUIRED",
+]);
 
 type WatchedMerge = {
   card: WorkboardCard;
@@ -58,7 +67,11 @@ function watchedMerge(card: WorkboardCard, now: number): WatchedMerge | undefine
     : undefined;
 }
 
-/** A commit on the base branch with its own and its first parent's combined check state. */
+/**
+ * A commit on the base branch with its own and its first parent's combined
+ * check state. `checks` is absent while GitHub reports the commit red and
+ * none of its checks failed, as after a cancelled job.
+ */
 export type BaseBranchCommit = {
   oid: string;
   message: string;
@@ -75,7 +88,15 @@ const BASE_HISTORY_QUERY = `query($owner: String!, $name: String!, $since: GitTi
             nodes {
               oid
               message
-              statusCheckRollup { state }
+              statusCheckRollup {
+                state
+                contexts(first: ${CHECKS_PER_COMMIT}) {
+                  nodes {
+                    ... on CheckRun { conclusion }
+                    ... on StatusContext { state }
+                  }
+                }
+              }
               parents(first: 1) { nodes { statusCheckRollup { state } } }
             }
             pageInfo { hasNextPage endCursor }
@@ -90,13 +111,38 @@ function rollupState(value: unknown): string | undefined {
   return isRecord(value) && typeof value.state === "string" ? value.state : undefined;
 }
 
+/**
+ * A commit's own combined check state. GitHub's rollup also reads `FAILURE`
+ * when a job was cancelled, which says nothing about the commit, so a red
+ * rollup counts only when one of its checks failed. A rollup listed without
+ * its checks, or with more than one page of them, stands as GitHub reports it.
+ */
+function ownChecks(rollup: unknown): string | undefined {
+  const state = rollupState(rollup);
+  const contexts = isRecord(rollup) && isRecord(rollup.contexts) ? rollup.contexts.nodes : [];
+  if (
+    (state !== "FAILURE" && state !== "ERROR") ||
+    !Array.isArray(contexts) ||
+    contexts.length === 0 ||
+    contexts.length >= CHECKS_PER_COMMIT
+  ) {
+    return state;
+  }
+  return contexts.some(
+    (context) =>
+      isRecord(context) && FAILED_CHECK_OUTCOMES.has(context.conclusion ?? context.state),
+  )
+    ? state
+    : undefined;
+}
+
 function baseBranchCommit(node: unknown): BaseBranchCommit | undefined {
   if (!isRecord(node) || typeof node.oid !== "string" || typeof node.message !== "string") {
     return undefined;
   }
   const parents =
     isRecord(node.parents) && Array.isArray(node.parents.nodes) ? node.parents.nodes : [];
-  const checks = rollupState(node.statusCheckRollup);
+  const checks = ownChecks(node.statusCheckRollup);
   const parentChecks = isRecord(parents[0]) ? rollupState(parents[0].statusCheckRollup) : undefined;
   return {
     oid: node.oid,
@@ -149,9 +195,9 @@ async function baseBranchHistory(
  * (git's `This reverts commit <merge>` line, or a title `Revert "… (#<number>)"`
  * as GitHub's revert button writes for a squash merge), or the merge commit's
  * own checks failed where its parent's passed. A merge commit still pending,
- * or with a red parent, is no regression of its own. At rung b a batch
- * merged by hand can turn red mid-batch and green at its last commit; that
- * counts too, and the operator dismisses it.
+ * red from a cancelled check alone, or with a red parent, is no regression of
+ * its own. At rung b a batch merged by hand can turn red mid-batch and green
+ * at its last commit; that counts too, and the operator dismisses it.
  */
 export function mergeRegression(
   merge: Pick<WatchedMerge, "mergeCommit" | "number">,
