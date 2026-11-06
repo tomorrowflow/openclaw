@@ -1,9 +1,7 @@
-import path from "node:path";
 import type {
   WorkboardCard,
   WorkboardExecution,
   WorkboardLaunchState,
-  WorkboardWorkspace,
 } from "@openclaw/workboard-contract";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import {
@@ -11,12 +9,12 @@ import {
   resolveNonNegativeIntegerOption,
 } from "openclaw/plugin-sdk/number-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
-import { canonicalPathFromExistingAncestor } from "openclaw/plugin-sdk/security-runtime";
 import {
   assertRestrictedWorkboardTarget,
   cleanupWorkboardCardWorktree,
-  managedWorktreeName,
+  materializeWorkspace,
   resolveDispatchWorkspaceAccess,
+  type WorkboardWorktreeRuntime,
   type ResolveAgentWorkspaceRuntime,
 } from "./dispatcher-workspace.js";
 import { buildNodeTicketMessage } from "./node-ticket-brief.js";
@@ -66,7 +64,6 @@ const DEFAULT_DISPATCH_MAX_STARTS = 3;
 const NODE_TICKET_DEFAULT_CLAIM_TTL_SECONDS = 2 * 60 * 60;
 
 type WorkboardSubagentRuntime = Pick<PluginRuntime["subagent"], "run">;
-type WorkboardWorktreeRuntime = PluginRuntime["worktrees"];
 
 type WorkboardDispatchStartOptions = {
   cardId?: string;
@@ -130,82 +127,6 @@ const pendingWorkboardDispatches = new WeakMap<WorkboardStore, Promise<void>>();
 function cardHasActiveClaim(card: WorkboardCard, now: number): boolean {
   const claim = card.metadata?.claim;
   return Boolean(claim && isFutureDateTimestampMs(claim.expiresAt, { nowMs: now }));
-}
-
-async function materializeWorkspace(params: {
-  card: WorkboardCard;
-  worktrees?: WorkboardWorktreeRuntime;
-  materializeWorktree: boolean;
-  workspaceAccess: WorkboardWorkspaceAccess;
-  assertOwnerCurrent?: () => void;
-}): Promise<{ workspace?: WorkboardWorkspace; cwd?: string }> {
-  const workspace = params.card.metadata?.automation?.workspace;
-  if (!workspace || workspace.kind === "scratch") {
-    return {};
-  }
-  const sourcePath = workspace.sourcePath ?? workspace.path;
-  const sourceBranch = workspace.sourcePath ? workspace.sourceBranch : workspace.branch;
-  if (!sourcePath || !path.isAbsolute(sourcePath)) {
-    throw new Error("worktree workspace path must be an absolute git checkout path");
-  }
-  // Persisted cards can outlive the caller that created them. Keep the exact
-  // canonical path that passes this dispatcher's current boundary check.
-  const canonicalSourcePath = await assertWorkboardWorkspaceSourceAccess(
-    workspace,
-    params.workspaceAccess,
-  );
-  if (!canonicalSourcePath) {
-    throw new Error("worktree workspace path is required");
-  }
-  if (workspace.kind === "dir" || !params.workspaceAccess.unrestricted) {
-    await assertCanonicalWorkboardRootAccess(canonicalSourcePath, params.workspaceAccess);
-    return workspace.kind === "worktree"
-      ? { cwd: canonicalSourcePath, workspace: { kind: "dir", path: canonicalSourcePath } }
-      : { cwd: canonicalSourcePath };
-  }
-  if (!params.materializeWorktree) {
-    throw new Error("managed worktree materialization was not explicitly authorized");
-  }
-  if (!params.worktrees) {
-    throw new Error("managed worktree runtime is unavailable");
-  }
-  params.assertOwnerCurrent?.();
-  const worktree = await params.worktrees.create({
-    repoRoot: canonicalSourcePath,
-    name: managedWorktreeName(params.card.id),
-    ...(sourceBranch ? { baseRef: sourceBranch } : {}),
-    ownerKind: "workboard",
-    ownerId: params.card.id,
-    ...(params.assertOwnerCurrent ? { commitGuard: params.assertOwnerCurrent } : {}),
-  });
-  let cwd: string;
-  try {
-    cwd = await canonicalPathFromExistingAncestor(worktree.path);
-  } catch (error) {
-    const removed = await params.worktrees
-      .removeIfLossless({
-        path: worktree.path,
-        ownerKind: "workboard",
-        ownerId: params.card.id,
-      })
-      .catch(() => false);
-    if (!removed) {
-      throw new Error(`${formatErrorMessage(error)}; managed worktree cleanup failed`, {
-        cause: error,
-      });
-    }
-    throw error;
-  }
-  return {
-    cwd,
-    workspace: {
-      kind: "worktree",
-      path: worktree.path,
-      branch: worktree.branch,
-      sourcePath,
-      ...(sourceBranch ? { sourceBranch } : {}),
-    },
-  };
 }
 
 function sortReadyCards(a: WorkboardCard, b: WorkboardCard): number {

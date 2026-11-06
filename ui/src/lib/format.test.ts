@@ -213,7 +213,11 @@ describe("date/time millisecond formatters", () => {
 describe("stripThinkingTags", () => {
   it("keeps text when tags are unpaired", () => {
     expect(stripThinkingTags("<think>\nsecret\nHello")).toBe("secret\nHello");
-    expect(stripThinkingTags("Hello\n</think>")).toBe("Hello\n");
+  });
+
+  // Fork divergence: an orphan close tag ends reasoning the model never opened.
+  it("treats everything before an orphan close tag as reasoning", () => {
+    expect(stripThinkingTags("Hello\n</think>")).toBe("");
   });
 
   it("drops malformed reasoning while preserving the visible suffix spacing", () => {
