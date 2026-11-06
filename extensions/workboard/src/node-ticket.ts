@@ -79,6 +79,11 @@ const DEFAULT_SAMPLE_EVERY = 3;
 
 const VERIFICATION_LINE = /^\*\*Verification:\*\* (pass|fail|error)\b/;
 
+/** Whether a card is in a 1-in-`every` sample, chosen by its id so the sample is nobody's choice. */
+export function cardInSample(cardId: string, every: number): boolean {
+  return createHash("sha256").update(cardId).digest().readUInt32BE(0) % every === 0;
+}
+
 /** The verifier's comment on a round starts with the verdict line `**Verification:** ...`. */
 export function isVerificationComment(comment: WorkboardComment): boolean {
   return comment.source?.startsWith("agent:") === true && VERIFICATION_LINE.test(comment.body);
@@ -88,8 +93,8 @@ export function isVerificationComment(comment: WorkboardComment): boolean {
  * Who accepts an imported node ticket on its move to done. The operator does
  * unless an agent moves it; an agent may only for a class at rung b or c on
  * the board whose round also ran at b or c, after posting its verdict, and, on
- * a board with a verifier, once the round's verification passed, plus at c
- * its cross-verification on a board with a cross-verifier. An accept
+ * a board with a verifier, once the round's verification passed, plus its
+ * cross-verification when the import picked the round for one. An accept
  * verdict then picks whether a person reads the PR: every reworked ticket,
  * and 1 in `sampleEvery` others, chosen by the card id so the sample is not
  * the reader's choice. Throws the refusal an agent gets.
@@ -131,14 +136,14 @@ export function nodeTicketAcceptance(params: {
   if (board?.verifier) {
     requirePassedVerification(worktree, imported, "verification");
   }
-  // A probe never reaches here: it is archived, never accepted.
-  if (board?.crossVerifier && worktree.rung === "c") {
+  // The import stamps crossVerify (rung c, in the cross-verifier's sample, no probe);
+  // a cross-verifier removed since then gates nothing.
+  if (board?.crossVerifier && imported.crossVerify) {
     requirePassedVerification(worktree, imported, "crossVerification");
   }
-  const sampleEvery = classRung.sampleEvery ?? DEFAULT_SAMPLE_EVERY;
   const sampled =
     (worktree.rework?.round ?? 0) > 0 ||
-    createHash("sha256").update(card.id).digest().readUInt32BE(0) % sampleEvery === 0;
+    cardInSample(card.id, classRung.sampleEvery ?? DEFAULT_SAMPLE_EVERY);
   return { ...imported, decidedBy: actor, sampled };
 }
 

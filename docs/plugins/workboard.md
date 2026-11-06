@@ -862,8 +862,13 @@ two never share the node's build caches, and an agent's accept at c needs
 both to pass (see **Accept** below). Rounds at a or b never run it, so it
 costs nothing below c. Pick an agent or model other than the verifier's, such
 as `{ agentId: "verifier-claude", model: "anthropic/claude-opus-5-5" }`
-beside a Codex verifier. Saving refuses a `crossVerifier` without a
-`verifier`; `crossVerifier: null` removes it.
+beside a Codex verifier. Its optional `sampleEvery` (an integer from 1 to 100) cross-verifies every reworked rung c round and 1 in `sampleEvery` of
+the others, chosen by the card id like the review sample; without it every
+rung c round is cross-verified. The pick is made at the round's import and
+stamped as `crossVerify` on the handoff, so a `sampleEvery` change applies
+to rounds imported after it. Saving refuses a `crossVerifier` without a
+`verifier` and a `sampleEvery` on the `verifier`; `crossVerifier: null`
+removes it.
 
 The plugin passes the session no tool restriction: the agent's own tools are
 the boundary. `agentId` must name a dedicated agent that has only `exec` and
@@ -1055,7 +1060,10 @@ model, so a verdict always comes from the configured one:
    (the spec and its Proof section), the round's range, node, and working
    directory, and never the ticket session's summary, proof, decisions,
    review, or verdict. It tells the verifier to re-run the proof the notes
-   name, then try to break the change (acceptance criteria with a `file:line`
+   name (each command in the foreground, one call per command, never started
+   in the background and polled, never repeated once finished; where the
+   proof runs a suite on the base commit and on the head, the head first and
+   the base only when the head fails), then try to break the change (acceptance criteria with a `file:line`
    or a command, sibling entry points, async/cancel/restart state, interface
    boundaries, drift against docs or ADRs), that throwaway probes in the
    worktree are fine but committing, pushing, or touching other worktrees is
@@ -1105,7 +1113,8 @@ model, so a verdict always comes from the configured one:
    verifier that cannot run. A record whose head or round is not the imported
    round's is stale: it gates nothing and the next import replaces it.
    **Cross-verification:** on a board with an `orchestration.crossVerifier`,
-   a rung c round's import also records `crossVerify: true`, and once its
+   the import of a rung c round in its sample (see the setting above) also
+   records `crossVerify: true`, and once its
    verification passed the same pass starts the cross-verifier the same way
    (same brief and verify worktree path, key
    `agent:<agentId>:verify-<card8>-r<round>-x<n>`), writing its record to
@@ -1177,9 +1186,10 @@ model, so a verdict always comes from the configured one:
    for its comment."), after a `fail` ("The verification failed: <summary>.
    Post `Verdict: rework: …` and rework it."), and after an `error` ("The
    verification could not finish (<summary>). Leave the card in review; the
-   operator decides or re-runs it."). A round that ran at rung c on a board
-   with a `crossVerifier` also needs its cross-verification to have passed,
-   with the same refusals naming the cross-verification. A rework verdict and
+   operator decides or re-runs it."). A round whose import stamped
+   `crossVerify`, while the board still has a `crossVerifier`, also needs its
+   cross-verification to have passed, with the same refusals naming the
+   cross-verification. A rework verdict and
    an operator's move are never gated; the operator's move waits for the
    cross-verification as it waits for the verification. Otherwise the move fails and
    names the next step: at rung a, post the verdict and let the operator

@@ -173,7 +173,18 @@ function normalizeVerifier(
   if (!VERIFIER_MODEL_PATTERN.test(model)) {
     throw new Error(`${field} model ${model} must be provider/model.`);
   }
-  return { agentId, model };
+  const rawSample = isRecord(value) ? value.sampleEvery : undefined;
+  if (rawSample === undefined || rawSample === null) {
+    return { agentId, model };
+  }
+  if (field === "verifier") {
+    throw new Error("verifier verifies every round; sampleEvery belongs to the crossVerifier.");
+  }
+  const sampleEvery = resolveOptionalIntegerOption(rawSample, { min: 1, max: 100 });
+  if (sampleEvery === undefined || sampleEvery !== rawSample) {
+    throw new Error(`${field} sampleEvery must be an integer from 1 to 100.`);
+  }
+  return { agentId, model, sampleEvery };
 }
 
 const MAX_CLASS_RUNGS = 50;

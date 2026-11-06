@@ -49,6 +49,8 @@ async function importedDocsTicket(
     later?: Record<string, WorkboardClassRung>;
     target?: WorkboardExecutionTarget;
     headCommit?: string;
+    /** What the import stamps on a rung c round in the cross-verifier's sample. */
+    crossVerify?: true;
   } = {},
 ) {
   if (params.classRungs) {
@@ -66,6 +68,7 @@ async function importedDocsTicket(
         phase: "imported",
         headCommit: params.headCommit ?? "b".repeat(40),
         importedAt: Date.now(),
+        ...(params.crossVerify ? { crossVerify: true as const } : {}),
       },
     },
     claim,
@@ -457,11 +460,16 @@ describe("Workboard rung b", () => {
         crossVerifier: { agentId: "verifier-claude", model: "anthropic/claude-opus-5-5" },
       },
     });
-    const atC = await importedDocsTicket(store, { classRungs: { docs: { rung: "c" } } });
+    const atC = await importedDocsTicket(store, {
+      classRungs: { docs: { rung: "c" } },
+      crossVerify: true,
+    });
     const atB = await importedDocsTicket(store, {
       classRungs: { docs: { rung: "b" } },
       later: { docs: { rung: "c" } },
     });
+    // A rung c round its import left out of the cross-verifier's sample.
+    const unsampled = await importedDocsTicket(store, { classRungs: { docs: { rung: "c" } } });
     const facts = { round: 0, headCommit: "b".repeat(40), startedAt: 1, endedAt: 2, findings: [] };
     const record = async (
       card: WorkboardCard,
@@ -479,13 +487,15 @@ describe("Workboard rung b", () => {
       });
     };
     const move = agentTools(store)("workboard_move");
-    for (const card of [atC, atB]) {
+    for (const card of [atC, atB, unsampled]) {
       await record(card, "verification", "pass");
       await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
     }
 
     await move.execute("accept", { id: atB.id, status: "done" });
     expect((await store.get(atB.id))?.status).toBe("done");
+    await move.execute("accept", { id: unsampled.id, status: "done" });
+    expect((await store.get(unsampled.id))?.status).toBe("done");
 
     const accept = () => move.execute("accept", { id: atC.id, status: "done" });
     await expect(accept()).rejects.toThrow(
@@ -518,6 +528,37 @@ describe("Workboard rung b", () => {
       store.upsertBoard({ id: "app", orchestration: { verifier: null } }),
     ).rejects.toThrow("crossVerifier needs a verifier");
     await store.upsertBoard({ id: "app", orchestration: { verifier: null, crossVerifier: null } });
+  });
+
+  it("keeps a cross-verifier sample of 1 to 100 rounds, never on the verifier", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const verifier = { agentId: "verifier", model: "openai/gpt-6-sol" };
+    const crossVerifier = { agentId: "verifier-claude", model: "anthropic/claude-opus-5-5" };
+    await store.upsertBoard({
+      id: "app",
+      orchestration: { verifier, crossVerifier: { ...crossVerifier, sampleEvery: 3 } },
+    });
+    expect((await store.boardOrchestration("app"))?.crossVerifier).toEqual({
+      ...crossVerifier,
+      sampleEvery: 3,
+    });
+    for (const sampleEvery of [0, 101, 1.5, "3"]) {
+      await expect(
+        store.upsertBoard({
+          id: "app",
+          orchestration: { verifier, crossVerifier: { ...crossVerifier, sampleEvery } },
+        }),
+      ).rejects.toThrow("crossVerifier sampleEvery must be an integer from 1 to 100.");
+    }
+    await expect(
+      store.upsertBoard({
+        id: "app",
+        orchestration: { verifier: { ...verifier, sampleEvery: 2 }, crossVerifier },
+      }),
+    ).rejects.toThrow("verifier verifies every round; sampleEvery belongs to the crossVerifier.");
+    // Saved again without it, the sample is gone.
+    await store.upsertBoard({ id: "app", orchestration: { verifier, crossVerifier } });
+    expect((await store.boardOrchestration("app"))?.crossVerifier).toEqual(crossVerifier);
   });
 
   it("samples by the card: stable per card, every reworked round, and 1 in sampleEvery", () => {

@@ -324,8 +324,9 @@ export type WorkboardNodeHandoff =
       /** The board had a verifier at import, so the round waits for its verification before it can be decided. */
       verify?: true;
       /**
-       * The round ran at rung c on a board with a `crossVerifier` at import,
-       * so once its verification passed it also waits for the cross-verification.
+       * The round ran at rung c on a board with a `crossVerifier` at import and
+       * is in its sample (every round without `sampleEvery`), so once its
+       * verification passed it also waits for the cross-verification.
        */
       crossVerify?: true;
       /**

@@ -23,7 +23,11 @@ import {
 import { drainStartQueue, POOL_SLOT, reopenNodeTicket, slotKey } from "./node-ticket-reopen.js";
 import type { WorkboardNodeTicketStart } from "./node-ticket-reopen.js";
 import { parseNumstat } from "./node-ticket-rounds.js";
-import { nodeVerificationStep, runNodeVerification } from "./node-ticket-verification.js";
+import {
+  crossVerifies,
+  nodeVerificationStep,
+  runNodeVerification,
+} from "./node-ticket-verification.js";
 import {
   HandoffSupersededError,
   hostGit,
@@ -368,12 +372,7 @@ async function runNodeTicketHandoff(params: {
       }
       const orchestration = await store.boardOrchestration(cardBoardId(card));
       const verifier = orchestration?.verifier;
-      // The same rounds nodeVerificationStep cross-verifies: rung c, no probe.
-      const crossVerify =
-        verifier &&
-        orchestration?.crossVerifier &&
-        worktree.rung === "c" &&
-        !card.metadata?.automation?.probe;
+      const crossVerify = crossVerifies(card, worktree, orchestration);
       await store.setNodeHandoff(
         card.id,
         {
