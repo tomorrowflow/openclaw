@@ -65,7 +65,7 @@ configuredTimeoutMs <= 0 | src/cron/service/timeout-policy.ts | Timeout hardenin
 createCronScheduleSchema | src/agents/tools/cron-tool-schema.ts | Explicit TypeBox schema for cron job/patch objects (upstreamed 2026.7.2; schema split out of cron-tool.ts)
 
 # --- Auth ---
-ownerAllowAll | src/auto-reply/command-auth.ts | Wildcard (*) support for ownerAllowFrom
+# RETIRED 2026.11.1: ownerAllowFrom wildcard. The live config lists one explicit owner, so the patch only widened privileges.
 
 # --- CLI ---
 enablePositionalOptions | src/cli/program/build-program.ts | Positional options fix (prevents option shadowing)
