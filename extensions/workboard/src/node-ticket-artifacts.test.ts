@@ -73,14 +73,14 @@ async function readScreenshot(
   runtime: WorkboardNodeTicketRuntime,
   card: WorkboardCard,
   source: WorkboardNodeFileSource,
-  path: string,
+  filePath: string,
 ) {
   const { mimeType, bytes } = await readNodeTicketArtifact(
     runtime,
     card,
     "screenshot",
     source,
-    path,
+    filePath,
   );
   return { mimeType, contentBase64: bytes.toString("base64") };
 }

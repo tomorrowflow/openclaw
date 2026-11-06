@@ -169,7 +169,7 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
         ? {
             comments: comments.map((comment) => {
               const body = hiddenBody(comment);
-              return body === undefined ? comment : { ...comment, body };
+              return body === undefined ? comment : Object.assign({}, comment, { body });
             }),
           }
         : {}),

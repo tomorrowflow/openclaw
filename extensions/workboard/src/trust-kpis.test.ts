@@ -300,12 +300,13 @@ describe("projectWorkboardTrust", () => {
         worktree: {
           ...published(at),
           rework: { ...rework, round: 2 },
-          reviews: [0, 1, 2].map((round) => ({
-            ...accept(round),
-            decidedBy: "agent" as const,
-            sampled: true,
-            verification: { verdict: "pass" as const, startedAt: at, endedAt: at },
-          })),
+          reviews: [0, 1, 2].map((round) =>
+            Object.assign(accept(round), {
+              decidedBy: "agent" as const,
+              sampled: true,
+              verification: { verdict: "pass" as const, startedAt: at, endedAt: at },
+            }),
+          ),
         },
       }),
     ];

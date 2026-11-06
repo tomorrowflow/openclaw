@@ -15,15 +15,15 @@ export type SettledList = Exclude<ListState, { status: "loading" }>;
 /** One node ticket's files of one kind (screenshots, prototypes) as one Gateway connection lists them. */
 export type CardFileList = {
   /** Lists the shown card; another card or none drops the rest through `onForget`. */
-  show(card: WorkboardCard | undefined): void;
+  show: (card: WorkboardCard | undefined) => void;
   /**
    * Lists the shown card again, keeping its last list meanwhile. False, and a
    * no-op, while nothing is shown or the current list is loading.
    */
-  refresh(): boolean;
+  refresh: () => boolean;
   /** Undefined for another card or while the first list is pending. */
-  list(cardId: string): SettledList | undefined;
-  dispose(): void;
+  list: (cardId: string) => SettledList | undefined;
+  dispose: () => void;
 };
 
 /**

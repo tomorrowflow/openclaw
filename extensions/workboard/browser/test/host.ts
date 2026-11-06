@@ -143,7 +143,7 @@ export function createWorkboardTestHost() {
     registrations,
     listeners,
     events,
-    notify() {
+    notify: () => {
       for (const listener of listeners) {
         listener();
       }

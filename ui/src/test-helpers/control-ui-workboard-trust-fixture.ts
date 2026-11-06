@@ -64,18 +64,22 @@ export function buildWorkboardTrustFixture(boardId: string, baseTime: number) {
         blind: { a: counts(16, 16, 13), b: counts(5, 5, 4) },
       },
     ],
-    weeks: accepted.map((count, index) => ({
-      weekStart: monday - (7 - index) * week,
-      accepted: count,
-      autonomous: autonomous[index] ?? 0,
-      medianLeadTimeMs: (6 - index * 0.5) * 60 * 60 * 1000,
-      // Review wait and context were recorded from the fourth week on.
-      ...(index < 3
-        ? {}
-        : {
-            medianReviewWaitMs: (3 - index * 0.25) * 60 * 60 * 1000,
-            medianContextTokens: 90_000 + index * 8_000,
-          }),
-    })),
+    weeks: accepted.map((count, index) =>
+      Object.assign(
+        {
+          weekStart: monday - (7 - index) * week,
+          accepted: count,
+          autonomous: autonomous[index] ?? 0,
+          medianLeadTimeMs: (6 - index * 0.5) * 60 * 60 * 1000,
+        },
+        // Review wait and context were recorded from the fourth week on.
+        index < 3
+          ? {}
+          : {
+              medianReviewWaitMs: (3 - index * 0.25) * 60 * 60 * 1000,
+              medianContextTokens: 90_000 + index * 8_000,
+            },
+      ),
+    ),
   };
 }
