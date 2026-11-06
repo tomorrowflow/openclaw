@@ -30,6 +30,10 @@ describe("Signal owner authorization", () => {
     expect(authorize(OWNER, [`signal:${OWNER}`]).senderIsOwner).toBe(true);
   });
 
+  it("normalizes a formatted number through the Signal plugin", () => {
+    expect(authorize(OWNER, ["signal:+1 (555) 000-1111"]).senderIsOwner).toBe(true);
+  });
+
   it("denies another number", () => {
     expect(authorize("+15550002222", [`signal:${OWNER}`]).senderIsOwner).toBe(false);
   });
