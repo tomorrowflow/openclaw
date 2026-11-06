@@ -218,7 +218,8 @@ export function createFakeGitHub(remote: string) {
   const closedPulls: Array<{ html_url: string; sha: string; merged: boolean; mergedAt?: number }> =
     [];
   // The default branch's commits, newest first, for the regression watch.
-  const baseHistory: BaseBranchCommit[] = [];
+  // `checkOutcomes` lists each of the commit's own checks as GitHub reports it.
+  const baseHistory: Array<BaseBranchCommit & { checkOutcomes?: string[] }> = [];
   // The rung c merge queue's view: the base branch head's checks, and each open PR's head and checks.
   const queue = {
     baseChecks: "SUCCESS" as string | undefined,
@@ -327,10 +328,17 @@ export function createFakeGitHub(remote: string) {
       return new Response(JSON.stringify({ sha, merged: true }), { status: 200 });
     }
     if (url.endsWith("/graphql") && String(body?.query).includes("defaultBranchRef")) {
-      const nodes = baseHistory.map(({ oid, message, checks, parentChecks }) => ({
+      const nodes = baseHistory.map(({ oid, message, checks, parentChecks, checkOutcomes }) => ({
         oid,
         message,
-        statusCheckRollup: checks ? { state: checks } : null,
+        statusCheckRollup: checks
+          ? {
+              state: checks,
+              ...(checkOutcomes
+                ? { contexts: { nodes: checkOutcomes.map((conclusion) => ({ conclusion })) } }
+                : {}),
+            }
+          : null,
         parents: { nodes: [{ statusCheckRollup: parentChecks ? { state: parentChecks } : null }] },
       }));
       return new Response(

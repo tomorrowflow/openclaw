@@ -147,6 +147,33 @@ describe("merge regression watch", () => {
     expect(await ticket.trust()).toMatchObject({ regressions: 1 });
   });
 
+  it("keeps a rung c class when the merge commit's red comes from a cancelled check alone", async () => {
+    const ticket = await mergedTicket("c");
+    const merge = {
+      oid: MERGE,
+      message: "fix parser (#7)",
+      checks: "FAILURE",
+      parentChecks: "SUCCESS",
+      checkOutcomes: ["SUCCESS", "SUCCESS", "CANCELLED", "SKIPPED"],
+    };
+    ticket.github.baseHistory.push(merge);
+    await ticket.syncPass();
+    expect((await ticket.pullRequest())?.regression).toBeUndefined();
+    expect((await ticket.docsRung())?.rung).toBe("c");
+    expect(await ticket.trust()).toMatchObject({ regressions: 0 });
+
+    // A rerun that fails is a verdict, and the still-watched merge picks it up.
+    merge.checkOutcomes = ["SUCCESS", "SUCCESS", "FAILURE", "SKIPPED"];
+    await ticket.syncPass();
+    expect((await ticket.pullRequest())?.regression).toEqual({
+      kind: "red_main",
+      commit: MERGE,
+      at: expect.any(Number),
+      demoted: true,
+    });
+    expect((await ticket.docsRung())?.rung).toBe("b");
+  });
+
   it("stops watching a merge 7 days after it merged", async () => {
     const ticket = await mergedTicket("c");
     // The merge's own pass already read the history once, finding nothing.
