@@ -323,31 +323,22 @@ function resolveOwnerAuthorizationState(
   if (!allowAll && channelCommandOwners.length === 0 && params.to) {
     channelCommandOwners.push(...normalizeAllowFromEntry({ ...params, value: params.to }));
   }
-  // Fork: a configured "*" stays visible in the owner list (see explicitOwnerAllowAll).
-  const explicitOwners = Array.from(new Set(configOwnerAllowFromList));
+  const explicitOwners = Array.from(new Set(stripWildcardAllowFrom(configOwnerAllowFromList)));
   const contextCommandOwners = stripWildcardAllowFrom(contextOwnerAllowFromList);
   // Channel and context lists can authorize commands within one transport, but only the global
   // owner list grants owner-only command and action authority.
-  // Fork: a wildcard owner entry makes every sender an owner. Only the global
-  // list waives owner-only enforcement; a context wildcard opens candidates.
-  const explicitOwnerAllowAll = configOwnerAllowFromList.some(isWildcardAllowFromEntry);
-  const ownerAllowAll =
-    explicitOwnerAllowAll || contextOwnerAllowFromList.some(isWildcardAllowFromEntry);
   const commandOwnerCandidates = Array.from(
     new Set(
-      ownerAllowAll
-        ? ["*"]
-        : explicitOwners.length > 0
-          ? explicitOwners
-          : contextCommandOwners.length > 0
-            ? contextCommandOwners
-            : channelCommandOwners,
+      explicitOwners.length > 0
+        ? explicitOwners
+        : contextCommandOwners.length > 0
+          ? contextCommandOwners
+          : channelCommandOwners,
     ),
   );
   return {
     commandOwnerCandidates,
     explicitOwners,
-    explicitOwnerAllowAll,
   };
 }
 
@@ -503,20 +494,16 @@ function resolveCommandAuthorizationState(
     ctx.GatewayClientScopes.includes("operator.admin");
   const ownerAllowlistConfigured = ownerState.explicitOwners.length > 0;
   const assertOwnerCurrent = captureCommandOwnerAssertion(ctx);
-  const ownerAllowAll = ownerState.explicitOwnerAllowAll;
   const senderIsOwner =
     senderIsOwnerByIdentity ||
     senderIsOwnerByScope ||
-    getCommandOwnerAuthority(ctx)?.isCurrent() === true ||
-    ownerAllowAll;
-  const requireOwner = enforceOwner || (ownerAllowlistConfigured && !ownerAllowAll);
+    getCommandOwnerAuthority(ctx)?.isCurrent() === true;
+  const requireOwner = enforceOwner || ownerAllowlistConfigured;
   const isOwnerForCommands = !requireOwner
     ? true
-    : ownerAllowAll
-      ? true
-      : ownerAllowlistConfigured
-        ? senderIsOwner
-        : senderIsOwner || Boolean(matchedCommandOwner);
+    : ownerAllowlistConfigured
+      ? senderIsOwner
+      : senderIsOwner || Boolean(matchedCommandOwner);
   // Literal turns cannot regain command access through an allowlist; inline
   // command consumers must preserve their text while owner facts remain intact.
   const access =
