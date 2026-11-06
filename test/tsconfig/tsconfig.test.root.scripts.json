@@ -13,6 +13,7 @@
     "../../packages/**/*.d.ts",
     "../../ui/**/*.d.ts"
   ],
+  // The mobile-release pair imports .github/actions files the fork removes on every sync.
   "exclude": [
     "../../node_modules",
     "../../dist",
@@ -29,6 +30,8 @@
     "../../test/scripts/release-*.ts",
     "../../test/scripts/release-*.tsx",
     "../../test/scripts/vitest-*.ts",
-    "../../test/scripts/vitest-*.tsx"
+    "../../test/scripts/vitest-*.tsx",
+    "../../test/scripts/mobile-release-ci.test.ts",
+    "../../test/scripts/mobile-release-process.test-support.ts"
   ]
 }
