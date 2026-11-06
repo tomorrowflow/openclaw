@@ -11,6 +11,7 @@ import {
   createDoctorContext,
   createDoctorLintFixture,
 } from "./doctor-health-contributions-suite.test-support.js";
+import { resolveDoctorContributionHealthChecks } from "./doctor-health-contributions.js";
 import {
   createDoctorConfigFixture,
   createDoctorHealthFlowContext,
@@ -18,7 +19,6 @@ import {
   createDoctorPrompterFixture,
   resolveDoctorHealthContributions,
 } from "./doctor-health-contributions.test-support.js";
-import { resolveDoctorContributionHealthChecks } from "./doctor-health-contributions.js";
 import { runDoctorLintChecks } from "./doctor-lint-flow.js";
 import type { HealthCheck } from "./health-checks.js";
 
