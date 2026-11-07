@@ -804,6 +804,14 @@ export type WorkboardOrchestrationSettings = {
    */
   classRungs?: Record<string, WorkboardClassRung>;
   /**
+   * One-way-door paths (FAC-09): a PR whose diff touches one, by any class,
+   * is never auto-merged at rung c and waits for the operator's own merge.
+   * Repo-relative files or directories; a trailing `/` holds the directory
+   * alone, otherwise the entry holds that file and the directory of that
+   * name. Operator-set only.
+   */
+  heldPaths?: string[];
+  /**
    * The independent verification run on each imported round: a session of
    * `agentId` on `model` (`provider/model`) that re-runs the ticket's proof on
    * its node and tries to break the change. Absent = no verification.
