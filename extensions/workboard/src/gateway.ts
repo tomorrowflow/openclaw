@@ -16,6 +16,7 @@ import {
   WorkboardUploadsDisabledError,
   type GatewayMethodContext,
 } from "./gateway-helpers.js";
+import type { WorkboardHealthReader } from "./health.js";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sessions.js";
 import {
   listNodeTicketArtifacts,
@@ -141,6 +142,7 @@ export function registerWorkboardGatewayMethods(params: {
     cards: readonly WorkboardCard[];
     sessionKey?: string;
   }) => Promise<void>;
+  health?: WorkboardHealthReader;
 }) {
   const { api } = params;
   const assertUploadsAllowed = (client: GatewayMethodContext["client"]) => {
@@ -524,6 +526,12 @@ export function registerWorkboardGatewayMethods(params: {
     return store.mergeDigest({ boardId: input.boardId, ...(since === undefined ? {} : { since }) });
   });
   register("workboard.overview", READ_SCOPE, ({ params: input }) => store.overview(input.boardId));
+  register("workboard.health", READ_SCOPE, () => {
+    if (!params.health) {
+      throw new Error("Workboard health is unavailable.");
+    }
+    return params.health.read();
+  });
   register("workboard.transcriptViewer", READ_SCOPE, () => ({ port: transcriptViewerPort }));
   register("workboard.officeViewer", READ_SCOPE, () => ({ port: officeViewerPort }));
   register("workboard.architectureViewer", READ_SCOPE, () => ({ port: architectureViewerPort }));

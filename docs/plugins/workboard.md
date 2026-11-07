@@ -554,7 +554,7 @@ do not need it: each worker run is granted `workboard_heartbeat`,
 | `workboard_specify`                                                                                                                              | Turn a rough triage/backlog card into a clarified `todo` card; records the spec summary on the card.                                                                                      |
 | `workboard_decompose`                                                                                                                            | Fan a parent orchestration card into linked children, inheriting board/tenant metadata; can complete the parent with a created-card manifest.                                             |
 | `workboard_notify_subscribe` / `workboard_notify_list` / `workboard_notify_events` / `workboard_notify_advance` / `workboard_notify_unsubscribe` | Manage notification subscriptions. Event reads are replay-safe; `advance` moves the durable cursor so callers resume without losing or double-reading completed/failed/stale card events. |
-| `workboard_boards` / `workboard_stats`                                                                                                           | Inspect board namespaces and queue stats; `trust` adds the trust KPIs, `overview` the Factory overview, `mergeDigest` (with `since`) the rung c merge digest.                             |
+| `workboard_boards` / `workboard_stats`                                                                                                           | Inspect board namespaces and queue stats; `trust` adds the trust KPIs, `overview` the Factory overview, `mergeDigest` (with `since`) the rung c merge digest, `health` the factory health. |
 | `workboard_promote` / `workboard_reassign` / `workboard_reclaim`                                                                                 | Recover or hand off stuck work.                                                                                                                                                           |
 | `workboard_comment` / `workboard_proof`                                                                                                          | Add handoff notes or attach proof/artifact references.                                                                                                                                    |
 | `workboard_escalate`                                                                                                                             | Record that a node ticket's open questions went to the operator (`handoff.escalatedAt`), so automation reviews the round once                                                             |
@@ -1352,7 +1352,8 @@ evidence: its start records it in `rework.unchangedRounds`.
 #### Trust KPIs
 
 `workboard.cards.trust {boardId}` (and `workboard_stats {trust: true}` for
-agents, which also takes `overview: true` and `mergeDigest: true`) projects
+agents, which also takes `overview: true`, `mergeDigest: true`, and
+`health: true`) projects
 node ticket facts on read. Per task
 class (a `class:<name>` label, else `unclassified`) it counts tickets,
 accepted (published), clean accepts (no rework round or outside commit),
@@ -1794,6 +1795,23 @@ read of its own. It returns `needsYou`, `inFlight`, `shipped`, and `insights`
 rows (`cardId`, `boardId`, `title`, `summary`, `stage`, plus the band's fields),
 `open` counts per status (`done` excluded), and the current trust KPI `week`.
 Without `boardId` it covers every board, and `boardId` reports as `all`.
+
+**Health:** `workboard.health` (`operator.read`; `workboard_stats {health: true}`
+for agents) projects the factory's operational state for the unarchived boards,
+so a quota outage or a dead automation shows in the next brief instead of a day
+later. `automations` lists every scheduler job a board names as its
+`automationJobId` or that one of the boards' `defaultAssignee` agents (and, from
+the tool, the calling agent) runs: `enabled`, `lastRunStatus`, `lastRunAt`,
+`lastError` (the run's error, else its delivery error), `nextRunAt`,
+`runningSince`, and the `boardIds` naming it; a named job the scheduler does not
+know reports `exists: false`. `nodes` lists every node the boards' default
+targets and routes name with `paired`, `connected`, and `lastSeenAt`. `accounts`
+lists each of those agents' primary `provider` and `model` with the stored
+profiles for that provider, each `ok` or in a `cooldown`, `disabled`, or
+`blocked` window `until` an epoch ms with its `reason`. A fact whose source
+could not be read (the health service not running, no node runtime, an
+unreadable auth store) is `{status: "unknown", reason}` in its place; the method
+never guesses.
 
 ### Session-board widgets
 

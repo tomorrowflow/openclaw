@@ -6,6 +6,7 @@ import { createWorkboardAutomationNudgeService } from "./src/automation-nudge.js
 import { createWorkboardChangeEventService } from "./src/change-events.js";
 import { registerWorkboardCommand } from "./src/command.js";
 import { dispatchAndStartWorkboardCards } from "./src/dispatcher.js";
+import { createWorkboardHealthService } from "./src/health.js";
 import {
   readWorkboardLifecycleSessions,
   type WorkboardLifecycleSessionReader,
@@ -121,6 +122,7 @@ export default definePluginEntry({
       onMatched: automationNudge.nudge,
     });
     resourceServices.push(lifecycleSync);
+    const health = createWorkboardHealthService({ store, runtime: api.runtime });
     api.session.controls.registerControlUiDescriptor({
       surface: "tab",
       id: "workboard",
@@ -148,9 +150,10 @@ export default definePluginEntry({
       sessionsBoard,
       readSessions,
       onOperatorComment: automationNudge.nudge,
+      health,
     });
     registerWorkboardCommand({ api, store });
-    for (const service of [changeEvents, automationNudge, sessionsBoard, lifecycleSync]) {
+    for (const service of [changeEvents, automationNudge, sessionsBoard, lifecycleSync, health]) {
       api.registerService(service);
     }
     api.on("gateway_start", (_event, context) => lifecycleSync.onGatewayStart(context.abortSignal));
@@ -174,7 +177,7 @@ export default definePluginEntry({
     api.registerTool(
       (context) =>
         guardWorkboardToolsForWorkspaceAccess(
-          createWorkboardTools({ context, store }),
+          createWorkboardTools({ context, store, health }),
           context,
           api.runtime.sandbox.resolveWorkspaceAuthority,
         ),

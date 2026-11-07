@@ -3,6 +3,7 @@ import type { AnyAgentTool } from "openclaw/plugin-sdk/plugin-entry";
 import { asNonArrayRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { Type } from "typebox";
 import { redactCard, redactDispatchResult } from "./card-redaction.js";
+import type { WorkboardHealthReader } from "./health.js";
 import type { WorkboardAgentActor } from "./store-inputs.js";
 import type { WorkboardStore } from "./store.js";
 import {
@@ -29,10 +30,18 @@ export function createWorkboardOrchestrationTools(params: {
   store: WorkboardStore;
   ownerId: string;
   actor: WorkboardAgentActor;
+  agentId?: string;
+  health?: WorkboardHealthReader;
 }): AnyAgentTool[] {
   const { store, ownerId, actor } = params;
   const { readScopedCardToolParams, scopedCardMutation, claimedCardMutation } =
     createWorkboardCardMutations(store, ownerId);
+  const readHealth = () => {
+    if (!params.health) {
+      throw new Error("Workboard health is unavailable.");
+    }
+    return params.health.read({ agentId: params.agentId });
+  };
   return [
     {
       name: "workboard_boards",
@@ -108,7 +117,7 @@ export function createWorkboardOrchestrationTools(params: {
       name: "workboard_stats",
       label: "Workboard Stats",
       description:
-        "Summarize Workboard counts by status and assignee for one board or all boards. With trust, also return the node ticket trust KPIs: per task class, and a weekly autonomy and lead time trend. With overview, also return the Factory overview: what waits on the operator, what is in flight, and what shipped this week. With mergeDigest, also return the rung c merges in the window, each with its revert command.",
+        "Summarize Workboard counts by status and assignee for one board or all boards. With trust, also return the node ticket trust KPIs: per task class, and a weekly autonomy and lead time trend. With overview, also return the Factory overview: what waits on the operator, what is in flight, and what shipped this week. With mergeDigest, also return the rung c merges in the window, each with its revert command. With health, also return the factory's operational state: the boards' automation jobs with their last run and error, the paired state of the boards' target nodes, and whether the assignee agents' inference profiles are in a cooldown, disabled, or blocked window.",
       parameters: strictObject({
         boardId: Type.Optional(Type.String({ description: "Optional board id filter." })),
         trust: Type.Optional(
@@ -132,6 +141,12 @@ export function createWorkboardOrchestrationTools(params: {
               "Epoch milliseconds starting the merge digest window; only used with mergeDigest.",
           }),
         ),
+        health: Type.Optional(
+          Type.Boolean({
+            description:
+              "Include the factory health: automation jobs, target node liveness, and inference profile windows.",
+          }),
+        ),
       }),
       execute: async (_toolCallId, rawParams) => {
         const record = asNonArrayRecord(rawParams);
@@ -149,6 +164,7 @@ export function createWorkboardOrchestrationTools(params: {
                 }),
               }
             : {}),
+          ...(record.health === true ? { health: await readHealth() } : {}),
         });
       },
     },
