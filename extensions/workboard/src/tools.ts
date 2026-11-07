@@ -471,18 +471,27 @@ export function createWorkboardTools(params: {
       name: "workboard_move",
       label: "Workboard Move",
       description:
-        "Move a Workboard card to another status. Claimed cards require matching claim scope.",
+        "Move a Workboard card to another status, change its priority, or both; at least one of status or priority is required. Claimed cards require matching claim scope.",
       parameters: strictObject({
         id: cardIdField(),
-        status: Type.Union(
-          WORKBOARD_STATUSES.map((status) => Type.Literal(status)),
-          { description: "Target Workboard status." },
+        status: Type.Optional(
+          Type.Union(
+            WORKBOARD_STATUSES.map((status) => Type.Literal(status)),
+            { description: "Target Workboard status." },
+          ),
         ),
+        priority: Type.Optional(Type.String({ description: "low, normal, high, or urgent." })),
         token: claimTokenField("Claim token for claimed cards."),
       }),
-      execute: scopedCardMutation((id, record, scope) =>
-        store.move(id, record.status, undefined, scope, { actor }),
-      ),
+      execute: scopedCardMutation((id, record, scope) => {
+        if (record.status === undefined && record.priority === undefined) {
+          throw new Error("workboard_move needs a status, a priority, or both.");
+        }
+        return store.move(id, record.status, undefined, scope, {
+          actor,
+          priority: record.priority,
+        });
+      }),
     },
     {
       name: "workboard_grill_done",
