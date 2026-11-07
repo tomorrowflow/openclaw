@@ -187,8 +187,14 @@ async function readHeldPaths(
       const entries = Array.isArray(reply) ? reply : [];
       listed += entries.length;
       for (const entry of entries) {
-        if (!isRecord(entry)) {
-          continue;
+        if (!isRecord(entry) || typeof entry.filename !== "string") {
+          return { kind: "unknown", detail: "GitHub listed a file without a name" };
+        }
+        if (entry.status === "renamed" && typeof entry.previous_filename !== "string") {
+          return {
+            kind: "unknown",
+            detail: `GitHub listed ${entry.filename} as renamed without its old name`,
+          };
         }
         for (const path of [entry.filename, entry.previous_filename]) {
           if (typeof path === "string" && !files.includes(path)) {

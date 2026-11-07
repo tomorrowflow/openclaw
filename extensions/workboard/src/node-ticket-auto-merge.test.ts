@@ -330,6 +330,30 @@ describe("runAutoMergeQueue held paths", () => {
     ]);
   });
 
+  it("holds without a record when a listed file has no name or a rename lacks its old name", async () => {
+    const queue = acmeQueue();
+    const nameless = queue.candidate(1, { publishedAt: 0 });
+    queue.github.queue.pullFiles.set("https://github.com/acme/app/pull/1", [
+      { filename: "docs/a.md" },
+      {} as { filename: string },
+    ]);
+    const rename = queue.candidate(2, { publishedAt: 1 });
+    queue.github.queue.pullFiles.set("https://github.com/acme/app/pull/2", [
+      { filename: "docs/b.md", status: "renamed" } as { filename: string },
+    ]);
+
+    await queue.run([nameless, rename], held);
+
+    expect(queue.github.merges).toEqual([]);
+    expect(queue.store.setAutoMergeWait).not.toHaveBeenCalled();
+    expect(queue.warn.mock.calls.map(([message]) => message)).toEqual([
+      expect.stringMatching(/holds card-1: GitHub listed a file without a name/),
+      expect.stringMatching(
+        /holds card-2: GitHub listed docs\/b.md as renamed without its old name/,
+      ),
+    ]);
+  });
+
   it("keeps a held PR held without another read, and reads a new accepted head again", async () => {
     const queue = acmeQueue();
     const wait = { reason: "held_path", headCommit: "head-1", since: 0 } as const;
