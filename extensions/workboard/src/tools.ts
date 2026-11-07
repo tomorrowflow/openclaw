@@ -28,7 +28,6 @@ function summarizeCard(card: WorkboardCard) {
     status: card.status,
     priority: card.priority,
     labels: card.labels,
-    updatedAt: card.updatedAt,
     agentId: card.agentId,
     tenant: card.metadata?.automation?.tenant,
     boardId: card.metadata?.automation?.boardId ?? "default",
