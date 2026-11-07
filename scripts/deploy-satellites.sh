@@ -3,7 +3,8 @@
 #
 #   deploy-satellites.sh prepare-source  build the checked-out commit on source satellites
 #   deploy-satellites.sh prepare         stage the installed build next to each running node
-#   deploy-satellites.sh activate        switch each node to the staged build and restart it
+#   deploy-satellites.sh activate        switch each node to the staged build and restart it,
+#                                        once no Workboard card is working on that node
 #   deploy-satellites.sh provision       apply the node profile (Claude settings, skills, tool checks)
 #
 # sync-and-deploy.sh starts `prepare-source` in the background before its own
@@ -53,6 +54,14 @@ PROFILE_DIR="${OPENCLAW_NODE_PROFILE_DIR:-$HOME/.config/openclaw-deploy/node-pro
 NODE_RULES_DIR="${OPENCLAW_NODE_RULES_DIR:-/home/openclaw/.openclaw/workspace/factory/node-tool-rules}"
 NODE_USER=factory
 GLOBAL_ROOT="$(npm root -g)/openclaw"
+# activate restarts the node process, which takes the Claude session or verifier
+# exec of any Workboard card working on that node with it (IOS-A85's verifier
+# died mid-xcodebuild on 2026-11-07). Each satellite's activate therefore holds
+# while a card targets that node, up to this many seconds, then fails on its own
+# so the deploy's satellite warning names the node. sync-and-deploy.sh forwards
+# its --allow-running-tickets as OPENCLAW_ALLOW_RUNNING_TICKETS=1.
+ALLOW_RUNNING_TICKETS="${OPENCLAW_ALLOW_RUNNING_TICKETS:-0}"
+BUSY_WAIT_SECONDS="${OPENCLAW_SATELLITE_BUSY_WAIT_SECONDS:-3600}"
 # The Mac build stays silent for minutes (output goes to /dev/null), and an idle
 # session dropped mid-build ("client_loop: send disconnect: Broken pipe").
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
@@ -178,8 +187,55 @@ check_mac_node() {
     openclaw --version | grep -q '($SHA)'"
 }
 
+oc_openclaw() {
+  (cd /tmp && sudo -n -u openclaw openclaw "$@")
+}
+
+# Prints the Workboard node tickets working on the node named <name>, one per
+# line: running, or verifying (the verifier execs on the card's node too).
+# Empty when there are none; fails when the board or the node list cannot be
+# read, or when <name> is not a paired node's display name.
+list_busy_node_tickets() {
+  local name="$1" node_id cards
+  node_id="$(oc_openclaw nodes list --json 2>/dev/null \
+    | jq -er --arg name "$name" '.paired[] | select(.displayName == $name) | .nodeId')" || return 1
+  cards="$(oc_openclaw gateway call workboard.cards.list --json --params '{}' 2>/dev/null)" || return 1
+  jq -er --arg id "$node_id" '[.cards[]
+      | select(.metadata.automation.target.kind == "node-claude")
+      | select(.metadata.automation.target.nodeId == $id)
+      | select(.status == "running"
+          or .metadata.automation.target.worktree.verification.phase == "running")
+      | "    \(.id)  \(.title)"] | join("\n")' <<<"$cards"
+}
+
+# Holds <name>'s activate until no card works on that node. A ticket starting in
+# the seconds between the last check and the restart is accepted. An unreadable
+# board only warns: the deploy must still be able to repair a broken host.
+wait_for_idle_node() {
+  local name="$1" busy shown="" deadline=$((SECONDS + BUSY_WAIT_SECONDS))
+  [[ "$ALLOW_RUNNING_TICKETS" != 1 ]] || { echo "running node ticket guard skipped (OPENCLAW_ALLOW_RUNNING_TICKETS=1)"; return 0; }
+  while true; do
+    if ! busy="$(list_busy_node_tickets "$name")"; then
+      echo "could not list $name's node tickets (Gateway down, workboard plugin absent, or not a paired node) — activating without the check"
+      return 0
+    fi
+    [[ -n "$busy" ]] || return 0
+    if [[ "$busy" != "$shown" ]]; then
+      echo "holding activate; the restart would kill these node tickets:"
+      echo "$busy"
+      shown="$busy"
+    fi
+    if ((SECONDS >= deadline)); then
+      echo "node tickets still busy after $((BUSY_WAIT_SECONDS / 60)) min; $name stays on its old build — rerun $(basename "$0") activate once they finish" >&2
+      return 1
+    fi
+    sleep 30
+  done
+}
+
 activate_one() {
   local name="$1" kind="$2" target="$3"
+  wait_for_idle_node "$name"
   case "$kind" in
     macos-source)
       as_mac "$target" "

@@ -34,8 +34,9 @@ LOG_DIR="$HOME/logs"
 # deployed line and a smaller patch cut is the one to ship.
 #
 # --allow-running-tickets skips the running node ticket guard (see
-# check_running_node_tickets below). Use it only when the operator accepts
-# that a running ticket on a factory node may fail during the build.
+# check_running_node_tickets below) and the per-node hold in
+# deploy-satellites.sh activate. Use it only when the operator accepts that a
+# running ticket on a factory node may fail during the build or the restart.
 RUN_SYNC=1
 ALLOW_RUNNING_TICKETS=0
 USAGE="usage: $(basename "$0") [--deploy-only | --target X.Y.Z] [--allow-running-tickets]"
@@ -52,6 +53,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+export OPENCLAW_ALLOW_RUNNING_TICKETS="$ALLOW_RUNNING_TICKETS"
 
 # Where failure alerts go. openclaw runs as the openclaw user, so the send is
 # wrapped in `sudo -u openclaw`. Signal target is an E.164 number.
@@ -832,7 +834,8 @@ fi
 # is offline or fails keeps its old build and gets a Signal warning naming it.
 step "Satellites"
 # Activate runs even after a partial prepare: each satellite stands alone, and
-# one without a staged build just fails its own activate.
+# one without a staged build just fails its own activate. Cards started since
+# the cutover hold are safe: activate waits per node for its running tickets.
 SATELLITE_PROBLEMS=""
 wait "$SATELLITES_SRC_PID" || SATELLITE_PROBLEMS="prepare"
 wait "$SATELLITES_PREP_PID" || SATELLITE_PROBLEMS="prepare"
