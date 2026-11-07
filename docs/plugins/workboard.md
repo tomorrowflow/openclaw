@@ -475,8 +475,11 @@ scheduler authority, including after the worker's tool authority closes, with ev
 for the same board coalesced for 60 seconds; events during that window run the
 automation once more when it ends. If an attempt ends while its run is still
 active, the lifecycle sweep nudges the automation when it records the terminal
-outcome. The automation's schedule remains the backstop. Disabled and
-auto-disabled automations are never nudged. Deleting
+outcome. An operator comment posted through the Gateway (`workboard.cards.comment`,
+the card page's comment box) nudges the board's automation the same way, so a
+decision written on a card does not wait for the next scheduled run; a comment
+from an automation run itself nudges nothing. The automation's schedule remains
+the backstop. Disabled and auto-disabled automations are never nudged. Deleting
 the board does not delete or otherwise mutate the
 operator-owned automation job.
 
