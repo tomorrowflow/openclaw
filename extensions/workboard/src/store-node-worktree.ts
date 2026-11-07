@@ -1,5 +1,5 @@
 import type {
-  WorkboardAutoMergeWait,
+  WorkboardAutoMergeWaitCause,
   WorkboardCard,
   WorkboardMergeRegression,
   WorkboardNodeHandoff,
@@ -206,27 +206,34 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
 
   /**
    * Records why the rung c auto-merge passes over the PR, with its notice,
-   * only when the reason changed; undefined clears it without a notice.
+   * only when the cause changed: a held path read at another head is a new
+   * cause. No cause clears it without a notice.
    */
   async setAutoMergeWait(
     id: string,
-    input: { pullRequestUrl: string; reason?: WorkboardAutoMergeWait; at: number; notice?: string },
+    input: {
+      pullRequestUrl: string;
+      wait?: WorkboardAutoMergeWaitCause;
+      at: number;
+      notice?: string;
+    },
   ): Promise<void> {
     await this.updatePullRequestFacts(
       id,
       (pullRequest, handoff) => {
-        if (
-          handoff.pullRequestUrl !== input.pullRequestUrl ||
-          pullRequest.autoMergeWait?.reason === input.reason
-        ) {
+        const current = pullRequest.autoMergeWait;
+        const unchanged =
+          current?.reason === input.wait?.reason &&
+          (current?.reason !== "held_path" ||
+            input.wait?.reason !== "held_path" ||
+            current.headCommit === input.wait.headCommit);
+        if (handoff.pullRequestUrl !== input.pullRequestUrl || unchanged) {
           return undefined;
         }
         const { autoMergeWait: _wait, ...rest } = pullRequest;
-        return input.reason
-          ? { ...rest, autoMergeWait: { reason: input.reason, since: input.at } }
-          : rest;
+        return input.wait ? { ...rest, autoMergeWait: { ...input.wait, since: input.at } } : rest;
       },
-      input.reason ? input.notice : undefined,
+      input.wait ? input.notice : undefined,
     );
   }
 

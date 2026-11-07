@@ -1,4 +1,5 @@
 import type {
+  WorkboardAutoMergeWaitRecord,
   WorkboardExecutionTarget,
   WorkboardMergeRegression,
   WorkboardNodeFeedback,
@@ -130,9 +131,7 @@ function normalizePullRequestState(value: unknown): PullRequestFacts | undefined
   const mergedAt = resolveOptionalIntegerOption(value.mergedAt, { min: 0 });
   const mergeCommit = normalizeBoundedString(value.mergeCommit, undefined, 64, "merge commit");
   const regression = normalizeMergeRegression(value.regression);
-  const wait = isRecord(value.autoMergeWait) ? value.autoMergeWait : undefined;
-  const waitSince = resolveOptionalIntegerOption(wait?.since, { min: 0 });
-  const waitReason = wait?.reason;
+  const autoMergeWait = normalizeAutoMergeWait(value.autoMergeWait);
   return {
     state,
     checkedAt,
@@ -140,14 +139,36 @@ function normalizePullRequestState(value: unknown): PullRequestFacts | undefined
     ...(mergeCommit ? { mergeCommit } : {}),
     ...(regression ? { regression } : {}),
     ...(value.autoMerged === true ? { autoMerged: true as const } : {}),
-    ...(waitSince !== undefined &&
-    (waitReason === "base_red" ||
-      waitReason === "checks_failed" ||
-      waitReason === "checks_missing" ||
-      waitReason === "head_moved")
-      ? { autoMergeWait: { reason: waitReason, since: waitSince } }
-      : {}),
+    ...(autoMergeWait ? { autoMergeWait } : {}),
   };
+}
+
+function normalizeAutoMergeWait(value: unknown): WorkboardAutoMergeWaitRecord | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const since = resolveOptionalIntegerOption(value.since, { min: 0 });
+  if (since === undefined) {
+    return undefined;
+  }
+  switch (value.reason) {
+    case "base_red":
+    case "checks_failed":
+    case "checks_missing":
+    case "head_moved":
+      return { reason: value.reason, since };
+    case "held_path": {
+      const headCommit = normalizeBoundedString(value.headCommit, undefined, 64, "held head");
+      const paths = Array.isArray(value.paths)
+        ? value.paths.filter((path): path is string => typeof path === "string")
+        : [];
+      return headCommit && paths.length
+        ? { reason: "held_path", since, headCommit, paths }
+        : undefined;
+    }
+    default:
+      return undefined;
+  }
 }
 
 function normalizeMergeRegression(value: unknown): WorkboardMergeRegression | undefined {

@@ -371,7 +371,7 @@ export type WorkboardNodeHandoff =
          * Why the rung c auto-merge passes over this PR, since when; the
          * notice is posted once per reason.
          */
-        autoMergeWait?: { reason: WorkboardAutoMergeWait; since: number };
+        autoMergeWait?: WorkboardAutoMergeWaitRecord;
       };
       /**
        * When the PR state sync found the PR in conflict with its base and
@@ -384,9 +384,25 @@ export type WorkboardNodeHandoff =
 /**
  * Why the rung c auto-merge does not merge an agent-accepted PR: the base
  * branch is red (the whole queue halts), the PR's checks failed or never
- * reported, or its head is no longer the commit the agent accepted.
+ * reported, its head is no longer the commit the agent accepted, or its diff
+ * touches one of the board's `heldPaths`, which only the operator merges.
  */
-export type WorkboardAutoMergeWait = "base_red" | "checks_failed" | "checks_missing" | "head_moved";
+export type WorkboardAutoMergeWait =
+  | "base_red"
+  | "checks_failed"
+  | "checks_missing"
+  | "head_moved"
+  | "held_path";
+
+/**
+ * A held-path wait names the PR files that matched the board's `heldPaths`
+ * and the head they were read at; a new accepted head is evaluated again.
+ */
+export type WorkboardAutoMergeWaitCause =
+  | { reason: Exclude<WorkboardAutoMergeWait, "held_path"> }
+  | { reason: "held_path"; headCommit: string; paths: string[] };
+
+export type WorkboardAutoMergeWaitRecord = WorkboardAutoMergeWaitCause & { since: number };
 
 /**
  * A merged node ticket PR that broke its base branch: a later commit reverted
@@ -1046,12 +1062,16 @@ export type WorkboardOverviewWaitReason =
   | "sampled"
   | "questions"
   | "grilling"
-  | "blocked";
+  | "blocked"
+  | "held_path";
 
 export type WorkboardOverviewWaiting = WorkboardOverviewCard & {
   reason: WorkboardOverviewWaitReason;
   /** Absent when the card entered the wait before its newest 50 events. */
   waitingSince?: number;
+  /** With `held_path`: the PR files that matched the board's `heldPaths`, and the PR to merge by hand. */
+  heldPaths?: string[];
+  pullRequestUrl?: string;
 };
 
 /** A card waiting on the factory: queued, running, or with an agent to review, answer, or reopen it. */
