@@ -4,7 +4,8 @@ import path from "node:path";
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sessions.js";
-import { parseVerificationReply } from "./node-ticket-verification.js";
+import { crossVerifies, parseVerificationReply } from "./node-ticket-verification.js";
+import { cardInSample } from "./node-ticket.js";
 import {
   finishNodeTicket,
   git,
@@ -37,7 +38,12 @@ function verificationReply(block: unknown) {
  * the session owner's view says whether that session still runs.
  */
 async function verifiedTicket(
-  params: { notes?: string; failCreate?: string; docsRung?: "b" | "c"; cross?: boolean } = {},
+  params: {
+    notes?: string;
+    failCreate?: string;
+    docsRung?: "b" | "c";
+    cross?: boolean | { sampleEvery: number };
+  } = {},
 ) {
   const onReview = vi.fn(async (_card: WorkboardCard) => {});
   const verifier = { running: false, history: [] as unknown[], creates: [] as unknown[] };
@@ -58,7 +64,9 @@ async function verifiedTicket(
     id: "default",
     orchestration: {
       verifier: VERIFIER,
-      ...(params.cross ? { crossVerifier: CROSS_VERIFIER } : {}),
+      ...(params.cross
+        ? { crossVerifier: { ...CROSS_VERIFIER, ...(params.cross === true ? {} : params.cross) } }
+        : {}),
     },
   });
   if (params.notes) {
@@ -285,6 +293,33 @@ describe("node ticket verification", () => {
 
     // The operator's re-run drops both; the cross-verifier runs again after the next pass.
     await store.dropNodeVerification(card.id);
+    await expect(ticket.crossVerificationOf()).resolves.toBeUndefined();
+  });
+
+  it("cross-verifies only the rung c rounds in the cross-verifier's sample, chosen at import", async () => {
+    const ticket = await verifiedTicket({ docsRung: "c", cross: { sampleEvery: 100 } });
+    // A sample size that leaves this card out; all six at once would need a 1-in-30030 id.
+    const left = [2, 3, 5, 7, 11, 13].find(
+      (every) => !cardInSample(`cross:${ticket.card.id}`, every),
+    )!;
+    await ticket.store.upsertBoard({
+      id: "default",
+      orchestration: {
+        verifier: VERIFIER,
+        crossVerifier: { ...CROSS_VERIFIER, sampleEvery: left },
+      },
+    });
+    await ticket.handoffs.resume(ticket.warn);
+    const handoff = (await ticket.store.get(ticket.card.id))?.metadata?.automation?.target?.worktree
+      ?.handoff;
+    expect(handoff).toMatchObject({ phase: "imported", verify: true });
+    expect(handoff?.phase === "imported" && handoff.crossVerify).toBeUndefined();
+
+    ticket.verifier.running = false;
+    ticket.verifier.history = verificationReply({ verdict: "pass", summary: "pytest green" });
+    await ticket.handoffs.resume(ticket.warn);
+    expect(ticket.verifier.creates).toHaveLength(1);
+    expect(ticket.onReview).toHaveBeenCalledOnce();
     await expect(ticket.crossVerificationOf()).resolves.toBeUndefined();
   });
 
@@ -596,6 +631,52 @@ describe("node ticket verification", () => {
     expect(
       existsSync(path.join(repos.target.worktreesRoot, `verify-${card.id.slice(0, 8)}-r0`)),
     ).toBe(false);
+  });
+});
+
+describe("crossVerifies", () => {
+  const card = { id: "card-1", metadata: {} } as WorkboardCard;
+  const board = { verifier: VERIFIER, crossVerifier: { ...CROSS_VERIFIER, sampleEvery: 2 } };
+  const sampled = cardInSample(`cross:${card.id}`, 2);
+
+  it("picks every rung c round without a sample, else reworked rounds and 1 in sampleEvery", () => {
+    expect(
+      crossVerifies(card, { rung: "c" }, { verifier: VERIFIER, crossVerifier: CROSS_VERIFIER }),
+    ).toBe(true);
+    expect(crossVerifies(card, { rung: "c" }, board)).toBe(sampled);
+    expect(
+      crossVerifies(
+        card,
+        {
+          rung: "c",
+          rework: {
+            round: 1,
+            pullRequestUrl: "https://github.com/acme/app/pull/1",
+            acceptedAt: 1,
+            outsideCommits: 0,
+          },
+        },
+        board,
+      ),
+    ).toBe(true);
+  });
+
+  it("never picks a rung b round, a probe, or a board without both verifiers", () => {
+    expect(
+      crossVerifies(card, { rung: "b" }, { verifier: VERIFIER, crossVerifier: CROSS_VERIFIER }),
+    ).toBe(false);
+    expect(
+      crossVerifies(
+        {
+          ...card,
+          metadata: { automation: { probe: { kind: "egress" } } },
+        } as unknown as WorkboardCard,
+        { rung: "c" },
+        { verifier: VERIFIER, crossVerifier: CROSS_VERIFIER },
+      ),
+    ).toBe(false);
+    expect(crossVerifies(card, { rung: "c" }, { verifier: VERIFIER })).toBe(false);
+    expect(crossVerifies(card, { rung: "c" }, { crossVerifier: CROSS_VERIFIER })).toBe(false);
   });
 });
 
