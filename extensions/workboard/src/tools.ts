@@ -474,7 +474,7 @@ export function createWorkboardTools(params: {
       name: "workboard_move",
       label: "Workboard Move",
       description:
-        "Move a Workboard card to another status, change its priority, or both; at least one of status or priority is required. Claimed cards require matching claim scope.",
+        "Move a Workboard card to another status, change its priority, add or remove labels, or any combination; at least one of status, priority, addLabels, or removeLabels is required. `class:` labels route node tickets and stay operator-only. Claimed cards require matching claim scope.",
       parameters: strictObject({
         id: cardIdField(),
         status: Type.Optional(
@@ -484,15 +484,30 @@ export function createWorkboardTools(params: {
           ),
         ),
         priority: Type.Optional(Type.String({ description: "low, normal, high, or urgent." })),
+        addLabels: Type.Optional(
+          Type.Array(Type.String(), { description: "Labels to add; existing ones stay." }),
+        ),
+        removeLabels: Type.Optional(
+          Type.Array(Type.String(), { description: "Labels to remove; missing ones are ignored." }),
+        ),
         token: claimTokenField("Claim token for claimed cards."),
       }),
       execute: scopedCardMutation((id, record, scope) => {
-        if (record.status === undefined && record.priority === undefined) {
-          throw new Error("workboard_move needs a status, a priority, or both.");
+        if (
+          record.status === undefined &&
+          record.priority === undefined &&
+          record.addLabels === undefined &&
+          record.removeLabels === undefined
+        ) {
+          throw new Error(
+            "workboard_move needs at least one of status, priority, addLabels, or removeLabels.",
+          );
         }
         return store.move(id, record.status, undefined, scope, {
           actor,
           priority: record.priority,
+          addLabels: record.addLabels,
+          removeLabels: record.removeLabels,
         });
       }),
     },
