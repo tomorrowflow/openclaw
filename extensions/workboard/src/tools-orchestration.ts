@@ -1,4 +1,4 @@
-import { jsonResult, readStringParam } from "openclaw/plugin-sdk/core";
+import { jsonResult, readNumberParam, readStringParam } from "openclaw/plugin-sdk/core";
 import type { AnyAgentTool } from "openclaw/plugin-sdk/plugin-entry";
 import { asNonArrayRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { Type } from "typebox";
@@ -108,21 +108,48 @@ export function createWorkboardOrchestrationTools(params: {
       name: "workboard_stats",
       label: "Workboard Stats",
       description:
-        "Summarize Workboard counts by status and assignee for one board or all boards. With trust, also return the node ticket trust KPIs: per task class, and a weekly autonomy and lead time trend.",
+        "Summarize Workboard counts by status and assignee for one board or all boards. With trust, also return the node ticket trust KPIs: per task class, and a weekly autonomy and lead time trend. With overview, also return the Factory overview: what waits on the operator, what is in flight, and what shipped this week. With mergeDigest, also return the rung c merges in the window, each with its revert command.",
       parameters: strictObject({
         boardId: Type.Optional(Type.String({ description: "Optional board id filter." })),
         trust: Type.Optional(
           Type.Boolean({ description: "Include node ticket trust KPIs (for retros and digests)." }),
         ),
+        overview: Type.Optional(
+          Type.Boolean({
+            description:
+              "Include the Factory overview: waiting on the operator, in flight, shipped this week.",
+          }),
+        ),
+        mergeDigest: Type.Optional(
+          Type.Boolean({
+            description:
+              "Include the rung c merge digest with revert commands (default window: last 24 h).",
+          }),
+        ),
+        since: Type.Optional(
+          Type.Number({
+            description:
+              "Epoch milliseconds starting the merge digest window; only used with mergeDigest.",
+          }),
+        ),
       }),
       execute: async (_toolCallId, rawParams) => {
         const record = asNonArrayRecord(rawParams);
-        const stats = await store.stats({ boardId: record.boardId });
-        return jsonResult(
-          record.trust === true
-            ? { ...stats, trust: await store.trust({ boardId: record.boardId }) }
-            : stats,
-        );
+        const boardId = record.boardId;
+        const stats = await store.stats({ boardId });
+        return jsonResult({
+          ...stats,
+          ...(record.trust === true ? { trust: await store.trust({ boardId }) } : {}),
+          ...(record.overview === true ? { overview: await store.overview(boardId) } : {}),
+          ...(record.mergeDigest === true
+            ? {
+                mergeDigest: await store.mergeDigest({
+                  boardId,
+                  since: readNumberParam(record, "since", { nonNegativeInteger: true }),
+                }),
+              }
+            : {}),
+        });
       },
     },
     {

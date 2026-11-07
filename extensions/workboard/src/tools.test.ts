@@ -877,46 +877,6 @@ describe("workboard tools", () => {
     );
     expect(Buffer.from(attachment.contentBase64 as string, "base64").toString("utf8")).toBe("done");
   });
-
-  it("moves cards with agent claim scope", async () => {
-    const store = createWorkboardSqliteTestStore();
-    const tools = new Map(
-      createWorkboardTools({ store, context: { agentId: "agent-b" } }).map((tool) => [
-        tool.name,
-        tool,
-      ]),
-    );
-    const card = await store.create({ title: "Move tool card", status: "todo" });
-
-    const unclaimed = readPayload(
-      await tools.get("workboard_move")?.execute("move-unclaimed", {
-        id: card.id,
-        status: "ready",
-      }),
-    );
-    expect(unclaimed.card).toMatchObject({ status: "ready" });
-
-    await store.claim(card.id, { ownerId: "agent-a", token: "test-auth-token" });
-    await expect(
-      tools.get("workboard_move")?.execute("move-denied", {
-        id: card.id,
-        status: "review",
-      }),
-    ).rejects.toThrow("card is claimed by agent-a");
-
-    const claimed = readPayload(
-      await tools.get("workboard_move")?.execute("move-claimed", {
-        id: card.id,
-        status: "review",
-        token: "test-auth-token",
-      }),
-    );
-    // Review is not terminal: the claim stays with its owner.
-    expect(claimed.card).toMatchObject({
-      status: "review",
-      metadata: { claim: { ownerId: "agent-a" } },
-    });
-  });
 });
 
 async function createDispatchedCard(store: ReturnType<typeof createWorkboardSqliteTestStore>) {

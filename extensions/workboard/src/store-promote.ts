@@ -19,6 +19,7 @@ export class WorkboardPromoteStore extends WorkboardEnrichmentStore {
       expectedUpdatedAt?: number;
       assertOwnerCurrent?: () => void;
       actor?: WorkboardAgentActor;
+      priority?: unknown;
     } = {},
   ): Promise<WorkboardCard> {
     return await this.enqueueMutation(async () => {
@@ -28,7 +29,7 @@ export class WorkboardPromoteStore extends WorkboardEnrichmentStore {
           // Recheck after every cross-host CAS conflict so a worker cannot move
           // a card claimed between the read and write.
           assertCanMutateClaimedCard(current, scope);
-          return { status, position };
+          return { status, position, priority: options.priority };
         },
         {
           allowMetadataDependencyLinks: false,
