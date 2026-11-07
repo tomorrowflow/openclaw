@@ -1152,6 +1152,11 @@ export type WorkboardHealthAutomation = {
       lastError?: string;
       nextRunAt?: number;
       runningSince?: number;
+      /** Failed runs in a row; 0 after a success. */
+      consecutiveErrors?: number;
+      /** A trigger job's last evaluation, fired or not: `lastRunAt` moves only when a run fires or fails. */
+      lastTriggerEvalAt?: number;
+      triggerEvalCount?: number;
     }
 );
 

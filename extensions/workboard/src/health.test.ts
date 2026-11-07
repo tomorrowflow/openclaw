@@ -52,6 +52,9 @@ const JOBS = [
       lastRunAtMs: NOW - 2 * HOUR,
       lastError: "usage limit reached",
       nextRunAtMs: NOW + HOUR,
+      consecutiveErrors: 3,
+      lastTriggerEvalAtMs: NOW - 5 * 60_000,
+      triggerEvalCount: 71,
     },
   },
   {
@@ -148,6 +151,9 @@ describe("workboard health projection", () => {
           lastRunAt: NOW - 2 * HOUR,
           lastError: "usage limit reached",
           nextRunAt: NOW + HOUR,
+          consecutiveErrors: 3,
+          lastTriggerEvalAt: NOW - 5 * 60_000,
+          triggerEvalCount: 71,
         },
       ],
       nodes: [

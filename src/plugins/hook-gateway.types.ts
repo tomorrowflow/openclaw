@@ -43,6 +43,11 @@ type PluginHookGatewayCronJobState = {
   lastRunStatus?: PluginHookGatewayCronRunStatus;
   lastError?: string;
   lastDurationMs?: number;
+  /** Failed runs in a row; 0 after a success. */
+  consecutiveErrors?: number;
+  /** When a trigger job last evaluated its trigger, fired or not. */
+  lastTriggerEvalAtMs?: number;
+  triggerEvalCount?: number;
   lastDelivered?: boolean;
   lastDeliveryStatus?: PluginHookGatewayCronDeliveryStatus;
   lastDeliveryError?: string;
