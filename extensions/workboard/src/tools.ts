@@ -4,6 +4,7 @@ import { resolveIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import type { AnyAgentTool, OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "typebox";
 import { redactCard } from "./card-redaction.js";
+import type { WorkboardHealthReader } from "./health.js";
 import { relatedCardIds } from "./node-ticket-artifacts.js";
 import { normalizeCappedStringList } from "./store-string-lists.js";
 import { normalizeCommentSource } from "./store-value-normalizers.js";
@@ -72,6 +73,7 @@ const CardIdSchema = strictObject({
 export function createWorkboardTools(params: {
   context?: OpenClawPluginToolContext;
   store: WorkboardStore;
+  health?: WorkboardHealthReader;
 }): AnyAgentTool[] {
   const { store } = params;
   const ownerId = contextOwner(params.context);
@@ -520,7 +522,13 @@ export function createWorkboardTools(params: {
         return jsonResult({ card: summarizeCard(card) });
       },
     },
-    ...createWorkboardOrchestrationTools({ store, ownerId, actor }),
+    ...createWorkboardOrchestrationTools({
+      store,
+      ownerId,
+      actor,
+      agentId: params.context?.agentId,
+      health: params.health,
+    }),
   ];
   for (const tool of tools) {
     const execute = tool.execute;
