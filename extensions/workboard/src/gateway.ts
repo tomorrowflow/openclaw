@@ -138,14 +138,11 @@ export function registerWorkboardGatewayMethods(params: {
   store?: WorkboardStore;
   sessionsBoard?: Pick<WorkboardSessionsBoardService, "read" | "update" | "move">;
   readSessions?: WorkboardLifecycleSessionReader;
-<<<<<<< HEAD
-  health?: WorkboardHealthReader;
-=======
   onOperatorComment?: (input: {
     cards: readonly WorkboardCard[];
     sessionKey?: string;
   }) => Promise<void>;
->>>>>>> origin/main
+  health?: WorkboardHealthReader;
 }) {
   const { api } = params;
   const assertUploadsAllowed = (client: GatewayMethodContext["client"]) => {
