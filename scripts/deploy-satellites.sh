@@ -219,7 +219,7 @@ wait_for_idle_node() {
       echo "could not list $name's node tickets (Gateway down, workboard plugin absent, or not a paired node) — activating without the check"
       return 0
     fi
-    [[ -n "$busy" ]] || return 0
+    [[ -n "$busy" ]] || { echo "no node ticket working on $name"; return 0; }
     if [[ "$busy" != "$shown" ]]; then
       echo "holding activate; the restart would kill these node tickets:"
       echo "$busy"
