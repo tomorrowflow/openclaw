@@ -10,6 +10,7 @@ import {
   applyCronRunHistoryMaintenanceInDatabase,
   planCronRunHistoryMaintenance,
   readCronRunRecordsInDatabase,
+  recordCronRunFailureNotificationInDatabase,
 } from "./run-history.kernel.js";
 import type { CronRunRecord } from "./run-history.types.js";
 import { readActiveCronRunReceiptsInDatabase } from "./run-receipt-read.js";
@@ -204,6 +205,14 @@ export function recordCronFailureAlertOutcomeInWorker(
         job.state.lastFailureNotificationDeliveryStatus = input.outcome.status;
         job.state.lastFailureNotificationDeliveryError = input.outcome.error;
         updateCronRuntimeRow(db, input.storeKey, job);
+        if (input.runAtMs !== undefined) {
+          recordCronRunFailureNotificationInDatabase(db, {
+            storeKey: input.storeKey,
+            jobId: input.jobId,
+            runAtMs: input.runAtMs,
+            delivery: input.outcome,
+          });
+        }
       }
       return { outcome: { job: ownsCycle ? job : undefined } };
     },
