@@ -551,7 +551,7 @@ do not need it: each worker run is granted `workboard_heartbeat`,
 | `workboard_specify`                                                                                                                              | Turn a rough triage/backlog card into a clarified `todo` card; records the spec summary on the card.                                                                                      |
 | `workboard_decompose`                                                                                                                            | Fan a parent orchestration card into linked children, inheriting board/tenant metadata; can complete the parent with a created-card manifest.                                             |
 | `workboard_notify_subscribe` / `workboard_notify_list` / `workboard_notify_events` / `workboard_notify_advance` / `workboard_notify_unsubscribe` | Manage notification subscriptions. Event reads are replay-safe; `advance` moves the durable cursor so callers resume without losing or double-reading completed/failed/stale card events. |
-| `workboard_boards` / `workboard_stats`                                                                                                           | Inspect board namespaces and queue stats.                                                                                                                                                 |
+| `workboard_boards` / `workboard_stats`                                                                                                           | Inspect board namespaces and queue stats; `trust` adds the trust KPIs, `overview` the Factory overview, `mergeDigest` (with `since`) the rung c merge digest.                             |
 | `workboard_promote` / `workboard_reassign` / `workboard_reclaim`                                                                                 | Recover or hand off stuck work.                                                                                                                                                           |
 | `workboard_comment` / `workboard_proof`                                                                                                          | Add handoff notes or attach proof/artifact references.                                                                                                                                    |
 | `workboard_escalate`                                                                                                                             | Record that a node ticket's open questions went to the operator (`handoff.escalatedAt`), so automation reviews the round once                                                             |
@@ -1349,7 +1349,8 @@ evidence: its start records it in `rework.unchangedRounds`.
 #### Trust KPIs
 
 `workboard.cards.trust {boardId}` (and `workboard_stats {trust: true}` for
-agents) projects node ticket facts on read. Per task
+agents, which also takes `overview: true` and `mergeDigest: true`) projects
+node ticket facts on read. Per task
 class (a `class:<name>` label, else `unclassified`) it counts tickets,
 accepted (published), clean accepts (no rework round or outside commit),
 first-pass imports (never blocked), blocks, rework rounds, outside commits,
