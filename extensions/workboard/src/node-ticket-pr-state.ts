@@ -256,6 +256,7 @@ export function createPullRequestStateSync(params: {
         store: params.store,
         github: params.github,
         cards: await params.store.list(),
+        boards: (await params.store.listBoards()).boards,
         now: params.now,
         warn,
       });

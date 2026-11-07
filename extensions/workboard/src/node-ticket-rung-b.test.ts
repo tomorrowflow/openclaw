@@ -172,6 +172,55 @@ describe("Workboard rung b", () => {
     await expect(rungs()).resolves.toBeUndefined();
   });
 
+  it("stores heldPaths normalized and deduplicated, carries them, refuses an absolute or escaping path, and clears them", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const heldPaths = async () =>
+      (await store.listBoards()).boards.find((board) => board.id === "app")?.orchestration
+        ?.heldPaths;
+    await store.upsertBoard({
+      id: "app",
+      orchestration: {
+        heldPaths: [" ./server//webapp/ ", "infra/./deploy.yml", "server/webapp/", "migrations"],
+      },
+    });
+    await expect(heldPaths()).resolves.toEqual([
+      "server/webapp/",
+      "infra/deploy.yml",
+      "migrations",
+    ]);
+    await store.upsertBoard({ id: "app", orchestration: { autoDecompose: true } });
+    await expect(heldPaths()).resolves.toEqual([
+      "server/webapp/",
+      "infra/deploy.yml",
+      "migrations",
+    ]);
+    for (const [input, error] of [
+      ["docs/", "heldPaths must be an array of at most 100 repo-relative paths."],
+      [[""], "heldPaths entries must be non-empty repo-relative paths."],
+      [[42], "heldPaths entries must be non-empty repo-relative paths."],
+      [["/etc/passwd"], "must be a repo-relative path without .. segments."],
+      [["C:/repo"], "must be a repo-relative path without .. segments."],
+      [["docs/../secrets"], "must be a repo-relative path without .. segments."],
+      [["./"], "must name a path inside the repository."],
+      [["a".repeat(201)], "heldPaths entries must be 200 characters or fewer."],
+      [
+        Array.from({ length: 101 }, (_, index) => `held-${index}`),
+        "heldPaths must be an array of at most 100 repo-relative paths.",
+      ],
+    ] as const) {
+      await expect(
+        store.upsertBoard({ id: "app", orchestration: { heldPaths: input } }),
+      ).rejects.toThrow(error);
+    }
+    await expect(heldPaths()).resolves.toEqual([
+      "server/webapp/",
+      "infra/deploy.yml",
+      "migrations",
+    ]);
+    await store.upsertBoard({ id: "app", orchestration: { heldPaths: null } });
+    await expect(heldPaths()).resolves.toBeUndefined();
+  });
+
   it("keeps the operator-set verifier whole: saved, carried, refused when invalid, cleared", async () => {
     const store = createWorkboardSqliteTestStore();
     const verifier = async () =>

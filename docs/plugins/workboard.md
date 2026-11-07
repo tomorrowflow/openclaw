@@ -1321,10 +1321,41 @@ head's combined checks. Then:
   `state: "merged"`, `mergedAt`, `mergeCommit`, and `autoMerged: true` with a
   notice, and the regression watch follows it from then on.
 
+**Held paths (FAC-09):** a board's `orchestration.heldPaths`, set only through
+`workboard.boards.upsert`, names the one-way-door paths of its repository: a
+PR whose diff touches one is never auto-merged, whatever its class, and waits
+for you to merge it on GitHub. Before merging a candidate on such a board,
+Workboard reads the PR's changed files (`GET /repos/{repo}/pulls/{number}/files`,
+paged; both sides of a rename and a deleted file count) and compares them
+with the list. Entries are repo-relative files or directories, stored with
+`./` and doubled slashes folded: `server/webapp/` holds everything under that
+directory, `infra/deploy.yml` holds that file (and a directory of that name),
+and `migrations` holds the file or directory of that name, never
+`migrations2/`. Saving refuses an empty entry, an absolute path, a `..`
+segment, more than 100 entries, or one over 200 characters; `heldPaths: null`
+clears the list. A match passes the PR over with one notice naming the files,
+records `autoMergeWait: {reason: "held_path", headCommit, paths}`, and lists
+the card under **Needs you** on the Overview; the PRs behind it merge
+meanwhile. A file list GitHub did not give whole (a failed read, more than
+3000 files, or fewer files than the PR reports) holds the PR with a warning,
+and the next pass reads it again. A verifier pass, green checks, or a label
+change never clears a hold; only your own merge does, once the PR state sync
+sees the PR merged, and a rework round's new accepted head is read again.
+
+```json5
+{
+  id: "voice-diary",
+  orchestration: {
+    heldPaths: ["server/webapp/", "infra/deploy.yml", "migrations"],
+  },
+}
+```
+
 `autoMergeWait: {reason, since}` on `pullRequest` records the reason a PR is
-passed over or the queue halts, so each notice is posted once. A failure warns,
-and the next pass retries. An operator's decision at c, a rework verdict, and
-rounds at a or b never merge here.
+passed over or the queue halts, so each notice is posted once; a `held_path`
+wait also carries the matched `paths` and the `headCommit` they were read at.
+A failure warns, and the next pass retries. An operator's decision at c, a
+rework verdict, and rounds at a or b never merge here.
 
 **Merge digest:** `workboard.cards.mergeDigest {boardId, since}` lists every PR
 merged at or after `since` (epoch ms; default the last 24 hours) whose last
@@ -1764,12 +1795,12 @@ The template id is stored as card metadata.
 **Workboard → Overview** shows the whole factory on one page for an operator
 who does not follow each step. Four bands list the cards across every board:
 
-| Band              | Shows                                                                                                                                                                                                                                                                                                                                                               |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Needs you         | Cards waiting on you, oldest first: a review only you may accept (rung a, a plain card in `review`, or a rung b round whose class was demoted since or whose board has no automation job), a PR an agent accepted into the human review sample, [questions](#node-tickets) escalated to you or with no automation job to answer them, grillings, and blocked cards. |
-| In flight         | Queued and running cards, and node tickets waiting on an agent (a rung b review or questions the board's automation job takes, or a draft an agent published with a rework verdict before it reopens the ticket), with the node, rework round, and the last run's turn-end context.                                                                                 |
-| Shipped this week | Node tickets published and other cards done in the last 7 days, newest first: the PR, review rounds, who accepted it, whether it is in the review sample, and the agent's shadow verdict on a round you accepted.                                                                                                                                                   |
-| Insights          | Backlog cards labeled `gardener` or `architecture`, newest first.                                                                                                                                                                                                                                                                                                   |
+| Band              | Shows                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Needs you         | Cards waiting on you, oldest first: a review only you may accept (rung a, a plain card in `review`, or a rung b round whose class was demoted since or whose board has no automation job), a PR an agent accepted into the human review sample, a rung c PR held on a one-way-door path for your own merge (with the files it touches), [questions](#node-tickets) escalated to you or with no automation job to answer them, grillings, and blocked cards. |
+| In flight         | Queued and running cards, and node tickets waiting on an agent (a rung b review or questions the board's automation job takes, or a draft an agent published with a rework verdict before it reopens the ticket), with the node, rework round, and the last run's turn-end context.                                                                                                                                                                         |
+| Shipped this week | Node tickets published and other cards done in the last 7 days, newest first: the PR, review rounds, who accepted it, whether it is in the review sample, and the agent's shadow verdict on a round you accepted.                                                                                                                                                                                                                                           |
+| Insights          | Backlog cards labeled `gardener` or `architecture`, newest first.                                                                                                                                                                                                                                                                                                                                                                                           |
 
 Each row shows the title, the [summary](#card-fields), the
 [status line](#card-stage) with its age, and a reason, label, or details line.

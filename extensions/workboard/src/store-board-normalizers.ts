@@ -8,6 +8,7 @@ import {
 } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeHeldPaths } from "./held-paths.js";
 import type { WorkboardBoardInput } from "./store-inputs.js";
 import { normalizeBoardId, normalizeWorkspace } from "./store-normalizers.js";
 import { normalizeCappedStringList } from "./store-string-lists.js";
@@ -127,6 +128,9 @@ function normalizeOrchestration(
   const classRungs = Object.hasOwn(record, "classRungs")
     ? normalizeClassRungs(record.classRungs, fallback?.classRungs, now)
     : fallback?.classRungs;
+  const heldPaths = Object.hasOwn(record, "heldPaths")
+    ? normalizeHeldPaths(record.heldPaths)
+    : fallback?.heldPaths;
   const verifier = Object.hasOwn(record, "verifier")
     ? normalizeVerifier(record.verifier, "verifier")
     : fallback?.verifier;
@@ -145,6 +149,7 @@ function normalizeOrchestration(
     ...(defaultTarget ? { defaultTarget } : {}),
     ...(targetRoutes?.length ? { targetRoutes } : {}),
     ...(classRungs && Object.keys(classRungs).length ? { classRungs } : {}),
+    ...(heldPaths?.length ? { heldPaths } : {}),
     ...(verifier ? { verifier } : {}),
     ...(crossVerifier ? { crossVerifier } : {}),
   };

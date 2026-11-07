@@ -220,11 +220,16 @@ export function createFakeGitHub(remote: string) {
   // The default branch's commits, newest first, for the regression watch.
   // `checkOutcomes` lists each of the commit's own checks as GitHub reports it.
   const baseHistory: Array<BaseBranchCommit & { checkOutcomes?: string[] }> = [];
-  // The rung c merge queue's view: the base branch head's checks, and each open PR's head and checks.
+  // The rung c merge queue's view: the base branch head's checks, and each open
+  // PR's head, checks, and changed files. `pullChangedFiles` overrides the count
+  // GraphQL reports, to show a list shorter than the PR; `failFiles` fails the list.
   const queue = {
     baseChecks: "SUCCESS" as string | undefined,
     pullHeads: new Map<string, string>(),
     pullChecks: new Map<string, string>(),
+    pullFiles: new Map<string, Array<{ filename: string; previous_filename?: string }>>(),
+    pullChangedFiles: new Map<string, number>(),
+    failFiles: false,
   };
   const merges: Array<{ url: string; sha: string }> = [];
   const rejectCreate: { value?: { message: string; errors: Array<{ message: string }> } } = {};
@@ -303,6 +308,9 @@ export function createFakeGitHub(remote: string) {
               state: "OPEN",
               mergeable: conflictingPulls.has(html_url) ? "CONFLICTING" : "MERGEABLE",
               headRefOid: queue.pullHeads.get(html_url) ?? "",
+              changedFiles:
+                queue.pullChangedFiles.get(html_url) ??
+                (queue.pullFiles.get(html_url) ?? []).length,
               commits: {
                 nodes: [{ commit: { statusCheckRollup: checks ? { state: checks } : null } }],
               },
@@ -310,6 +318,17 @@ export function createFakeGitHub(remote: string) {
           : { state: "MERGED" };
       }
       return new Response(JSON.stringify({ data: { repository } }), { status: 200 });
+    }
+    const files = /\/pulls\/(\d+)\/files\?per_page=(\d+)&page=(\d+)$/.exec(url);
+    if (files) {
+      if (queue.failFiles) {
+        return new Response(JSON.stringify({ message: "Server Error" }), { status: 500 });
+      }
+      const html_url = openPulls.find((open) => open.endsWith(`/pull/${files[1]}`));
+      const perPage = Number(files[2]);
+      const start = (Number(files[3]) - 1) * perPage;
+      const all = html_url ? (queue.pullFiles.get(html_url) ?? []) : [];
+      return new Response(JSON.stringify(all.slice(start, start + perPage)), { status: 200 });
     }
     const merge = /\/pulls\/(\d+)\/merge$/.exec(url)?.[1];
     if (merge && method === "PUT") {

@@ -209,25 +209,39 @@ export function createOverviewPage(workboard: WorkboardCapability): ControlUiVie
 
     function WaitingMeta(props: { row: WorkboardOverviewWaiting }) {
       return (
-        <Show
-          when={read(
-            () =>
-              props.row.reason === "sampled" &&
-              host.connection.connected &&
-              host.connection.canWrite,
-          )}
-        >
-          <p class="workboard-overview__actions">
-            <button
-              class="btn btn--sm"
-              type="button"
-              disabled={read(() => marking.has(props.row.cardId))}
-              onClick={() => markRead(props.row)}
-            >
-              {t("workboard.overviewMarkRead")}
-            </button>
-          </p>
-        </Show>
+        <>
+          <MetaLine
+            parts={[
+              props.row.pullRequestUrl ? (
+                <a href={props.row.pullRequestUrl} target="_blank" rel="noreferrer">
+                  {t("workboard.overviewPullRequest")}
+                </a>
+              ) : undefined,
+              props.row.heldPaths?.length
+                ? t("workboard.overviewHeldPaths", { paths: props.row.heldPaths.join(", ") })
+                : undefined,
+            ]}
+          />
+          <Show
+            when={read(
+              () =>
+                props.row.reason === "sampled" &&
+                host.connection.connected &&
+                host.connection.canWrite,
+            )}
+          >
+            <p class="workboard-overview__actions">
+              <button
+                class="btn btn--sm"
+                type="button"
+                disabled={read(() => marking.has(props.row.cardId))}
+                onClick={() => markRead(props.row)}
+              >
+                {t("workboard.overviewMarkRead")}
+              </button>
+            </p>
+          </Show>
+        </>
       );
     }
 

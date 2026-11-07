@@ -1,4 +1,5 @@
 import type {
+  WorkboardAutoMergeWaitRecord,
   WorkboardBoardSummary,
   WorkboardCard,
   WorkboardNodeWorktree,
@@ -75,7 +76,11 @@ function imported(at: number): Partial<WorkboardNodeWorktree> {
 function published(
   at: number,
   review: NonNullable<WorkboardNodeWorktree["reviews"]>[number],
-  pullRequest?: { state: WorkboardPullRequestState; checkedAt: number },
+  pullRequest?: {
+    state: WorkboardPullRequestState;
+    checkedAt: number;
+    autoMergeWait?: WorkboardAutoMergeWaitRecord;
+  },
 ) {
   return {
     handoff: {
@@ -258,6 +263,57 @@ describe("projectWorkboardOverview", () => {
       expect.objectContaining({ cardId: "closed", sampled: true }),
     ]);
     expect(result.shipped[0]).not.toHaveProperty("shadowVerdict");
+  });
+
+  it("puts a PR held on a one-way-door path in front of the operator with its paths, ahead of its sample read, until it is merged or closed", () => {
+    const accept = {
+      round: 0,
+      verdict: "accept" as const,
+      decidedBy: "agent" as const,
+      rung: "c" as const,
+      sampled: true,
+    };
+    const held = (state: WorkboardPullRequestState, at: number) => ({
+      state,
+      checkedAt: at,
+      autoMergeWait: {
+        reason: "held_path" as const,
+        since: at + HOUR,
+        headCommit: "b",
+        paths: ["server/webapp/x.py", "infra/deploy.yml"],
+      },
+    });
+    const result = overview([
+      card("held", {
+        status: "done",
+        worktree: published(NOW - 9 * DAY, accept, held("open", NOW - 9 * DAY)),
+      }),
+      card("merged-by-hand", {
+        status: "done",
+        worktree: published(NOW - DAY, accept, held("merged", NOW - HOUR)),
+      }),
+      card("checks-wait", {
+        status: "done",
+        worktree: published(NOW - DAY, accept, {
+          state: "open",
+          checkedAt: NOW - HOUR,
+          autoMergeWait: { reason: "checks_failed", since: NOW - HOUR },
+        }),
+      }),
+    ]);
+
+    expect(result.needsYou).toEqual([
+      expect.objectContaining({
+        cardId: "held",
+        reason: "held_path",
+        waitingSince: NOW - 9 * DAY + HOUR,
+        heldPaths: ["server/webapp/x.py", "infra/deploy.yml"],
+        pullRequestUrl: PR,
+      }),
+      expect.objectContaining({ cardId: "merged-by-hand", reason: "sampled" }),
+      expect.objectContaining({ cardId: "checks-wait", reason: "sampled" }),
+    ]);
+    expect(result.shipped.map((row) => row.cardId)).toEqual(["merged-by-hand", "checks-wait"]);
   });
 
   it("keeps a draft an agent published to rework in flight until it reopens", () => {
