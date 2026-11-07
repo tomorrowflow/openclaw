@@ -295,9 +295,13 @@ Stop the running gateway, install from the local repo globally, and restart.
 > refuses before the sync and again before the deploy build while any
 > Workboard node ticket is `running`: the build starves the Gateway and
 > truncates the ticket's Claude CLI stream. Wait until the tickets reach
-> review, or stop them, then rerun. `--allow-running-tickets` deploys anyway.
-> If the card list cannot be read (Gateway down, no workboard plugin), the
-> script warns and continues.
+> review, or stop them, then rerun. Before the cutover restart it holds up to
+> 60 minutes for tickets that started during the build, and the satellites
+> `activate` step holds the same way per node, since restarting a node kills
+> the ticket or verifier working on it; a node still busy after that keeps its
+> old build and the satellite warning names it. `--allow-running-tickets`
+> deploys anyway. If the card list cannot be read (Gateway down, no workboard
+> plugin), the script warns and continues.
 
 > **Two-user model.** The `frogger` user holds the source repo at
 > `/home/frogger/openclaw/` and runs build/test/push. The `openclaw` user
