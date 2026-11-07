@@ -19,8 +19,13 @@ import {
   resolveCronRunRecordTimestamp,
 } from "../run-history-detail.js";
 import { createCronExecutionId } from "../run-id.js";
+import type { CronFailureNotificationDelivery } from "../types.js";
 import { publishCronRunHistoryChange } from "./run-history-changes.js";
-import type { CronRunHistoryWrite, CronRunRecord } from "./run-history.types.js";
+import type {
+  CronJsonValue as JsonValue,
+  CronRunHistoryWrite,
+  CronRunRecord,
+} from "./run-history.types.js";
 import type { CronRunReceiptWriteSchema } from "./run-receipt-write-admission.js";
 
 const query = (db: EngineConnection) =>
@@ -80,6 +85,8 @@ export function readCronRunRecordsInDatabase(
     planningOnly?: boolean;
     /** Restrict the read to these task ids. */
     taskIds?: readonly string[];
+    /** Restrict the read to runs that started at this time. */
+    startedAt?: number;
   },
 ): CronRunRecord[] {
   const planningOnly = options?.planningOnly === true;
@@ -127,6 +134,9 @@ export function readCronRunRecordsInDatabase(
   }
   if (options?.taskIds !== undefined) {
     select = select.where("task_id", "in", [...options.taskIds]);
+  }
+  if (options?.startedAt !== undefined) {
+    select = select.where("started_at", "=", options.startedAt);
   }
   return executeSqliteQuerySync(db, select).rows.map((row) => {
     // These released columns remain part of row admission even when Cron does not expose them.
@@ -240,6 +250,51 @@ export function recordCronRunInDatabase(db: EngineConnection, input: CronRunHist
     );
   }
   publishCronRunHistoryChange(db);
+}
+
+/**
+ * Writes a settled failure-alert outcome onto the history of the run that
+ * alerted. The run's row is written when the run finalizes, before its alert
+ * is sent, so it carries `unknown` until this lands; the job row's copy is
+ * reset by the next run, which left history as the only record and that
+ * record wrong. Caller owns the exact transaction.
+ */
+export function recordCronRunFailureNotificationInDatabase(
+  db: EngineConnection,
+  input: {
+    storeKey: string;
+    jobId: string;
+    runAtMs: number;
+    delivery: CronFailureNotificationDelivery;
+  },
+): number {
+  const runs = readCronRunRecordsInDatabase(db, input.jobId, undefined, {
+    startedAt: input.runAtMs,
+  }).filter(
+    (row) =>
+      cronRunRecordStoreKey(row) === input.storeKey &&
+      isRecord(row.detail) &&
+      row.detail.kind === "cron-run",
+  );
+  for (const run of runs) {
+    executeSqliteQuerySync(
+      db,
+      query(db)
+        .updateTable("task_runs")
+        .set({
+          detail_json: JSON.stringify({
+            ...(run.detail as { [key: string]: JsonValue }),
+            failureNotificationDelivery: input.delivery,
+          }),
+        })
+        .where("task_id", "=", run.id)
+        .where("runtime", "=", "cron"),
+    );
+  }
+  if (runs.length > 0) {
+    publishCronRunHistoryChange(db);
+  }
+  return runs.length;
 }
 
 /** Queue rejection is durable even if the host never receives the commit result. */
