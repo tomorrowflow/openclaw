@@ -142,7 +142,13 @@ export default definePluginEntry({
         requiredScopes: [scope],
       });
     }
-    registerWorkboardGatewayMethods({ api, store, sessionsBoard, readSessions });
+    registerWorkboardGatewayMethods({
+      api,
+      store,
+      sessionsBoard,
+      readSessions,
+      onOperatorComment: automationNudge.nudge,
+    });
     registerWorkboardCommand({ api, store });
     for (const service of [changeEvents, automationNudge, sessionsBoard, lifecycleSync]) {
       api.registerService(service);

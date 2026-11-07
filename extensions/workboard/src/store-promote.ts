@@ -7,7 +7,21 @@ import type {
   WorkboardPromoteInput,
 } from "./store-inputs.js";
 import { clearDiagnostics } from "./store-normalizers.js";
+import { normalizeCappedStringList } from "./store-string-lists.js";
 import { normalizeBoundedString } from "./store-value-normalizers.js";
+
+/**
+ * The dispatcher routes node tickets on `class:` labels, so only the operator
+ * sets or clears them; agents move labels around them.
+ */
+function normalizeLabelChange(value: unknown, field: "addLabels" | "removeLabels"): string[] {
+  const labels = normalizeCappedStringList(value, "labels");
+  const taskClass = labels.find((label) => label.startsWith("class:"));
+  if (taskClass) {
+    throw new Error(`${field} cannot change ${taskClass}: class labels are operator-only.`);
+  }
+  return labels;
+}
 
 export class WorkboardPromoteStore extends WorkboardEnrichmentStore {
   async move(
@@ -20,8 +34,13 @@ export class WorkboardPromoteStore extends WorkboardEnrichmentStore {
       assertOwnerCurrent?: () => void;
       actor?: WorkboardAgentActor;
       priority?: unknown;
+      addLabels?: unknown;
+      removeLabels?: unknown;
     } = {},
   ): Promise<WorkboardCard> {
+    const addLabels = normalizeLabelChange(options.addLabels, "addLabels");
+    const removeLabels = normalizeLabelChange(options.removeLabels, "removeLabels");
+    const changesLabels = options.addLabels !== undefined || options.removeLabels !== undefined;
     return await this.enqueueMutation(async () => {
       const result = await this.updateLatestCard(
         id,
@@ -29,7 +48,14 @@ export class WorkboardPromoteStore extends WorkboardEnrichmentStore {
           // Recheck after every cross-host CAS conflict so a worker cannot move
           // a card claimed between the read and write.
           assertCanMutateClaimedCard(current, scope);
-          return { status, position, priority: options.priority };
+          return {
+            status,
+            position,
+            priority: options.priority,
+            labels: changesLabels
+              ? [...current.labels.filter((label) => !removeLabels.includes(label)), ...addLabels]
+              : undefined,
+          };
         },
         {
           allowMetadataDependencyLinks: false,

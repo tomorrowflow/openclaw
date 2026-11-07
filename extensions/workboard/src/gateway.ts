@@ -137,6 +137,10 @@ export function registerWorkboardGatewayMethods(params: {
   store?: WorkboardStore;
   sessionsBoard?: Pick<WorkboardSessionsBoardService, "read" | "update" | "move">;
   readSessions?: WorkboardLifecycleSessionReader;
+  onOperatorComment?: (input: {
+    cards: readonly WorkboardCard[];
+    sessionKey?: string;
+  }) => Promise<void>;
 }) {
   const { api } = params;
   const assertUploadsAllowed = (client: GatewayMethodContext["client"]) => {
@@ -407,9 +411,15 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.delete", WRITE_SCOPE, ({ params: input }) =>
     store.delete(readId(input), { expectedUpdatedAt: readExpectedUpdatedAt(input) }),
   );
-  cardMutation("comment", (id, input) =>
-    store.addComment(id, { body: input.body }, undefined, "operator"),
-  );
+  register("workboard.cards.comment", WRITE_SCOPE, async ({ params: input, client }) => {
+    const card = await store.addComment(readId(input), { body: input.body }, undefined, "operator");
+    // A decision posted on a card must not wait for the board job's schedule.
+    await params.onOperatorComment?.({
+      cards: [card],
+      sessionKey: client?.internal?.agentRuntimeIdentity?.sessionKey,
+    });
+    return { card: redactOperatorCard(card) };
+  });
   cardMutation("link", (id, input) => store.addLink(id, input));
   register("workboard.cards.linkDependency", WRITE_SCOPE, ({ params: input }) => {
     const { parentId, childId } = input;

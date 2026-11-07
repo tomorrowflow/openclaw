@@ -475,8 +475,11 @@ scheduler authority, including after the worker's tool authority closes, with ev
 for the same board coalesced for 60 seconds; events during that window run the
 automation once more when it ends. If an attempt ends while its run is still
 active, the lifecycle sweep nudges the automation when it records the terminal
-outcome. The automation's schedule remains the backstop. Disabled and
-auto-disabled automations are never nudged. Deleting
+outcome. An operator comment posted through the Gateway (`workboard.cards.comment`,
+the card page's comment box) nudges the board's automation the same way, so a
+decision written on a card does not wait for the next scheduled run; a comment
+from an automation run itself nudges nothing. The automation's schedule remains
+the backstop. Disabled and auto-disabled automations are never nudged. Deleting
 the board does not delete or otherwise mutate the
 operator-owned automation job.
 
@@ -556,7 +559,7 @@ do not need it: each worker run is granted `workboard_heartbeat`,
 | `workboard_comment` / `workboard_proof`                                                                                                          | Add handoff notes or attach proof/artifact references.                                                                                                                                    |
 | `workboard_escalate`                                                                                                                             | Record that a node ticket's open questions went to the operator (`handoff.escalatedAt`), so automation reviews the round once                                                             |
 | `workboard_unblock`                                                                                                                              | Move blocked work back to `todo`.                                                                                                                                                         |
-| `workboard_move`                                                                                                                                 | Move a card to another status, set its `priority`, or both; claimed cards require the caller's agent claim scope.                                                                         |
+| `workboard_move`                                                                                                                                 | Move a card to another status, set its `priority`, add or remove labels (`class:` labels stay operator-only), or any mix; claimed cards require the caller's agent claim scope.           |
 | `workboard_grill_done`                                                                                                                           | Hand a node ticket grilling's result back from its grill session; only that session may.                                                                                                  |
 | `workboard_dispatch`                                                                                                                             | Nudge dependency promotion or stale-claim cleanup without launching workers; worker launch uses Gateway or slash-command dispatch.                                                        |
 

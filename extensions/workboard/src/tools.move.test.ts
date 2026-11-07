@@ -57,7 +57,7 @@ describe("workboard_move tool", () => {
     const card = await store.create({ title: "Priority tool card", status: "todo" });
 
     await expect(move.execute("move-nothing", { id: card.id })).rejects.toThrow(
-      "workboard_move needs a status, a priority, or both.",
+      "workboard_move needs at least one of status, priority, addLabels, or removeLabels.",
     );
 
     const prioritized = readPayload(
@@ -88,5 +88,68 @@ describe("workboard_move tool", () => {
       }),
     );
     expect(lowered.card).toMatchObject({ status: claimed.status, priority: "low" });
+  });
+
+  it("adds and removes labels through workboard_move, keeping class labels operator-only", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const tools = new Map(
+      createWorkboardTools({ store, context: { agentId: "agent-b" } }).map((tool) => [
+        tool.name,
+        tool,
+      ]),
+    );
+    const move = expectDefined(tools.get("workboard_move"), "workboard_move tool");
+    const card = await store.create({
+      title: "Label tool card",
+      status: "todo",
+      labels: ["class:docs", "needs-decision"],
+    });
+
+    const added = readPayload(
+      await move.execute("move-add-labels", {
+        id: card.id,
+        addLabels: ["chef", "needs-decision", "chef"],
+      }),
+    );
+    expect(added.card).toMatchObject({
+      status: "todo",
+      labels: ["class:docs", "needs-decision", "chef"],
+    });
+
+    const swapped = readPayload(
+      await move.execute("move-swap-labels", {
+        id: card.id,
+        status: "ready",
+        removeLabels: ["needs-decision", "absent"],
+        addLabels: ["decided"],
+      }),
+    );
+    expect(swapped.card).toMatchObject({
+      status: "ready",
+      labels: ["class:docs", "chef", "decided"],
+    });
+
+    await expect(
+      move.execute("move-add-class", { id: card.id, addLabels: ["class:spec"] }),
+    ).rejects.toThrow("class labels are operator-only");
+    await expect(
+      move.execute("move-remove-class", { id: card.id, removeLabels: ["class:docs"] }),
+    ).rejects.toThrow("class labels are operator-only");
+    expect(await store.get(card.id)).toMatchObject({ labels: ["class:docs", "chef", "decided"] });
+
+    await store.claim(card.id, { ownerId: "agent-a", token: "test-auth-token" });
+    await expect(
+      move.execute("move-labels-denied", { id: card.id, addLabels: ["stolen"] }),
+    ).rejects.toThrow("card is claimed by agent-a");
+    expect(await store.get(card.id)).toMatchObject({ labels: ["class:docs", "chef", "decided"] });
+
+    const claimed = readPayload(
+      await move.execute("move-labels-claimed", {
+        id: card.id,
+        removeLabels: ["chef"],
+        token: "test-auth-token",
+      }),
+    );
+    expect(claimed.card).toMatchObject({ labels: ["class:docs", "decided"] });
   });
 });
