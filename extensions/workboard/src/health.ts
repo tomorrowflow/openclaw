@@ -115,6 +115,13 @@ function automationRow(job: CronJob, boardIds: string[]): WorkboardHealthAutomat
     ...(lastError ? { lastError } : {}),
     ...(state?.nextRunAtMs === undefined ? {} : { nextRunAt: state.nextRunAtMs }),
     ...(state?.runningAtMs === undefined ? {} : { runningSince: state.runningAtMs }),
+    ...(state?.consecutiveErrors === undefined
+      ? {}
+      : { consecutiveErrors: state.consecutiveErrors }),
+    ...(state?.lastTriggerEvalAtMs === undefined
+      ? {}
+      : { lastTriggerEvalAt: state.lastTriggerEvalAtMs }),
+    ...(state?.triggerEvalCount === undefined ? {} : { triggerEvalCount: state.triggerEvalCount }),
   };
 }
 
