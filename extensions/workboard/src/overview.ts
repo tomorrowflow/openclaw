@@ -154,10 +154,26 @@ function place(
       return;
     case "published": {
       // An agent's rework verdict publishes a draft before it reopens the ticket.
-      const latest = nodeTicketTarget(card)?.worktree?.reviews?.at(-1);
+      const worktree = nodeTicketTarget(card)?.worktree;
+      const latest = worktree?.reviews?.at(-1);
       if (latest?.decidedBy === "agent" && latest.verdict === "rework") {
         result.inFlight.push(inFlight(card));
         return;
+      }
+      // A held PR waits for the operator's own merge, however old; the PR
+      // state sync clears the wait when it sees the PR merged or closed.
+      const handoff = worktree?.handoff;
+      const wait = handoff?.phase === "published" ? handoff.pullRequest?.autoMergeWait : undefined;
+      const held =
+        wait?.reason === "held_path" &&
+        stage.pullRequestState !== "merged" &&
+        stage.pullRequestState !== "closed";
+      if (held) {
+        result.needsYou.push({
+          ...waiting(card, "held_path", wait.since),
+          heldPaths: wait.paths,
+          pullRequestUrl: stage.pullRequestUrl,
+        });
       }
       if (now - stage.since > SHIPPED_WINDOW_MS) {
         return;
@@ -166,10 +182,11 @@ function place(
       result.shipped.push(shipped);
       // A sampled PR waits for the operator's read until it is merged or closed on
       // GitHub; one merged at rung c merged without the read, so it still waits.
+      // While it is held, the operator's merge comes first and the read after it.
       const settled =
         stage.pullRequestState === "closed" ||
         (stage.pullRequestState === "merged" && latest?.rung !== "c");
-      if (shipped.sampled && latest?.readAt === undefined && !settled) {
+      if (shipped.sampled && latest?.readAt === undefined && !settled && !held) {
         result.needsYou.push(waiting(card, "sampled", stage.since));
       }
       return;
