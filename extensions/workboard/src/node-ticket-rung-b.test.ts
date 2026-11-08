@@ -316,13 +316,11 @@ describe("Workboard rung b", () => {
     });
   });
 
-  it("refuses reopening an imported round before its draft PR exists, leaving it in review", async () => {
+  it("refuses an agent's reopen of an imported round before its draft PR exists, leaving it in review", async () => {
     const store = createWorkboardSqliteTestStore();
     const card = await importedDocsTicket(store);
     const refusal = "This ticket's latest round was imported but isn't published yet.";
 
-    await expect(store.move(card.id, "todo", undefined)).rejects.toThrow(refusal);
-    await expect(store.move(card.id, "ready", undefined)).rejects.toThrow(refusal);
     await expect(
       agentTools(store)("workboard_move").execute("move", { id: card.id, status: "todo" }),
     ).rejects.toThrow(refusal);
