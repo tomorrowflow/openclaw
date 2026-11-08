@@ -108,7 +108,9 @@ export function createNodeRepos(root: string) {
 export function createLocalNodeGateway() {
   let runs = 0;
   const respond = vi.fn((method: string, params?: Record<string, unknown>): unknown => {
-    const nodeParams = params?.params as { command?: string[]; path?: string } | undefined;
+    const nodeParams = params?.params as
+      | { command?: string[]; path?: string; maxBytes?: number }
+      | undefined;
     if (method === "node.invoke" && params?.command === "system.run") {
       const [command = "", ...args] = nodeParams?.command ?? [];
       const result = spawnSync(command, args, { encoding: "utf8" });
@@ -118,6 +120,10 @@ export function createLocalNodeGateway() {
     }
     if (method === "node.invoke" && params?.command === "file.fetch") {
       const bytes = readFileSync(nodeParams?.path ?? "");
+      // The node refuses a file over the caller's limit, as file.fetch does.
+      if (nodeParams?.maxBytes !== undefined && bytes.byteLength > nodeParams.maxBytes) {
+        return { payload: { ok: false, code: "FILE_TOO_LARGE" } };
+      }
       return {
         payload: {
           ok: true,

@@ -1,5 +1,6 @@
 // Workboard tests cover bringing a finished node ticket's branch back into the host clone.
-import { existsSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -90,6 +91,22 @@ describe("node ticket handoff", () => {
     expect(existsSync(worktree)).toBe(false);
     expect(existsSync(`${worktree}.bundle`)).toBe(false);
     expect(git(repos.target.repoPath, "branch", "--list", branch)).toBe("");
+  });
+
+  it("imports a branch whose bundle is larger than one node file fetch", async () => {
+    // Random base64 stays incompressible enough to bundle past file.fetch's 16 MiB cap.
+    const screenshots = randomBytes(18 * 1024 * 1024).toString("base64");
+    const { store, card, repos, worktree, handoffs, warn } = await finishNodeTicket({
+      files: { "screenshots.txt": screenshots },
+    });
+    const head = git(worktree, "rev-parse", "HEAD");
+
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect((await store.get(card.id))?.status).toBe("review");
+    expect(git(repos.hostRepo, "rev-parse", `factory/${card.id}`)).toBe(head);
+    expect(readdirSync(repos.target.worktreesRoot)).toEqual([]);
   });
 
   it("imports without a diffstat when git diff --numstat fails", async () => {
