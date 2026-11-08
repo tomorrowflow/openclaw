@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { signalPlugin } from "../../extensions/signal/src/channel.js";
 import type { OpenClawConfig } from "../config/config.js";
-import { stageActivePluginRegistry } from "../plugins/runtime.js";
+import { setActivePluginRegistry } from "../plugins/runtime.js";
 import { createTestRegistry } from "../test-utils/channel-plugins.js";
 import { resolveCommandAuthorization } from "./command-auth.js";
 import type { MsgContext } from "./templating.js";
@@ -21,7 +21,7 @@ function authorize(sender: string, ownerAllowFrom: string[]) {
 
 describe("Signal owner authorization", () => {
   beforeEach(() => {
-    stageActivePluginRegistry(
+    setActivePluginRegistry(
       createTestRegistry([{ pluginId: "signal", plugin: signalPlugin, source: "test" }]),
     );
   });

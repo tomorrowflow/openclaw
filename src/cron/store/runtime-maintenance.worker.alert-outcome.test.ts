@@ -88,6 +88,7 @@ it("records a settled failure-alert outcome on the run's history row, not only o
               alertAtMs: ALERT_AT_MS,
               notificationId,
               outcome: { delivered: true, status: "delivered" },
+              snapshot: {},
             }),
         );
 

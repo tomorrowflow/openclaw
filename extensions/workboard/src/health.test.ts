@@ -100,7 +100,7 @@ describe("workboard health projection", () => {
               },
               {
                 profileId: "anthropic:blocked",
-                usage: { blockedUntil: NOW + HOUR, blockedReason: "manual" },
+                usage: { blockedUntil: NOW + HOUR, blockedReason: "subscription_limit" },
               },
             ],
           },
@@ -198,7 +198,7 @@ describe("workboard health projection", () => {
               profileId: "anthropic:blocked",
               status: "blocked",
               until: NOW + HOUR,
-              reason: "manual",
+              reason: "subscription_limit",
             },
           ],
         },
