@@ -1,9 +1,11 @@
 import { WORKBOARD_STATUSES, type WorkboardCard } from "@openclaw/workboard-contract";
-import { jsonResult, readStringParam } from "openclaw/plugin-sdk/core";
+import { jsonResult, readStringArrayParam, readStringParam } from "openclaw/plugin-sdk/core";
 import { resolveIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import type { AnyAgentTool, OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
+import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { Type } from "typebox";
 import { redactCard } from "./card-redaction.js";
+import { workboardCardStage } from "./card-stage.js";
 import type { WorkboardHealthReader } from "./health.js";
 import { relatedCardIds } from "./node-ticket-artifacts.js";
 import { normalizeCappedStringList } from "./store-string-lists.js";
@@ -48,7 +50,67 @@ function summarizeCard(card: WorkboardCard) {
       : undefined,
     diagnostics: card.metadata?.diagnostics,
     archivedAt: card.metadata?.archivedAt,
+    stage: workboardCardStage(card),
     updatedAt: card.updatedAt,
+  };
+}
+
+/**
+ * Full comment bodies a `workboard_read` returns, newest first. Agent tool
+ * results are cut at 16k-64k characters by model context, and a long-lived
+ * card's comments alone reach 40k, which hid the handoff behind them. The
+ * budget keeps the latest questions round whole; older comments go out as
+ * stubs with their first line, which `commentIds` reads in full.
+ */
+const READ_COMMENT_BODY_BUDGET_CHARS = 12_000;
+const OMITTED_COMMENT_FIRST_LINE_CHARS = 160;
+
+function commentFirstLine(body: string): string {
+  const line = body.split("\n", 1)[0] ?? "";
+  return line.length <= OMITTED_COMMENT_FIRST_LINE_CHARS
+    ? line
+    : `${truncateUtf16Safe(line, OMITTED_COMMENT_FIRST_LINE_CHARS - 1)}…`;
+}
+
+/**
+ * The card as an agent reads it: derived `stage` first, the automation record
+ * ahead of the comments, comments bounded to the newest that fit the budget,
+ * and the worker context, which repeats the notes, last. A truncated result
+ * then loses the redundant tail, not the state the agent decides on.
+ */
+function agentReadPayload(card: WorkboardCard, workerContext: string) {
+  const redacted = redactCard(card);
+  const comments = redacted.metadata?.comments ?? [];
+  let kept = 0;
+  let chars = 0;
+  for (const comment of comments.toReversed()) {
+    chars += comment.body.length;
+    if (kept > 0 && chars > READ_COMMENT_BODY_BUDGET_CHARS) {
+      break;
+    }
+    kept += 1;
+  }
+  const omitted = comments.slice(0, comments.length - kept);
+  const { automation, comments: _comments, ...rest } = redacted.metadata ?? {};
+  const metadata = redacted.metadata && {
+    ...(automation ? { automation } : {}),
+    ...rest,
+    ...(redacted.metadata.comments ? { comments: comments.slice(omitted.length) } : {}),
+  };
+  return {
+    stage: workboardCardStage(card),
+    ...(omitted.length
+      ? {
+          omittedComments: omitted.map((comment) => ({
+            id: comment.id,
+            createdAt: comment.createdAt,
+            firstLine: commentFirstLine(comment.body),
+            chars: comment.body.length,
+          })),
+        }
+      : {}),
+    card: { ...redacted, ...(metadata ? { metadata } : {}) },
+    workerContext,
   };
 }
 
@@ -236,16 +298,35 @@ export function createWorkboardTools(params: {
       name: "workboard_read",
       label: "Workboard Read",
       description:
-        "Read one Workboard card and return bounded worker context with notes, attempts, comments, proof, links, and diagnostics.",
-      parameters: CardIdSchema,
+        "Read one Workboard card: its derived stage, the card with the newest comments in full (older ones listed in omittedComments), and bounded worker context.",
+      parameters: strictObject({
+        id: cardIdField(),
+        token: claimTokenField(),
+        commentIds: Type.Optional(
+          Type.Array(Type.String(), {
+            description:
+              "Return only these comments in full, by id from omittedComments, instead of the card.",
+          }),
+        ),
+      }),
       execute: async (_toolCallId, rawParams) => {
         const record = rawParams as Record<string, unknown>;
         const id = readStringParam(record, "id", { required: true });
+        const commentIds = readStringArrayParam(record, "commentIds");
+        if (commentIds?.length) {
+          const wanted = new Set(commentIds);
+          const card = await store.get(id);
+          if (!card) {
+            throw new Error(`card not found: ${id}`);
+          }
+          return jsonResult({
+            comments: (redactCard(card).metadata?.comments ?? []).filter((comment) =>
+              wanted.has(comment.id),
+            ),
+          });
+        }
         const { card, workerContext } = await store.readWithWorkerContext(id);
-        return jsonResult({
-          card: redactCard(card),
-          workerContext,
-        });
+        return jsonResult(agentReadPayload(card, workerContext));
       },
     },
     {
