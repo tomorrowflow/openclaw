@@ -277,6 +277,21 @@ describe("resolveDeliveryTarget", () => {
     expect(result).toMatchObject({ ok: true, channel: "alpha", to: "room-allowed" });
   });
 
+  it("uses the channel's own default account when the delivery names none", async () => {
+    // A legacy {channel, to} delivery block with only a named account configured (#186043).
+    setSingleOutboundTestPlugin(
+      { id: "forum", outbound: createStubOutbound("Forum"), messaging: forumMessagingForTest },
+      { config: { listAccountIds: () => ["main"], resolveAccount: () => ({}) } },
+    );
+
+    const result = await resolveDeliveryTarget(makeCfg(), AGENT_ID, {
+      channel: "forum",
+      to: "room:ops",
+    });
+
+    expect(result).toMatchObject({ ok: true, accountId: "main", to: "room:ops" });
+  });
+
   it("falls back to the session for a whitespace-only account", async () => {
     setLastSessionEntry({
       channel: "forum",

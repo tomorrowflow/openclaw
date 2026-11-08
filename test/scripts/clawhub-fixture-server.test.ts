@@ -472,11 +472,23 @@ ${runner.slice(boundary)}
     const download = await fetch(`${baseUrl}${whatsappPath}/versions/${version}/artifact/download`);
     expect(download.headers.get("x-clawhub-artifact-sha256")).toBe(sha256);
     expect(Buffer.from(await download.arrayBuffer())).toEqual(archive);
+    // The release CLI completes installation without the newer best-effort
+    // catalog-detail read. Its artifact/security/download audit is still complete.
+    const withoutDetail = runPrepublishAssertion(
+      baseUrl,
+      "@openclaw/whatsapp",
+      version,
+      "required",
+      isolatedCwd,
+    );
+    expect(withoutDetail.status, withoutDetail.stderr).toBe(0);
+    expect((await fetch(`${baseUrl}${whatsappPath}/detail`)).status).toBe(404);
     expect((await fetchJson(baseUrl, "/__fixture__/requests")).requests).toEqual([
       `GET ${whatsappPath}`,
       `GET ${whatsappPath}/versions/${version}/artifact`,
       `GET ${whatsappPath}/versions/${version}/security`,
       `GET ${whatsappPath}/versions/${version}/artifact/download`,
+      `GET ${whatsappPath}/detail`,
     ]);
     expect(
       runPrepublishAssertion(baseUrl, "@openclaw/whatsapp", version, undefined, isolatedCwd).status,
@@ -505,10 +517,12 @@ ${runner.slice(boundary)}
       `${whatsappPath}/versions/${version}/artifact`,
       `${whatsappPath}/versions/${version}/security`,
       `${whatsappPath}/versions/${version}/artifact/download`,
+      `${whatsappPath}/detail`,
     ];
-    for (const requestPath of completeRequestPaths) {
+    // Recovery may cross CLI generations: this install omits catalog metadata.
+    for (const requestPath of completeRequestPaths.slice(0, -1)) {
       const response = await fetch(`${baseUrl}${requestPath}`);
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(requestPath.endsWith("/detail") ? 404 : 200);
       await response.arrayBuffer();
     }
     expect(
@@ -518,7 +532,7 @@ ${runner.slice(boundary)}
     for (let attempt = 2; attempt < 4; attempt += 1) {
       for (const requestPath of completeRequestPaths) {
         const response = await fetch(`${baseUrl}${requestPath}`);
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(requestPath.endsWith("/detail") ? 404 : 200);
         await response.arrayBuffer();
       }
     }
@@ -548,7 +562,7 @@ ${runner.slice(boundary)}
     expect(partial.status).toBe(1);
 
     expect((await fetch(`${baseUrl}/api/v1/packages/%40openclaw%2Fforeign`)).status).toBe(404);
-    for (const requestPath of completeRequestPaths.slice(1, 3)) {
+    for (const requestPath of completeRequestPaths.slice(1, 4)) {
       expect((await fetch(`${baseUrl}${requestPath}`)).status).toBe(200);
     }
     const foreign = runPrepublishAssertion(
@@ -572,7 +586,7 @@ ${runner.slice(boundary)}
     for (let attempt = 0; attempt < 17; attempt += 1) {
       for (const requestPath of completeRequestPaths) {
         const response = await fetch(`${maximumBaseUrl}${requestPath}`);
-        expect(response.status).toBe(200);
+        expect(response.status).toBe(requestPath.endsWith("/detail") ? 404 : 200);
         await response.arrayBuffer();
       }
     }
@@ -589,6 +603,41 @@ ${runner.slice(boundary)}
     expect(aboveMaximum.stderr).toContain(
       "expected 2-16 complete ClawHub artifact audit sequences",
     );
+    // Optional metadata must not make security, identity, ordering, or count optional.
+    const core = completeRequestPaths.slice(0, -1);
+    const detailPath = completeRequestPaths[4];
+    const invalidSequences = [
+      core.filter((_, index) => index !== 2), // missing security
+      core.filter((_, index) => index !== 1), // missing artifact metadata
+      core.slice(0, -1), // missing download
+      [core[0], core[2], core[1], core[3]], // reordered audit
+      [detailPath, ...core], // metadata before installation
+      [...core, detailPath, detailPath], // duplicate metadata
+      [...core, `${detailPath}?version=${version}`], // unapproved query
+      [...core, `${whatsappPath}/versions/other/security`],
+      [...core, "/api/v1/packages/%40openclaw%2Fforeign"],
+      [...core, core[0]], // incomplete second install
+    ];
+    for (const requests of invalidSequences) {
+      const { baseUrl: invalidBaseUrl } = await startFixtureServer(
+        "prepublish-artifacts",
+        signal,
+        [manifestPath],
+        isolatedCwd,
+      );
+      for (const requestPath of requests) {
+        await (await fetch(`${invalidBaseUrl}${requestPath}`)).arrayBuffer();
+      }
+      const invalid = runPrepublishAssertion(
+        invalidBaseUrl,
+        "@openclaw/whatsapp",
+        version,
+        "required",
+        isolatedCwd,
+        "complete",
+      );
+      expect(invalid.status, JSON.stringify(requests)).toBe(1);
+    }
     expect((await fetch(`${baseUrl}/api/v1/packages/%40openclaw%2Fai`)).status).toBe(404);
   });
 

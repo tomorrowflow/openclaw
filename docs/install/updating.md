@@ -33,6 +33,12 @@ backup.
 
 ## Update implementation contract
 
+Update inspection and snapshot workers bind plugin metadata discovery to the
+selected installation's state directory, including requests from older installed
+updaters. A different profile's database version must not block that inspection.
+The candidate worker must contain this repair; an older updater inspecting with
+its own worker still needs an updated runtime.
+
 Within one database-generation observation, update and Doctor workers reuse a
 verified digest while the file's device, inode, size, and nanosecond birth,
 modification, and change times remain identical. Each family observation still
@@ -679,6 +685,8 @@ If a copy fails, active copies finish before cleanup; link publication and
 verification run only after all file copies succeed. Stored state and recovery backups
 retain their existing durability guarantees. An older installed updater keeps
 its initial snapshot behavior until you launch an update from the newer version.
+
+Snapshot progress keeps one history write in flight and coalesces pending observations to the latest progress. A worker queue-capacity refusal before dispatch may skip advisory progress with a warning; required recovery and terminal records and uncertain write outcomes remain failures.
 
 Runtime retention looks for hoisted dependencies within the package manager's
 owning installation. Missing optional peers do not cause it to copy unrelated

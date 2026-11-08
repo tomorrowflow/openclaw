@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { UpdateCommandFailure } from "../cli/update-cli/update-command-result.js";
 import { withUpdateFailureTriage } from "../cli/update-cli/update-command-triage.js";
+import * as configPaths from "../config/paths.js";
 import type { HealthFinding } from "../flows/health-checks.js";
 import { resolveInstallationTarget } from "../infra/installation-target-context.js";
 import type { UpdateRunResult } from "../infra/update-runner-types.js";
@@ -334,7 +335,7 @@ describe("triageCommand", () => {
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
 
-  it("preserves local diagnostics and redacted snapshot failures while the Gateway is offline", async () => {
+  it("keeps separate-installation diagnostics without inspecting the host service", async () => {
     const { writeDiagnosticSupportExport } = await vi.importActual<
       typeof import("../logging/diagnostic-support-export.js")
     >("../logging/diagnostic-support-export.js");
@@ -373,7 +374,8 @@ describe("triageCommand", () => {
     const diagnostics = JSON.parse(await zip.file("diagnostics.json")!.async("string"));
     expect(diagnostics.config).toMatchObject({ exists: true, parseOk: true });
     expect(diagnostics.health).toMatchObject({ status: "failed" });
-    expect(diagnostics.status).toMatchObject({ status: "failed" });
+    expect(diagnostics.status).toMatchObject({ status: "skipped" });
+    expect(mocks.gatherDaemonStatus).not.toHaveBeenCalled();
     const entries = await Promise.all(
       Object.values(zip.files)
         .filter((entry) => !entry.dir)
@@ -391,6 +393,9 @@ describe("triageCommand", () => {
   });
 
   it("reuses the sanitized support exporter with Gateway status and health snapshots", async () => {
+    // This case exercises the default-install branch; the separate-installation case above
+    // proves a redirected state directory must not inspect the host service.
+    vi.spyOn(configPaths, "isDefaultInstallIdentity").mockReturnValue(true);
     const health = { ok: true };
     const status = { gateway: { reachable: true } };
     const bundlePath = path.join(stateDir, "diagnostics.zip");

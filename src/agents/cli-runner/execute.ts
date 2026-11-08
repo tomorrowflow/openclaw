@@ -455,6 +455,7 @@ export async function executePreparedCliRun(
         assertCurrent();
         const resolvedExecutionArgs = context.backendResolved.resolveExecutionArgs?.({
           config: params.config,
+          agentId: params.agentId,
           workspaceDir: context.workspaceDir,
           provider: params.provider,
           modelId: context.modelId,
@@ -478,6 +479,7 @@ export async function executePreparedCliRun(
               : params.cliToolAvailability,
           hostOwnedTools: context.hostOwnedTools,
           useResume,
+          ...(params.controlOperation === "compact" ? { controlOperation: "compact" } : {}),
           baseArgs: baseArgsWithSkills,
         });
         if (

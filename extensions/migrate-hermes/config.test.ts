@@ -34,19 +34,19 @@ function modelProviderValues(
   );
 }
 
+beforeEach(async () => {
+  testWorkspace = await tempWorkspace({
+    rootDir: resolvePreferredOpenClawTmpDir(),
+    prefix: "openclaw-migrate-hermes-",
+  });
+});
+
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await testWorkspace.cleanup();
+});
+
 describe("Hermes migration config mapping", () => {
-  beforeEach(async () => {
-    testWorkspace = await tempWorkspace({
-      rootDir: resolvePreferredOpenClawTmpDir(),
-      prefix: "openclaw-migrate-hermes-",
-    });
-  });
-
-  afterEach(async () => {
-    vi.unstubAllEnvs();
-    await testWorkspace.cleanup();
-  });
-
   it("plans plugin-owned config when target credential storage is unreadable", async () => {
     const { source, workspaceDir, stateDir, agentDir } = makeHermesPaths(testWorkspace.dir);
     await writeFile(
@@ -916,5 +916,54 @@ describe("Hermes migration config mapping", () => {
     expect(
       (config.mcp as { servers?: { beta?: { command?: string } } }).servers?.beta?.command,
     ).toBe("beta");
+  });
+});
+
+describe("Hermes source encoding", () => {
+  it.each([
+    ["config.yaml", 'skills:\n  config:\n    proof:\n      label: "', '"\n'],
+    [".env", 'OPENAI_API_KEY="', '"\n'],
+    ["auth.json", '{"openai":{"access_token":"', '"}}'],
+  ])("refuses invalid UTF-8 in %s before writing imported state", async (name, prefix, suffix) => {
+    const { source, stateDir, workspaceDir } = makeHermesPaths(testWorkspace.dir);
+    const sourcePath = path.join(source, name);
+    await writeFile(sourcePath, "");
+    const bytes = Buffer.concat([Buffer.from(prefix), Buffer.from([0xff]), Buffer.from(suffix)]);
+    await fs.writeFile(sourcePath, bytes);
+    const config: OpenClawConfig = { gateway: { mode: "local" } };
+    const before = structuredClone(config);
+    const context = makeContext({
+      source,
+      stateDir,
+      workspaceDir,
+      config,
+      runtime: makeConfigRuntime(config),
+    });
+
+    await expect(buildHermesMigrationProvider().apply(context)).rejects.toThrow(
+      /UTF-8.*retry migration/s,
+    );
+    expect(config).toEqual(before);
+    expect(await fs.readFile(sourcePath)).toEqual(bytes);
+  });
+
+  it("imports repaired YAML without altering valid Unicode", async () => {
+    const label = "café 中文 🦞 literal �";
+    const { source, stateDir, workspaceDir } = makeHermesPaths(testWorkspace.dir);
+    await writeFile(
+      path.join(source, "config.yaml"),
+      ["skills:", "  config:", "    proof:", "      label: " + JSON.stringify(label), ""].join(
+        "\n",
+      ),
+    );
+    const config: OpenClawConfig = {};
+    const result = await buildHermesMigrationProvider().apply(
+      makeContext({ source, stateDir, workspaceDir, config, runtime: makeConfigRuntime(config) }),
+    );
+
+    expect(result.items.find((item) => item.id === "config:skill-entry:proof")?.status).toBe(
+      "migrated",
+    );
+    expect(config.skills?.entries?.proof?.config?.label).toBe(label);
   });
 });

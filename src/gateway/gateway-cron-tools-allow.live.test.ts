@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { storeLiveApiKeyProfile } from "../../test/helpers/live-api-key-profile.js";
+import { buildCronToolCapabilityProbePrompt } from "../../test/helpers/live-tool-contract-prompts.js";
 import {
   createOpenClawTestInstance,
   type OpenClawTestInstance,
@@ -130,10 +131,6 @@ describeLive("cron tool allowlists through live harnesses", () => {
             const marker = `CRON_FILE_${randomUUID()}`;
             const file = path.join(workspace, `probe-${randomUUID()}.txt`);
             await fs.writeFile(file, `${marker}\n`);
-            const instruction =
-              cap === "bash"
-                ? `Use the exec tool to run cat ${JSON.stringify(file)}.`
-                : `Use the read tool to read ${JSON.stringify(file)}.`;
             const updated = (await cliJson(instance, [
               "cron",
               "edit",
@@ -141,7 +138,7 @@ describeLive("cron tool allowlists through live harnesses", () => {
               "--tools",
               cap,
               "--message",
-              `${instruction} Reply with the file contents. If no tools are available, reply exactly NO_TOOLS.`,
+              buildCronToolCapabilityProbePrompt(file, cap),
             ])) as CronJob;
             expect(updated.payload).toMatchObject({ toolsAllow: cap ? [cap] : [] });
 
@@ -216,7 +213,10 @@ describeLive("cron tool allowlists through live harnesses", () => {
             } else {
               const toolName = cap === "bash" ? "exec" : "read";
               const call = calls.find((entry) => entry.name === toolName);
-              expect(call, `${runtime} cap ${cap}: expected ${toolName} call`).toBeDefined();
+              expect(
+                call,
+                `${runtime} cap ${cap}: expected ${toolName} call; observedCalls=${calls.map((entry) => entry.name).join(",") || "none"}; observedResults=${results.map((entry) => entry.toolName).join(",") || "none"}`,
+              ).toBeDefined();
               const result = results.find((entry) => entry.toolCallId === call?.id);
               expect(result).toMatchObject({ toolName, isError: false });
               expect(JSON.stringify(result?.content)).toContain(marker);

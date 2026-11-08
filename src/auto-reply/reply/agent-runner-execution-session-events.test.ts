@@ -327,15 +327,18 @@ describe("ordinary session event execution", () => {
       assertCurrent: vi.fn(),
       revalidate: vi.fn(async () => {}),
     };
+    const runParams = {
+      authProfileId: "scheduled-profile",
+      authProfileIdSource: "auto" as const,
+      authProfileBinding,
+      allowAuthProfileFallback: false,
+      onSuccessfulAuthProfile,
+    };
     const acquire = vi.spyOn(cronInference, "prepareCronRunInference").mockResolvedValue({
-      runParamsFor: () => ({
-        authProfileId: "scheduled-profile",
-        authProfileIdSource: "auto",
-        authProfileBinding,
-        allowAuthProfileFallback: false,
-        onSuccessfulAuthProfile,
-      }),
+      runParams,
+      runParamsFor: () => runParams,
       assertCandidate,
+      resolveCliAuthProfile: vi.fn(async () => "scheduled-profile"),
       dispose,
     });
     onTestFinished(() => acquire.mockRestore());
@@ -370,6 +373,62 @@ describe("ordinary session event execution", () => {
     expect(settle).toHaveBeenCalledOnce();
     expect(dispose).toHaveBeenCalledOnce();
   });
+
+  it.for([false, true])(
+    "carries scheduled credential authority into CLI preparation (revoked=%s)",
+    async (revoke, { onTestFinished }) => {
+      const followupRun = createFollowupRun();
+      useCliFallback(followupRun);
+      const automation = createScheduledAutomation();
+      followupRun.run.scheduledAutomation = automation;
+      automation.job.inferenceBinding = {
+        version: 1,
+        provider: "claude-cli",
+        profileId: "scheduled-profile",
+        authorizationId: "a".repeat(64),
+        authRequirement: "subscription",
+        source: "auto",
+      };
+      let retired = false;
+      const assertCurrent = vi.fn(() => {
+        if (retired) {
+          throw new Error("scheduled credential retired");
+        }
+      });
+      const runParams = {
+        authProfileId: "scheduled-profile",
+        authProfileBinding: {
+          profileId: "scheduled-profile",
+          authRequirement: "subscription" as const,
+          assertCurrent,
+          revalidate: async () => {},
+        },
+      };
+      const acquire = vi.spyOn(cronInference, "prepareCronRunInference").mockResolvedValue({
+        runParams,
+        runParamsFor: () => runParams,
+        assertCandidate: vi.fn(),
+        resolveCliAuthProfile: vi.fn(async () => "scheduled-profile"),
+        dispose: vi.fn(),
+      });
+      onTestFinished(() => acquire.mockRestore());
+      state.runCliAgentMock.mockImplementationOnce(async (params: RunCliAgentParams) => {
+        expect(params.authProfileId).toBe("scheduled-profile");
+        expect(params.assertCurrent).toBeTypeOf("function");
+        params.assertCurrent?.();
+        retired = revoke;
+        // The real CLI owner invokes this guard again after awaited preparation.
+        params.assertCurrent?.();
+        return { payloads: [{ text: "done" }], meta: {} };
+      });
+      const result = await executeAgentTurn(createMinimalRunAgentTurnParams({ followupRun }));
+      expect(state.runCliAgentMock).toHaveBeenCalledOnce();
+      expect(assertCurrent).toHaveBeenCalledTimes(2);
+      expect(result.outcome).toMatchObject(
+        revoke ? { kind: "rejected" } : { kind: "settled", status: "ok" },
+      );
+    },
+  );
 
   it.for([
     { runtime: "embedded", outcome: "start" },

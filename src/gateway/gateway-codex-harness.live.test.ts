@@ -47,6 +47,7 @@ import {
   renderBitmapTextPngBase64,
   renderSolidColorPngBase64,
 } from "../../test/helpers/live-image-probe.js";
+import { buildCanonicalTextReplyProbePrompt } from "../../test/helpers/live-tool-contract-prompts.js";
 import {
   buildLongOutputPrompt,
   validateLongOutput,
@@ -66,6 +67,7 @@ import {
   connectTestGatewayClient,
   ensurePairedTestGatewayClientIdentity,
 } from "./gateway-cli-backend.live-helpers.js";
+import { waitForSettledCodexCatalog } from "./gateway-codex-harness.catalog.live-helpers.js";
 import { requireSuccessfulNativeCommandCompactionEvidence } from "./gateway-codex-harness.command-evidence.live-helpers.js";
 import {
   buildCodexHarnessAppServerArgs,
@@ -2236,14 +2238,37 @@ describeLive("gateway live (Codex harness)", () => {
           return client;
         };
         client = await connect();
-        const catalog = await client.request<SessionsCatalogListResult>("sessions.catalog.list", {
-          catalogId: "codex",
-          agentId: "dev",
-        });
+        const catalog = await waitForSettledCodexCatalog(
+          (timeoutMs) =>
+            client!.request<SessionsCatalogListResult>(
+              "sessions.catalog.list",
+              { catalogId: "codex", agentId: "dev" },
+              { timeoutMs },
+            ),
+          CODEX_HARNESS_REQUEST_TIMEOUT_MS,
+        );
         const sources = catalog.catalogs.flatMap((entry) =>
           entry.hosts.flatMap((host) => host.sessions.map((session) => ({ host, session }))),
         );
-        expect(sources).toHaveLength(1);
+        expect(
+          sources,
+          JSON.stringify({
+            phase: "canonical-native-catalog",
+            seedExitCode: seeded.code,
+            catalogs: catalog.catalogs.map((entry) => ({
+              id: entry.id,
+              errorCode: entry.error?.code,
+              hosts: entry.hosts.map((host) => ({
+                kind: host.kind,
+                connected: host.connected,
+                pending: host.pending,
+                errorCode: host.error?.code,
+                sessionCount: host.sessions.length,
+                hasNextCursor: Boolean(host.nextCursor),
+              })),
+            })),
+          }),
+        ).toHaveLength(1);
         const { host, session } = sources[0]!;
         expect(session.modelProvider).toBe("openai");
         const source = await client.request<{ sessionKey: string }>("sessions.catalog.continue", {
@@ -2256,7 +2281,7 @@ describeLive("gateway live (Codex harness)", () => {
         await requestAgentText({
           client,
           sessionKey: source.sessionKey,
-          message: "Reply exactly CODEX-CANONICAL-SOURCE.",
+          message: buildCanonicalTextReplyProbePrompt("CODEX-CANONICAL-SOURCE"),
           expectedReply: "CODEX-CANONICAL-SOURCE",
           preserveNativeTurnSettings: true,
         });
@@ -2295,7 +2320,7 @@ describeLive("gateway live (Codex harness)", () => {
           await requestAgentText({
             client,
             sessionKey: child.sessionKey,
-            message: `Reply exactly CODEX-CANONICAL-${phase.toUpperCase()}.`,
+            message: buildCanonicalTextReplyProbePrompt(`CODEX-CANONICAL-${phase.toUpperCase()}`),
             expectedReply: `CODEX-CANONICAL-${phase.toUpperCase()}`,
             preserveNativeTurnSettings: true,
           });

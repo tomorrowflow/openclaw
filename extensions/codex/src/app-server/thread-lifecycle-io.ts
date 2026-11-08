@@ -323,8 +323,7 @@ export async function resumeExistingCodexThread(
       // Keeping its previous client id disables warm reuse after every restart.
       clientId: resolveCodexAppServerClientInstanceId(params.client),
       pendingResumeConfiguration: undefined,
-      ...(resumeBinding.agentWorkspaceDeveloperInstructions === undefined &&
-      params.agentWorkspaceDeveloperInstructions !== undefined
+      ...(params.agentWorkspaceDeveloperInstructions !== undefined
         ? { agentWorkspaceDeveloperInstructions: params.agentWorkspaceDeveloperInstructions }
         : {}),
       cwd: params.cwd,
@@ -391,6 +390,7 @@ export async function resumeExistingCodexThread(
           modelProvider: resumePatch.modelProvider ?? null,
           preserveNativeModel: resumeBinding.preserveNativeModel,
         },
+        params,
       ),
       lifecycle: {
         action: "resumed",
@@ -713,6 +713,7 @@ export async function startFreshCodexThread(
             params.params.authProfileId,
             dynamicToolsFingerprint,
             { model: response.model, modelProvider: bindingModelProvider ?? null },
+            params,
           ),
         }
       : {}),
