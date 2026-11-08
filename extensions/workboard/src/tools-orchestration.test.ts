@@ -55,3 +55,43 @@ describe("workboard_stats tool", () => {
     });
   });
 });
+
+describe("workboard_class_rung tool", () => {
+  it("sets one class and keeps the other classes and board settings", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({
+      id: "default",
+      orchestration: {
+        defaultAssignee: "dev",
+        classRungs: { docs: { rung: "b" }, "ios-logic": { rung: "c", since: 1_000 } },
+      },
+    });
+    const tools = new Map(createWorkboardTools({ store }).map((tool) => [tool.name, tool]));
+    const classRung = expectDefined(tools.get("workboard_class_rung"), "workboard_class_rung");
+
+    const restamp = Date.now() - 60_000;
+    expect(
+      readPayload(
+        await classRung.execute("restamp", {
+          boardId: "default",
+          class: "docs",
+          rung: "b",
+          since: restamp,
+        }),
+      ),
+    ).toEqual({
+      classRungs: { docs: { rung: "b", since: restamp }, "ios-logic": { rung: "c", since: 1_000 } },
+    });
+
+    const before = Date.now();
+    await classRung.execute("promote", { boardId: "default", class: "server-fix", rung: "b" });
+    const orchestration = await store.boardOrchestration("default");
+    expect(orchestration?.defaultAssignee).toBe("dev");
+    expect(orchestration?.classRungs?.["ios-logic"]).toEqual({ rung: "c", since: 1_000 });
+    expect(orchestration?.classRungs?.["server-fix"]?.since).toBeGreaterThanOrEqual(before);
+
+    await expect(
+      classRung.execute("missing", { boardId: "nope", class: "docs", rung: "b" }),
+    ).rejects.toThrow("does not exist");
+  });
+});

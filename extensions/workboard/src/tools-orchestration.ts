@@ -93,6 +93,34 @@ export function createWorkboardOrchestrationTools(params: {
         jsonResult({ board: await store.upsertBoard(asNonArrayRecord(rawParams)) }),
     },
     {
+      name: "workboard_class_rung",
+      label: "Workboard Class Rung",
+      description:
+        "Set one task class's rung on a board (a: the operator reviews, b: the agent decides, c: auto-merge with a sampled read), keeping every other class. A rung change stamps since to now; pass since (epoch ms) to restamp the trust window, for example to a promotion's day. Returns the board's classRungs.",
+      parameters: strictObject({
+        boardId: Type.String({ description: "Board id." }),
+        class: Type.String({ description: "Task class without the class: prefix." }),
+        rung: Type.Union([Type.Literal("a"), Type.Literal("b"), Type.Literal("c")]),
+        since: Type.Optional(
+          Type.Integer({ description: "Epoch ms the class's trust window starts.", minimum: 0 }),
+        ),
+        sampleEvery: Type.Optional(
+          Type.Integer({
+            description: "Rung c: a human reads 1 in this many accepted PRs. Default 3.",
+            minimum: 1,
+            maximum: 100,
+          }),
+        ),
+      }),
+      execute: async (_toolCallId, rawParams) => {
+        const record = asNonArrayRecord(rawParams);
+        const { boardId, class: taskClass, ...entry } = record;
+        return jsonResult({
+          classRungs: await store.setClassRung(String(boardId), String(taskClass), entry),
+        });
+      },
+    },
+    {
       name: "workboard_board_archive",
       label: "Workboard Board Archive",
       description: "Archive or restore persisted Workboard board metadata.",
