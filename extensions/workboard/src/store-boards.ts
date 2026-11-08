@@ -2,6 +2,7 @@ import type {
   WorkboardBoardMetadata,
   WorkboardBoardSummary,
   WorkboardCard,
+  WorkboardClassRung,
   WorkboardChange,
   WorkboardListResult,
   WorkboardMergeDigestResult,
@@ -283,6 +284,33 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
       this.assertTargetModelAllowed(input, board);
       await this.boardStore.register(id, { version: 1, board });
       return board.kind === "sessions" ? await this.getSessionsBoard(id) : board;
+    });
+  }
+
+  /**
+   * Sets one class's rung and keeps every other class as stored, so a caller
+   * never resends the whole map. The normalizer stamps `since` on a rung
+   * change; an explicit `since` restamps the trust window without one. The
+   * normalizer validates `entry` like any board save.
+   */
+  async setClassRung(
+    boardId: string,
+    taskClass: string,
+    entry: Record<string, unknown>,
+  ): Promise<Record<string, WorkboardClassRung>> {
+    return await this.enqueueMutation(async () => {
+      const id = normalizeBoardIdRequired(boardId);
+      const existing = await this.boardStore.lookup(id);
+      if (!existing) {
+        throw new Error(`Workboard board ${id} does not exist.`);
+      }
+      const classRungs = existing.board.orchestration?.classRungs ?? {};
+      const board = normalizeBoardMetadata(
+        { id, orchestration: { classRungs: { ...classRungs, [taskClass]: entry } } },
+        existing.board,
+      );
+      await this.boardStore.register(id, { version: 1, board });
+      return board.orchestration?.classRungs ?? {};
     });
   }
 
