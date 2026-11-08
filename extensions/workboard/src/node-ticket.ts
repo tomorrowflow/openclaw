@@ -28,6 +28,8 @@ import {
 import {
   currentNodeVerification,
   type ImportedHandoff,
+  importedReworkRefusal,
+  isBlockReason,
   nodeReviewReadiness,
   reviewVerdictOf,
   type VerificationSlot,
@@ -173,9 +175,9 @@ function requirePassedVerification(
  * An imported round's move. The move to done records who accepted it; the
  * board's rung for an agent's move is read in the queued write, so a demotion
  * applies to the next move. The operator's move to done waits for the
- * round's verification and verdict (see `nodeReviewReadiness`). A move to todo or ready is refused until that
- * move published the draft PR: the next session starts from the PR branch,
- * so the dispatcher would only block the card.
+ * round's verification and verdict (see `nodeReviewReadiness`), as does its
+ * move to todo or ready (rework), which the handoff publishes first because
+ * the rework session starts from the PR branch. Agents rework via done.
  */
 export async function withImportedNodeTicketMove(params: {
   existing: WorkboardCard;
@@ -197,12 +199,12 @@ export async function withImportedNodeTicketMove(params: {
   ) {
     return next;
   }
-  if (next.status === "todo" || next.status === "ready") {
-    throw new Error(
-      "This ticket's latest round was imported but isn't published yet. Move the card to done to push it to the draft PR, then move it to todo for rework.",
-    );
+  const rework = next.status === "todo" || next.status === "ready";
+  const refusal = rework ? importedReworkRefusal(existing, next, actor !== undefined) : undefined;
+  if (refusal) {
+    throw new Error(refusal);
   }
-  if (next.status !== "done") {
+  if (!rework && next.status !== "done") {
     return next;
   }
   // An agent's move passes nodeTicketAcceptance, which already demands both.
@@ -245,7 +247,7 @@ export async function withImportedNodeTicketMove(params: {
  * answers to a ticket's questions: card comments newer than the publish or
  * the questions and Workboard's own notices since. The slot wait notice is
  * written after a review comment and is not feedback either, nor is a late
- * shadow verdict.
+ * shadow verdict or a block reason (written with its failed notification).
  */
 export function nodeTicketReviewComments(card: WorkboardCard): WorkboardComment[] {
   const handoff = nodeTicketTarget(card)?.worktree?.handoff;
@@ -258,6 +260,7 @@ export function nodeTicketReviewComments(card: WorkboardCard): WorkboardComment[
     (comment) =>
       comment.createdAt > from &&
       comment.createdAt !== handoff.slotWaitNotedAt &&
+      !isBlockReason(card, comment) &&
       !reviewVerdictOf(comment),
   );
 }
@@ -419,7 +422,7 @@ export async function createNodeTicketWorktree(params: {
   const previous = target.worktree;
   if (previous?.handoff?.phase === "imported") {
     throw new Error(
-      "this ticket's latest round was imported but isn't published yet; move the card to done to push it to the draft PR, then reopen it for rework",
+      "this ticket's latest round was imported but isn't published yet; move the card to done to accept it, or to todo to rework it, and the handoff publishes the draft PR first",
     );
   }
   const published = previous?.handoff?.phase === "published" ? previous.handoff : undefined;

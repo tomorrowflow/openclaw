@@ -9,6 +9,7 @@ import { readResponseWithLimit } from "openclaw/plugin-sdk/response-limit-runtim
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   HandoffSupersededError,
+  isVerificationComment,
   nodeTicketTarget,
   requireHostGit,
   STANDARDS_REVIEW_LABEL,
@@ -59,6 +60,21 @@ type PublishCard = {
   rung?: WorkboardAgentRung;
 };
 
+/** The operator moved an imported round to todo or ready: rework, published first. */
+function reworkDecided(card: WorkboardCard): boolean {
+  return card.status === "todo" || card.status === "ready";
+}
+
+/** When the round's last verdict or verification comment arrived; feedback follows it. */
+function reviewedAt(item: PublishCard): number {
+  const review = item.card.metadata?.comments?.findLast(
+    (comment) =>
+      comment.createdAt >= item.importedAt &&
+      (reviewVerdictOf(comment) !== undefined || isVerificationComment(comment)),
+  );
+  return review?.createdAt ?? item.importedAt;
+}
+
 export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
   const target = nodeTicketTarget(card);
   const worktree = target?.worktree;
@@ -67,7 +83,7 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
     !target ||
     !worktree ||
     handoff?.phase !== "imported" ||
-    card.status !== "done" ||
+    (card.status !== "done" && !reworkDecided(card)) ||
     card.metadata?.archivedAt ||
     // A probe only measures the harness; the handoff pass archives it instead.
     card.metadata?.automation?.probe
@@ -126,7 +142,8 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
 function reviewVerdict(item: PublishCard): WorkboardNodeReviewVerdict {
   const { card } = item;
   const decidedAt =
-    card.events?.findLast((event) => event.toStatus === "done")?.at ?? Number.POSITIVE_INFINITY;
+    card.events?.findLast((event) => event.toStatus === card.status)?.at ??
+    Number.POSITIVE_INFINITY;
   const verdict = (card.metadata?.comments ?? [])
     .filter((comment) => comment.createdAt >= item.importedAt && comment.createdAt <= decidedAt)
     .flatMap((comment) => reviewVerdictOf(comment) ?? [])
@@ -540,8 +557,9 @@ function reworkCommentBody(item: PublishCard, rework: WorkboardNodeRework): stri
 
 /**
  * D43: an accepted node ticket (moved to done after its import) becomes one
- * draft PR. A failure blocks the card with the reason; moving it to done
- * again retries, and an already open PR for the branch is reused.
+ * draft PR, and so does one the operator moved to todo for rework, which the
+ * reopen then starts. A failure blocks the card with the reason; the same
+ * move again retries, and an already open PR for the branch is reused.
  */
 export async function publishNodeTicket(params: {
   store: WorkboardStore;
@@ -574,7 +592,7 @@ export async function publishNodeTicket(params: {
     await store.block(
       card.id,
       {
-        reason: `Draft PR failed: ${formatErrorMessage(error)}\nFix the cause, then move the card to done again to retry.`,
+        reason: `Draft PR failed: ${formatErrorMessage(error)}\nFix the cause, then move the card to ${reworkDecided(card) ? "todo" : "done"} again to retry.`,
       },
       scope,
     );
@@ -595,6 +613,8 @@ export async function publishNodeTicket(params: {
         headCommit: item.headCommit,
         importedAt: item.importedAt,
         publishedAt,
+        // Feedback written before the move to todo is the rework's review.
+        ...(reworkDecided(card) ? { reviewFrom: reviewedAt(item) } : {}),
         pullRequestUrl,
         pullRequest: {
           state: pullRequest.merged ? "merged" : draft ? "draft" : "open",
@@ -637,11 +657,13 @@ export async function publishNodeTicket(params: {
   }
   const marked =
     REWORK_TITLE_PATTERN.test(reused?.title ?? "") || REWORK_BODY_PATTERN.test(reused?.body ?? "");
-  // An agent's rework verdict publishes before it reopens the ticket, and that
-  // reopen marks the PR again, so its publish leaves the marker alone.
+  // A rework decision (the operator's move to todo, or an agent's rework
+  // verdict) publishes before it reopens the ticket, and that reopen marks the
+  // PR again, so its publish leaves the marker alone.
   const verdict = reviewVerdict(item);
-  const agentRework = verdict.decidedBy === "agent" && verdict.verdict === "rework";
-  if (reused && marked && !agentRework) {
+  const reworking =
+    reworkDecided(card) || (verdict.decidedBy === "agent" && verdict.verdict === "rework");
+  if (reused && marked && !reworking) {
     try {
       await githubApi(
         params.github,

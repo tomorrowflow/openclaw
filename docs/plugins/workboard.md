@@ -1180,7 +1180,7 @@ model, so a verdict always comes from the configured one:
    `Closes <owner>/<repo>#<n>`, so merging the PR closes the issue. A
    failure, such as a missing [token](#configuration), blocks the card with
    the reason, including GitHub's validation errors; move it to `done` again
-   to retry. Archive a card instead of
+   to retry, or to `todo` to rework the round instead. Archive a card instead of
    moving it to `done` to close it without a PR.
    **Agent acceptance at rung b:** an agent's Workboard tools (every one that
    can set `done`, such as `workboard_move`, `workboard_release` with a
@@ -1231,9 +1231,19 @@ model, so a verdict always comes from the configured one:
    previous publish (the review feedback and the session's summary). If the
    comment fails, the push still counts and the card gets a comment saying so.
    The card records `rework.round`, `rework.outsideCommits`, and the first
-   acceptance (`rework.acceptedAt`) on its node worktree. A card imported but not yet published can't be reworked: Workboard
-   refuses its move to `todo` or `ready` and it stays in `review`. Move it to
-   `done` first. A branch that is gone from `origin` (merged or closed PR) needs a new
+   acceptance (`rework.acceptedAt`) on its node worktree. A card in `review`
+   whose round is imported but not yet published goes straight to rework the
+   same way: the operator's move to `todo` or `ready` waits for the round's
+   verification and verdict like a move to `done`, then the handoff pushes the
+   round to the draft PR and starts the rework round. Comments after the
+   round's last verdict or verification comment count as its review feedback,
+   so a comment written before the move is enough; block reasons never count,
+   and a move with none goes back to `backlog` as above. A failed publish
+   blocks the card; fix the cause and move it to `todo` again. A card blocked
+   after a failed accept keeps that decision: moving it to `todo` (or
+   Unblock) is refused until a move to `done` publishes it. An agent's move
+   to `todo` or `ready` is still refused: an agent posts
+   `Verdict: rework: <finding>` and moves the card to `done`. A branch that is gone from `origin` (merged or closed PR) needs a new
    card.
 6. **Stop and restart:** **Stop** on a running node ticket calls
    `workboard.cards.stop {id, expectedUpdatedAt}`, which records the stop on

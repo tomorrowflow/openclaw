@@ -1040,22 +1040,6 @@ describe("node ticket draft PR", () => {
     expect(started?.metadata?.automation?.startRequest).toBeUndefined();
   });
 
-  it("refuses to rework an imported ticket before its draft PR exists", async () => {
-    const { store, card, handoffs, warn, gateway } = await finishNodeTicket({});
-    await handoffs.resume(warn);
-    await expect(store.move(card.id, "todo", undefined)).rejects.toThrow("isn't published yet");
-
-    await dispatchAndStartWorkboardCards({
-      store,
-      subagent: { run: vi.fn() },
-      nodeTickets: gateway,
-      options: { cardId: card.id, now: Date.now() },
-    });
-
-    expect((await store.get(card.id))?.status).toBe("review");
-    expect(gateway.respond).not.toHaveBeenLastCalledWith("sessions.create", expect.anything());
-  });
-
   it("finishes on the merged PR that already holds the accepted commit, without pushing or opening one", async () => {
     const { store, card, repos, handoffs, warn, github } = await acceptImportedTicket();
     const branch = `factory/${card.id}`;

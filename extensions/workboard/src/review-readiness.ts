@@ -24,6 +24,42 @@ export function reviewVerdictOf(comment: WorkboardComment): "accept" | "rework" 
   return match === "accept" || match === "rework" ? match : undefined;
 }
 
+/**
+ * Why a move of an imported, unpublished round to todo or ready can't decide
+ * rework: only the operator decides it from review, and a blocked card's move
+ * retries the decision it left review with, so Unblock after a failed accept
+ * retries the accept.
+ */
+export function importedReworkRefusal(
+  existing: WorkboardCard,
+  next: WorkboardCard,
+  byAgent: boolean,
+): string | undefined {
+  const decided =
+    existing.status === "blocked"
+      ? existing.events?.findLast((event) => event.fromStatus === "review")?.toStatus
+      : next.status;
+  if (decided === "done") {
+    return "This round was accepted; move the card to done again to retry its draft PR, then to todo with a comment to rework it.";
+  }
+  // A probe is archived when its round ends, never published.
+  const probe = next.metadata?.automation?.probe !== undefined;
+  return byAgent || probe || (decided !== "todo" && decided !== "ready")
+    ? "This ticket's latest round was imported but isn't published yet. Move the card to done to push it to the draft PR, then move it to todo for rework."
+    : undefined;
+}
+
+/** A Workboard block reason, which a block writes together with its failed notification. */
+export function isBlockReason(card: WorkboardCard, comment: WorkboardComment): boolean {
+  return (
+    comment.source === undefined &&
+    (card.metadata?.notifications ?? []).some(
+      (notification) =>
+        notification.kind === "failed" && notification.createdAt === comment.createdAt,
+    )
+  );
+}
+
 /** When the first verdict comment between `from` and `to` arrived. */
 export function firstVerdictAt(
   card: WorkboardCard,
