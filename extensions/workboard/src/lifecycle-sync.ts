@@ -66,6 +66,7 @@ type WorkboardLifecycleMatchHandler = (input: {
 type WorkboardAgentEndEvent = {
   runId?: string;
   success: boolean;
+  error?: string;
   messages?: unknown[];
   durationMs?: number;
 };
@@ -295,10 +296,13 @@ export async function syncWorkboardAgentEnded(params: {
     params.onSessionActive?.();
   }
   // After any lifecycle write, which gives a session-linked attempt its run id.
+  // A failed run's error (a provider quota, an auth refusal) is the only record of
+  // why its card blocked.
   const contextTokens = turnEndContextTokens(params.event.messages ?? []);
-  if (source.runId && contextTokens !== undefined) {
+  const error = params.event.success ? undefined : params.event.error;
+  if (source.runId && (contextTokens !== undefined || error)) {
     for (const card of cards) {
-      await params.store.recordAttemptContext(card.id, source.runId, contextTokens);
+      await params.store.recordAttemptEnd(card.id, source.runId, { contextTokens, error });
     }
   }
   return count;
