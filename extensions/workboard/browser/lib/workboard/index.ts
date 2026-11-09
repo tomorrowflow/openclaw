@@ -46,6 +46,7 @@ export {
   moveWorkboardCard,
   recordWorkboardVisualCheck,
   saveWorkboardCardDraft,
+  setWorkboardCardModel,
 } from "./mutations.ts";
 export { startWorkboardCard, stopWorkboardCard } from "./execution.ts";
 export {

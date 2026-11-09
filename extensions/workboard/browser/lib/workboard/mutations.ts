@@ -290,6 +290,20 @@ export async function recordWorkboardVisualCheck(
   });
 }
 
+/** Changes the model a stopped node ticket runs on; its next start uses it. */
+export async function setWorkboardCardModel(
+  params: WorkboardCardMutationParams & { model: string },
+) {
+  return runWorkboardCardMutation(params, async (state, client) => {
+    const payload = await client.request("workboard.cards.setModel", {
+      id: params.cardId,
+      model: params.model,
+    });
+    replaceCard(state, normalizeCardPayload(payload));
+    return true;
+  });
+}
+
 /** Ends a node ticket's grilling; the session continues the ticket with what is settled. */
 export async function endWorkboardGrill(params: WorkboardCardMutationParams) {
   return runWorkboardCardMutation(params, async (state, client) => {

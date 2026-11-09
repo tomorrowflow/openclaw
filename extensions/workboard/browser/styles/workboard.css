@@ -3987,6 +3987,40 @@ workboard-inline-text {
   border-top: 0;
 }
 
+.workboard-detail__model {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workboard-detail__model-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.workboard-detail__model-field select {
+  min-width: 0;
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-weight: 400;
+}
+
+.workboard-detail__model-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .workboard-detail__menu {
   position: fixed;
   inset: auto;

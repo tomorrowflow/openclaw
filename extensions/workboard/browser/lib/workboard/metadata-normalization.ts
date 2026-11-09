@@ -19,17 +19,24 @@ import {
   type WorkboardMetadata,
 } from "./types.ts";
 
-/** The UI only needs to know where a node ticket runs, never its recorded worktree. */
+/** The UI only needs where a node ticket runs and on which model, never its recorded worktree. */
 export function normalizeNodeClaudeTarget(target: unknown): WorkboardExecutionTarget | undefined {
   if (!isRecord(target) || target.kind !== "node-claude") {
     return undefined;
   }
-  const { nodeId, repoPath, worktreesRoot, hostRepoPath } = target;
+  const { nodeId, repoPath, worktreesRoot, hostRepoPath, model } = target;
   return typeof nodeId === "string" &&
     typeof repoPath === "string" &&
     typeof worktreesRoot === "string" &&
     typeof hostRepoPath === "string"
-    ? { kind: "node-claude", nodeId, repoPath, worktreesRoot, hostRepoPath }
+    ? {
+        kind: "node-claude",
+        nodeId,
+        repoPath,
+        worktreesRoot,
+        hostRepoPath,
+        ...(typeof model === "string" && model.trim() ? { model: model.trim() } : {}),
+      }
     : undefined;
 }
 
