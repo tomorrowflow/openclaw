@@ -41,6 +41,7 @@ const representativeCorpusIds = new Set([
   "http-structured-insufficient-quota",
   "xai-403-spending-limit",
   "billing-periodic-limit-402",
+  "claude-session-limit",
   "billing-custom-proxy",
   "billing-zhipu-periodic-limit",
   "billing-subscription-quota-refresh",

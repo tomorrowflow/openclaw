@@ -62,8 +62,10 @@ const PRE_DISPATCH_TOOL_CALL_REJECTION_MESSAGES = new Set([
 export function isPreDispatchToolCallRejectionMessage(errorMessage?: string): boolean {
   return errorMessage !== undefined && PRE_DISPATCH_TOOL_CALL_REJECTION_MESSAGES.has(errorMessage);
 }
+// Claude reports its rolling 5-hour window as "You've hit your session limit · resets …";
+// the "hit your" anchor keeps OpenClaw's own session-count limits out.
 const PERIODIC_USAGE_LIMIT_RE =
-  /\b(?:daily|weekly|monthly)(?:\/(?:daily|weekly|monthly))* (?:usage )?limit(?:s)?(?: (?:exhausted|reached|exceeded))?\b/i;
+  /\b(?:daily|weekly|monthly)(?:\/(?:daily|weekly|monthly))* (?:usage )?limit(?:s)?(?: (?:exhausted|reached|exceeded))?\b|\bhit your session limit\b/i;
 
 const HIGH_CONFIDENCE_AUTH_PERMANENT_PATTERNS = [
   /api[_ ]?key[_ ]?(?:revoked|deactivated|deleted)/i,
