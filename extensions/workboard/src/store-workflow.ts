@@ -38,6 +38,7 @@ import {
   MAX_CARD_ARTIFACTS,
   MAX_CARD_COMMENTS,
   MAX_BLOCK_REASON_CHARS,
+  MAX_ATTEMPT_ERROR_CHARS,
   secondsToDurationMs,
 } from "./store-constants.js";
 import type {
@@ -550,21 +551,33 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
     });
   }
 
-  /** Records a run's turn-end context on the attempt with its run id; other attempts and cards are left alone. */
-  async recordAttemptContext(
+  /**
+   * Records a run's turn-end facts on the attempt with its run id; other attempts and cards are left alone.
+   * The error stays on the attempt through the lifecycle write that later closes it.
+   */
+  async recordAttemptEnd(
     id: string,
     runId: string,
-    contextTokens: number,
+    end: { contextTokens?: number; error?: string },
   ): Promise<WorkboardCard | undefined> {
+    const error = capText(end.error, MAX_ATTEMPT_ERROR_CHARS);
     return await this.enqueueMutation(async () => {
       const result = await this.updateLatestCard(id, (card) => {
         const attempts = [...(card.metadata?.attempts ?? [])];
         const index = attempts.findIndex((attempt) => attempt.runId === runId);
         const attempt = attempts[index];
-        if (!attempt || attempt.contextTokens === contextTokens) {
+        if (!attempt) {
           return undefined;
         }
-        attempts[index] = { ...attempt, contextTokens };
+        const next = {
+          ...attempt,
+          ...(end.contextTokens === undefined ? {} : { contextTokens: end.contextTokens }),
+          ...(error ? { error } : {}),
+        };
+        if (isDeepStrictEqual(next, attempt)) {
+          return undefined;
+        }
+        attempts[index] = next;
         return { metadata: { ...card.metadata, attempts } };
       });
       return result.updated ? result.card : undefined;

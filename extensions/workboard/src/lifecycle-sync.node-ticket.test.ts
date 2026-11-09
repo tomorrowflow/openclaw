@@ -673,9 +673,10 @@ describe("Workboard node ticket lifecycle", () => {
     const nodeTickets = createNodeGateway();
     const { card, sessionKey, runId } = await startNodeCard(store, nodeTickets);
     // The CLI runner failed; agent_end fires while fallback may still continue.
+    const quota = "You've hit your session limit · resets 2:20am (Europe/Berlin)";
     await syncWorkboardAgentEnded({
       store,
-      event: { runId, success: false, messages: [] },
+      event: { runId, success: false, error: quota, messages: [] },
       context: { runId, sessionKey },
       readSessions: async () => ({
         sessions: [{ key: sessionKey, status: "running" as const, hasActiveRun: true }],
@@ -691,6 +692,12 @@ describe("Workboard node ticket lifecycle", () => {
     const failed = await store.get(card.id);
     expect(failed?.status).toBe("blocked");
     expect(failed?.metadata?.claim).toBeUndefined();
+    // The provider's error is the only record of why the card blocked.
+    expect(failed?.metadata?.attempts?.at(-1)).toMatchObject({
+      runId,
+      status: "blocked",
+      error: quota,
+    });
 
     await store.move(card.id, "todo", undefined);
     const restarted = await dispatchAndStartWorkboardCards({
