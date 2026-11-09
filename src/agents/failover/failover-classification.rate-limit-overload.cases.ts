@@ -214,6 +214,11 @@ export const rateLimitOverloadCases = [
     { id: "billing-weekly-monthly", message: "LLM error: weekly/monthly limit reached" },
     { id: "billing-monthly-limit", message: "LLM error: monthly limit reached" },
     { id: "billing-daily-limit", message: "LLM error: daily limit exceeded" },
+    // Claude's rolling 5-hour window, as the Claude CLI reports it.
+    {
+      id: "claude-session-limit",
+      message: "You've hit your session limit · resets 2:20am (Europe/Berlin)",
+    },
     { id: "billing-chinese-frequency", message: "频率限制" },
     { id: "billing-chinese-quota-insufficient", message: "配额不足" },
     { id: "billing-chinese-credit-exhausted", message: "额度已用尽" },
