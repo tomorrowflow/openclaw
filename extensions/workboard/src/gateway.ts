@@ -337,6 +337,11 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.dismissRegression", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(store.dismissMergeRegression(readId(input))),
   );
+  register("workboard.cards.setModel", WRITE_SCOPE, ({ params: input }) =>
+    redactCardResult(
+      store.setTargetModel(readId(input), readStringParam(input, "model", { required: true })),
+    ),
+  );
   // The card change wakes the node handoff owner, which starts a fresh verification.
   register("workboard.cards.verify", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(store.dropNodeVerification(readId(input))),

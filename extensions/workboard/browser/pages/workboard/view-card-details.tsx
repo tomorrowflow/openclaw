@@ -45,6 +45,7 @@ import {
   NodeTicketTabPanels,
 } from "./view-card-detail-tabs.tsx";
 import { CardDiscardDialog } from "./view-card-modal.tsx";
+import { CardModelControl } from "./view-card-model.tsx";
 import { NodeRounds } from "./view-card-rounds.tsx";
 import { CardSessionHeading } from "./view-card-session-heading.tsx";
 import {
@@ -553,6 +554,14 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                         </details>
                       ) : undefined}
                     </section>
+                    {card().metadata?.automation?.target?.model && !action().archived ? (
+                      <CardModelControl
+                        workboard={actionProps}
+                        card={card()}
+                        busy={action().busy}
+                        writable={action().writable}
+                      />
+                    ) : undefined}
                     <BoardAutomation
                       automation={props.detailBoardAutomation}
                       onNavigate={navigateAutomation}

@@ -76,4 +76,44 @@ export class WorkboardNodeTicketQueueStore extends WorkboardWorkflowStore {
       };
     });
   }
+
+  /**
+   * Changes the model a node ticket runs on. Each start passes the target's
+   * model to the session, so the next start applies it; the worktree, node and
+   * repo stay as they are. A running card keeps its model until it stops.
+   */
+  async setTargetModel(id: string, model: string): Promise<WorkboardCard> {
+    const requested = model.trim();
+    if (!requested.includes("/")) {
+      throw new Error("model must be a provider/model reference.");
+    }
+    return await this.enqueueMutation(async () => {
+      const card = await this.requireCard(id);
+      const automation = card.metadata?.automation;
+      const target = automation?.target;
+      if (!automation || target?.kind !== "node-claude") {
+        throw new Error("only node ticket cards have a model to change.");
+      }
+      if (card.status === "running" || card.metadata?.claim) {
+        throw new Error("stop the card before changing its model.");
+      }
+      const refusal = this.checkTargetModel?.({ agentId: card.agentId, model: requested });
+      if (refusal) {
+        throw new Error(`model ${requested} is not allowed for this card's agent (${refusal}).`);
+      }
+      if (target.model === requested) {
+        return card;
+      }
+      return await this.updateCard(
+        card,
+        {
+          metadata: {
+            ...card.metadata,
+            automation: { ...automation, target: { ...target, model: requested } },
+          },
+        },
+        { expectedUpdatedAt: card.updatedAt },
+      );
+    });
+  }
 }
