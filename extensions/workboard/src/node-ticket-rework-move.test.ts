@@ -36,12 +36,12 @@ describe("node ticket rework from review", () => {
     expect(stored?.metadata?.automation?.target?.worktree?.reviews?.at(-1)).toMatchObject({
       verdict: "rework",
     });
-    const message = gateway.respond.mock.calls.findLast(
-      ([method]) => method === "sessions.create",
-    )?.[1]?.message;
+    const message = String(
+      gateway.respond.mock.calls.findLast(([method]) => method === "sessions.create")?.[1]?.message,
+    );
     expect(message).toContain("Review rework, round 1");
     expect(message).toContain("Rename the flag to --strict.");
-    expect(message?.split("## Turn contract")[0]).not.toContain("Draft PR failed");
+    expect(message.split("## Turn contract")[0]).not.toContain("Draft PR failed");
   });
   it("refuses to turn an Unblock after a failed accept into rework", async () => {
     const { store, card, repos, handoffs, warn } = await finishNodeTicket({});
