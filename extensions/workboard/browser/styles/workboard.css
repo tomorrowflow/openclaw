@@ -3380,6 +3380,9 @@ workboard-inline-text {
   display: grid;
   gap: 12px;
   min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
 }
 
 .workboard-detail__section h3,
@@ -3444,12 +3447,6 @@ workboard-inline-text {
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.workboard-detail__execution--empty {
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
 }
 
 .workboard-detail__execution--empty .workboard-detail__session-row {
@@ -3991,6 +3988,8 @@ workboard-inline-text {
   display: grid;
   gap: 4px;
   min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
 .workboard-detail__model-field {

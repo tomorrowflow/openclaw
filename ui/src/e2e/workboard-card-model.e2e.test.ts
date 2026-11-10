@@ -51,6 +51,10 @@ suite.define(() => {
               createdAt: now - 3_600_000,
               updatedAt: now - 60_000,
               agentId: "dev",
+              notes: Array.from(
+                { length: 14 },
+                (_, i) => `Step ${i + 1}. Bring up the compose stack and record the runbook entry.`,
+              ).join("\n\n"),
               metadata: {
                 automation: {
                   boardId: "lindra",
@@ -108,7 +112,29 @@ suite.define(() => {
             await expect.poll(() => select.inputValue()).toBe(FABLE);
             await select.focus();
             await expect.poll(() => select.locator("option").count()).toBe(2);
+            const order = await page.evaluate(() => {
+              const run = document.querySelector(".workboard-detail__execution");
+              const notes = document.querySelector(
+                ".workboard-detail__content workboard-inline-text",
+              );
+              const model = document.querySelector("select[data-card-model]");
+              return {
+                modelInRun: Boolean(run?.contains(model ?? null)),
+                runBeforeNotes: Boolean(
+                  run &&
+                  notes &&
+                  run.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING,
+                ),
+                selectBottom: model?.getBoundingClientRect().bottom ?? 0,
+              };
+            });
+            expect(order.modelInRun).toBe(true);
+            expect(order.runBeforeNotes).toBe(true);
+            expect(order.selectBottom).toBeLessThan(1000);
             await capture(page, "after-open.png");
+            await page.setViewportSize({ width: 480, height: 900 });
+            await capture(page, "after-narrow.png");
+            await page.setViewportSize({ width: 1440, height: 1000 });
             await select.selectOption(SONNET);
             await expect
               .poll(async () => (await gateway.getRequests("workboard.cards.setModel")).length)
