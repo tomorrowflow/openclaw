@@ -15,7 +15,7 @@ import {
   WORKBOARD_ALL_BOARDS_FILTER,
 } from "../../lib/workboard/board-filter.ts";
 import { workboardBoardName } from "../../lib/workboard/board-presentation.ts";
-import { canRestartWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
+import { isWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
 import {
   getWorkboardDependencyState,
   getWorkboardLifecycle,
@@ -52,6 +52,7 @@ import {
   formatEventLabel,
   formatLifecycle,
   formatPriorityLabel,
+  engineBlockedByRuntime,
   workboardErrorMessage,
   workboardMutationContext,
   workboardViewState,
@@ -472,8 +473,11 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                           writable={action().writable}
                         />
                       ) : undefined}
-                      {/* A restart continues the node ticket's own session; other starts would not. */}
-                      {action().showStartControls && !canRestartWorkboardNodeTicket(card()) ? (
+                      {/* A node ticket runs on its node with the chosen model; an engine start would
+                          bypass both. An agent pinned to another runtime refuses every engine start. */}
+                      {action().showStartControls &&
+                      !isWorkboardNodeTicket(card()) &&
+                      !engineBlockedByRuntime(props, card(), "codex") ? (
                         <details class="workboard-detail__disclosure workboard-detail__engine-options">
                           <summary>
                             <span class="workboard-detail__disclosure-chevron" aria-hidden="true">

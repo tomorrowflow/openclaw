@@ -309,7 +309,6 @@ export default {
     detailLastSeen: "Last seen {time}",
     detailExecutionOptions: "Other ways to start",
     detailModel: "Model",
-    detailModelHelp: "The next start runs this card on the chosen model.",
     detailModelRunning: "Stop the card to change its model.",
     detailModelUnavailable: "Could not list models: {error}",
     detailRunAutomatically: "Run automatically",
