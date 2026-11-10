@@ -6,6 +6,9 @@
 
 /**
  * The board's verifier: a session of `agentId` on `model` (`provider/model`).
+ * `fallbacks`, tried in order, start the session when the Gateway refuses
+ * `model` (for example while its account is in a rate-limit cooldown); the
+ * verification records the model that ran.
  * `sampleEvery`, allowed on the `crossVerifier` only, cross-verifies every
  * reworked rung c round and 1 in `sampleEvery` others, chosen by the card id
  * independently of the review sample; without it every rung c round is
@@ -14,6 +17,7 @@
 export type WorkboardVerifierSettings = {
   agentId: string;
   model: string;
+  fallbacks?: string[];
   sampleEvery?: number;
 };
 

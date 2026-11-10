@@ -608,6 +608,31 @@ describe("Workboard rung b", () => {
     expect((await store.boardOrchestration("app"))?.crossVerifier).toEqual(crossVerifier);
   });
 
+  it("keeps a verifier's distinct provider/model fallbacks", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const verifier = { agentId: "verifier", model: "openai/gpt-6-sol" };
+    await store.upsertBoard({
+      id: "app",
+      orchestration: { verifier: { ...verifier, fallbacks: ["ollama/kimi-k3:cloud"] } },
+    });
+    expect((await store.boardOrchestration("app"))?.verifier).toEqual({
+      ...verifier,
+      fallbacks: ["ollama/kimi-k3:cloud"],
+    });
+    for (const [fallbacks, error] of [
+      [["kimi"], "verifier fallback kimi must be provider/model."],
+      [["openai/gpt-6-sol"], "verifier fallbacks must differ from its model and from each other."],
+      ["ollama/kimi-k3:cloud", "verifier fallbacks must be a list of at most 5"],
+    ] as const) {
+      await expect(
+        store.upsertBoard({ id: "app", orchestration: { verifier: { ...verifier, fallbacks } } }),
+      ).rejects.toThrow(error);
+    }
+    // Saved again without them, the fallbacks are gone.
+    await store.upsertBoard({ id: "app", orchestration: { verifier } });
+    expect((await store.boardOrchestration("app"))?.verifier).toEqual(verifier);
+  });
+
   it("samples by the card: stable per card, every reworked round, and 1 in sampleEvery", () => {
     const accept = (id: string, classRung: WorkboardClassRung, round = 0) =>
       nodeTicketAcceptance({

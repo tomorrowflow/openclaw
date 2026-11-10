@@ -5,6 +5,7 @@ import type { ProviderRuntimeModel } from "../plugins/provider-runtime-model.typ
 import { createLazyPromise } from "../shared/lazy-promise.js";
 import { FailoverError } from "./failover/error.js";
 import type { AgentHarness } from "./harness/types.js";
+import type { ModelAuthAvailabilityEvaluation } from "./model-auth-availability.types.js";
 import { findModelInCatalog } from "./model-catalog-lookup.js";
 import { modelKey, type ModelRef } from "./model-ref-shared.js";
 import { createModelCatalogIdentityKeyResolver } from "./openai-model-routes.js";
@@ -331,6 +332,17 @@ export async function preparePublishedModelRuntimeChoice(params: {
     workspaceDir: params.workspaceDir,
   });
   const unavailable = `${params.runtimeId ? `Runtime "${params.runtimeId}"` : "A runtime"} is not available for ${params.provider}/${params.model}. Refresh the model catalog and choose again.`;
+  // A rate-limit cooldown is not a catalog problem; name it so the caller waits or switches.
+  const unavailableBecause = (
+    evaluation: Pick<ModelAuthAvailabilityEvaluation, "unavailableReason" | "unavailableUntil">,
+  ) =>
+    evaluation.unavailableReason === "cooldown"
+      ? `${params.provider}/${params.model} is temporarily unavailable: its account is in a rate-limit cooldown${
+          evaluation.unavailableUntil
+            ? ` until ${new Date(evaluation.unavailableUntil).toISOString()}`
+            : ""
+        }. Try again later or choose another model.`
+      : unavailable;
   if (!published) {
     return { kind: "unavailable", message: unavailable };
   }
@@ -382,7 +394,7 @@ export async function preparePublishedModelRuntimeChoice(params: {
       selectedAuth.selectedAuthMode,
     );
     if (selectedAuth.availability !== true || !authProfileMode) {
-      return { kind: "unavailable", message: unavailable };
+      return { kind: "unavailable", message: unavailableBecause(selectedAuth) };
     }
     const resolved = await resolveModelAsync(
       params.provider,
@@ -419,7 +431,12 @@ export async function preparePublishedModelRuntimeChoice(params: {
       ? params.preferredRuntimeId
       : choices?.[0]);
   if (!runtimeId || !choices?.includes(runtimeId)) {
-    return { kind: "unavailable", message: unavailable };
+    return {
+      kind: "unavailable",
+      message: unavailableBecause(
+        decisions.evaluateEntry(entry, variants.length ? variants : [entry], params.runtimeId),
+      ),
+    };
   }
   const host = decisions.evaluateEntry(entry, variants.length ? variants : [entry], runtimeId);
   const validate = () =>

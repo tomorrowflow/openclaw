@@ -270,6 +270,26 @@ it("rejects a stale native observation without renewing it", async () => {
   expect(reload).not.toHaveBeenCalled();
 });
 
+it("names an account cooldown instead of asking for a catalog refresh", async () => {
+  const until = Date.now() + 60 * 60 * 1000;
+  const owner = createModelRuntimeChoiceOwnerFixture(custom);
+  bindPreparedModelRuntimeAuth(owner, {
+    store: {
+      version: 1,
+      profiles: {
+        "fixture:account": { type: "api_key", provider: "fixture", key: "synthetic-credential" },
+      },
+      usageStats: { "fixture:account": { cooldownUntil: until, cooldownReason: "rate_limit" } },
+    },
+  });
+  published.owner = owner;
+  const choice = await preparePublishedModelRuntimeChoice({ ...request, cfg: custom });
+  expect(choice).toEqual({
+    kind: "unavailable",
+    message: `fixture/model is temporarily unavailable: its account is in a rate-limit cooldown until ${new Date(until).toISOString()}. Try again later or choose another model.`,
+  });
+});
+
 it("keeps the configured Claude CLI runtime when switching models with saved setup tokens", async () => {
   vi.stubEnv("ANTHROPIC_API_KEY", "");
   cliBackendsTesting.setDepsForTest({
