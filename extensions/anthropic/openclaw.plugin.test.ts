@@ -47,6 +47,12 @@ describe("Anthropic plugin manifest", () => {
       thinkingLevelMap: { xhigh: "xhigh", max: "max" },
     },
     {
+      id: "claude-fable-5-2",
+      name: "Claude Fable 5.2",
+      cost: { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 },
+      thinkingLevelMap: { minimal: "low", xhigh: "xhigh", max: "max" },
+    },
+    {
       id: "claude-fable-5-1",
       name: "Claude Fable 5.1",
       cost: { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
