@@ -605,6 +605,51 @@ describe("WorkboardView", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it("names a card's session plainly without raw engine and mode values", async () => {
+    const { host, state } = createLoadedWorkboardState();
+    state.cards = [
+      createWorkboardCard({
+        title: "Install the test tier",
+        status: "review",
+        execution: {
+          id: "exec-1",
+          kind: "agent-session",
+          engine: "claude",
+          mode: "autonomous",
+          status: "succeeded",
+          sessionKey: "agent:dev:workboard-1",
+          startedAt: 1,
+          updatedAt: 2,
+        },
+      }),
+    ];
+    state.detailCardId = "card-1";
+    const { container, renderView } = createWorkboardView(
+      {
+        sessions: [
+          {
+            key: "agent:dev:workboard-1",
+            kind: "direct",
+            displayName: "Workboard card-1: Install the test tier",
+            updatedAt: 2,
+            hasActiveRun: false,
+            status: "done",
+          },
+        ],
+      },
+      host,
+    );
+    renderView();
+    const heading = await vi.waitFor(() =>
+      expectDefined(
+        container.querySelector(".workboard-detail .workboard-detail__execution-main"),
+        "session heading",
+      ),
+    );
+    expect(heading.querySelector(".workboard-detail__session-name")?.textContent).toBe("Session");
+    expect(heading.textContent).not.toMatch(/claude|autonomous/);
+  });
+
   it("shows stale lifecycle on executed linked cards", async () => {
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(60 * 60 * 1000);
     try {

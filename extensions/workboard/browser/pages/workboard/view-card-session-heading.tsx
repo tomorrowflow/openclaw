@@ -26,6 +26,14 @@ export function CardSessionHeading(props: {
   const sessionStatus = createMemo(() => getSessionStatus(props.card, props.lifecycle));
   const sessionStateLabel = () => formatted().label;
   const sessionEmpty = () => props.lifecycle.state === "unlinked" && !props.action.linkedSessionKey;
+  // Card sessions are labeled with the card title; inside the card that repeats the heading.
+  const sessionName = () => {
+    const name = props.lifecycle.session?.displayName ?? props.lifecycle.session?.label;
+    if (name && !name.includes(props.card.title.trim())) {
+      return name;
+    }
+    return name || props.action.linkedSessionKey ? t("workboard.fieldSession") : formatted().label;
+  };
   return (
     <div class="workboard-detail__execution-main">
       <div class="workboard-detail__session-row" title={formatted().detail}>
@@ -44,11 +52,7 @@ export function CardSessionHeading(props: {
             class="workboard-detail__session-name"
             id={props.tab === "overview" ? workboardCardDetailDescriptionId : undefined}
           >
-            {sessionEmpty()
-              ? t("workboard.detailNoSessionYet")
-              : (props.lifecycle.session?.displayName ??
-                props.lifecycle.session?.label ??
-                (props.action.linkedSessionKey ? t("workboard.fieldSession") : formatted().label))}
+            {sessionEmpty() ? t("workboard.detailNoSessionYet") : sessionName()}
           </span>
           {!sessionEmpty() && sessionStatus().detail ? (
             <p class="workboard-detail__session-description" textContent={sessionStatus().detail} />
