@@ -102,6 +102,21 @@ describe("card model control", () => {
     );
   });
 
+  it("sits in the run panel ahead of the long notes", () => {
+    const { state, container, renderView } = createWorkboardView({
+      client: createWorkboardTestClient({}),
+    });
+    const card = nodeCard({ notes: "Long ticket notes. ".repeat(400) });
+    state.cards = [card];
+    state.detailCardId = card.id;
+    renderView();
+
+    const panel = container.querySelector(".workboard-detail__execution")!;
+    const notes = container.querySelector(".workboard-detail__content workboard-inline-text")!;
+    expect(panel.contains(modelSelect(container))).toBe(true);
+    expect(panel.compareDocumentPosition(notes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("is disabled with the reason while the card runs", () => {
     const { state, container, renderView } = createWorkboardView({
       client: createWorkboardTestClient({}),

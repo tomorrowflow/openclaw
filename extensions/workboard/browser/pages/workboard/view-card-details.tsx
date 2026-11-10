@@ -450,50 +450,6 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                     </div>
                   </aside>
                   <div class="workboard-detail__content">
-                    <Show when={automation()?.summary || card().stage || card().pullRequestUrl}>
-                      <section
-                        class="workboard-detail__summary"
-                        aria-label={t("workboard.detailSummary")}
-                      >
-                        <Show when={automation()?.summary}>
-                          {(summary) => <Markdown markdown={summary()} />}
-                        </Show>
-                        <CardStage stage={card().stage} now={Date.now()} />{" "}
-                        <CardPullRequest card={card()} />
-                        <Show
-                          when={
-                            card().stage?.kind === "questions" &&
-                            action().writable &&
-                            !action().archived
-                          }
-                        >
-                          <div class="workboard-detail__actions">
-                            <button
-                              class="btn"
-                              type="button"
-                              data-card-action="grill-questions"
-                              title={t("workboard.grillQuestionsTitle")}
-                              disabled={action().busy}
-                              onClick={() =>
-                                void grillWorkboardQuestions({
-                                  ...workboardMutationContext(actionProps),
-                                  cardId: card().id,
-                                })
-                              }
-                            >
-                              {t("workboard.grillQuestions")}
-                            </button>
-                          </div>
-                        </Show>
-                      </section>
-                    </Show>
-                    <InlineText
-                      owner={props}
-                      card={card()}
-                      field={"notes"}
-                      disabled={action().busy}
-                      readOnly={!action().writable || action().archived}
-                    />
                     <section
                       class={[
                         "workboard-detail__execution",
@@ -508,6 +464,14 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                         action={action()}
                         tab="overview"
                       />
+                      {card().metadata?.automation?.target?.model && !action().archived ? (
+                        <CardModelControl
+                          workboard={actionProps}
+                          card={card()}
+                          busy={action().busy}
+                          writable={action().writable}
+                        />
+                      ) : undefined}
                       {/* A restart continues the node ticket's own session; other starts would not. */}
                       {action().showStartControls && !canRestartWorkboardNodeTicket(card()) ? (
                         <details class="workboard-detail__disclosure workboard-detail__engine-options">
@@ -554,14 +518,51 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                         </details>
                       ) : undefined}
                     </section>
-                    {card().metadata?.automation?.target?.model && !action().archived ? (
-                      <CardModelControl
-                        workboard={actionProps}
-                        card={card()}
-                        busy={action().busy}
-                        writable={action().writable}
-                      />
-                    ) : undefined}
+                    <Show when={automation()?.summary || card().stage || card().pullRequestUrl}>
+                      <section
+                        class="workboard-detail__summary"
+                        aria-label={t("workboard.detailSummary")}
+                      >
+                        <Show when={automation()?.summary}>
+                          {(summary) => <Markdown markdown={summary()} />}
+                        </Show>
+                        <CardStage stage={card().stage} now={Date.now()} />{" "}
+                        <CardPullRequest card={card()} />
+                        <Show
+                          when={
+                            card().stage?.kind === "questions" &&
+                            action().writable &&
+                            !action().archived
+                          }
+                        >
+                          <div class="workboard-detail__actions">
+                            <button
+                              class="btn"
+                              type="button"
+                              data-card-action="grill-questions"
+                              title={t("workboard.grillQuestionsTitle")}
+                              disabled={action().busy}
+                              onClick={() =>
+                                void grillWorkboardQuestions({
+                                  ...workboardMutationContext(actionProps),
+                                  cardId: card().id,
+                                })
+                              }
+                            >
+                              {t("workboard.grillQuestions")}
+                            </button>
+                          </div>
+                        </Show>
+                      </section>
+                    </Show>
+                    <DependencyDetailList dependencies={dependencies()} navigation={navigation} />
+                    <InlineText
+                      owner={props}
+                      card={card()}
+                      field={"notes"}
+                      disabled={action().busy}
+                      readOnly={!action().writable || action().archived}
+                    />
                     <BoardAutomation
                       automation={props.detailBoardAutomation}
                       onNavigate={navigateAutomation}
@@ -574,7 +575,6 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                         </For>
                       </section>
                     ) : undefined}
-                    <DependencyDetailList dependencies={dependencies()} navigation={navigation} />
                   </div>
                 </div>
               </section>
