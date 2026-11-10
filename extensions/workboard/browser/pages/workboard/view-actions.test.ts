@@ -528,11 +528,9 @@ describe("WorkboardView", () => {
           "Open Claude",
         ]);
       } else {
-        expect(detailStartButtons).toHaveLength(4);
-        expect(detailStartButtons.every((button) => button.disabled)).toBe(true);
-        expect(detailStartButtons[0]?.getAttribute("aria-label")).toContain(
-          "uses the codex ACP runtime",
-        );
+        // Every engine start would be refused, so the detail offers none.
+        expect(detailStartButtons).toEqual([]);
+        expect(container.querySelector(".workboard-detail__engine-options")).toBeNull();
       }
     },
   );

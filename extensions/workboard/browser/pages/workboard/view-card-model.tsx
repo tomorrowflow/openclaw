@@ -1,5 +1,5 @@
 /** @jsxImportSource @solidjs/web */
-import { createMemo, createSignal, For } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
@@ -53,7 +53,7 @@ export function CardModelControl(props: {
       ? t("workboard.detailModelRunning")
       : state.status === "unavailable"
         ? t("workboard.detailModelUnavailable", { error: state.error })
-        : t("workboard.detailModelHelp");
+        : undefined;
   };
   const load = () => {
     const client = props.workboard.client;
@@ -93,7 +93,9 @@ export function CardModelControl(props: {
           </For>
         </select>
       </label>
-      <p class="workboard-detail__model-hint" textContent={hint()} />
+      <Show when={hint()}>
+        {(text) => <p class="workboard-detail__model-hint" textContent={text()} />}
+      </Show>
     </div>
   );
 }

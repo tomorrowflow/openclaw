@@ -236,15 +236,10 @@ describe("Workboard card execution actions", () => {
     expect(props.onOpenSession).not.toHaveBeenCalled();
     expect(state.cards[0]?.metadata?.automation?.startRequest).toEqual({ requestedAt: 2 });
     expect(start().textContent?.trim()).toBe("Queued");
-    // Run and Open in an engine would race the queued start too.
+    // A node ticket starts only through its own Start; engine starts would bypass the node.
     const controls = [...container.querySelectorAll<HTMLButtonElement>(".workboard-card__start")];
-    expect(controls.map((button) => button.className)).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("workboard-card__start--manual"),
-        expect.stringMatching(/workboard-card__start--autonomous(?!.*--default)/),
-      ]),
-    );
-    expect(controls.filter((button) => !button.disabled)).toEqual([]);
+    expect(controls).toEqual([start()]);
+    expect(start().disabled).toBe(true);
   });
 });
 
