@@ -166,21 +166,22 @@ function normalizeVerifier(
   if (value === null || value === undefined) {
     return undefined;
   }
-  const agentId = isRecord(value)
-    ? normalizeBoundedString(value.agentId, undefined, 120, `${field} agentId`)
-    : undefined;
-  const model = isRecord(value)
-    ? normalizeBoundedString(value.model, undefined, 160, `${field} model`)
-    : undefined;
+  if (!isRecord(value)) {
+    throw new Error(`${field} needs a non-empty agentId and a model.`);
+  }
+  const agentId = normalizeBoundedString(value.agentId, undefined, 120, `${field} agentId`);
+  const model = normalizeBoundedString(value.model, undefined, 160, `${field} model`);
   if (!agentId || !model) {
     throw new Error(`${field} needs a non-empty agentId and a model.`);
   }
   if (!VERIFIER_MODEL_PATTERN.test(model)) {
     throw new Error(`${field} model ${model} must be provider/model.`);
   }
-  const rawSample = isRecord(value) ? value.sampleEvery : undefined;
+  const fallbacks = normalizeVerifierFallbacks(value.fallbacks, model, field);
+  const settings = { agentId, model, ...(fallbacks.length ? { fallbacks } : {}) };
+  const rawSample = value.sampleEvery;
   if (rawSample === undefined || rawSample === null) {
-    return { agentId, model };
+    return settings;
   }
   if (field === "verifier") {
     throw new Error("verifier verifies every round; sampleEvery belongs to the crossVerifier.");
@@ -189,7 +190,35 @@ function normalizeVerifier(
   if (sampleEvery === undefined || sampleEvery !== rawSample) {
     throw new Error(`${field} sampleEvery must be an integer from 1 to 100.`);
   }
-  return { agentId, model, sampleEvery };
+  return { ...settings, sampleEvery };
+}
+
+const MAX_VERIFIER_FALLBACKS = 5;
+
+function normalizeVerifierFallbacks(
+  value: unknown,
+  model: string,
+  field: "verifier" | "crossVerifier",
+): string[] {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value) || value.length > MAX_VERIFIER_FALLBACKS) {
+    throw new Error(
+      `${field} fallbacks must be a list of at most ${MAX_VERIFIER_FALLBACKS} provider/model entries.`,
+    );
+  }
+  const fallbacks = value.map((entry) => {
+    const fallback = normalizeBoundedString(entry, undefined, 160, `${field} fallback`);
+    if (!fallback || !VERIFIER_MODEL_PATTERN.test(fallback)) {
+      throw new Error(`${field} fallback ${String(entry)} must be provider/model.`);
+    }
+    return fallback;
+  });
+  if (new Set([model, ...fallbacks]).size !== fallbacks.length + 1) {
+    throw new Error(`${field} fallbacks must differ from its model and from each other.`);
+  }
+  return fallbacks;
 }
 
 const MAX_CLASS_RUNGS = 50;

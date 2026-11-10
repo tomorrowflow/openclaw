@@ -864,8 +864,14 @@ independent verification of every imported round (see **Verification**
 below): `{ agentId: "verifier", model: "openai/gpt-6-sol" }` names the agent
 whose session verifies and the `provider/model` it runs on, which should
 differ from the ticket model so the proof is re-executed by another model.
-Saving refuses an empty `agentId` or a model that is not `provider/model`;
-`verifier: null` removes it. Without it no round is verified.
+Its optional `fallbacks` (up to 5 `provider/model` entries, each different
+from `model` and from the others) start the session, in order, when the
+Gateway refuses `model`, for example while its account is in a rate-limit
+cooldown: `{ agentId: "verifier", model: "openai/gpt-6-sol", fallbacks:
+["ollama/kimi-k3:cloud"] }`. The verification records and its comment names
+the model that ran; when every model is refused, the `error` verdict lists
+each refusal. Saving refuses an empty `agentId` or a model that is not
+`provider/model`; `verifier: null` removes it. Without it no round is verified.
 
 A board's `orchestration.crossVerifier`, the same shape, adds a second,
 independent verification for rounds that ran at rung c (never a probe). It
@@ -887,7 +893,8 @@ removes it.
 The plugin passes the session no tool restriction: the agent's own tools are
 the boundary. `agentId` must name a dedicated agent that has only `exec` and
 `process`, runs its commands on the node, and never falls back to another
-model, so a verdict always comes from the configured one:
+model on its own, so a verdict always comes from a model the board names
+(`model` or one of its `fallbacks`):
 
 ```json5
 // openclaw.json

@@ -43,6 +43,8 @@ async function verifiedTicket(
     failCreate?: string;
     docsRung?: "b" | "c";
     cross?: boolean | { sampleEvery: number };
+    fallbacks?: string[];
+    refuse?: string[];
   } = {},
 ) {
   const onReview = vi.fn(async (_card: WorkboardCard) => {});
@@ -63,7 +65,7 @@ async function verifiedTicket(
   await ticket.store.upsertBoard({
     id: "default",
     orchestration: {
-      verifier: VERIFIER,
+      verifier: { ...VERIFIER, ...(params.fallbacks ? { fallbacks: params.fallbacks } : {}) },
       ...(params.cross
         ? { crossVerifier: { ...CROSS_VERIFIER, ...(params.cross === true ? {} : params.cross) } }
         : {}),
@@ -79,6 +81,10 @@ async function verifiedTicket(
     }
     if (method === "sessions.create" && String(requestParams?.key).includes(":verify-")) {
       verifier.creates.push(requestParams);
+      const model = String(requestParams?.model);
+      if (params.refuse?.includes(model)) {
+        throw new Error(`${model} is temporarily unavailable`);
+      }
       verifier.running = !params.failCreate;
       return params.failCreate
         ? {
@@ -92,7 +98,10 @@ async function verifiedTicket(
             key: requestParams?.key,
             runId: "run-verify",
             runStarted: true,
-            resolved: { modelProvider: "openai", model: "gpt-6-sol" },
+            resolved: {
+              modelProvider: String(requestParams?.model).split("/")[0],
+              model: String(requestParams?.model).split("/").slice(1).join("/"),
+            },
           };
     }
     return answer(method, requestParams);
@@ -631,6 +640,44 @@ describe("node ticket verification", () => {
     expect(
       existsSync(path.join(repos.target.worktreesRoot, `verify-${card.id.slice(0, 8)}-r0`)),
     ).toBe(false);
+  });
+  it("starts the verifier on the board's next fallback when the Gateway refuses its model", async () => {
+    const ticket = await verifiedTicket({
+      fallbacks: ["ollama/kimi-k3:cloud", "ollama/glm-5.3:cloud"],
+      refuse: ["openai/gpt-6-sol"],
+    });
+    const { card, handoffs, warn, verifier } = ticket;
+
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(verifier.creates.map((create) => (create as { model: string }).model)).toEqual([
+      "openai/gpt-6-sol",
+      "ollama/kimi-k3:cloud",
+    ]);
+    expect(new Set(verifier.creates.map((create) => (create as { key: string }).key))).toEqual(
+      new Set([`agent:verifier:verify-${card.id.slice(0, 8)}-r0-v0`]),
+    );
+    await expect(ticket.verificationOf()).resolves.toMatchObject({
+      phase: "running",
+      model: "ollama/kimi-k3:cloud",
+    });
+  });
+
+  it("names every refused model when no configured model can start", async () => {
+    const ticket = await verifiedTicket({
+      fallbacks: ["ollama/kimi-k3:cloud"],
+      refuse: ["openai/gpt-6-sol", "ollama/kimi-k3:cloud"],
+    });
+
+    await ticket.handoffs.resume(ticket.warn);
+
+    await expect(ticket.verificationOf()).resolves.toMatchObject({
+      phase: "done",
+      verdict: "error",
+      summary:
+        "The verification could not start: openai/gpt-6-sol: openai/gpt-6-sol is temporarily unavailable; ollama/kimi-k3:cloud: ollama/kimi-k3:cloud is temporarily unavailable",
+    });
   });
 });
 

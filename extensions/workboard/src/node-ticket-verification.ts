@@ -352,23 +352,46 @@ async function createVerificationSession(params: {
   verifier: WorkboardVerifierSettings;
   key: string;
   verifyPath: string;
-}): Promise<{ sessionKey: string; model?: string }> {
+}): Promise<{ sessionKey: string; model: string }> {
   const { card, round, verifier, key, verifyPath } = params;
-  const result = await params.runtime.request(
-    "sessions.create",
-    {
-      key,
-      agentId: verifier.agentId,
-      model: verifier.model,
-      // Binds the session's exec host to the node: its shell commands run in the verify worktree.
-      execNode: round.target.nodeId,
-      cwd: verifyPath,
-      displayName: `Verify ${card.title}`.slice(0, 120),
-      category: VERIFICATION_SESSION_GROUP,
-      message: verificationMessage({ card, round, verifyPath }),
-    },
-    { scopes: ["operator.admin"] },
-  );
+  const create = (model: string) =>
+    params.runtime.request(
+      "sessions.create",
+      {
+        key,
+        agentId: verifier.agentId,
+        model,
+        // Binds the session's exec host to the node: its shell commands run in the verify worktree.
+        execNode: round.target.nodeId,
+        cwd: verifyPath,
+        displayName: `Verify ${card.title}`.slice(0, 120),
+        category: VERIFICATION_SESSION_GROUP,
+        message: verificationMessage({ card, round, verifyPath }),
+      },
+      { scopes: ["operator.admin"] },
+    );
+  // A refused create writes no session, so the next configured model reuses the key. A session
+  // whose run then fails to start stays on its model and ends the verification below. Accepted
+  // edge: a transport failure after the Gateway committed the create also moves on to the next
+  // model, which then takes over that session.
+  const models = [verifier.model, ...(verifier.fallbacks ?? [])];
+  const refusals: string[] = [];
+  let result: unknown;
+  let started = verifier.model;
+  for (const model of models) {
+    try {
+      result = await create(model);
+      started = model;
+      break;
+    } catch (error) {
+      refusals.push(
+        models.length > 1 ? `${model}: ${formatErrorMessage(error)}` : formatErrorMessage(error),
+      );
+    }
+  }
+  if (refusals.length === models.length) {
+    throw new Error(refusals.join("; "));
+  }
   const record = isRecord(result) ? result : {};
   if (record.runStarted === false) {
     throw new Error(sessionCreateRunError(record));
@@ -376,9 +399,10 @@ async function createVerificationSession(params: {
   const resolved = isRecord(record.resolved) ? record.resolved : {};
   return {
     sessionKey: typeof record.key === "string" && record.key ? record.key : key,
-    ...(typeof resolved.modelProvider === "string" && typeof resolved.model === "string"
-      ? { model: `${resolved.modelProvider}/${resolved.model}` }
-      : {}),
+    model:
+      typeof resolved.modelProvider === "string" && typeof resolved.model === "string"
+        ? `${resolved.modelProvider}/${resolved.model}`
+        : started,
   };
 }
 
