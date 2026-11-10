@@ -1,5 +1,5 @@
 ---
-summary: "Pick an OpenAI model ref, including GPT-6.1 Sol, GPT-6 Astra, Sol, Luna, and the GPT-5.6 tiers"
+summary: "Pick an OpenAI model ref, including GPT-6.1 Sol, GPT-6.1 Terra, GPT-6 Astra, Sol, Luna, and the GPT-5.6 tiers"
 read_when:
   - You are choosing which OpenAI model ref to run
   - You want to select GPT-6.1 Sol, GPT-6 Sol, or Luna
@@ -16,6 +16,7 @@ sidebarTitle: "Models"
 | ChatGPT/Codex subscription, native Codex runtime  | `openai/gpt-6-astra`                                               | Fresh subscription setup; sign in with Codex auth.                  |
 | Direct API-key billing for agent turns            | `openai/gpt-6-astra` plus an ordered API-key auth profile          | Fresh API-key setup uses Astra.                                     |
 | GPT-6.1 Sol                                       | `openai/gpt-6.1-sol`                                               | Select explicitly; reasoning cannot be disabled.                    |
+| GPT-6.1 Terra                                     | `openai/gpt-6.1-terra`                                             | Select explicitly; reasoning defaults to `medium`.                  |
 | GPT-6 Sol                                         | `openai/gpt-6-sol`                                                 | Select explicitly; account access can differ between auth routes.   |
 | Lower-cost GPT-6 Luna                             | `openai/gpt-6-luna`                                                | Select explicitly; check the account catalog for availability.      |
 | Choose an exact GPT-5.6 tier                      | `openai/gpt-5.6-sol`, `-terra`, or `-luna`                         | Check `models list` for the tiers available to this account.        |
@@ -219,6 +220,28 @@ Standard API prices per million tokens are $2 input, $0.10 cache reads, $2.50
 cache writes, and $10 output. Above 272K input tokens, input and cache rates
 double and output costs 1.5 times the standard rate for the full request.
 See the [GPT-6.1 Sol model reference](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+for current capabilities, pricing, and regional availability.
+
+## GPT-6.1 Terra
+
+Select `openai/gpt-6.1-terra` with an OpenAI API-key profile or a
+ChatGPT/Codex subscription that exposes it:
+
+```bash
+openclaw models set openai/gpt-6.1-terra
+```
+
+It uses the Responses API for tool calls, accepts text and images, and supports
+a 1,050,000-token context window (922,000 input tokens) with up to 128,000
+output tokens. A successful account catalog remains authoritative, including
+smaller account-specific windows; subscription offline hints do not imply access.
+
+Reasoning defaults to `medium` and supports `none`, `low`, `medium`, `high`,
+`xhigh`, and `max`, so `off` sends `none` as it does for GPT-6 Sol and Luna.
+Standard API prices per million tokens are $1 input, $0.05 cached input, and $5
+output; OpenClaw's catalog prices cache writes at 1.25 times input, as for
+Luna. See the
+[GPT-6.1 Terra model reference](https://developers.openai.com/api/docs/models/gpt-6.1-terra)
 for current capabilities, pricing, and regional availability.
 
 ## GPT-6 Sol and Luna

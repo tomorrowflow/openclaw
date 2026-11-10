@@ -50,6 +50,7 @@ describe("unreleased Claude generations", () => {
       "claude-haiku-5-5",
       "claude-sonnet-5",
       "claude-fable-5",
+      "claude-fable-5-2",
       "claude-fable-5-1",
     ]) {
       const model = resolveModel(id);
@@ -90,6 +91,7 @@ describe("unreleased Claude generations", () => {
       "claude-haiku-5-5",
       "claude-sonnet-5",
       "claude-fable-5",
+      "claude-fable-5-2",
       "claude-fable-5-1",
     ]) {
       expect(resolveModel(id)?.compat, id).toEqual({

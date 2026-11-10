@@ -62,12 +62,14 @@ export function resolveOpenAIRequestReasoning(
             fallbackMap: { [requested]: intent },
           });
   return {
-    // Sol and Luna accept none on ChatGPT; other subscription models need route metadata.
+    // GPT-6 Sol, Luna, and 6.1 Terra accept none on ChatGPT; other subscription models need route metadata.
     effort:
       effort === "none" &&
       resolveOpenAIThinkingApi(model.api) === "openai-chatgpt-responses" &&
       !supportsOpenAIReasoningEffort(
-        model.id === "gpt-6-sol" || model.id === "gpt-6-luna" ? model : { compat: model.compat },
+        model.id === "gpt-6-sol" || model.id === "gpt-6-luna" || model.id === "gpt-6.1-terra"
+          ? model
+          : { compat: model.compat },
         "none",
       )
         ? undefined

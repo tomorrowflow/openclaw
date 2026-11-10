@@ -15,6 +15,7 @@ const subscriptionRoute = {
 describe("OpenAI stale ChatGPT catalog rows", () => {
   it.each([
     ["gpt-6.1-sol", [platformRoute, subscriptionRoute]],
+    ["gpt-6.1-terra", [platformRoute, subscriptionRoute]],
     ["gpt-5.4-codex", [platformRoute, subscriptionRoute]],
     ["chat-latest", [platformRoute]],
     ["gpt-5.3-codex-spark", [subscriptionRoute]],

@@ -300,6 +300,7 @@ describe("OpenAI Responses provider", () => {
     { id: "gpt-6.1-sol", reasoningEffort: undefined, expectedEffort: undefined },
     { id: "gpt-6.1-sol", reasoningEffort: "minimal", expectedEffort: "low" },
     { id: "gpt-6-luna", reasoningEffort: "max", expectedEffort: "max" },
+    { id: "gpt-6.1-terra", reasoningEffort: "max", expectedEffort: "max" },
   ] as const)(
     "honors $id reasoning and sampling without catalog metadata for $reasoningEffort",
     async ({ id, reasoningEffort, expectedEffort }) => {

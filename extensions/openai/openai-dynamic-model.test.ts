@@ -149,6 +149,13 @@ describe("OpenAI dynamic model capabilities", () => {
         efforts: ["none", "low", "medium", "high", "xhigh", "max"],
         cost: { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125 },
       },
+      {
+        api,
+        id: "gpt-6.1-terra",
+        off: "none",
+        efforts: ["none", "low", "medium", "high", "xhigh", "max"],
+        cost: { input: 1, output: 5, cacheRead: 0.05, cacheWrite: 1.25 },
+      },
     ]),
   )("resolves $id with its own capabilities over $api", ({ api, id, off, efforts, cost }) => {
     const model = buildOpenAIProvider().resolveDynamicModel?.({
@@ -172,7 +179,12 @@ describe("OpenAI dynamic model capabilities", () => {
       reasoning: true,
       input: ["text", "image"],
       contextWindow: 1_050_000,
-      contextTokens: api === "openai-chatgpt-responses" && id === "gpt-6.1-sol" ? 500_000 : 272_000,
+      contextTokens:
+        id === "gpt-6.1-terra"
+          ? 922_000
+          : api === "openai-chatgpt-responses" && id === "gpt-6.1-sol"
+            ? 500_000
+            : 272_000,
       maxTokens: 128_000,
       cost,
       thinkingLevelMap: { off, minimal: "low", xhigh: "xhigh", max: "max" },
