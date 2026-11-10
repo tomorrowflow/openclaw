@@ -48,8 +48,6 @@ export function getSessionStatus(
         [
           state === "succeeded" ? undefined : formatted.detail,
           lifecycle.state === "stale" ? card.metadata?.stale?.reason : undefined,
-          card.execution?.engine,
-          card.execution?.mode,
         ].filter((value): value is string => Boolean(value)),
       ),
     ].join("\n\n"),
