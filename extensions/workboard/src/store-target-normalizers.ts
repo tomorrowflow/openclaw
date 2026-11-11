@@ -76,6 +76,7 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
   }
   if (value.phase === "imported") {
     const decidedBy = normalizeCommentSource(value.decidedBy);
+    const verdictSessionKey = normalizeSessionKey(value.verdictSessionKey);
     return {
       phase: "imported",
       headCommit,
@@ -84,6 +85,7 @@ function normalizeNodeHandoff(value: unknown): WorkboardNodeHandoff | undefined 
       ...(value.crossVerify === true ? { crossVerify: true as const } : {}),
       ...(decidedBy && decidedBy !== "operator" ? { decidedBy } : {}),
       ...(typeof value.sampled === "boolean" ? { sampled: value.sampled } : {}),
+      ...(verdictSessionKey ? { verdictSessionKey } : {}),
     };
   }
   const publishedAt = resolveOptionalIntegerOption(value.publishedAt, { min: 0 });
@@ -302,6 +304,7 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
       const publishedAt = resolveOptionalIntegerOption(entry.publishedAt, { min: 0 });
       const readAt = resolveOptionalIntegerOption(entry.readAt, { min: 0 });
       const verdictAt = resolveOptionalIntegerOption(entry.verdictAt, { min: 0 });
+      const verdictSessionKey = normalizeSessionKey(entry.verdictSessionKey);
       const verification = isRecord(entry.verification)
         ? verificationVerdict(entry.verification.verdict)
         : undefined;
@@ -321,6 +324,7 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
           ...(typeof entry.sampled === "boolean" ? { sampled: entry.sampled } : {}),
           ...(readAt === undefined ? {} : { readAt }),
           ...(verdictAt === undefined ? {} : { verdictAt }),
+          ...(verdictSessionKey ? { verdictSessionKey } : {}),
           ...(entry.rung === "b" || entry.rung === "c" ? { rung: entry.rung } : {}),
           ...(verification && isRecord(entry.verification)
             ? {
@@ -328,6 +332,7 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
                   verdict: verification,
                   ...verificationModel(entry.verification.model),
                   ...verificationSpan(entry.verification),
+                  ...verificationSession(entry.verification),
                   ...(visual ? { visual } : {}),
                 },
               }
@@ -338,6 +343,7 @@ function normalizeNodeReviews(value: unknown): WorkboardNodeReviewVerdict[] {
                   verdict: crossVerification,
                   ...verificationModel(entry.crossVerification.model),
                   ...verificationSpan(entry.crossVerification),
+                  ...verificationSession(entry.crossVerification),
                 },
               }
             : {}),
@@ -368,6 +374,15 @@ function verificationSpan(value: Record<string, unknown>): {
   return startedAt === undefined
     ? {}
     : { startedAt, ...(endedAt === undefined ? {} : { endedAt }) };
+}
+
+function normalizeSessionKey(value: unknown): string | undefined {
+  return normalizeBoundedString(value, undefined, 500, "node session key");
+}
+
+function verificationSession(value: Record<string, unknown>): { sessionKey?: string } {
+  const sessionKey = normalizeSessionKey(value.sessionKey);
+  return sessionKey ? { sessionKey } : {};
 }
 
 function verificationModel(value: unknown): { model?: string } {

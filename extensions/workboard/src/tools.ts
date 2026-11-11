@@ -390,7 +390,13 @@ export function createWorkboardTools(params: {
         token: ScopedClaimTokenField,
       }),
       execute: scopedCardMutation((id, record, scope) =>
-        store.addComment(id, { body: record.body }, scope, commentSource),
+        store.addComment(
+          id,
+          { body: record.body },
+          scope,
+          commentSource,
+          params.context?.sessionKey,
+        ),
       ),
     },
     {

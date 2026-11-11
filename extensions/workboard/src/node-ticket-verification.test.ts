@@ -408,6 +408,7 @@ describe("node ticket verification", () => {
           model: "openai/gpt-6-sol",
           startedAt: expect.any(Number),
           endedAt: expect.any(Number),
+          sessionKey: `agent:verifier:verify-${card.id.slice(0, 8)}-r0-v0`,
         },
       }),
     ]);

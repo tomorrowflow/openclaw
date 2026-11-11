@@ -156,3 +156,34 @@ it("keeps a round's verification record and a review's verification, dropping ma
     { round: 2, verdict: "accept" },
   ]);
 });
+
+it("keeps the sessions recorded for a round's verdict and verifications", () => {
+  const worktree = {
+    path: "/Users/factory/worktrees/c1",
+    branch: "factory/c1",
+    baseCommit: "a".repeat(40),
+    handoff: {
+      phase: "imported",
+      headCommit: "c".repeat(40),
+      importedAt: 30,
+      verdictSessionKey: "agent:dev:review-c1-r1",
+    },
+    reviews: [
+      {
+        round: 0,
+        verdict: "accept",
+        verdictSessionKey: "agent:dev:review-c1-r0",
+        verification: { verdict: "pass", sessionKey: "agent:verifier:verify-c1-r0" },
+        crossVerification: { verdict: "pass", sessionKey: "agent:cross:verify-c1-r0" },
+      },
+    ],
+  };
+  const normalize = (value: unknown) =>
+    normalizeExecutionTarget({ ...NODE_TARGET, worktree: value }, undefined, {
+      allowLaunchState: true,
+    })?.worktree;
+
+  const normalized = normalize(worktree);
+  expect(normalized).toEqual(worktree);
+  expect(normalize(normalized)).toEqual(normalized);
+});

@@ -15,6 +15,7 @@ import { definedFields } from "../record-fields.js";
 import { assertAgentMayMoveCard } from "./node-ticket-probe.js";
 import { withImportedNodeTicketMove } from "./node-ticket.js";
 import type { PersistedWorkboardCard } from "./persistence-types.js";
+import { reviewVerdictOf, withVerdictSession } from "./review-readiness.js";
 import { normalizeAutomationPatch, normalizeCardAutomation } from "./store-automation.js";
 import { WorkboardBoardStore } from "./store-boards.js";
 import {
@@ -653,6 +654,8 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     input: WorkboardCommentInput,
     scope?: WorkboardMutationScope,
     source?: WorkboardCommentSource,
+    /** The posting agent's session; recorded when the comment is a node ticket round's verdict. */
+    sessionKey?: string,
   ): Promise<WorkboardCard> {
     const now = Date.now();
     const body = normalizeBoundedString(
@@ -665,12 +668,26 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       throw new Error("comment body is required.");
     }
     const comment = { id: randomUUID(), body, createdAt: now, ...(source ? { source } : {}) };
-    return await this.updateMetadata(id, (existing) => {
-      assertCanMutateClaimedCard(existing, scope);
-      return {
-        ...existing.metadata,
-        comments: [...(existing.metadata?.comments ?? []), comment].slice(-MAX_CARD_COMMENTS),
-      };
+    const verdictSession = sessionKey && reviewVerdictOf(comment) ? sessionKey : undefined;
+    return await this.enqueueMutation(async () => {
+      const result = await this.updateLatestCard(
+        id,
+        (existing) => {
+          assertCanMutateClaimedCard(existing, scope);
+          const automation = verdictSession
+            ? withVerdictSession(existing, verdictSession)
+            : undefined;
+          return {
+            metadata: {
+              ...existing.metadata,
+              comments: [...(existing.metadata?.comments ?? []), comment].slice(-MAX_CARD_COMMENTS),
+              ...(automation ? { automation } : {}),
+            },
+          };
+        },
+        { allowAutomationLaunch: verdictSession !== undefined },
+      );
+      return result.card;
     });
   }
 

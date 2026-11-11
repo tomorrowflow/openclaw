@@ -58,6 +58,8 @@ type PublishCard = {
   crossVerification?: WorkboardNodeReviewVerdict["crossVerification"];
   /** The round ran at rung b or c; copied into its review entry. */
   rung?: WorkboardAgentRung;
+  /** The session of the round's verdict, copied into its review entry. */
+  verdictSessionKey?: string;
 };
 
 /** The operator moved an imported round to todo or ready: rework, published first. */
@@ -103,6 +105,7 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
     decidedByAgent: handoff.decidedBy !== undefined,
     ...(handoff.sampled === undefined ? {} : { sampled: handoff.sampled }),
     ...(worktree.rung ? { rung: worktree.rung } : {}),
+    ...(handoff.verdictSessionKey ? { verdictSessionKey: handoff.verdictSessionKey } : {}),
     ...(verification?.phase === "done"
       ? {
           verification: {
@@ -110,6 +113,7 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
             ...(verification.model ? { model: verification.model } : {}),
             startedAt: verification.startedAt,
             endedAt: verification.endedAt,
+            ...(verification.sessionKey ? { sessionKey: verification.sessionKey } : {}),
             ...(verification.visual && verification.visualCheck
               ? {
                   visual: {
@@ -128,6 +132,7 @@ export function publishCandidate(card: WorkboardCard): PublishCard | undefined {
             ...(cross.model ? { model: cross.model } : {}),
             startedAt: cross.startedAt,
             endedAt: cross.endedAt,
+            ...(cross.sessionKey ? { sessionKey: cross.sessionKey } : {}),
           },
         }
       : {}),
@@ -153,6 +158,7 @@ function reviewVerdict(item: PublishCard): WorkboardNodeReviewVerdict {
     round: item.rework?.round ?? 0,
     verdict: verdict ?? "missed",
     ...(verdictAt === undefined ? {} : { verdictAt }),
+    ...(verdict && item.verdictSessionKey ? { verdictSessionKey: item.verdictSessionKey } : {}),
     ...(item.decidedByAgent ? { decidedBy: "agent" as const } : {}),
     ...(item.sampled === undefined ? {} : { sampled: item.sampled }),
     ...(item.verification ? { verification: item.verification } : {}),

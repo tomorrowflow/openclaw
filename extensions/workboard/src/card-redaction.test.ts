@@ -403,11 +403,12 @@ describe("redactOperatorCard", () => {
       bodies: [HIDDEN_VERIFICATION_NOTICE, "Verification: I will run it tonight."],
       verification: undefined,
     });
-    // A re-run keeps the previous run's comment hidden; its running record holds a slot and stays.
+    // A re-run keeps the previous run's comment hidden, and its running session too.
     expect(view(verifiedCard(running))).toEqual({
       bodies: [HIDDEN_VERIFICATION_NOTICE, "Verification: I will run it tonight."],
-      verification: running,
+      verification: undefined,
     });
+    expect(view(verifiedCard(running, { rung: "b" })).verification).toEqual(running);
     // The operator's re-run drops the record; the comment of the hidden result stays hidden.
     expect(view(verifiedCard(undefined))).toEqual({
       bodies: [HIDDEN_VERIFICATION_NOTICE, "Verification: I will run it tonight."],

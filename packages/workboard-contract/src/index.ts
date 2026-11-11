@@ -1,3 +1,4 @@
+import type { WorkboardCardSession } from "./card-sessions.js";
 import type { WorkboardNodePreview, WorkboardPreviewSettings } from "./preview.js";
 import type { WorkboardProbe } from "./probes.js";
 import type { WorkboardSessionsBoardSpec } from "./sessions-board.js";
@@ -13,6 +14,7 @@ import type {
 
 export type * from "./preview.js";
 export type * from "./verification.js";
+export type * from "./card-sessions.js";
 
 export type WorkboardDatabasePortApi<Database, Input> = {
   inspectWorkboardPortSource(db: Database): {
@@ -338,6 +340,11 @@ export type WorkboardNodeHandoff =
        */
       decidedBy?: `agent:${string}`;
       sampled?: boolean;
+      /**
+       * The session that posted the round's newest `Verdict:` comment. Operator
+       * reads leave it out until the operator decides the round.
+       */
+      verdictSessionKey?: string;
     }
   | {
       phase: "published";
@@ -510,12 +517,15 @@ export type WorkboardNodeReviewVerdict = {
   readAt?: number;
   /** When the board automation's first verdict comment on the round arrived. */
   verdictAt?: number;
+  /** The session that posted the verdict; absent on `missed` and on rounds published before it was recorded. */
+  verdictSessionKey?: string;
   /** The round's cross-verification result, when the board ran one before the publish. */
   crossVerification?: {
     verdict: WorkboardVerificationVerdict;
     model?: string;
     startedAt?: number;
     endedAt?: number;
+    sessionKey?: string;
   };
   /** The round's verification result, when the board ran one before the publish. */
   verification?: {
@@ -523,6 +533,7 @@ export type WorkboardNodeReviewVerdict = {
     model?: string;
     startedAt?: number;
     endedAt?: number;
+    sessionKey?: string;
     /**
      * The round's visual check, copied in only when the operator recorded one
      * before the publish: the verifier's visual verdict beside the operator's.
@@ -1007,6 +1018,8 @@ export type WorkboardRoundReviewTimes = {
 
 export type WorkboardOperatorCard = WorkboardCard & {
   stage?: WorkboardCardStage;
+  /** Every recorded session of the card, oldest round first. */
+  sessions?: WorkboardCardSession[];
   rounds?: WorkboardNodeRound[];
   reviewTimes?: WorkboardRoundReviewTimes[];
   /** A node ticket's draft PR, from its publish on; kept while rework rounds run. */

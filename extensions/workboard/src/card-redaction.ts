@@ -5,6 +5,7 @@ import {
   type WorkboardComment,
   type WorkboardOperatorCard,
 } from "@openclaw/workboard-contract";
+import { workboardCardSessions } from "./card-sessions.js";
 import { workboardCardPullRequest, workboardCardStage } from "./card-stage.js";
 import { blindVisualCheckComment, isVisualCheckComment } from "./node-ticket-rounds.js";
 import { isVerificationComment, nodeTicketTarget } from "./node-ticket.js";
@@ -12,6 +13,7 @@ import {
   currentNodeVerification,
   nodeRoundReviewTimes,
   reviewVerdictOf,
+  undecidedImportedRound,
   visualCheckVerification,
 } from "./review-readiness.js";
 import type { WorkboardDispatchResult } from "./store-inputs.js";
@@ -76,6 +78,7 @@ function withoutUncheckedVisualRead(card: WorkboardCard): WorkboardAutomation | 
  */
 export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
   const stage = workboardCardStage(card);
+  const sessions = workboardCardSessions(card);
   const worktree = nodeTicketTarget(card)?.worktree;
   const rounds = worktree?.rounds;
   const reviewTimes = worktree ? nodeRoundReviewTimes(card, worktree) : [];
@@ -89,6 +92,7 @@ export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
   return {
     ...redacted,
     ...(stage ? { stage } : {}),
+    ...(sessions.length ? { sessions } : {}),
     ...(rounds ? { rounds } : {}),
     ...(reviewTimes.length ? { reviewTimes } : {}),
     ...(grill
@@ -118,31 +122,25 @@ export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
 
 /**
  * Hides what could prime the operator's decision on an undecided imported
- * round: dev's shadow verdict, and at rung a the verification's verdict too:
- * every verification comment since the import, record or not (a re-run drops
- * the record before its comment is replaced), the verifier's part of every
- * visual check comment (the operator's verdict and note stay), and the
- * round's `done` record; a `running` record stays, it holds a slot. A round
- * that ran at rung b is
+ * round: dev's shadow verdict and the session that posted it, and at rung a
+ * the verification too: every verification comment since the import, record
+ * or not (a re-run drops the record before its comment is replaced), the
+ * verifier's part of every visual check comment (the operator's verdict and
+ * note stay), and the round's verification record, running or done, whose
+ * session would show the result as it forms. A round that ran at rung b is
  * the agent's to decide, so its verification stays visible.
  */
 function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): WorkboardCard {
-  const target = nodeTicketTarget(card);
+  const pending = undecidedImportedRound(card);
+  // The worktree as redactCard left it, so a hidden visual read stays hidden.
+  const target = nodeTicketTarget(redacted);
   const worktree = target?.worktree;
-  const handoff = worktree?.handoff;
-  // Nobody decides a probe's round, so nothing it shows can prime a decision.
-  if (!target || !worktree || handoff?.phase !== "imported" || card.metadata?.automation?.probe) {
+  if (!pending || !target || !worktree) {
     return redacted;
   }
-  // A failed publish blocks the card in phase "imported"; the operator already decided.
-  const decided =
-    card.status === "done" ||
-    card.events?.some((event) => event.toStatus === "done" && event.at >= handoff.importedAt);
-  if (decided) {
-    return redacted;
-  }
+  const { handoff } = pending;
   const rungA = !workboardAgentDecides(worktree.rung);
-  const hideRecord = rungA && currentNodeVerification(worktree, handoff)?.phase === "done";
+  const hideRecord = rungA && currentNodeVerification(pending.worktree, handoff) !== undefined;
   const hiddenBody = (comment: WorkboardComment): string | undefined => {
     if (comment.createdAt < handoff.importedAt) {
       return undefined;
@@ -159,10 +157,16 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
     return isVisualCheckComment(comment) ? blindVisualCheckComment(comment.body) : undefined;
   };
   const comments = redacted.metadata?.comments;
-  if (!hideRecord && !comments?.some((comment) => hiddenBody(comment) !== undefined)) {
+  const hideSession = handoff.verdictSessionKey !== undefined;
+  if (
+    !hideRecord &&
+    !hideSession &&
+    !comments?.some((comment) => hiddenBody(comment) !== undefined)
+  ) {
     return redacted;
   }
-  const { verification: _verification, ...visible } = worktree;
+  const { verification: _verification, ...withoutRecord } = worktree;
+  const { verdictSessionKey: _verdictSession, ...blindHandoff } = handoff;
   return {
     ...redacted,
     metadata: {
@@ -175,14 +179,13 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
             }),
           }
         : {}),
-      ...(hideRecord
-        ? {
-            automation: {
-              ...redacted.metadata?.automation,
-              target: { ...target, worktree: visible },
-            },
-          }
-        : {}),
+      automation: {
+        ...redacted.metadata?.automation,
+        target: {
+          ...target,
+          worktree: { ...(hideRecord ? withoutRecord : worktree), handoff: blindHandoff },
+        },
+      },
     },
   };
 }
