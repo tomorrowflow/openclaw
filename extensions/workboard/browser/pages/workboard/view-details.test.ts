@@ -784,15 +784,76 @@ describe("WorkboardView", () => {
     expect(container.querySelector(".workboard-detail")).toBeNull();
   });
 
-  it("opens a linked card and the card's run session from the details tab", () => {
+  it("lists the card's sessions by round with one Open per visible session", () => {
     const onOpenSession = vi.fn();
-    const sessionKey = "agent:dev:subagent:ticket";
+    const implementer = "agent:dev:subagent:ticket";
     const { state, container, renderView } = createWorkboardView({ onOpenSession });
     state.cards = [
       createWorkboardCard({
-        status: "done",
-        sessionKey,
+        status: "review",
+        sessionKey: implementer,
         runId: "run-7",
+        sessions: [
+          { role: "implementer", round: 0, state: "finished", sessionKey: implementer },
+          { role: "verifier", round: 0, state: "finished", sessionKey: "agent:verifier:r0" },
+          { role: "verdict", round: 0, state: "finished", sessionKey: "agent:dev:review-r0" },
+          { role: "implementer", round: 1, state: "finished", sessionKey: implementer },
+          { role: "grill", round: 1, state: "running", sessionKey: "agent:dev:grill-1" },
+          { role: "verifier", round: 1, state: "running", blind: true },
+          { role: "verdict", round: 1, state: "finished", blind: true },
+        ],
+      }),
+    ];
+    state.detailCardId = "card-1";
+    renderView();
+    textButton(container.querySelector('[role="tablist"]')!, "Details").click();
+    renderView();
+    const panel = expectDefined(
+      container.querySelector<HTMLElement>(".workboard-detail__tabpanel:not([hidden])"),
+      "details panel",
+    );
+    const rounds = [
+      ...panel.querySelectorAll<HTMLDetailsElement>(".workboard-detail__sessions details"),
+    ];
+    expect(
+      rounds.map((round) => [round.querySelector("summary")?.textContent, round.open]),
+    ).toEqual([
+      ["Rework round 1", true],
+      ["First run", false],
+    ]);
+    const rows = (round: HTMLElement) =>
+      [...round.querySelectorAll("li")].map((row) => row.textContent?.replace(/\s+/g, " ").trim());
+    expect(rows(rounds[0]!)).toEqual([
+      "ImplementerFinishedOpen session",
+      "GrillRunningOpen session",
+      "VerifierRunningHidden until you decide this round",
+      "VerdictFinishedHidden until you decide this round",
+    ]);
+    expect(rows(rounds[1]!)).toEqual([
+      "ImplementerFinishedOpen session",
+      "VerifierFinishedOpen session",
+      "VerdictFinishedOpen session",
+    ]);
+    // Neither the run id nor a hidden session's key is listed.
+    expect(panel.textContent).not.toContain("run-7");
+    expect(panel.textContent).not.toContain(implementer);
+
+    const open = (round: HTMLElement, index: number) =>
+      round.querySelectorAll("li")[index]!.querySelector("button")!.click();
+    open(rounds[0]!, 0);
+    expect(onOpenSession).toHaveBeenLastCalledWith({ sessionKey: implementer });
+    open(rounds[0]!, 1);
+    expect(onOpenSession).toHaveBeenLastCalledWith({ sessionKey: "agent:dev:grill-1" });
+    open(rounds[1]!, 2);
+    expect(onOpenSession).toHaveBeenLastCalledWith({ sessionKey: "agent:dev:review-r0" });
+    expect(rounds[0]!.querySelectorAll("button")).toHaveLength(2);
+  });
+
+  it("opens a linked card from the details tab", () => {
+    const { state, container, renderView } = createWorkboardView();
+    state.cards = [
+      createWorkboardCard({
+        status: "done",
         metadata: {
           links: [
             { id: "l1", type: "parent", createdAt: 1, targetCardId: "card-2" },
@@ -832,12 +893,6 @@ describe("WorkboardView", () => {
     expect([...panel.querySelectorAll("a")].map((anchor) => anchor.getAttribute("href"))).toEqual([
       "https://example.com/pr/1",
     ]);
-
-    requireButton(panel, "run-7").click();
-    expect(onOpenSession).toHaveBeenLastCalledWith({ sessionKey });
-    onOpenSession.mockClear();
-    requireButton(panel, sessionKey).click();
-    expect(onOpenSession).toHaveBeenLastCalledWith({ sessionKey });
 
     requireButton(panel, "Failure contract").click();
     renderView();

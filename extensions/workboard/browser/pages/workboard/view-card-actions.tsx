@@ -28,7 +28,10 @@ import {
   type WorkboardExecutionMode,
   type WorkboardStatus,
 } from "../../lib/workboard/index.ts";
-import { workboardCardSessionTarget } from "../../lib/workboard/session-resolution.ts";
+import {
+  workboardCardSessionTarget,
+  workboardSessionTarget,
+} from "../../lib/workboard/session-resolution.ts";
 import { openEditModal } from "./view-card-modal.tsx";
 import {
   canMutate,
@@ -175,6 +178,9 @@ export function getCardActionState(props: WorkboardProps, card: WorkboardCard) {
     live,
     linkedSessionKey,
     sessionTarget,
+    /** Any of the card's sessions; the card's own opens as its lifecycle resolved it. */
+    sessionTargetFor: (sessionKey: string) =>
+      sessionKey === linkedSessionKey ? sessionTarget : workboardSessionTarget(sessionKey),
     writable,
     showStartControls: writable && canStartWorkboardCard(card),
     archived: Boolean(card.metadata?.archivedAt),

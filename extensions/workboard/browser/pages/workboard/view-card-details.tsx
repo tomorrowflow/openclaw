@@ -234,8 +234,8 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
         openCardDetails(state(), target);
         props.onRequestUpdate?.();
       }),
-    get openSession() {
-      const target = action().sessionTarget;
+    openSession: (sessionKey) => {
+      const target = action().sessionTargetFor(sessionKey);
       return target ? () => actionProps.onOpenSession(target) : undefined;
     },
     get openTranscript() {
@@ -308,16 +308,19 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
         >
           <div class="workboard-detail">
             <header class="workboard-detail__header">
-              <h2 id={workboardCardDetailTitleId}>
-                <span class="sr-only">{t("workboard.detailTitle")}: </span>
-                <InlineText
-                  owner={props}
-                  card={card()}
-                  field={"title"}
-                  disabled={action().busy}
-                  readOnly={!action().writable || action().archived}
-                />
-              </h2>
+              <div class="workboard-detail__heading">
+                <h2 id={workboardCardDetailTitleId}>
+                  <span class="sr-only">{t("workboard.detailTitle")}: </span>
+                  <InlineText
+                    owner={props}
+                    card={card()}
+                    field={"title"}
+                    disabled={action().busy}
+                    readOnly={!action().writable || action().archived}
+                  />
+                </h2>
+                <CardStage stage={card().stage} now={Date.now()} />
+              </div>
               <div class="workboard-detail__header-actions">
                 {action().writable ? (
                   <>
@@ -525,7 +528,7 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                         </details>
                       ) : undefined}
                     </section>
-                    <Show when={automation()?.summary || card().stage || card().pullRequestUrl}>
+                    <Show when={automation()?.summary || card().pullRequestUrl}>
                       <section
                         class="workboard-detail__summary"
                         aria-label={t("workboard.detailSummary")}
@@ -533,7 +536,6 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                         <Show when={automation()?.summary}>
                           {(summary) => <Markdown markdown={summary()} />}
                         </Show>
-                        <CardStage stage={card().stage} now={Date.now()} />{" "}
                         <CardPullRequest card={card()} />
                         <Show
                           when={

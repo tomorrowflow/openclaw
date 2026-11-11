@@ -24,7 +24,14 @@ export function workboardCardSessionTarget(
   card: WorkboardCard,
   session?: BoardGetParams,
 ): BoardGetParams | undefined {
-  const key = session?.sessionKey ?? workboardCardSessionKey(card);
+  return workboardSessionTarget(session?.sessionKey ?? workboardCardSessionKey(card), session);
+}
+
+/** The session `key` names, when it can be opened as it is or `session` resolved it. */
+export function workboardSessionTarget(
+  key: string | undefined,
+  session?: BoardGetParams,
+): BoardGetParams | undefined {
   // Provisional links need a resolved key; reserved keys also need an explicit owner.
   // The card's current assignee does not identify the original execution.
   if (

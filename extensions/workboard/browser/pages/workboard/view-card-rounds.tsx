@@ -69,7 +69,7 @@ export function NodeRounds(props: {
   );
 }
 
-function roundName(round: number): string {
+export function roundName(round: number): string {
   return round === 0
     ? t("workboard.roundFirst")
     : t("workboard.roundRework", { number: String(round) });
