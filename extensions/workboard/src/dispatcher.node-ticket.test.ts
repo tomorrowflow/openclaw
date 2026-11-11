@@ -2,12 +2,15 @@ import { expectDefined } from "@openclaw/normalization-core";
 // Workboard tests cover dispatching cards to paired-node Claude Code sessions.
 import { describe, expect, it, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
+import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
 import { nodeTicketTarget } from "./node-ticket.js";
 import {
   BASE_COMMIT,
   createNodeCard,
   createNodeGateway,
+  endedSession,
   NODE_TARGET as TARGET,
+  startNodeCard,
 } from "./node-ticket.test-support.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 import { createWorkboardTools } from "./tools.js";
@@ -539,5 +542,32 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
         },
       },
     });
+  });
+
+  it("restarts a node ticket an agent moved to review while its run was still going", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const nodeTickets = createNodeGateway();
+    const { card, sessionKey, runId } = await startNodeCard(store, nodeTickets);
+    const tools = new Map(
+      createWorkboardTools({ store, context: { agentId: "dev" } }).map((tool) => [tool.name, tool]),
+    );
+
+    await tools.get("workboard_move")?.execute("move-review", { id: card.id, status: "review" });
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: true, messages: [] },
+      context: { runId, sessionKey },
+      readSessions: endedSession(),
+    });
+    await store.move(card.id, "todo", undefined);
+    const restart = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets,
+      options: { cardId: card.id },
+    });
+
+    expect(restart.startFailures).toEqual([]);
+    expect(restart.started).toEqual([expect.objectContaining({ cardId: card.id })]);
   });
 });

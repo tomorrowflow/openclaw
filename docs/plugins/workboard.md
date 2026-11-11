@@ -1285,7 +1285,10 @@ model on its own, so a verdict always comes from a model the board names
    while one is in flight returns the card as is. **Restart** on a node ticket
    in `todo` or `ready` that keeps its session link starts it again in the
    same worktree, keeping uncommitted edits. Move a `blocked` node ticket to
-   `todo` first; a published or questions card then resumes on its own.
+   `todo` first; a published or questions card then resumes on its own. Any
+   other move that takes a running node ticket out of `running`, such as an
+   agent moving it to `review` mid-run, also releases its claim, because the
+   run's end report no longer applies to the card.
 
 Nodes and ticket sessions never hold the GitHub token; only the Gateway's
 publish step and the PR state sync read it.
