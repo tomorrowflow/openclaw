@@ -897,11 +897,13 @@ the tailnet, so you can try the change from any device before deciding (see
 without a shell, and `ports` is the range previews take ports from.
 `{port}` and `{card}` (the card id's first 8 characters) are substituted in
 every element. The optional `env` maps environment variable names to
-SecretRefs that only `up` receives (see
+`store` SecretRefs that only `up` receives (see
 [Preview credentials](#preview-credentials)). Saving refuses an empty argv,
 ports outside 1024 to 65535 or with `from` above `to`, an `env` name that is
-not letters, digits, and underscores, an `env` value that is not a valid
-SecretRef, and more than 32 `env` entries; `preview: null` removes it.
+not upper-case letters, digits, and underscores, an `env` value that is not a
+`store` SecretRef, and more than 32 `env` entries; `preview: null` removes it.
+Changing `env`, or changing `up` while the board has `env`, needs
+`operator.admin`; `operator.write` callers can edit everything else.
 
 The plugin passes the session no tool restriction: the agent's own tools are
 the boundary. `agentId` must name a dedicated agent that has only `exec` and
@@ -1500,23 +1502,33 @@ openclaw secrets store set LINDRA_PREVIEW_TOKEN
 }
 ```
 
-Each start resolves every entry through the Gateway's
-[secret providers](/gateway/secrets/secretref-contract) right before `up`, so
-a rotated secret reaches the next preview, and passes the values as `up`'s
-environment on top of the node's own; `down` gets none. Board reads carry the
-refs, and card records, warnings, and the **Preview** tab carry no values: a
-resolved value that `up` prints into its error output is replaced with
-`[redacted]` before the failure is recorded. An entry that does not resolve
-fails the start before `up` runs, with an error that names the variable, the
-reason, and the next action: for a `store` ref, run
-`openclaw secrets store set <id>`, then **Retry**; for other sources, make the
-named ref resolvable, then **Retry**.
+Only `store` refs are accepted, so a preview can never read the Gateway's own
+environment, files, or exec providers. Because the Gateway resolves them with
+its own authority, setting or changing `env`, or changing `up` while the board
+has `env` (a new `up` could send the values anywhere), needs `operator.admin`;
+an `operator.write` caller that tries gets an error naming that scope, and the
+board stays unchanged.
+
+Each start resolves every entry from the Gateway's secret store right before
+`up`, so a rotated secret reaches the next preview, and passes the values as
+`up`'s environment on top of the node's own; `down` gets none. Board reads
+carry the refs, and card records, warnings, and the **Preview** tab carry no
+values. Verbatim occurrences of a resolved value in `up`'s error output are
+replaced with `[redacted]` before the failure is recorded; transformed echoes
+(base64, URL-encoded) are not, so `up` must not print credentials. An entry
+that does not resolve fails the start before `up` runs, with an error that
+names the variable, the reason, and the next action: run
+`openclaw secrets store set <id>`, then **Retry**.
 
 The node applies its own environment policy to these values. It refuses
 variables that change how programs load or run (for example `NODE_OPTIONS`,
-`LD_*`, `GIT_CONFIG_*`), which fails the start at `up` with the refused names,
-and it passes a shell wrapper (`sh -c`, `bash -lc`) only locale variables, so
-run `up` as a plain argv when it needs `env`.
+`LD_*`, `GIT_CONFIG_*`) and conventional credential and tool names such as
+`GITHUB_TOKEN`, `GH_TOKEN`, `NPM_TOKEN`, `AWS_SECRET_ACCESS_KEY`,
+`DOCKER_HOST`, and `HOME`, which fails the start at `up` with the refused
+names. Use a project-specific name such as `<PROJECT>_PREVIEW_TOKEN` and have
+the stack read that. The node also passes a shell wrapper (`sh -c`,
+`bash -lc`) only locale variables, so run `up` as a plain argv when it needs
+`env`.
 
 #### Trust KPIs
 

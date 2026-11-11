@@ -94,17 +94,24 @@ export function assertNoCursorAdvance(params: Record<string, unknown>) {
   }
 }
 
+/**
+ * In-process plugin dispatch has no remote client and already runs with host
+ * authority; a connected client is an admin only with operator.admin.
+ */
+export function callerHasAdmin(client: GatewayMethodContext["client"]): boolean {
+  if (!client) {
+    return true;
+  }
+  const scopes = Array.isArray(client.connect?.scopes) ? client.connect.scopes : [];
+  return scopes.includes("operator.admin");
+}
+
 function resolveGatewayWorkboardWorkspaceAccess(params: {
   context: GatewayMethodContext["context"];
   client: GatewayMethodContext["client"];
 }): WorkboardWorkspaceAccess {
-  // In-process plugin dispatch has no remote client and already runs with host
-  // authority. Connected write-scope clients stay within configured workspaces.
-  if (!params.client) {
-    return { unrestricted: true };
-  }
-  const scopes = Array.isArray(params.client?.connect?.scopes) ? params.client.connect.scopes : [];
-  if (scopes.includes("operator.admin")) {
+  // Connected write-scope clients stay within configured workspaces.
+  if (callerHasAdmin(params.client)) {
     return { unrestricted: true };
   }
   return resolveConfiguredWorkboardWorkspaceAccess({

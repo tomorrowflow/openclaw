@@ -361,7 +361,7 @@ export async function runNodeCommand(
   argv: string[],
   options: { cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {},
 ): Promise<string> {
-  const timeoutMs = options.timeoutMs ?? NODE_COMMAND_TIMEOUT_MS;
+  const { cwd, env, timeoutMs = NODE_COMMAND_TIMEOUT_MS } = options;
   const payload = nodeInvokePayload(
     await runtime.request(
       "node.invoke",
@@ -369,7 +369,7 @@ export async function runNodeCommand(
         nodeId,
         command: "system.run",
         timeoutMs,
-        params: { ...options, command: argv, timeoutMs },
+        params: { command: argv, timeoutMs, ...(cwd ? { cwd } : {}), ...(env ? { env } : {}) },
         idempotencyKey: randomUUID(),
       },
       { scopes: ["operator.admin"] },

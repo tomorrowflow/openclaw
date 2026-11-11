@@ -31,7 +31,7 @@ import type {
   WorkboardSubscriptionStore,
   WorkboardWriteAuthority,
 } from "./persistence-types.js";
-import { normalizeBoardMetadata } from "./store-board-normalizers.js";
+import { changesPreviewSecrets, normalizeBoardMetadata } from "./store-board-normalizers.js";
 import { findWorkboardTargetRoute, workboardRouteTargets } from "./store-constants.js";
 import type {
   WorkboardBoardInput,
@@ -276,11 +276,26 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
     };
   }
 
-  async upsertBoard(input: WorkboardBoardInput): Promise<WorkboardBoardMetadata> {
+  /**
+   * `admin` says the caller holds operator.admin: preview env resolves with the
+   * Gateway's authority, so only an admin may change what `up` receives.
+   */
+  async upsertBoard(
+    input: WorkboardBoardInput,
+    caller: { admin: boolean } = { admin: false },
+  ): Promise<WorkboardBoardMetadata> {
     return await this.enqueueMutation(async () => {
       const id = normalizeBoardIdRequired(input.id);
       const existing = await this.boardStore.lookup(id);
       const board = normalizeBoardMetadata({ ...input, id }, existing?.board);
+      if (
+        !caller.admin &&
+        changesPreviewSecrets(existing?.board.orchestration?.preview, board.orchestration?.preview)
+      ) {
+        throw new Error(
+          "Changing a board's preview env, or its preview up while it has env, needs operator.admin.",
+        );
+      }
       this.assertTargetModelAllowed(input, board);
       await this.boardStore.register(id, { version: 1, board });
       return board.kind === "sessions" ? await this.getSessionsBoard(id) : board;

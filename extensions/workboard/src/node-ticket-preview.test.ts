@@ -1,8 +1,21 @@
 // Workboard tests cover node tickets' review previews: up on review, torn down on leaving it.
-import { existsSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import type { WorkboardCard, WorkboardPreviewSettings } from "@openclaw/workboard-contract";
+import {
+  closeOpenClawStateDatabaseAsync,
+  writeSecretStoreEntryForTest,
+} from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { redactOperatorCard } from "./card-redaction.js";
 import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
@@ -20,10 +33,36 @@ import {
 import type { WorkboardStore } from "./store.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 
-afterEach(() => {
+const stateDirs: string[] = [];
+
+afterEach(async () => {
   removeTempRoots();
   vi.unstubAllEnvs();
+  await closeOpenClawStateDatabaseAsync();
+  for (const dir of stateDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
+
+/**
+ * Points the Gateway's state at a fresh directory, so previews resolve store
+ * SecretRefs from its secret store; returns a writer for that store.
+ */
+function isolatedSecretStore() {
+  const stateDir = mkdtempSync(path.join(os.tmpdir(), "workboard-preview-state-"));
+  stateDirs.push(stateDir);
+  vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+  return async (name: string, value: string) => {
+    await writeSecretStoreEntryForTest({
+      scope: { kind: "team" },
+      name,
+      value,
+      kind: "secret",
+      updatedBy: "workboard-preview-test",
+      database: { env: { OPENCLAW_STATE_DIR: stateDir } },
+    });
+  };
+}
 
 const PREVIEW: WorkboardPreviewSettings = {
   up: ["sh", "-c", "echo {port} {card} > preview-up.txt"],
@@ -92,10 +131,10 @@ async function previewInReview(
   await ticket.handoffs.resume(ticket.warn);
   const imported = await ticket.store.get(ticket.card.id);
   expect(imported?.status).toBe("review");
-  await ticket.store.upsertBoard({
-    id: "default",
-    orchestration: { preview: options.preview ?? PREVIEW },
-  });
+  await ticket.store.upsertBoard(
+    { id: "default", orchestration: { preview: options.preview ?? PREVIEW } },
+    { admin: true },
+  );
   const node = withTailscale(ticket.gateway, options);
   const warn = vi.fn();
   const sync = createNodePreviews({
@@ -508,20 +547,20 @@ describe("node ticket review previews", () => {
     );
   });
 
-  it("resolves the board's preview env at each start and passes it to up alone, recording no value", async () => {
-    const tokenRef = { source: "env", provider: "default", id: "WB_PREVIEW_TEST_TOKEN" } as const;
+  it("resolves the board's store secrets at each start and passes them to up alone, recording no value", async () => {
+    const tokenRef = { source: "store", provider: "default", id: "WB_PREVIEW_TEST_TOKEN" } as const;
     const preview: WorkboardPreviewSettings = {
       ...PREVIEW,
       up: [process.execPath, "-e", WRITE_TOKEN],
       env: { PREVIEW_TOKEN: tokenRef },
     };
     const { store, card, node, warn, sync, previewPath } = await previewInReview({ preview });
-    vi.stubEnv("WB_PREVIEW_TEST_TOKEN", "");
+    const storeSecret = isolatedSecretStore();
     await sync(warn);
 
     const unresolved = await previewOf(store, card.id);
     expect(unresolved?.state === "failed" ? unresolved.error : "").toMatch(
-      /^Preview secret PREVIEW_TOKEN could not be resolved: .*\(env:default:WB_PREVIEW_TEST_TOKEN\).* Make env:default:WB_PREVIEW_TEST_TOKEN resolvable, then Retry\.$/,
+      /^Preview secret PREVIEW_TOKEN could not be resolved: .*Store it with `openclaw secrets store set WB_PREVIEW_TEST_TOKEN`, then Retry\.$/,
     );
     expect(node.calls.some((call) => call.argv[0] === process.execPath)).toBe(false);
 
@@ -531,7 +570,7 @@ describe("node ticket review previews", () => {
       ["rotated-secret-value", () => store.archive(card.id, false)],
     ] as const;
     for (const [secret, restart] of restarts) {
-      vi.stubEnv("WB_PREVIEW_TEST_TOKEN", secret);
+      await storeSecret(tokenRef.id, secret);
       await restart();
       node.calls.length = 0;
       await sync(warn);
@@ -556,29 +595,22 @@ describe("node ticket review previews", () => {
     }
   });
 
-  it("names the missing store secret and the command that stores it", async () => {
+  it("cuts every resolved value out of a failed up's recorded error, longest first", async () => {
+    const storeSecret = isolatedSecretStore();
+    // The short value is the long one's prefix, so cutting it first would leave the long one's tail.
+    await storeSecret("WB_PREVIEW_SHORT", "leaky-secret");
+    await storeSecret("WB_PREVIEW_LONG", "leaky-secret-and-its-tail");
     const { store, card, warn, sync } = await previewInReview({
       preview: {
         ...PREVIEW,
-        env: { LINDRA_TOKEN: { source: "store", provider: "default", id: "WB_PREVIEW_MISSING" } },
-      },
-    });
-    await sync(warn);
-
-    const preview = await previewOf(store, card.id);
-    expect(preview?.state === "failed" ? preview.error : "").toMatch(
-      /^Preview secret LINDRA_TOKEN could not be resolved: .*Store it with `openclaw secrets store set WB_PREVIEW_MISSING`, then Retry\.$/,
-    );
-  });
-
-  it("cuts resolved env values out of a failed up's recorded error", async () => {
-    vi.stubEnv("WB_PREVIEW_TEST_TOKEN", "leaky-secret-value");
-    const { store, card, warn, sync } = await previewInReview({
-      preview: {
-        ...PREVIEW,
-        up: ["sh", "-c", 'echo "echoed $PREVIEW_TOKEN" >&2; exit 1'],
+        up: [
+          process.execPath,
+          "-e",
+          "process.stderr.write(`echoed ${process.env.PREVIEW_SHORT} ${process.env.PREVIEW_LONG}`); process.exit(1)",
+        ],
         env: {
-          PREVIEW_TOKEN: { source: "env", provider: "default", id: "WB_PREVIEW_TEST_TOKEN" },
+          PREVIEW_SHORT: { source: "store", provider: "default", id: "WB_PREVIEW_SHORT" },
+          PREVIEW_LONG: { source: "store", provider: "default", id: "WB_PREVIEW_LONG" },
         },
       },
     });
@@ -586,9 +618,9 @@ describe("node ticket review previews", () => {
 
     const preview = await previewOf(store, card.id);
     expect(preview?.state === "failed" ? preview.error : "").toMatch(
-      /: echoed \[redacted\]\. Fix the stack/,
+      /: echoed \[redacted\] \[redacted\]\. Fix the stack/,
     );
-    expect(JSON.stringify(await store.get(card.id))).not.toContain("leaky-secret-value");
+    expect(JSON.stringify(await store.get(card.id))).not.toMatch(/leaky|its-tail/);
   });
 
   it("starts nothing on a board without previews", async () => {
@@ -608,10 +640,14 @@ describe("board preview settings", () => {
     const preview = async () =>
       (await store.listBoards()).boards.find((board) => board.id === "app")?.orchestration?.preview;
     const withEnv = { ...PREVIEW, env: { LINDRA_PREVIEW_TOKEN: STORE_REF } };
-    await store.upsertBoard({ id: "app", orchestration: { preview: withEnv } });
+    const admin = { admin: true };
+    await store.upsertBoard({ id: "app", orchestration: { preview: withEnv } }, admin);
     await store.upsertBoard({ id: "app", orchestration: { autoDecompose: true } });
     await expect(preview()).resolves.toEqual(withEnv);
-    await store.upsertBoard({ id: "app", orchestration: { preview: { ...PREVIEW, env: {} } } });
+    await store.upsertBoard(
+      { id: "app", orchestration: { preview: { ...PREVIEW, env: {} } } },
+      admin,
+    );
     await expect(preview()).resolves.toEqual(PREVIEW);
     await store.upsertBoard({ id: "app", orchestration: { preview: PREVIEW } });
     for (const [input, error] of [
@@ -623,11 +659,29 @@ describe("board preview settings", () => {
       [{ up: PREVIEW.up, down: PREVIEW.down }, "preview needs up, down, and ports"],
       [{ ...PREVIEW, env: { "1TOKEN": STORE_REF } }, 'preview env name "1TOKEN" must be'],
       [{ ...PREVIEW, env: { "MY-TOKEN": STORE_REF } }, 'preview env name "MY-TOKEN" must be'],
-      [{ ...PREVIEW, env: { TOKEN: "plain-value" } }, "preview env TOKEN must be a SecretRef"],
+      [{ ...PREVIEW, env: { token: STORE_REF } }, 'preview env name "token" must be'],
+      [
+        { ...PREVIEW, env: JSON.parse(`{"__proto__": ${JSON.stringify(STORE_REF)}}`) },
+        'preview env name "__proto__" must be',
+      ],
+      [
+        { ...PREVIEW, env: { TOKEN: "plain-value" } },
+        "preview env TOKEN must be a store SecretRef",
+      ],
       [
         { ...PREVIEW, env: { TOKEN: { ...STORE_REF, id: "lower-case" } } },
-        "preview env TOKEN must be a SecretRef",
+        "preview env TOKEN must be a store SecretRef",
       ],
+      ...(["env", "file", "exec"] as const).map(
+        (source) =>
+          [
+            {
+              ...PREVIEW,
+              env: { TOKEN: { source, provider: "default", id: "OPENCLAW_GATEWAY_TOKEN" } },
+            },
+            "preview env TOKEN must be a store SecretRef",
+          ] as const,
+      ),
       [
         {
           ...PREVIEW,
@@ -637,7 +691,7 @@ describe("board preview settings", () => {
       ],
     ] as const) {
       await expect(
-        store.upsertBoard({ id: "app", orchestration: { preview: input } }),
+        store.upsertBoard({ id: "app", orchestration: { preview: input } }, admin),
       ).rejects.toThrow(error);
     }
     await expect(preview()).resolves.toEqual(PREVIEW);
