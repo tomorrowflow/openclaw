@@ -95,6 +95,7 @@ async function importedSource(params: { verifier?: boolean } = {}) {
   const handoffs = createNodeTicketHandoffs({
     store,
     runtime: gateway,
+    config: () => ({}),
     github: github.access,
     start: async (cardId, queue) =>
       await dispatchAndStartWorkboardCards({

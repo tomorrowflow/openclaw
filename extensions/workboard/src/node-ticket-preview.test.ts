@@ -22,6 +22,7 @@ import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 
 afterEach(() => {
   removeTempRoots();
+  vi.unstubAllEnvs();
 });
 
 const PREVIEW: WorkboardPreviewSettings = {
@@ -32,7 +33,11 @@ const PREVIEW: WorkboardPreviewSettings = {
 
 const DNS_NAME = "app-node.tail1234.ts.net";
 
-type NodeCall = { argv: string[]; cwd?: string };
+// Run without a shell: a node drops all but locale variables from a shell wrapper's env.
+const WRITE_TOKEN =
+  "require('node:fs').writeFileSync('preview-token.txt', process.env.PREVIEW_TOKEN ?? '')";
+
+type NodeCall = { argv: string[]; cwd?: string; env?: Record<string, string> };
 
 /**
  * The local node gateway with `tailscale` answered as a node would: `serve`
@@ -44,9 +49,15 @@ function withTailscale(local: WorkboardNodeTicketRuntime, options: { failServe?:
     method: string,
     params?: Record<string, unknown>,
   ) => {
-    const nodeParams = params?.params as { command?: string[]; cwd?: string } | undefined;
+    const nodeParams = params?.params as
+      | { command?: string[]; cwd?: string; env?: Record<string, string> }
+      | undefined;
     const argv = nodeParams?.command ?? [];
-    calls.push({ argv, ...(nodeParams?.cwd ? { cwd: nodeParams.cwd } : {}) });
+    calls.push({
+      argv,
+      ...(nodeParams?.cwd ? { cwd: nodeParams.cwd } : {}),
+      ...(nodeParams?.env ? { env: nodeParams.env } : {}),
+    });
     if (argv[0] !== "tailscale") {
       return await local.request<T>(method, params);
     }
@@ -87,7 +98,12 @@ async function previewInReview(
   });
   const node = withTailscale(ticket.gateway, options);
   const warn = vi.fn();
-  const sync = createNodePreviews({ store: ticket.store, runtime: node, now: Date.now });
+  const sync = createNodePreviews({
+    store: ticket.store,
+    runtime: node,
+    config: () => ({}),
+    now: Date.now,
+  });
   const previewPath = path.join(ticket.repos.target.worktreesRoot, `wb-${ticket.card.id}-preview`);
   const handoff = imported?.metadata?.automation?.target?.worktree?.handoff;
   const headCommit = handoff?.phase === "imported" ? handoff.headCommit : "";
@@ -337,7 +353,12 @@ describe("node ticket review previews", () => {
       preview: { ...cutOff, state: "starting", at: cutOff.at + 1 },
     });
 
-    const restarted = createNodePreviews({ store, runtime: node, now: Date.now });
+    const restarted = createNodePreviews({
+      store,
+      runtime: node,
+      config: () => ({}),
+      now: Date.now,
+    });
     node.calls.length = 0;
     await restarted(warn);
 
@@ -416,7 +437,12 @@ describe("node ticket review previews", () => {
       await boardReleased;
       return await boardOrchestration(boardId);
     });
-    const overlapping = createNodePreviews({ store, runtime: held, now: Date.now });
+    const overlapping = createNodePreviews({
+      store,
+      runtime: held,
+      config: () => ({}),
+      now: Date.now,
+    });
 
     const first = overlapping(warn);
     const second = overlapping(warn);
@@ -482,23 +508,112 @@ describe("node ticket review previews", () => {
     );
   });
 
+  it("resolves the board's preview env at each start and passes it to up alone, recording no value", async () => {
+    const tokenRef = { source: "env", provider: "default", id: "WB_PREVIEW_TEST_TOKEN" } as const;
+    const preview: WorkboardPreviewSettings = {
+      ...PREVIEW,
+      up: [process.execPath, "-e", WRITE_TOKEN],
+      env: { PREVIEW_TOKEN: tokenRef },
+    };
+    const { store, card, node, warn, sync, previewPath } = await previewInReview({ preview });
+    vi.stubEnv("WB_PREVIEW_TEST_TOKEN", "");
+    await sync(warn);
+
+    const unresolved = await previewOf(store, card.id);
+    expect(unresolved?.state === "failed" ? unresolved.error : "").toMatch(
+      /^Preview secret PREVIEW_TOKEN could not be resolved: .*\(env:default:WB_PREVIEW_TEST_TOKEN\).* Make env:default:WB_PREVIEW_TEST_TOKEN resolvable, then Retry\.$/,
+    );
+    expect(node.calls.some((call) => call.argv[0] === process.execPath)).toBe(false);
+
+    // Retry starts the first value; archiving tears it down, unarchiving starts the rotated one.
+    const restarts = [
+      ["first-secret-value", () => store.retryNodePreview(card.id)],
+      ["rotated-secret-value", () => store.archive(card.id, false)],
+    ] as const;
+    for (const [secret, restart] of restarts) {
+      vi.stubEnv("WB_PREVIEW_TEST_TOKEN", secret);
+      await restart();
+      node.calls.length = 0;
+      await sync(warn);
+      expect(readFileSync(path.join(previewPath, "preview-token.txt"), "utf8")).toBe(secret);
+      expect(node.calls.filter((call) => call.env)).toEqual([
+        { argv: preview.up, cwd: previewPath, env: { PREVIEW_TOKEN: secret } },
+      ]);
+      expect(await previewOf(store, card.id)).toMatchObject({ state: "up" });
+
+      await store.archive(card.id, true);
+      node.calls.length = 0;
+      await sync(warn);
+      expect(await previewOf(store, card.id)).toBeUndefined();
+      expect(node.calls.filter((call) => call.env)).toEqual([]);
+    }
+
+    expect(warn).not.toHaveBeenCalled();
+    const boards = JSON.stringify((await store.listBoards()).boards);
+    expect(boards).toContain('"WB_PREVIEW_TEST_TOKEN"');
+    for (const recorded of [JSON.stringify(await store.get(card.id)), boards]) {
+      expect(recorded).not.toContain("secret-value");
+    }
+  });
+
+  it("names the missing store secret and the command that stores it", async () => {
+    const { store, card, warn, sync } = await previewInReview({
+      preview: {
+        ...PREVIEW,
+        env: { LINDRA_TOKEN: { source: "store", provider: "default", id: "WB_PREVIEW_MISSING" } },
+      },
+    });
+    await sync(warn);
+
+    const preview = await previewOf(store, card.id);
+    expect(preview?.state === "failed" ? preview.error : "").toMatch(
+      /^Preview secret LINDRA_TOKEN could not be resolved: .*Store it with `openclaw secrets store set WB_PREVIEW_MISSING`, then Retry\.$/,
+    );
+  });
+
+  it("cuts resolved env values out of a failed up's recorded error", async () => {
+    vi.stubEnv("WB_PREVIEW_TEST_TOKEN", "leaky-secret-value");
+    const { store, card, warn, sync } = await previewInReview({
+      preview: {
+        ...PREVIEW,
+        up: ["sh", "-c", 'echo "echoed $PREVIEW_TOKEN" >&2; exit 1'],
+        env: {
+          PREVIEW_TOKEN: { source: "env", provider: "default", id: "WB_PREVIEW_TEST_TOKEN" },
+        },
+      },
+    });
+    await sync(warn);
+
+    const preview = await previewOf(store, card.id);
+    expect(preview?.state === "failed" ? preview.error : "").toMatch(
+      /: echoed \[redacted\]\. Fix the stack/,
+    );
+    expect(JSON.stringify(await store.get(card.id))).not.toContain("leaky-secret-value");
+  });
+
   it("starts nothing on a board without previews", async () => {
     const { store, card, node, warn } = await previewInReview();
     await store.upsertBoard({ id: "default", orchestration: { preview: null } });
-    await createNodePreviews({ store, runtime: node, now: Date.now })(warn);
+    await createNodePreviews({ store, runtime: node, config: () => ({}), now: Date.now })(warn);
     expect(node.calls).toEqual([]);
     expect(await previewOf(store, card.id)).toBeUndefined();
   });
 });
+
+const STORE_REF = { source: "store", provider: "default", id: "LINDRA_PREVIEW_TOKEN" } as const;
 
 describe("board preview settings", () => {
   it("stores, carries, validates, and clears a board's preview", async () => {
     const store = createWorkboardSqliteTestStore();
     const preview = async () =>
       (await store.listBoards()).boards.find((board) => board.id === "app")?.orchestration?.preview;
-    await store.upsertBoard({ id: "app", orchestration: { preview: PREVIEW } });
+    const withEnv = { ...PREVIEW, env: { LINDRA_PREVIEW_TOKEN: STORE_REF } };
+    await store.upsertBoard({ id: "app", orchestration: { preview: withEnv } });
     await store.upsertBoard({ id: "app", orchestration: { autoDecompose: true } });
+    await expect(preview()).resolves.toEqual(withEnv);
+    await store.upsertBoard({ id: "app", orchestration: { preview: { ...PREVIEW, env: {} } } });
     await expect(preview()).resolves.toEqual(PREVIEW);
+    await store.upsertBoard({ id: "app", orchestration: { preview: PREVIEW } });
     for (const [input, error] of [
       [{ ...PREVIEW, up: [] }, "preview up must be an argv"],
       [{ ...PREVIEW, down: ["sh", 3] }, "preview down must be an argv"],
@@ -506,6 +621,20 @@ describe("board preview settings", () => {
       [{ ...PREVIEW, ports: { from: 48619, to: 48600 } }, "with from <= to"],
       [{ ...PREVIEW, ports: { from: 48600.5, to: 48610 } }, "preview ports must be integers"],
       [{ up: PREVIEW.up, down: PREVIEW.down }, "preview needs up, down, and ports"],
+      [{ ...PREVIEW, env: { "1TOKEN": STORE_REF } }, 'preview env name "1TOKEN" must be'],
+      [{ ...PREVIEW, env: { "MY-TOKEN": STORE_REF } }, 'preview env name "MY-TOKEN" must be'],
+      [{ ...PREVIEW, env: { TOKEN: "plain-value" } }, "preview env TOKEN must be a SecretRef"],
+      [
+        { ...PREVIEW, env: { TOKEN: { ...STORE_REF, id: "lower-case" } } },
+        "preview env TOKEN must be a SecretRef",
+      ],
+      [
+        {
+          ...PREVIEW,
+          env: Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`T${i}`, STORE_REF])),
+        },
+        "preview env takes at most 32 variables",
+      ],
     ] as const) {
       await expect(
         store.upsertBoard({ id: "app", orchestration: { preview: input } }),

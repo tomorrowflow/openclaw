@@ -4,6 +4,7 @@ import type {
   WorkboardNodeWorktree,
   WorkboardVerifierSettings,
 } from "@openclaw/workboard-contract";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sessions.js";
 import { withNodeBundle } from "./node-ticket-bundle.js";
@@ -495,6 +496,8 @@ async function endNodeProbe(params: {
 export function createNodeTicketHandoffs(params: {
   store: WorkboardStore;
   runtime: WorkboardNodeTicketRuntime;
+  /** The Gateway's current config, which review previews resolve their env against. */
+  config: () => OpenClawConfig;
   github: WorkboardGitHubAccess;
   start: WorkboardNodeTicketStart;
   /** Wakes the board automation once a card in review is ready for its review. */
@@ -506,7 +509,12 @@ export function createNodeTicketHandoffs(params: {
   const inFlight = new Set<string>();
   const now = params.now ?? Date.now;
   const syncPullRequests = createPullRequestStateSync({ ...params, now });
-  const syncPreviews = createNodePreviews({ store: params.store, runtime: params.runtime, now });
+  const syncPreviews = createNodePreviews({
+    store: params.store,
+    runtime: params.runtime,
+    config: params.config,
+    now,
+  });
   const verifiersOf = (card: WorkboardCard) => async () =>
     await params.store.boardOrchestration(cardBoardId(card));
   /**

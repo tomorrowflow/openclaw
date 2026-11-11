@@ -144,6 +144,7 @@ async function grillingTicket(
   const handoffs = createNodeTicketHandoffs({
     store,
     runtime: gateway,
+    config: () => ({}),
     github: { token: () => undefined },
     readSessions,
     start: async (cardId, queue) =>
@@ -809,6 +810,7 @@ describe("grilling ended by the operator", () => {
     await createNodeTicketHandoffs({
       store: failing.store,
       runtime: failing.gateway,
+      config: () => ({}),
       github: { token: () => undefined },
       start: async () => ({ startFailures: [{ error: "node offline" }] }),
     }).resume(failing.warn);

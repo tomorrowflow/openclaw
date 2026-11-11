@@ -1,3 +1,4 @@
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { getPreparedPluginSecretInput } from "openclaw/plugin-sdk/secret-input-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { definePluginEntry } from "./api.js";
@@ -94,6 +95,8 @@ export default definePluginEntry({
     const nodeHandoffs = createNodeTicketHandoffs({
       store,
       runtime: api.runtime.gateway,
+      // Secret resolution only reads the snapshot; its SDK type predates DeepReadonly.
+      config: () => api.runtime.config.current() as OpenClawConfig,
       readSessions,
       github: {
         token: (repo) =>
