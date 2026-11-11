@@ -3,11 +3,13 @@ import {
   type WorkboardBoardMetadata,
   type WorkboardClassRung,
   type WorkboardOrchestrationSettings,
+  type WorkboardPreviewSecretRef,
   type WorkboardPreviewSettings,
   type WorkboardTargetRoute,
   type WorkboardVerifierSettings,
 } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
+import { isSecretRef, isValidSecretRef } from "openclaw/plugin-sdk/secret-input";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { normalizeHeldPaths } from "./held-paths.js";
 import type { WorkboardBoardInput } from "./store-inputs.js";
@@ -163,6 +165,8 @@ function normalizeOrchestration(
 
 const MIN_PREVIEW_PORT = 1024;
 const MAX_PREVIEW_PORT = 65535;
+const MAX_PREVIEW_ENV = 32;
+const PREVIEW_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 
 // `preview: null` removes it.
 function normalizePreviewSettings(value: unknown): WorkboardPreviewSettings | undefined {
@@ -180,7 +184,39 @@ function normalizePreviewSettings(value: unknown): WorkboardPreviewSettings | un
       `preview ports must be integers from ${MIN_PREVIEW_PORT} to ${MAX_PREVIEW_PORT} with from <= to.`,
     );
   }
-  return { up, down, ports: { from, to } };
+  const env = normalizePreviewEnv(value.env);
+  return { up, down, ports: { from, to }, ...(env ? { env } : {}) };
+}
+
+// Values are SecretRefs only, so board reads never carry a credential.
+function normalizePreviewEnv(
+  value: unknown,
+): Record<string, WorkboardPreviewSecretRef> | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error("preview env must map variable names to SecretRefs.");
+  }
+  const entries = Object.entries(value);
+  if (entries.length > MAX_PREVIEW_ENV) {
+    throw new Error(`preview env takes at most ${MAX_PREVIEW_ENV} variables.`);
+  }
+  const env: Record<string, WorkboardPreviewSecretRef> = {};
+  for (const [name, ref] of entries) {
+    if (!PREVIEW_ENV_NAME.test(name)) {
+      throw new Error(
+        `preview env name ${JSON.stringify(name.slice(0, 64))} must be letters, digits, and underscores, not starting with a digit.`,
+      );
+    }
+    if (!isSecretRef(ref) || !isValidSecretRef(ref)) {
+      throw new Error(
+        `preview env ${name} must be a SecretRef such as {"source": "store", "provider": "default", "id": "${name.toUpperCase()}"}; store the value with \`openclaw secrets store set ${name.toUpperCase()}\`.`,
+      );
+    }
+    env[name] = ref;
+  }
+  return entries.length > 0 ? env : undefined;
 }
 
 function isPreviewPort(value: unknown): value is number {

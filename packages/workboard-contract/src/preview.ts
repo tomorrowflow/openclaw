@@ -2,12 +2,22 @@
  * A board's review preview: argv run on the node in a detached worktree of the
  * imported head, `{port}` and `{card}` (the card id's first 8 characters)
  * substituted in every element. `up` starts the stack on 127.0.0.1:{port},
- * `down` stops it; `ports` is the range previews take ports from.
+ * `down` stops it; `ports` is the range previews take ports from. `env` maps
+ * variable names to SecretRefs the Gateway resolves at each start and passes
+ * to `up` only; the board keeps the refs, never the values.
  */
 export type WorkboardPreviewSettings = {
   up: string[];
   down: string[];
   ports: { from: number; to: number };
+  env?: Record<string, WorkboardPreviewSecretRef>;
+};
+
+/** The SDK's SecretRef shape (`openclaw/plugin-sdk/secret-ref-runtime`). */
+export type WorkboardPreviewSecretRef = {
+  source: "env" | "file" | "exec" | "store";
+  provider: string;
+  id: string;
 };
 
 /**

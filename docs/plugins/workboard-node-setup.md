@@ -320,6 +320,9 @@ node and publishes it with the node's own `tailscale serve` (see
    clear of the node's other services. The stack must bind
    `127.0.0.1:{port}`; `tailscale serve` takes the same port on the tailnet
    address.
+5. Keep the stack's credentials off the node. The board's `preview.env`
+   resolves them on the Gateway and passes them to `up` (see
+   [Preview credentials](/plugins/workboard#preview-credentials)).
 
 ## Verify
 

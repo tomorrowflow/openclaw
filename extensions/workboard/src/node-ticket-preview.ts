@@ -2,9 +2,12 @@ import path from "node:path";
 import type {
   WorkboardCard,
   WorkboardNodePreview,
+  WorkboardPreviewSecretRef,
   WorkboardPreviewSettings,
 } from "@openclaw/workboard-contract";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import { resolveConfiguredSecretInputString } from "openclaw/plugin-sdk/secret-input-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { checkoutDetachedWorktree } from "./node-ticket-verification.js";
 import {
@@ -32,12 +35,14 @@ type StartingPreview = Extract<WorkboardNodePreview, { state: "starting" }>;
 /** The preview a card should have: its imported head, while it waits in review on a board with previews. */
 type PreviewWant = { headCommit: string; settings: WorkboardPreviewSettings };
 
-type StartStep = "checkout" | "up" | "serve" | "status";
+type StartStep = "checkout" | "env" | "up" | "serve" | "status";
 
 /** Each step's failure names what broke and the operator's next action. */
 const STEP_FAILURES: Record<StartStep, (nodeId: string, detail: string) => string> = {
   checkout: (nodeId, detail) =>
     `Could not check out the reviewed head on ${nodeId}: ${detail}. Retry once the commit is in the node clone.`,
+  // resolvePreviewEnv's error already names the variable and the next action.
+  env: (_nodeId, detail) => detail,
   up: (nodeId, detail) =>
     `The board's preview up failed on ${nodeId}: ${detail}. Fix the stack or the board's preview.up, then Retry.`,
   serve: (nodeId, detail) =>
@@ -70,12 +75,48 @@ function substitute(argv: readonly string[], port: number, cardId: string): stri
   );
 }
 
-/** The error's start and end, which name the failed command and how its output ended. */
-function errorDetail(error: unknown): string {
-  const message = formatErrorMessage(error).trim();
+/**
+ * The error's start and end, which name the failed command and how its output
+ * ended; `secrets` are cut out first, since `up` may echo its environment.
+ */
+function errorDetail(error: unknown, secrets: readonly string[] = []): string {
+  const message = secrets
+    .reduce((text, secret) => text.replaceAll(secret, "[redacted]"), formatErrorMessage(error))
+    .trim();
   return message.length > PREVIEW_ERROR_HEAD_CHARS + PREVIEW_ERROR_TAIL_CHARS
     ? `${message.slice(0, PREVIEW_ERROR_HEAD_CHARS)}…${message.slice(-PREVIEW_ERROR_TAIL_CHARS)}`
     : message;
+}
+
+/**
+ * Resolves the board's preview env through the Gateway's secret providers at
+ * each start, so a rotated secret reaches the next preview.
+ */
+async function resolvePreviewEnv(
+  env: Record<string, WorkboardPreviewSecretRef> | undefined,
+  config: OpenClawConfig,
+): Promise<Record<string, string>> {
+  const resolved: Record<string, string> = {};
+  for (const [name, ref] of Object.entries(env ?? {})) {
+    const result = await resolveConfiguredSecretInputString({
+      config,
+      env: process.env,
+      value: ref,
+      path: `preview.env.${name}`,
+      unresolvedReasonStyle: "detailed",
+    });
+    if (result.value === undefined) {
+      const next =
+        ref.source === "store"
+          ? `Store it with \`openclaw secrets store set ${ref.id}\``
+          : `Make ${ref.source}:${ref.provider}:${ref.id} resolvable`;
+      throw new Error(
+        `Preview secret ${name} could not be resolved: ${result.unresolvedRefReason ?? "no value"} ${next}, then Retry.`,
+      );
+    }
+    resolved[name] = result.value;
+  }
+  return resolved;
 }
 
 /** The node's MagicDNS name from `tailscale status --json`, without the trailing dot. */
@@ -102,9 +143,11 @@ function tailnetName(status: string): string {
 export function createNodePreviews(params: {
   store: WorkboardStore;
   runtime: WorkboardNodeTicketRuntime;
+  /** The Gateway's current config, which preview env SecretRefs resolve against. */
+  config: () => OpenClawConfig;
   now: () => number;
 }) {
-  const { store, runtime, now } = params;
+  const { store, runtime, config, now } = params;
   const inFlight = new Set<string>();
   // Port picks run one at a time, so two starts never take the same port.
   let allocation: Promise<unknown> = Promise.resolve();
@@ -204,16 +247,23 @@ export function createNodePreviews(params: {
       return;
     }
     const { port } = starting;
-    const node = (argv: string[], options?: { cwd?: string; timeoutMs?: number }) =>
-      runNodeCommand(runtime, target.nodeId, argv, options);
+    const node = (
+      argv: string[],
+      options?: { cwd?: string; timeoutMs?: number; env?: Record<string, string> },
+    ) => runNodeCommand(runtime, target.nodeId, argv, options);
     let step: StartStep = "checkout";
+    let secrets: string[] = [];
     let next: WorkboardNodePreview;
     try {
       await checkoutDetachedWorktree(runtime, target, previewPath, want.headCommit);
+      step = "env";
+      const env = await resolvePreviewEnv(want.settings.env, config());
+      secrets = Object.values(env);
       step = "up";
       await node(substitute(want.settings.up, port, card.id), {
         cwd: previewPath,
         timeoutMs: PREVIEW_UP_TIMEOUT_MS,
+        ...(secrets.length > 0 ? { env } : {}),
       });
       step = "serve";
       await node(["tailscale", "serve", "--bg", `--https=${port}`, `http://127.0.0.1:${port}`]);
@@ -224,7 +274,7 @@ export function createNodePreviews(params: {
       next = {
         ...starting,
         state: "failed",
-        error: STEP_FAILURES[step](target.nodeId, errorDetail(error)),
+        error: STEP_FAILURES[step](target.nodeId, errorDetail(error, secrets)),
         at: now(),
       };
     }

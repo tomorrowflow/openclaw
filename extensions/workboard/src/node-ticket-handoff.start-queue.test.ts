@@ -33,6 +33,7 @@ describe("node ticket start queue", () => {
     const handoffs = createNodeTicketHandoffs({
       store,
       runtime: gateway,
+      config: () => ({}),
       github: { token: () => undefined },
       start,
     });
@@ -98,6 +99,7 @@ describe("node ticket start queue", () => {
       const handoffs = createNodeTicketHandoffs({
         store,
         runtime: gateway,
+        config: () => ({}),
         github: { token: () => undefined },
         start: async (cardId, queue) => {
           const result = await start(cardId, queue);

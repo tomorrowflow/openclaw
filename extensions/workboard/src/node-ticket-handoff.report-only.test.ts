@@ -59,6 +59,7 @@ describe("node ticket report-only round", () => {
     const handoffs = createNodeTicketHandoffs({
       store,
       runtime: gateway,
+      config: () => ({}),
       github: github.access,
       start: async () => ({ startFailures: [] }),
     });
