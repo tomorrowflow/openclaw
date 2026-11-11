@@ -23,7 +23,7 @@ import {
   visualCheckVerdict,
   visualReadVerdict,
 } from "./node-ticket-rounds.js";
-import { MAX_NODE_REVIEW_VERDICTS } from "./store-constants.js";
+import { MAX_NODE_REVIEW_VERDICTS, MAX_NODE_SESSION_KEY_CHARS } from "./store-constants.js";
 import { normalizeBoundedString, normalizeCommentSource } from "./store-value-normalizers.js";
 import { isAbsoluteWorkspacePath, relativeRepoPath } from "./workspace-path.js";
 
@@ -377,7 +377,7 @@ function verificationSpan(value: Record<string, unknown>): {
 }
 
 function normalizeSessionKey(value: unknown): string | undefined {
-  return normalizeBoundedString(value, undefined, 500, "node session key");
+  return normalizeBoundedString(value, undefined, MAX_NODE_SESSION_KEY_CHARS, "node session key");
 }
 
 function verificationSession(value: Record<string, unknown>): { sessionKey?: string } {

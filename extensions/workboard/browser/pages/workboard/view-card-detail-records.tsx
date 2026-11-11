@@ -8,6 +8,7 @@ import { For, Show, createMemo } from "solid-js";
 import { icons } from "../../components/icons.tsx";
 import { t } from "../../i18n/index.ts";
 import { formatUiExternalText } from "../../lib/format-error.ts";
+import { isWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
 import type { WorkboardCard, WorkboardDependencyState } from "../../lib/workboard/index.ts";
 import { roundName } from "./view-card-rounds.tsx";
 import { formatStatusLabel, formatUpdatedTime } from "./view-helpers.tsx";
@@ -140,7 +141,10 @@ function SessionEntry(props: { session: WorkboardCardSession; navigation: Detail
             <span class="workboard-detail__session-entry-state">
               {t("workboard.sessionHiddenUntilDecided")}
             </span>
-          ) : undefined
+          ) : (
+            // A provisional or reserved key cannot be opened; the key still names the session.
+            <span class="workboard-detail__session-entry-key">{props.session.sessionKey}</span>
+          )
         }
       >
         {(onOpen) => (
@@ -158,9 +162,26 @@ function SessionEntry(props: { session: WorkboardCardSession; navigation: Detail
   );
 }
 
-/** The card's sessions by round, newest round first and open, earlier rounds collapsed. */
+function SessionEntries(props: {
+  sessions: readonly WorkboardCardSession[];
+  navigation: DetailNavigation;
+}) {
+  return (
+    <ul class="workboard-detail__session-list">
+      <For each={props.sessions} keyed={false}>
+        {(session) => <SessionEntry session={session()} navigation={props.navigation} />}
+      </For>
+    </ul>
+  );
+}
+
+/**
+ * The card's sessions. A node ticket's are grouped by round, newest round
+ * first and open, earlier rounds collapsed; a plain card has no rounds.
+ */
 function SessionList(props: {
   sessions: readonly WorkboardCardSession[];
+  byRound: boolean;
   navigation: DetailNavigation;
 }) {
   const rounds = createMemo(() =>
@@ -172,26 +193,27 @@ function SessionList(props: {
       })),
   );
   return (
-    <Show when={rounds().length}>
+    <Show when={props.sessions.length}>
       <section class="workboard-detail__section workboard-detail__sessions">
         <h3>{t("workboard.detailSessions")}</h3>
-        <For each={rounds()} keyed={(entry) => entry.round}>
-          {(entry, index) => (
-            <details class="workboard-detail__disclosure" open={index() === 0}>
-              <summary>
-                <span class="workboard-detail__disclosure-chevron" aria-hidden="true">
-                  {icons.chevronDown}
-                </span>
-                {roundName(entry().round)}
-              </summary>
-              <ul class="workboard-detail__session-list">
-                <For each={entry().sessions} keyed={false}>
-                  {(session) => <SessionEntry session={session()} navigation={props.navigation} />}
-                </For>
-              </ul>
-            </details>
-          )}
-        </For>
+        <Show
+          when={props.byRound}
+          fallback={<SessionEntries sessions={props.sessions} navigation={props.navigation} />}
+        >
+          <For each={rounds()} keyed={(entry) => entry.round}>
+            {(entry, index) => (
+              <details class="workboard-detail__disclosure" open={index() === 0}>
+                <summary>
+                  <span class="workboard-detail__disclosure-chevron" aria-hidden="true">
+                    {icons.chevronDown}
+                  </span>
+                  {roundName(entry().round)}
+                </summary>
+                <SessionEntries sessions={entry().sessions} navigation={props.navigation} />
+              </details>
+            )}
+          </For>
+        </Show>
       </section>
     </Show>
   );
@@ -483,6 +505,7 @@ export function technicalDetailsData(card: WorkboardCard, linkedSessionKey: stri
   );
   return {
     sessions,
+    sessionsByRound: isWorkboardNodeTicket(card),
     links,
     attempts,
     proof,
@@ -516,7 +539,11 @@ export function TechnicalDetails(props: {
             {(field) => <DetailRow label={field()[0]} value={field()[1]} />}
           </For>
         </div>
-        <SessionList sessions={props.data.sessions} navigation={props.navigation} />
+        <SessionList
+          sessions={props.data.sessions}
+          byRound={props.data.sessionsByRound}
+          navigation={props.navigation}
+        />
         <Show when={props.data.notifications.length}>
           <section class="workboard-detail__section">
             <h3>{t("workboard.detailNotifications")}</h3>

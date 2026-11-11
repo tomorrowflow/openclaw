@@ -129,7 +129,14 @@ describe("workboardCardSessions", () => {
       { role: "cross_verifier", round: 1, state: "finished", blind: true },
       { role: "verdict", round: 1, state: "finished", blind: true },
     ]);
-    expect(JSON.stringify(redactOperatorCard(card))).not.toContain(VERDICT_R1);
+    const operator = redactOperatorCard(card);
+    const json = JSON.stringify(operator);
+    for (const hidden of [VERIFIER_R1, CROSS_R1, VERDICT_R1]) {
+      expect(json).not.toContain(hidden);
+    }
+    const worktree = operator.metadata?.automation?.target?.worktree;
+    expect(worktree?.verification).toMatchObject({ phase: "done", verdict: "pass" });
+    expect(worktree?.crossVerification).toMatchObject({ phase: "done", verdict: "pass" });
   });
 
   it("opens the round's reviewers once the operator decides it", () => {

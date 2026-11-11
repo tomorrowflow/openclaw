@@ -154,4 +154,74 @@ suite.define(() => {
       },
     });
   });
+
+  it("lists a plain card's session without a round and names one it cannot open", async (test) => {
+    await suite.runScenario(test, {
+      run: async () => {
+        await suite.withPage(
+          { viewport: { width: 1440, height: 1000 }, serviceWorkers: "block" },
+          async ({ page }) => {
+            const now = Date.now();
+            const provisional = "subagent:workboard-notes-1";
+            const board = {
+              id: "notes",
+              name: "Notes",
+              total: 1,
+              active: 1,
+              archived: 0,
+              byStatus: { running: 1 },
+            };
+            const card = {
+              id: "notes-1",
+              title: "Write the release notes",
+              status: "running",
+              priority: "normal",
+              labels: [],
+              position: 1,
+              createdAt: now - 600_000,
+              updatedAt: now - 60_000,
+              agentId: "main",
+              sessionKey: provisional,
+              sessions: [
+                { role: "implementer", round: 0, state: "running", sessionKey: provisional },
+              ],
+              metadata: { automation: { boardId: "notes" } },
+            };
+            await installMockGateway(page, {
+              ...workboardUi,
+              featureMethods: [
+                ...defaultControlUiFeatureMethods,
+                "workboard.boards.list",
+                "workboard.cards.list",
+              ],
+              methodResponses: {
+                "workboard.boards.list": { boards: [board] },
+                "workboard.cards.list": {
+                  boards: [board],
+                  cards: [card],
+                  statuses: ["todo", "running", "review", "done"],
+                },
+              },
+            });
+
+            await page.goto(`${suite.server.baseUrl}workboard/notes`);
+            await page.getByText("Write the release notes").first().click();
+            await page.locator(".workboard-detail").waitFor();
+            await page.getByRole("tab", { name: "Details" }).click();
+            const sessions = page.locator(
+              "#workboard-detail-panel-details .workboard-detail__sessions",
+            );
+            await sessions.waitFor();
+            await capture(page, "plain-card-sessions.png");
+
+            expect(await sessions.locator("details").count()).toBe(0);
+            expect(await sessions.locator("button").count()).toBe(0);
+            expect(await sessions.locator("li").allTextContents()).toEqual([
+              `ImplementerRunning${provisional}`,
+            ]);
+          },
+        );
+      },
+    });
+  });
 });

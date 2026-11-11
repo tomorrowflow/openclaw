@@ -793,6 +793,17 @@ describe("WorkboardView", () => {
         status: "review",
         sessionKey: implementer,
         runId: "run-7",
+        metadata: {
+          automation: {
+            target: {
+              kind: "node-claude",
+              nodeId: "mac-factory",
+              repoPath: "/repos/app",
+              worktreesRoot: "/worktrees",
+              hostRepoPath: "/host/app",
+            },
+          },
+        },
         sessions: [
           { role: "implementer", round: 0, state: "finished", sessionKey: implementer },
           { role: "verifier", round: 0, state: "finished", sessionKey: "agent:verifier:r0" },
@@ -847,6 +858,43 @@ describe("WorkboardView", () => {
     open(rounds[1]!, 2);
     expect(onOpenSession).toHaveBeenLastCalledWith({ sessionKey: "agent:dev:review-r0" });
     expect(rounds[0]!.querySelectorAll("button")).toHaveLength(2);
+  });
+
+  it("lists a plain card's session without a round and names one that cannot be opened", () => {
+    const openable = "agent:main:dashboard:1";
+    const provisional = "subagent:workboard-card-2";
+    const { state, container, renderView } = createWorkboardView();
+    state.cards = [
+      createWorkboardCard({
+        status: "done",
+        sessions: [{ role: "implementer", round: 0, state: "finished", sessionKey: openable }],
+      }),
+      createWorkboardCard({
+        id: "card-2",
+        status: "done",
+        sessions: [{ role: "implementer", round: 0, state: "finished", sessionKey: provisional }],
+      }),
+    ];
+    const sessionsOf = (cardId: string) => {
+      state.detailCardId = cardId;
+      renderView();
+      textButton(container.querySelector('[role="tablist"]')!, "Details").click();
+      renderView();
+      return expectDefined(
+        container.querySelector<HTMLElement>(".workboard-detail__sessions"),
+        "sessions",
+      );
+    };
+
+    const plain = sessionsOf("card-1");
+    expect(plain.querySelector("details")).toBeNull();
+    expect(plain.querySelector("li")?.textContent).toBe("ImplementerFinishedOpen session");
+    expect(plain.querySelector("button")?.title).toBe(openable);
+
+    const unopenable = sessionsOf("card-2");
+    expect(unopenable.querySelector("details")).toBeNull();
+    expect(unopenable.querySelector("button")).toBeNull();
+    expect(unopenable.querySelector("li")?.textContent).toBe(`ImplementerFinished${provisional}`);
   });
 
   it("opens a linked card from the details tab", () => {

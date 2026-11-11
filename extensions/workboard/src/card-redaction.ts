@@ -3,6 +3,7 @@ import {
   type WorkboardAutomation,
   type WorkboardCard,
   type WorkboardComment,
+  type WorkboardNodeVerification,
   type WorkboardOperatorCard,
 } from "@openclaw/workboard-contract";
 import { workboardCardSessions } from "./card-sessions.js";
@@ -10,7 +11,6 @@ import { workboardCardPullRequest, workboardCardStage } from "./card-stage.js";
 import { blindVisualCheckComment, isVisualCheckComment } from "./node-ticket-rounds.js";
 import { isVerificationComment, nodeTicketTarget } from "./node-ticket.js";
 import {
-  currentNodeVerification,
   nodeRoundReviewTimes,
   reviewVerdictOf,
   undecidedImportedRound,
@@ -122,13 +122,14 @@ export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
 
 /**
  * Hides what could prime the operator's decision on an undecided imported
- * round: dev's shadow verdict and the session that posted it, and at rung a
- * the verification too: every verification comment since the import, record
- * or not (a re-run drops the record before its comment is replaced), the
- * verifier's part of every visual check comment (the operator's verdict and
- * note stay), and the round's verification record, running or done, whose
- * session would show the result as it forms. A round that ran at rung b is
- * the agent's to decide, so its verification stays visible.
+ * round: dev's shadow verdict and the session that posted it, and at every
+ * rung the round's verifier and cross-verifier sessions, which would show
+ * the result as it forms. At rung a the verification itself stays hidden
+ * too: every verification comment since the import, record or not (a re-run
+ * drops the record before its comment is replaced), the verifier's part of
+ * every visual check comment (the operator's verdict and note stay), and the
+ * round's verification records. A round that runs at rung b or c is the
+ * agent's to decide, so its finished verification results stay visible.
  */
 function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): WorkboardCard {
   const pending = undecidedImportedRound(card);
@@ -140,7 +141,21 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
   }
   const { handoff } = pending;
   const rungA = !workboardAgentDecides(worktree.rung);
-  const hideRecord = rungA && currentNodeVerification(pending.worktree, handoff) !== undefined;
+  const blindRecord = (
+    record: WorkboardNodeVerification | undefined,
+  ): WorkboardNodeVerification | undefined => {
+    if (record?.round !== pending.round) {
+      return record;
+    }
+    // A running record holds no result, and its session key is required.
+    if (rungA || record.phase === "running") {
+      return undefined;
+    }
+    const { sessionKey: _session, ...blind } = record;
+    return blind;
+  };
+  const verification = blindRecord(worktree.verification);
+  const crossVerification = blindRecord(worktree.crossVerification);
   const hiddenBody = (comment: WorkboardComment): string | undefined => {
     if (comment.createdAt < handoff.importedAt) {
       return undefined;
@@ -157,15 +172,11 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
     return isVisualCheckComment(comment) ? blindVisualCheckComment(comment.body) : undefined;
   };
   const comments = redacted.metadata?.comments;
-  const hideSession = handoff.verdictSessionKey !== undefined;
-  if (
-    !hideRecord &&
-    !hideSession &&
-    !comments?.some((comment) => hiddenBody(comment) !== undefined)
-  ) {
-    return redacted;
-  }
-  const { verification: _verification, ...withoutRecord } = worktree;
+  const {
+    verification: _verification,
+    crossVerification: _crossVerification,
+    ...withoutRecords
+  } = worktree;
   const { verdictSessionKey: _verdictSession, ...blindHandoff } = handoff;
   return {
     ...redacted,
@@ -183,7 +194,12 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
         ...redacted.metadata?.automation,
         target: {
           ...target,
-          worktree: { ...(hideRecord ? withoutRecord : worktree), handoff: blindHandoff },
+          worktree: {
+            ...withoutRecords,
+            ...(verification ? { verification } : {}),
+            ...(crossVerification ? { crossVerification } : {}),
+            handoff: blindHandoff,
+          },
         },
       },
     },

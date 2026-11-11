@@ -3658,6 +3658,14 @@ workboard-inline-text {
   color: var(--muted);
 }
 
+/* The key of a session that cannot be opened, on its own line under the row. */
+.workboard-detail__session-entry-key {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+}
+
 /* A node ticket round: what its import changed and what its session decided. */
 .workboard-round h4,
 .workboard-detail__changes .workboard-round h3 {

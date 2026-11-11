@@ -33,6 +33,7 @@ import {
   MAX_CARD_COMMENTS,
   MAX_CARD_WORKER_LOGS,
   MAX_COMMENT_BODY_CHARS,
+  MAX_NODE_SESSION_KEY_CHARS,
   assertWorkboardSlotClaimed,
   POSITION_STEP,
   withWorkboardRouteTarget,
@@ -668,7 +669,11 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       throw new Error("comment body is required.");
     }
     const comment = { id: randomUUID(), body, createdAt: now, ...(source ? { source } : {}) };
-    const verdictSession = sessionKey && reviewVerdictOf(comment) ? sessionKey : undefined;
+    // Best-effort: a key the worktree record cannot hold is skipped, so the verdict still lands.
+    const verdictSession =
+      sessionKey && sessionKey.length <= MAX_NODE_SESSION_KEY_CHARS && reviewVerdictOf(comment)
+        ? sessionKey
+        : undefined;
     return await this.enqueueMutation(async () => {
       const result = await this.updateLatestCard(
         id,
