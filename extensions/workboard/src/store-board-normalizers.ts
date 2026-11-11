@@ -166,7 +166,8 @@ function normalizeOrchestration(
 const MIN_PREVIEW_PORT = 1024;
 const MAX_PREVIEW_PORT = 65535;
 const MAX_PREVIEW_ENV = 32;
-const PREVIEW_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+// Upper case only, which also keeps `__proto__` and `constructor` out of the map.
+const PREVIEW_ENV_NAME = /^[A-Z_][A-Z0-9_]{0,127}$/;
 
 // `preview: null` removes it.
 function normalizePreviewSettings(value: unknown): WorkboardPreviewSettings | undefined {
@@ -188,7 +189,8 @@ function normalizePreviewSettings(value: unknown): WorkboardPreviewSettings | un
   return { up, down, ports: { from, to }, ...(env ? { env } : {}) };
 }
 
-// Values are SecretRefs only, so board reads never carry a credential.
+// Values are store SecretRefs only, so board reads never carry a credential
+// and a preview never reaches the Gateway's own env, files, or commands.
 function normalizePreviewEnv(
   value: unknown,
 ): Record<string, WorkboardPreviewSecretRef> | undefined {
@@ -196,7 +198,7 @@ function normalizePreviewEnv(
     return undefined;
   }
   if (!isRecord(value)) {
-    throw new Error("preview env must map variable names to SecretRefs.");
+    throw new Error("preview env must map variable names to store SecretRefs.");
   }
   const entries = Object.entries(value);
   if (entries.length > MAX_PREVIEW_ENV) {
@@ -206,17 +208,34 @@ function normalizePreviewEnv(
   for (const [name, ref] of entries) {
     if (!PREVIEW_ENV_NAME.test(name)) {
       throw new Error(
-        `preview env name ${JSON.stringify(name.slice(0, 64))} must be letters, digits, and underscores, not starting with a digit.`,
+        `preview env name ${JSON.stringify(name.slice(0, 64))} must be upper-case letters, digits, and underscores, not starting with a digit.`,
       );
     }
-    if (!isSecretRef(ref) || !isValidSecretRef(ref)) {
+    // isSecretRef narrows the unknown input; isValidSecretRef takes a SecretRef.
+    if (!isSecretRef(ref) || ref.source !== "store" || !isValidSecretRef(ref)) {
       throw new Error(
-        `preview env ${name} must be a SecretRef such as {"source": "store", "provider": "default", "id": "${name.toUpperCase()}"}; store the value with \`openclaw secrets store set ${name.toUpperCase()}\`.`,
+        `preview env ${name} must be a store SecretRef such as {"source": "store", "provider": "default", "id": "${name}"}; store the value with \`openclaw secrets store set ${name}\`.`,
       );
     }
-    env[name] = ref;
+    env[name] = { source: "store", provider: ref.provider, id: ref.id };
   }
   return entries.length > 0 ? env : undefined;
+}
+
+/**
+ * Whether a save changes what a preview's `up` receives: its env, or its argv
+ * while the board has env, since a new `up` could send the values anywhere.
+ */
+export function changesPreviewSecrets(
+  before: WorkboardPreviewSettings | undefined,
+  after: WorkboardPreviewSettings | undefined,
+): boolean {
+  const envKey = (preview: WorkboardPreviewSettings | undefined) =>
+    JSON.stringify(Object.entries(preview?.env ?? {}).toSorted(([a], [b]) => a.localeCompare(b)));
+  if (envKey(before) !== envKey(after)) {
+    return true;
+  }
+  return after?.env !== undefined && JSON.stringify(before?.up) !== JSON.stringify(after.up);
 }
 
 function isPreviewPort(value: unknown): value is number {

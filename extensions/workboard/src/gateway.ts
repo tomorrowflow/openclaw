@@ -7,6 +7,7 @@ import type { OpenClawPluginApi } from "../api.js";
 import { redactOperatorCard } from "./card-redaction.js";
 import {
   assertNoCursorAdvance,
+  callerHasAdmin,
   createWorkboardDispatchHandler,
   readId,
   readExpectedUpdatedAt,
@@ -476,7 +477,9 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.boards.list", READ_SCOPE, () => store.listBoards());
   register("workboard.boards.upsert", WRITE_SCOPE, async (request) => {
     await resolveGatewayWorkspaceMutationAccess(request, request.params);
-    return { board: await store.upsertBoard(request.params) };
+    return {
+      board: await store.upsertBoard(request.params, { admin: callerHasAdmin(request.client) }),
+    };
   });
   const sessionsBoard = () => {
     if (!params.sessionsBoard) {

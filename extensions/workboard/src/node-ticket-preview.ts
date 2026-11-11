@@ -77,12 +77,21 @@ function substitute(argv: readonly string[], port: number, cardId: string): stri
 
 /**
  * The error's start and end, which name the failed command and how its output
- * ended; `secrets` are cut out first, since `up` may echo its environment.
+ * ended; verbatim `secrets` are cut out first, since `up` may echo its
+ * environment. Longest first, so a value containing another is cut whole, and
+ * before formatErrorMessage, whose log masking keeps a long value's ends.
  */
 function errorDetail(error: unknown, secrets: readonly string[] = []): string {
-  const message = secrets
-    .reduce((text, secret) => text.replaceAll(secret, "[redacted]"), formatErrorMessage(error))
-    .trim();
+  const redacted =
+    secrets.length === 0
+      ? error
+      : secrets
+          .toSorted((a, b) => b.length - a.length)
+          .reduce(
+            (text, secret) => text.replaceAll(secret, "[redacted]"),
+            error instanceof Error ? error.message : String(error),
+          );
+  const message = formatErrorMessage(redacted).trim();
   return message.length > PREVIEW_ERROR_HEAD_CHARS + PREVIEW_ERROR_TAIL_CHARS
     ? `${message.slice(0, PREVIEW_ERROR_HEAD_CHARS)}…${message.slice(-PREVIEW_ERROR_TAIL_CHARS)}`
     : message;
@@ -106,12 +115,8 @@ async function resolvePreviewEnv(
       unresolvedReasonStyle: "detailed",
     });
     if (result.value === undefined) {
-      const next =
-        ref.source === "store"
-          ? `Store it with \`openclaw secrets store set ${ref.id}\``
-          : `Make ${ref.source}:${ref.provider}:${ref.id} resolvable`;
       throw new Error(
-        `Preview secret ${name} could not be resolved: ${result.unresolvedRefReason ?? "no value"} ${next}, then Retry.`,
+        `Preview secret ${name} could not be resolved: ${result.unresolvedRefReason ?? "no value"} Store it with \`openclaw secrets store set ${ref.id}\`, then Retry.`,
       );
     }
     resolved[name] = result.value;

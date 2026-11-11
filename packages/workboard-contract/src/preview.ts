@@ -13,9 +13,9 @@ export type WorkboardPreviewSettings = {
   env?: Record<string, WorkboardPreviewSecretRef>;
 };
 
-/** The SDK's SecretRef shape (`openclaw/plugin-sdk/secret-ref-runtime`). */
+/** A store SecretRef (`openclaw/plugin-sdk/secret-ref-runtime`); other sources are refused. */
 export type WorkboardPreviewSecretRef = {
-  source: "env" | "file" | "exec" | "store";
+  source: "store";
   provider: string;
   id: string;
 };

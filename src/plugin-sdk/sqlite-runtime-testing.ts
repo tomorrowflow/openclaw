@@ -42,3 +42,5 @@ export { observeHostDataSql } from "../../test/helpers/sqlite-statement-executio
 export { useSqliteWorkerFault } from "../../test/helpers/sqlite-worker-fault.js";
 
 export { withNativeSessionMutationForTest } from "./test-helpers/native-session-mutation.js";
+
+export { writeSecretStoreEntry as writeSecretStoreEntryForTest } from "../secrets/store/secret-store.js";
