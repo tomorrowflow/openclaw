@@ -1,4 +1,5 @@
 import type {
+  WorkboardAutomation,
   WorkboardCard,
   WorkboardComment,
   WorkboardNodeHandoff,
@@ -22,6 +23,30 @@ export function reviewVerdictOf(comment: WorkboardComment): "accept" | "rework" 
     ? REVIEW_VERDICT_PATTERN.exec(comment.body.trim())?.[2]?.toLowerCase()
     : undefined;
   return match === "accept" || match === "rework" ? match : undefined;
+}
+
+/**
+ * The card's automation with `sessionKey` recorded as the session of a verdict
+ * posted on the imported round waiting in review; undefined when no round
+ * waits. A later verdict replaces it, as the newest verdict is the round's.
+ */
+export function withVerdictSession(
+  card: WorkboardCard,
+  sessionKey: string,
+): WorkboardAutomation | undefined {
+  const target = card.metadata?.automation?.target;
+  const worktree = target?.worktree;
+  const handoff = worktree?.handoff;
+  if (!target || !worktree || handoff?.phase !== "imported" || card.status !== "review") {
+    return undefined;
+  }
+  return {
+    ...card.metadata?.automation,
+    target: {
+      ...target,
+      worktree: { ...worktree, handoff: { ...handoff, verdictSessionKey: sessionKey } },
+    },
+  };
 }
 
 /**
@@ -94,6 +119,26 @@ export function currentNodeVerification(
     verification.round === (worktree.rework?.round ?? 0)
     ? verification
     : undefined;
+}
+
+/**
+ * The imported round that waits for the operator's decision, whose review
+ * stays blind on operator reads. Undefined once the operator decided it by
+ * moving the card to done (a failed publish blocks the card in phase
+ * `imported`), and for a probe, which nobody decides.
+ */
+export function undecidedImportedRound(
+  card: WorkboardCard,
+): { worktree: WorkboardNodeWorktree; handoff: ImportedHandoff; round: number } | undefined {
+  const worktree = card.metadata?.automation?.target?.worktree;
+  const handoff = worktree?.handoff;
+  if (!worktree || handoff?.phase !== "imported" || card.metadata?.automation?.probe) {
+    return undefined;
+  }
+  const decided =
+    card.status === "done" ||
+    card.events?.some((event) => event.toStatus === "done" && event.at >= handoff.importedAt);
+  return decided ? undefined : { worktree, handoff, round: worktree.rework?.round ?? 0 };
 }
 
 export function visualCheckVerification(

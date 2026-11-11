@@ -403,17 +403,20 @@ describe("redactOperatorCard", () => {
       bodies: [HIDDEN_VERIFICATION_NOTICE, "Verification: I will run it tonight."],
       verification: undefined,
     });
-    // A re-run keeps the previous run's comment hidden; its running record holds a slot and stays.
+    // A re-run keeps the previous run's comment hidden, and its running session too.
     expect(view(verifiedCard(running))).toEqual({
       bodies: [HIDDEN_VERIFICATION_NOTICE, "Verification: I will run it tonight."],
-      verification: running,
+      verification: undefined,
     });
+    // At rung b the result shows, never the session that could be opened.
+    expect(view(verifiedCard(running, { rung: "b" })).verification).toBeUndefined();
     // The operator's re-run drops the record; the comment of the hidden result stays hidden.
     expect(view(verifiedCard(undefined))).toEqual({
       bodies: [HIDDEN_VERIFICATION_NOTICE, "Verification: I will run it tonight."],
       verification: undefined,
     });
-    expect(view(verifiedCard(done, { rung: "b" })).verification).toEqual(done);
+    const { sessionKey: _session, ...blindDone } = done;
+    expect(view(verifiedCard(done, { rung: "b" })).verification).toEqual(blindDone);
     expect(view(verifiedCard(undefined, { rung: "b" })).bodies?.[0]).toContain(
       "**Verification:** fail",
     );
@@ -453,14 +456,15 @@ describe("redactOperatorCard", () => {
       visualCheck: { round: 0, check },
       verification: undefined,
     });
-    // Rung b shows the record, still without the unchecked read.
+    // Rung b shows the record without its session, still without the unchecked read.
+    const { sessionKey: _session, ...blindVerification } = DONE_VERIFICATION;
     expect(view(visualCard({ visual }, { rung: "b" }))).toEqual({
       visualCheck: { round: 0 },
-      verification: DONE_VERIFICATION,
+      verification: blindVerification,
     });
     expect(view(visualCard({ visual, visualCheck: check }, { rung: "b" }))).toEqual({
       visualCheck: { round: 0, check },
-      verification: { ...DONE_VERIFICATION, visual, visualCheck: check },
+      verification: { ...blindVerification, visual, visualCheck: check },
     });
     // Deciding the round does not reveal a read the operator never checked.
     expect(view(visualCard({ visual }, { status: "done" })).verification).toEqual(

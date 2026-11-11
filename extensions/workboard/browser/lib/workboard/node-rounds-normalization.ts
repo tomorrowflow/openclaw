@@ -1,5 +1,6 @@
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type {
+  WorkboardCardSession,
   WorkboardNodeChangedFile,
   WorkboardNodeChanges,
   WorkboardNodeDecision,
@@ -117,5 +118,39 @@ export function normalizeReviewTimes(value: unknown): WorkboardRoundReviewTimes[
         ...(verdictAt === undefined ? {} : { verdictAt }),
       },
     ];
+  });
+}
+
+const SESSION_ROLES: ReadonlySet<string> = new Set<WorkboardCardSession["role"]>([
+  "implementer",
+  "verifier",
+  "cross_verifier",
+  "verdict",
+  "grill",
+]);
+
+function isSessionRole(value: unknown): value is WorkboardCardSession["role"] {
+  return typeof value === "string" && SESSION_ROLES.has(value);
+}
+
+function sessionState(value: unknown): WorkboardCardSession["state"] | undefined {
+  return value === "running" || value === "finished" ? value : undefined;
+}
+
+/** The Gateway derives the card's sessions; a row keeps its key unless it is blind. */
+export function normalizeCardSessions(value: unknown): WorkboardCardSession[] {
+  return (Array.isArray(value) ? value : []).flatMap((entry): WorkboardCardSession[] => {
+    const round = isRecord(entry) ? count(entry.round) : undefined;
+    const state = isRecord(entry) ? sessionState(entry.state) : undefined;
+    if (!isRecord(entry) || round === undefined || !isSessionRole(entry.role) || !state) {
+      return [];
+    }
+    const row = { role: entry.role, round, state };
+    const sessionKey = text(entry.sessionKey);
+    return entry.blind === true
+      ? [{ ...row, blind: true }]
+      : sessionKey
+        ? [{ ...row, sessionKey }]
+        : [];
   });
 }

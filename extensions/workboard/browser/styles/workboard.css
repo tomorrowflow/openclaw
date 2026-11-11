@@ -2874,8 +2874,14 @@
   margin-bottom: 24px;
 }
 
-.workboard-detail__header h2 {
+.workboard-detail__heading {
+  display: grid;
   flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workboard-detail__header h2 {
   margin: 0;
   min-width: 0;
   font-size: 1.25rem;
@@ -3532,6 +3538,10 @@ workboard-inline-text {
   gap: 8px;
 }
 
+.workboard-detail__technical-properties:empty {
+  display: none;
+}
+
 .workboard-detail__technical-properties .workboard-detail__row {
   grid-template-columns: 124px minmax(0, 1fr);
   align-items: baseline;
@@ -3614,6 +3624,46 @@ workboard-inline-text {
 .workboard-detail__records p.workboard-detail__record-reference {
   color: var(--muted);
   font-size: 0.74rem;
+}
+
+/* The card's sessions, one disclosure per round. */
+.workboard-detail__sessions {
+  display: grid;
+  gap: 12px;
+}
+
+.workboard-detail__session-list {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workboard-detail__session-entry {
+  display: grid;
+  grid-template-columns: 124px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.workboard-detail__session-entry > strong {
+  font-weight: 500;
+}
+
+.workboard-detail__session-entry-state {
+  color: var(--muted);
+}
+
+/* The key of a session that cannot be opened, on its own line under the row. */
+.workboard-detail__session-entry-key {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
 }
 
 /* A node ticket round: what its import changed and what its session decided. */

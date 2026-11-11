@@ -1,18 +1,25 @@
 /** @jsxImportSource @solidjs/web */
-import type { WorkboardRunAttempt, WorkboardProof } from "@openclaw/workboard-contract";
+import type {
+  WorkboardCardSession,
+  WorkboardRunAttempt,
+  WorkboardProof,
+} from "@openclaw/workboard-contract";
 import { For, Show, createMemo } from "solid-js";
 import { icons } from "../../components/icons.tsx";
 import { t } from "../../i18n/index.ts";
 import { formatUiExternalText } from "../../lib/format-error.ts";
+import { isWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
 import type { WorkboardCard, WorkboardDependencyState } from "../../lib/workboard/index.ts";
+import { roundName } from "./view-card-rounds.tsx";
 import { formatStatusLabel, formatUpdatedTime } from "./view-helpers.tsx";
 
-/** Opens a card or the card's run from the technical details; absent when not reachable. */
+/** Opens a card or one of the card's sessions from the technical details. */
 export type DetailNavigation = {
   /** A card the drawer can show; archived cards only while archived cards are shown. */
   readonly resolveCard: (cardId: string) => WorkboardCard | undefined;
   readonly openCard: (card: WorkboardCard) => void;
-  readonly openSession?: () => void;
+  /** Opens the session `sessionKey` names; undefined when it cannot be opened. */
+  readonly openSession: (sessionKey: string) => (() => void) | undefined;
   /** Opens the card's page in the transcript viewer; called from the click itself. */
   readonly openTranscript?: () => void;
 };
@@ -91,29 +98,6 @@ export function DetailRow(props: { label: string; value: unknown }) {
   );
 }
 
-function SessionRow(props: { label: string; value: string | undefined; onOpen?: () => void }) {
-  return (
-    <Show
-      when={props.onOpen && props.value?.trim()}
-      fallback={<DetailRow label={props.label} value={props.value} />}
-    >
-      {(text) => (
-        <div class="workboard-detail__row">
-          <span>{props.label}</span>
-          <button
-            type="button"
-            class="workboard-detail__card-link"
-            title={t("workboard.openSession")}
-            onClick={() => props.onOpen?.()}
-          >
-            {text()}
-          </button>
-        </div>
-      )}
-    </Show>
-  );
-}
-
 function TranscriptRow(props: { onOpen: (() => void) | undefined }) {
   return (
     <Show when={props.onOpen}>
@@ -123,6 +107,114 @@ function TranscriptRow(props: { onOpen: (() => void) | undefined }) {
           {t("workboard.openTranscript")}
         </button>
       </div>
+    </Show>
+  );
+}
+
+const sessionRoleKeys: Record<WorkboardCardSession["role"], string> = {
+  implementer: "workboard.sessionRoleImplementer",
+  verifier: "workboard.sessionRoleVerifier",
+  cross_verifier: "workboard.sessionRoleCrossVerifier",
+  verdict: "workboard.sessionRoleVerdict",
+  grill: "workboard.sessionRoleGrill",
+};
+
+function SessionEntry(props: { session: WorkboardCardSession; navigation: DetailNavigation }) {
+  const open = () =>
+    "sessionKey" in props.session
+      ? props.navigation.openSession(props.session.sessionKey)
+      : undefined;
+  return (
+    <li class="workboard-detail__session-entry">
+      <strong>{t(sessionRoleKeys[props.session.role])}</strong>
+      <span class="workboard-detail__session-entry-state">
+        {t(
+          props.session.state === "running"
+            ? "workboard.lifecycleRunning"
+            : "workboard.sessionFinished",
+        )}
+      </span>
+      <Show
+        when={open()}
+        fallback={
+          "blind" in props.session ? (
+            <span class="workboard-detail__session-entry-state">
+              {t("workboard.sessionHiddenUntilDecided")}
+            </span>
+          ) : (
+            // A provisional or reserved key cannot be opened; the key still names the session.
+            <span class="workboard-detail__session-entry-key">{props.session.sessionKey}</span>
+          )
+        }
+      >
+        {(onOpen) => (
+          <button
+            type="button"
+            class="workboard-detail__card-link"
+            title={"sessionKey" in props.session ? props.session.sessionKey : undefined}
+            onClick={() => onOpen()()}
+          >
+            {t("workboard.openSession")}
+          </button>
+        )}
+      </Show>
+    </li>
+  );
+}
+
+function SessionEntries(props: {
+  sessions: readonly WorkboardCardSession[];
+  navigation: DetailNavigation;
+}) {
+  return (
+    <ul class="workboard-detail__session-list">
+      <For each={props.sessions} keyed={false}>
+        {(session) => <SessionEntry session={session()} navigation={props.navigation} />}
+      </For>
+    </ul>
+  );
+}
+
+/**
+ * The card's sessions. A node ticket's are grouped by round, newest round
+ * first and open, earlier rounds collapsed; a plain card has no rounds.
+ */
+function SessionList(props: {
+  sessions: readonly WorkboardCardSession[];
+  byRound: boolean;
+  navigation: DetailNavigation;
+}) {
+  const rounds = createMemo(() =>
+    [...new Set(props.sessions.map((entry) => entry.round))]
+      .toSorted((left, right) => right - left)
+      .map((round) => ({
+        round,
+        sessions: props.sessions.filter((entry) => entry.round === round),
+      })),
+  );
+  return (
+    <Show when={props.sessions.length}>
+      <section class="workboard-detail__section workboard-detail__sessions">
+        <h3>{t("workboard.detailSessions")}</h3>
+        <Show
+          when={props.byRound}
+          fallback={<SessionEntries sessions={props.sessions} navigation={props.navigation} />}
+        >
+          <For each={rounds()} keyed={(entry) => entry.round}>
+            {(entry, index) => (
+              <details class="workboard-detail__disclosure" open={index() === 0}>
+                <summary>
+                  <span class="workboard-detail__disclosure-chevron" aria-hidden="true">
+                    {icons.chevronDown}
+                  </span>
+                  {roundName(entry().round)}
+                </summary>
+                <SessionEntries sessions={entry().sessions} navigation={props.navigation} />
+              </details>
+            )}
+          </For>
+        </Show>
+      </section>
     </Show>
   );
 }
@@ -376,7 +468,7 @@ export function technicalDetailsData(card: WorkboardCard, linkedSessionKey: stri
   const automation = card.metadata?.automation;
   const metadata = card.metadata;
   const notifications = [...(metadata?.notifications ?? [])];
-  const runId = card.runId ?? card.execution?.runId;
+  const sessions = [...(card.sessions ?? [])];
   const metadataFields: Array<readonly [string, string | number | undefined]> = [
     [t("workboard.detailTenant"), automation?.tenant],
     [
@@ -402,8 +494,7 @@ export function technicalDetailsData(card: WorkboardCard, linkedSessionKey: stri
   const detailSections = getDetailSections(card);
   const hasTechnicalDetails = Boolean(
     linkedSessionKey ||
-    card.runId ||
-    card.execution?.runId ||
+    sessions.length ||
     automation?.tenant ||
     metadataFields.some(([, value]) => value !== undefined && value !== "") ||
     notifications.length ||
@@ -413,8 +504,8 @@ export function technicalDetailsData(card: WorkboardCard, linkedSessionKey: stri
     detailSections.some(([, values]) => values.some((value) => value.trim())),
   );
   return {
-    linkedSessionKey,
-    runId,
+    sessions,
+    sessionsByRound: isWorkboardNodeTicket(card),
     links,
     attempts,
     proof,
@@ -443,21 +534,16 @@ export function TechnicalDetails(props: {
       >
         <h3>{t("workboard.detailTechnical")}</h3>
         <div class="workboard-detail__technical-properties">
-          <SessionRow
-            label={t("workboard.fieldSession")}
-            value={props.data.linkedSessionKey}
-            onOpen={props.navigation.openSession}
-          />
           <TranscriptRow onOpen={props.navigation.openTranscript} />
-          <SessionRow
-            label={t("workboard.detailRun")}
-            value={props.data.runId}
-            onOpen={props.navigation.openSession}
-          />
           <For each={props.data.metadataFields} keyed={(field) => field[0]}>
             {(field) => <DetailRow label={field()[0]} value={field()[1]} />}
           </For>
         </div>
+        <SessionList
+          sessions={props.data.sessions}
+          byRound={props.data.sessionsByRound}
+          navigation={props.navigation}
+        />
         <Show when={props.data.notifications.length}>
           <section class="workboard-detail__section">
             <h3>{t("workboard.detailNotifications")}</h3>

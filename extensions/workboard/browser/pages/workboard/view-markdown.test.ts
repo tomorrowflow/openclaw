@@ -143,7 +143,14 @@ it("shows the summary and the stage the Gateway derived on the card face and in 
   ).toBe("Questions waiting for you 3h");
 
   const drawer = renderDetails(listed);
-  expect(drawer.querySelector(".workboard-detail__summary .workboard-card__stage")).not.toBeNull();
+  // The drawer heads every tab with the board card's own stage label.
+  expect(
+    drawer
+      .querySelector(".workboard-detail__header .workboard-card__stage")
+      ?.textContent?.replace(/\s+/g, " ")
+      .trim(),
+  ).toBe("Questions waiting for you 3h");
+  expect(drawer.querySelector(".workboard-detail__summary .workboard-card__stage")).toBeNull();
   expect(workboardTestHost().host.components.mountMarkdown).toHaveBeenCalledWith(
     expect.any(HTMLElement),
     { markdown: "Empty input crashes the **parser**." },

@@ -31,6 +31,7 @@ export const MAX_ATTACHMENT_BYTES = 256 * 1024;
 export const MAX_CARD_DIAGNOSTICS = 12;
 export const MAX_CARD_NOTIFICATIONS = 20;
 export const MAX_NODE_REVIEW_VERDICTS = 20;
+export const MAX_NODE_SESSION_KEY_CHARS = 500;
 export const MAX_RUN_ID_LENGTH = 512;
 // Every card rides in one cards.list frame (MAX_PAYLOAD_BYTES, 25 MiB): 247
 // cards were 7.3 MB on 2026-11-01, metadata 3.1 MB of it, so 48 KiB leaves
