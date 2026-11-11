@@ -3003,6 +3003,7 @@
 .workboard-grilling,
 .workboard-detail__screenshots,
 .workboard-detail__prototypes,
+.workboard-detail__preview,
 .workboard-detail__session-panel,
 .workboard-detail__technical {
   display: grid;
@@ -3769,10 +3770,21 @@ workboard-inline-text {
   color: var(--muted);
 }
 
-.workboard-grilling__actions {
+.workboard-grilling__actions,
+.workboard-preview__actions {
   display: flex;
   justify-self: end;
   gap: 8px;
+}
+
+.workboard-preview__status,
+.workboard-preview__error {
+  margin: 0;
+}
+
+.workboard-preview__error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
 }
 
 .workboard-grilling__note,

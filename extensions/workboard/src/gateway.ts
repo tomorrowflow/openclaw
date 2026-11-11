@@ -346,6 +346,10 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.verify", WRITE_SCOPE, ({ params: input }) =>
     redactCardResult(store.dropNodeVerification(readId(input))),
   );
+  // The card change wakes the preview pass, which tears the failed preview down and starts it again.
+  register("workboard.cards.preview.retry", WRITE_SCOPE, ({ params: input }) =>
+    redactCardResult(store.retryNodePreview(readId(input))),
+  );
   register("workboard.cards.visualCheck", WRITE_SCOPE, ({ params: input }) => {
     const { verdict, note } = visualCheckParamsSchema.parse(input);
     return redactCardResult(

@@ -14,6 +14,7 @@ import {
   readNodeGrillResult,
 } from "./node-ticket-grill-session.js";
 import { createPullRequestStateSync } from "./node-ticket-pr-state.js";
+import { createNodePreviews } from "./node-ticket-preview.js";
 import { type NodeProbeEnd, nodeProbeEnd, nodeProbeNotice } from "./node-ticket-probe.js";
 import {
   publishCandidate,
@@ -505,6 +506,7 @@ export function createNodeTicketHandoffs(params: {
   const inFlight = new Set<string>();
   const now = params.now ?? Date.now;
   const syncPullRequests = createPullRequestStateSync({ ...params, now });
+  const syncPreviews = createNodePreviews({ store: params.store, runtime: params.runtime, now });
   const verifiersOf = (card: WorkboardCard) => async () =>
     await params.store.boardOrchestration(cardBoardId(card));
   /**
@@ -708,6 +710,12 @@ export function createNodeTicketHandoffs(params: {
       }
       await syncPullRequests(warn);
     },
+    /**
+     * Brings review previews in line with the cards. Kept out of `resume`: a
+     * preview's `up` can run for minutes, and `resume` runs as a store
+     * operation the store's close waits for.
+     */
+    syncPreviews,
   };
 }
 

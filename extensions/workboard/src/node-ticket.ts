@@ -359,15 +359,17 @@ export async function runNodeCommand(
   runtime: WorkboardNodeTicketRuntime,
   nodeId: string,
   argv: string[],
+  options: { cwd?: string; timeoutMs?: number } = {},
 ): Promise<string> {
+  const timeoutMs = options.timeoutMs ?? NODE_COMMAND_TIMEOUT_MS;
   const payload = nodeInvokePayload(
     await runtime.request(
       "node.invoke",
       {
         nodeId,
         command: "system.run",
-        timeoutMs: NODE_COMMAND_TIMEOUT_MS,
-        params: { command: argv, timeoutMs: NODE_COMMAND_TIMEOUT_MS },
+        timeoutMs,
+        params: { command: argv, timeoutMs, ...(options.cwd ? { cwd: options.cwd } : {}) },
         idempotencyKey: randomUUID(),
       },
       { scopes: ["operator.admin"] },
@@ -449,6 +451,8 @@ export async function createNodeTicketWorktree(params: {
     ...(previous?.crossVerification?.phase === "running"
       ? { crossVerification: previous.crossVerification }
       : {}),
+    // The preview pass tears down a review preview still up when the card left review.
+    ...(previous?.preview ? { preview: previous.preview } : {}),
   };
   const git = (...args: string[]) =>
     runNodeCommand(runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);

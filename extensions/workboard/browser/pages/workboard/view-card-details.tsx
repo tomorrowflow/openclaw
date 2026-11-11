@@ -272,6 +272,9 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
       ...(detailPrototypes(props, card())
         ? [{ id: "prototype", label: t("workboard.detailTabPrototype") } as const]
         : []),
+      ...(card().preview
+        ? [{ id: "preview", label: t("workboard.detailTabPreview") } as const]
+        : []),
       ...(action().sessionTarget
         ? [{ id: "session", label: t("workboard.detailTabSession") } as const]
         : []),

@@ -84,6 +84,7 @@ export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
   // The operator's own check is not shadow data, so it shows even while
   // hidePendingVerdicts leaves the verification record out.
   const verification = visualCheckVerification(card);
+  const preview = worktree?.preview;
   const redacted = hidePendingVerdicts(redactCard(card), card);
   return {
     ...redacted,
@@ -111,6 +112,7 @@ export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
           },
         }
       : {}),
+    ...(preview ? { preview } : {}),
   };
 }
 

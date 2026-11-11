@@ -297,6 +297,30 @@ Once the node is paired:
 
    The target `model` must pass the assignee's `modelPolicy.allow`.
 
+## Review previews
+
+A board with `orchestration.preview` runs each reviewed round's stack on its
+node and publishes it with the node's own `tailscale serve` (see
+[Review previews](/plugins/workboard#review-previews)). Once per node:
+
+1. Install Tailscale with MagicDNS and HTTPS certificates on for the tailnet,
+   and make `tailscale` resolvable on the node service's `PATH`.
+2. Let the build user configure `tailscale serve` without root:
+
+   ```bash
+   sudo tailscale set --operator=<build user>
+   ```
+
+   Without it the preview fails at serve and its error says to run this.
+
+3. Allow the board's preview port range in the tailnet ACLs (grants) for the
+   devices you review from, for example `tcp:48600-48619` to the node.
+4. Make sure the build user can run the board's `up` and `down` (for a Docker
+   stack, rootless Docker or the `docker` group), and keep the port range
+   clear of the node's other services. The stack must bind
+   `127.0.0.1:{port}`; `tailscale serve` takes the same port on the tailnet
+   address.
+
 ## Verify
 
 - `openclaw nodes describe --node <name>` lists `agent.cli.claude.run.v1`,
@@ -318,6 +342,7 @@ Once the node is paired:
 | macOS daemon exits 78 with an empty log               | Make the wrapper executable (`chmod 700`).                                                                                           |
 | Claude says it is not logged in from the service      | Export `CLAUDE_CODE_OAUTH_TOKEN` in the service environment; `/login` doesn't reach a service.                                       |
 | Linux node stops when you log out                     | Enable lingering: `sudo loginctl enable-linger <user>`.                                                                              |
+| Preview fails at `tailscale serve`                    | Run `sudo tailscale set --operator=<build user>` on the node once, then **Retry** on the card's Preview tab.                         |
 
 ## Related
 

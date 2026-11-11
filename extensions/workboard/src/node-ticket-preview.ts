@@ -1,0 +1,306 @@
+import path from "node:path";
+import type {
+  WorkboardCard,
+  WorkboardNodePreview,
+  WorkboardPreviewSettings,
+} from "@openclaw/workboard-contract";
+import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { checkoutDetachedWorktree } from "./node-ticket-verification.js";
+import {
+  nodeTicketTarget,
+  runNodeCommand,
+  type WorkboardNodeTicketRuntime,
+} from "./node-ticket.js";
+import { cardBoardId } from "./store-card-helpers.js";
+import type { WorkboardStore } from "./store.js";
+
+// A stack's first `up` can build images for minutes.
+const PREVIEW_UP_TIMEOUT_MS = 15 * 60_000;
+const PREVIEW_DOWN_TIMEOUT_MS = 5 * 60_000;
+const MAX_PREVIEW_ERROR_CHARS = 400;
+
+type NodeTarget = NonNullable<ReturnType<typeof nodeTicketTarget>>;
+
+/** A node ticket card with its recorded worktree, which preview writes are fenced on. */
+type PreviewCard = { card: WorkboardCard; target: NodeTarget; worktreePath: string };
+
+type StartingPreview = Extract<WorkboardNodePreview, { state: "starting" }>;
+
+/** The preview a card should have: its imported head, while it waits in review on a board with previews. */
+type PreviewWant = { headCommit: string; settings: WorkboardPreviewSettings };
+
+type StartStep = "checkout" | "up" | "serve" | "status";
+
+/** Each step's failure names what broke and the operator's next action. */
+const STEP_FAILURES: Record<StartStep, (nodeId: string, detail: string) => string> = {
+  checkout: (nodeId, detail) =>
+    `Could not check out the reviewed head on ${nodeId}: ${detail}. Retry once the commit is in the node clone.`,
+  up: (nodeId, detail) =>
+    `The board's preview up failed on ${nodeId}: ${detail}. Fix the stack or the board's preview.up, then Retry.`,
+  serve: (nodeId, detail) =>
+    `tailscale serve failed on ${nodeId}: ${detail}. Run \`sudo tailscale set --operator=<node user>\` on the node once, then Retry.`,
+  status: (nodeId, detail) =>
+    `Could not read the tailnet name of ${nodeId}: ${detail}. Retry once tailscale is up there.`,
+};
+
+function previewWant(
+  card: WorkboardCard,
+  settings: WorkboardPreviewSettings | undefined,
+): PreviewWant | undefined {
+  const handoff = nodeTicketTarget(card)?.worktree?.handoff;
+  // Nobody reviews a probe's round.
+  if (
+    !settings ||
+    card.status !== "review" ||
+    card.metadata?.archivedAt ||
+    card.metadata?.automation?.probe ||
+    handoff?.phase !== "imported"
+  ) {
+    return undefined;
+  }
+  return { headCommit: handoff.headCommit, settings };
+}
+
+function substitute(argv: readonly string[], port: number, cardId: string): string[] {
+  return argv.map((arg) =>
+    arg.replaceAll("{port}", String(port)).replaceAll("{card}", cardId.slice(0, 8)),
+  );
+}
+
+/** The error's last characters: a failed command's message ends with its output. */
+function errorTail(error: unknown): string {
+  const message = formatErrorMessage(error).trim();
+  return message.length > MAX_PREVIEW_ERROR_CHARS
+    ? `…${message.slice(-MAX_PREVIEW_ERROR_CHARS)}`
+    : message;
+}
+
+/** The node's MagicDNS name from `tailscale status --json`, without the trailing dot. */
+function tailnetName(status: string): string {
+  const parsed: unknown = JSON.parse(status);
+  const name = isRecord(parsed) && isRecord(parsed.Self) ? parsed.Self.DNSName : undefined;
+  const trimmed = typeof name === "string" ? name.replace(/\.$/, "") : "";
+  if (!trimmed) {
+    throw new Error("tailscale status has no Self.DNSName; is MagicDNS on?");
+  }
+  return trimmed;
+}
+
+/**
+ * Owns node tickets' review previews: while a card waits in review on an
+ * imported round and its board has a `preview`, the board's stack runs on the
+ * node that built it, in a detached worktree of the imported head, served on
+ * the tailnet by the node's own `tailscale serve`. Leaving review, archiving,
+ * or a new head tears it down. A pure function of card and board state,
+ * retried by every pass: a teardown that fails keeps its record for the next
+ * pass, a failed start keeps its record until the operator's Retry. Each card
+ * runs at most once at a time, so a long `up` holds back no other card.
+ */
+export function createNodePreviews(params: {
+  store: WorkboardStore;
+  runtime: WorkboardNodeTicketRuntime;
+  now: () => number;
+}) {
+  const { store, runtime, now } = params;
+  const inFlight = new Set<string>();
+  // Port picks run one at a time, so two starts never take the same port.
+  let allocation: Promise<unknown> = Promise.resolve();
+  const allocate = <T>(run: () => Promise<T>): Promise<T> => {
+    const next = allocation.then(run);
+    allocation = next.catch(() => undefined);
+    return next;
+  };
+
+  const teardown = async (
+    { card, target, worktreePath }: PreviewCard,
+    record: WorkboardNodePreview,
+    warn: (message: string) => void,
+  ): Promise<boolean> => {
+    const node = (argv: string[], options?: { cwd?: string; timeoutMs?: number }) =>
+      runNodeCommand(runtime, record.nodeId, argv, options);
+    if (record.port !== undefined) {
+      // Unserving a port nothing serves fails; a stale route is replaced when the port is served again.
+      await node(["tailscale", "serve", `--https=${record.port}`, "off"]).catch((error: unknown) =>
+        warn(
+          `workboard: could not unserve port ${record.port} on ${record.nodeId} for card ${card.id}: ${errorTail(error)}`,
+        ),
+      );
+    }
+    try {
+      const listed = await node(["git", "-C", target.repoPath, "worktree", "list", "--porcelain"]);
+      if (listed.split("\n").includes(`worktree ${record.path}`)) {
+        if (record.down.length > 0) {
+          await node(record.down, { cwd: record.path, timeoutMs: PREVIEW_DOWN_TIMEOUT_MS });
+        }
+        await node(["git", "-C", target.repoPath, "worktree", "remove", "--force", record.path]);
+      }
+    } catch (error) {
+      warn(
+        `workboard: could not stop the review preview of card ${card.id} on ${record.nodeId}; the next pass retries: ${errorTail(error)}`,
+      );
+      return false;
+    }
+    return await store.setNodePreview(card.id, {
+      worktreePath,
+      expectedAt: record.at,
+      preview: undefined,
+    });
+  };
+
+  const start = async ({ card, target, worktreePath }: PreviewCard, want: PreviewWant) => {
+    const previewPath = path.posix.join(target.worktreesRoot, `wb-${card.id}-preview`);
+    const { from, to } = want.settings.ports;
+    const starting = await allocate(async () => {
+      const held = new Set<number>();
+      for (const other of await store.list()) {
+        const preview = nodeTicketTarget(other)?.worktree?.preview;
+        if (other.id !== card.id && preview?.nodeId === target.nodeId && preview.port) {
+          held.add(preview.port);
+        }
+      }
+      const base = { headCommit: want.headCommit, nodeId: target.nodeId, path: previewPath };
+      let port = from;
+      while (port <= to && held.has(port)) {
+        port += 1;
+      }
+      if (port > to) {
+        await store.setNodePreview(card.id, {
+          worktreePath,
+          expectedAt: undefined,
+          preview: {
+            ...base,
+            down: [],
+            state: "failed",
+            error: `No preview port free on ${target.nodeId}: ${to - from + 1} previews running.`,
+            at: now(),
+          },
+        });
+        return undefined;
+      }
+      const record: StartingPreview = {
+        ...base,
+        down: substitute(want.settings.down, port, card.id),
+        state: "starting",
+        port,
+        at: now(),
+      };
+      const written = await store.setNodePreview(card.id, {
+        worktreePath,
+        expectedAt: undefined,
+        preview: record,
+      });
+      return written ? record : undefined;
+    });
+    if (!starting) {
+      return;
+    }
+    const { port } = starting;
+    const node = (argv: string[], options?: { cwd?: string; timeoutMs?: number }) =>
+      runNodeCommand(runtime, target.nodeId, argv, options);
+    let step: StartStep = "checkout";
+    let next: WorkboardNodePreview;
+    try {
+      await checkoutDetachedWorktree(runtime, target, previewPath, want.headCommit);
+      step = "up";
+      await node(substitute(want.settings.up, port, card.id), {
+        cwd: previewPath,
+        timeoutMs: PREVIEW_UP_TIMEOUT_MS,
+      });
+      step = "serve";
+      await node(["tailscale", "serve", "--bg", `--https=${port}`, `http://127.0.0.1:${port}`]);
+      step = "status";
+      const name = tailnetName(await node(["tailscale", "status", "--self", "--json"]));
+      next = { ...starting, state: "up", url: `https://${name}:${port}`, at: now() };
+    } catch (error) {
+      next = {
+        ...starting,
+        state: "failed",
+        error: STEP_FAILURES[step](target.nodeId, errorTail(error)),
+        at: now(),
+      };
+    }
+    await store.setNodePreview(card.id, { worktreePath, expectedAt: starting.at, preview: next });
+  };
+
+  /**
+   * One pass over the cards. `stopped` ends the wait for this pass's runs, not
+   * the runs: a stopping service does not wait out a long `up`.
+   */
+  return async function syncPreviews(
+    warn: (message: string) => void,
+    stopped?: AbortSignal,
+  ): Promise<void> {
+    const boards = new Map<string, Promise<WorkboardPreviewSettings | undefined>>();
+    const settingsOf = (card: WorkboardCard) => {
+      const boardId = cardBoardId(card);
+      let settings = boards.get(boardId);
+      if (!settings) {
+        settings = store
+          .boardOrchestration(boardId)
+          .then((orchestration) => orchestration?.preview);
+        boards.set(boardId, settings);
+      }
+      return settings;
+    };
+    const runs: Promise<void>[] = [];
+    for (const card of await store.list()) {
+      const target = nodeTicketTarget(card);
+      const worktree = target?.worktree;
+      const record = worktree?.preview;
+      if (!target || !worktree || (!record && card.status !== "review") || inFlight.has(card.id)) {
+        continue;
+      }
+      const settings = await settingsOf(card).catch((error: unknown) => {
+        warn(
+          `workboard review previews could not read board ${cardBoardId(card)}: ${errorTail(error)}`,
+        );
+        return null;
+      });
+      // An unread board leaves the card as it is.
+      if (settings === null) {
+        continue;
+      }
+      const want = previewWant(card, settings);
+      // A `starting` record no run of this process owns was cut off by a
+      // restart or reset by the operator's Retry: stop what it left, start again.
+      const stale =
+        record !== undefined &&
+        (!want || record.headCommit !== want.headCommit || record.state === "starting");
+      if (!stale && (record || !want)) {
+        continue;
+      }
+      inFlight.add(card.id);
+      const item = { card, target, worktreePath: worktree.path };
+      runs.push(
+        (async () => {
+          if (record && !(await teardown(item, record, warn))) {
+            return;
+          }
+          if (want) {
+            await start(item, want);
+          }
+        })()
+          .catch((error: unknown) =>
+            warn(`workboard review preview failed for card ${card.id}: ${errorTail(error)}`),
+          )
+          .finally(() => inFlight.delete(card.id)),
+      );
+    }
+    const settled = Promise.all(runs);
+    if (!stopped || runs.length === 0) {
+      await settled;
+      return;
+    }
+    let onAbort = () => {};
+    const aborted = new Promise<void>((resolve) => {
+      onAbort = () => resolve();
+      stopped.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      await Promise.race([settled, aborted]);
+    } finally {
+      stopped.removeEventListener("abort", onAbort);
+    }
+  };
+}

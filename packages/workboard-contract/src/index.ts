@@ -1,3 +1,4 @@
+import type { WorkboardNodePreview, WorkboardPreviewSettings } from "./preview.js";
 import type { WorkboardProbe } from "./probes.js";
 import type { WorkboardSessionsBoardSpec } from "./sessions-board.js";
 import type { WorkboardTrustWeek } from "./trust.js";
@@ -10,6 +11,7 @@ import type {
   WorkboardVisualVerdict,
 } from "./verification.js";
 
+export type * from "./preview.js";
 export type * from "./verification.js";
 
 export type WorkboardDatabasePortApi<Database, Input> = {
@@ -692,6 +694,8 @@ export type WorkboardNodeWorktree = {
    * failure.
    */
   stopRequestedAt?: number;
+  /** The review preview of the imported round, on a board with a `preview`. */
+  preview?: WorkboardNodePreview;
 };
 
 /**
@@ -840,6 +844,12 @@ export type WorkboardOrchestrationSettings = {
    * Needs `verifier`. Rounds at a or b never run it. Operator-set only.
    */
   crossVerifier?: WorkboardVerifierSettings;
+  /**
+   * Runs each node ticket's imported round on its node while the card waits
+   * in review and serves it on the tailnet. Absent = no previews.
+   * Operator-set only.
+   */
+  preview?: WorkboardPreviewSettings;
 };
 
 /**
@@ -1011,6 +1021,8 @@ export type WorkboardOperatorCard = WorkboardCard & {
    * one. The verifier's own read stays out of operator reads until then.
    */
   visualCheck?: { round: number; check?: WorkboardNodeVisualCheck };
+  /** A node ticket's review preview, from its start until the card leaves review. */
+  preview?: WorkboardNodePreview;
 };
 
 /** One file's diff in one node ticket round, read from the host clone. */

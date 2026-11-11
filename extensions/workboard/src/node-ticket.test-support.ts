@@ -109,11 +109,11 @@ export function createLocalNodeGateway() {
   let runs = 0;
   const respond = vi.fn((method: string, params?: Record<string, unknown>): unknown => {
     const nodeParams = params?.params as
-      | { command?: string[]; path?: string; maxBytes?: number }
+      | { command?: string[]; cwd?: string; path?: string; maxBytes?: number }
       | undefined;
     if (method === "node.invoke" && params?.command === "system.run") {
       const [command = "", ...args] = nodeParams?.command ?? [];
-      const result = spawnSync(command, args, { encoding: "utf8" });
+      const result = spawnSync(command, args, { encoding: "utf8", cwd: nodeParams?.cwd });
       return {
         payload: { success: result.status === 0, stdout: result.stdout, stderr: result.stderr },
       };
