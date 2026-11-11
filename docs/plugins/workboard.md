@@ -890,6 +890,15 @@ to rounds imported after it. Saving refuses a `crossVerifier` without a
 `verifier` and a `sampleEvery` on the `verifier`; `crossVerifier: null`
 removes it.
 
+A board's `orchestration.preview`, operator-set the same way, runs each
+imported round on its node while the card waits in review and serves it on
+the tailnet, so you can try the change from any device before deciding (see
+[Review previews](#review-previews)): `up` and `down` are argv arrays run
+without a shell, and `ports` is the range previews take ports from.
+`{port}` and `{card}` (the card id's first 8 characters) are substituted in
+every element. Saving refuses an empty argv and ports outside 1024 to 65535
+or with `from` above `to`; `preview: null` removes it.
+
 The plugin passes the session no tool restriction: the agent's own tools are
 the boundary. `agentId` must name a dedicated agent that has only `exec` and
 `process`, runs its commands on the node, and never falls back to another
@@ -1405,6 +1414,60 @@ operator. GitHub computes mergeability lazily, so an `UNKNOWN` PR waits for a
 later read. That round does not count as a rework round in the
 [Trust KPIs](#trust-kpis), even when re-running the proof commits new
 evidence: its start records it in `rework.unchangedRounds`.
+
+#### Review previews
+
+On a board with `orchestration.preview`, a node ticket waiting in `review` on
+an imported round gets a live preview of that round, built on the node that
+built the round:
+
+```json validate=false
+{
+  "preview": {
+    "up": ["python3", "scripts/env.py", "up", "--project", "lindra-pv-{card}", "--port", "{port}"],
+    "down": ["python3", "scripts/env.py", "down", "--project", "lindra-pv-{card}"],
+    "ports": { "from": 48600, "to": 48619 }
+  }
+}
+```
+
+1. **Start:** the preview pass takes the lowest port in `ports` that no other
+   card's preview holds on the same node (across boards), checks the imported
+   head out as a detached worktree at `<worktreesRoot>/wb-<cardId>-preview`,
+   and runs `up` there (15 minute limit), which must serve the stack on
+   `127.0.0.1:{port}`. It then runs
+   `tailscale serve --bg --https={port} http://127.0.0.1:{port}` on the node,
+   so the preview gets the node's own tailnet HTTPS certificate (browsers
+   grant the microphone and camera only to HTTPS pages), and reads the node's
+   MagicDNS name from `tailscale status --self --json`. The card records
+   `preview: {state: "up", url: "https://<node>.<tailnet>.ts.net:{port}", port,
+headCommit, nodeId}` on its node worktree, and operator reads carry it as
+   `preview`; the card drawer's **Preview** tab links it. Node setup:
+   [Review previews](/plugins/workboard-node-setup#review-previews).
+2. **Teardown:** when the card leaves review (done, todo, a rework round,
+   archived) or its imported head changes, the pass runs
+   `tailscale serve --https={port} off`, `down` in the preview worktree, and
+   removes the worktree, then clears the record; a new head then starts
+   afresh. `down` is the one the board had when the preview started, so a
+   board edit cannot strand a running stack. A failed `down` or worktree
+   removal keeps the record and logs a warning; the next pass, on the next
+   card change or the minute sweep, retries. A failed unserve only logs a
+   warning: the route is replaced when the port is served again.
+3. **Failure:** a failed checkout, `up`, serve, or name read records
+   `state: "failed"` with an error naming the step and the next action; with
+   every port taken the error reads `No preview port free on <node>: N previews running`.
+   A failed preview is not retried on its own.
+   `workboard.cards.preview.retry {id}` (`operator.write`, the tab's
+   **Retry**) tears down what it left running and starts it again.
+
+Each card's preview runs on its own, so a long `up` holds back neither other
+cards' previews nor the node-ticket handoffs. The pass runs outside the
+store's operations: a Gateway stopping mid-`up` leaves the record `starting`,
+and the next Gateway start tears that preview down and starts it again.
+Accepted edges: deleting a card, or replacing its target, while it has a
+preview leaves the stack running on the node, and its port counts as free, so
+the next preview may be given it; stop the stack by hand with the board's
+`down` first.
 
 #### Trust KPIs
 

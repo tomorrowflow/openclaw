@@ -579,6 +579,7 @@ export function createWorkboardLifecycleService(params: {
       let begun = false;
       const { nodeHandoffs } = params;
       const scheduler = ctx.scheduler;
+      const warn = (message: string) => ctx.logger.warn(message);
       // Scheduled callbacks run detached from the hook that asked for them, so
       // node requests carry the service's authority, not an ended requester's.
       scheduleNodeHandoffs =
@@ -587,10 +588,13 @@ export function createWorkboardLifecycleService(params: {
               scheduler.schedule({
                 id: "node-handoffs",
                 delayMs: 0,
-                run: () =>
-                  params.store.runOperation(() =>
-                    nodeHandoffs.resume((message) => ctx.logger.warn(message)),
-                  ),
+                run: () => params.store.runOperation(() => nodeHandoffs.resume(warn)),
+              });
+              // Not a store operation: the store's close must not wait for a long `up`.
+              scheduler.schedule({
+                id: "node-previews",
+                delayMs: 0,
+                run: () => nodeHandoffs.syncPreviews(warn, scheduler.signal),
               });
             }
           : undefined;
@@ -652,7 +656,7 @@ export function createWorkboardLifecycleService(params: {
               }
             }
             if (generation === owner) {
-              await cleanupWorktrees(cards, (message) => ctx.logger.warn(message));
+              await cleanupWorktrees(cards, warn);
             }
             if (generation === owner) {
               // Scheduled runs carry the plugin's own scope, which the draft PR
@@ -660,7 +664,13 @@ export function createWorkboardLifecycleService(params: {
               if (scheduleNodeHandoffs) {
                 scheduleNodeHandoffs();
               } else {
-                await params.nodeHandoffs?.resume((message) => ctx.logger.warn(message));
+                await params.nodeHandoffs?.resume(warn);
+                // Not awaited: the store's close waits for this operation, not for a long `up`.
+                void params.nodeHandoffs
+                  ?.syncPreviews(warn)
+                  .catch((error: unknown) =>
+                    warn(`workboard review previews failed: ${String(error)}`),
+                  );
               }
             }
           });

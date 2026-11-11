@@ -359,15 +359,17 @@ export async function runNodeCommand(
   runtime: WorkboardNodeTicketRuntime,
   nodeId: string,
   argv: string[],
+  options: { cwd?: string; timeoutMs?: number } = {},
 ): Promise<string> {
+  const timeoutMs = options.timeoutMs ?? NODE_COMMAND_TIMEOUT_MS;
   const payload = nodeInvokePayload(
     await runtime.request(
       "node.invoke",
       {
         nodeId,
         command: "system.run",
-        timeoutMs: NODE_COMMAND_TIMEOUT_MS,
-        params: { command: argv, timeoutMs: NODE_COMMAND_TIMEOUT_MS },
+        timeoutMs,
+        params: { command: argv, timeoutMs, ...(options.cwd ? { cwd: options.cwd } : {}) },
         idempotencyKey: randomUUID(),
       },
       { scopes: ["operator.admin"] },

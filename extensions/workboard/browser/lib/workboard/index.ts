@@ -45,6 +45,7 @@ export {
   grillWorkboardQuestions,
   moveWorkboardCard,
   recordWorkboardVisualCheck,
+  retryWorkboardPreview,
   saveWorkboardCardDraft,
   setWorkboardCardModel,
 } from "./mutations.ts";

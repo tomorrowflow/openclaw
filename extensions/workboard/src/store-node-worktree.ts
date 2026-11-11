@@ -3,6 +3,7 @@ import type {
   WorkboardCard,
   WorkboardMergeRegression,
   WorkboardNodeHandoff,
+  WorkboardNodePreview,
   WorkboardNodeVerification,
   WorkboardNodeWorktree,
   WorkboardPullRequestState,
@@ -416,6 +417,93 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
                 target: {
                   ...target,
                   worktree: { ...worktree, verification: { ...verification, visualCheck } },
+                },
+              },
+            },
+          };
+        },
+        { allowAutomationLaunch: true },
+      );
+      return result.card;
+    });
+  }
+
+  /**
+   * Replaces the card's review preview record (absent `preview` clears it)
+   * only while the record is still the one the caller read, `expectedAt`
+   * naming it by its `at` (absent: no record). False when it changed.
+   */
+  async setNodePreview(
+    id: string,
+    input: {
+      worktreePath: string;
+      expectedAt: number | undefined;
+      preview: WorkboardNodePreview | undefined;
+    },
+  ): Promise<boolean> {
+    return await this.enqueueMutation(async () => {
+      const result = await this.updateLatestCard(
+        id,
+        (card) => {
+          const target = card.metadata?.automation?.target;
+          const worktree = target?.worktree;
+          if (
+            !target ||
+            worktree?.path !== input.worktreePath ||
+            worktree.preview?.at !== input.expectedAt
+          ) {
+            return undefined;
+          }
+          const { preview: _replaced, ...rest } = worktree;
+          return {
+            metadata: {
+              ...card.metadata,
+              automation: {
+                ...card.metadata?.automation,
+                target: {
+                  ...target,
+                  worktree: input.preview ? { ...rest, preview: input.preview } : rest,
+                },
+              },
+            },
+          };
+        },
+        { allowAutomationLaunch: true },
+      );
+      return result.updated;
+    });
+  }
+
+  /**
+   * The operator's Retry of a failed review preview. A record holding a port
+   * goes back to `starting`, which the preview pass, finding no start of its
+   * own running, tears down and starts again; one without (no port was free)
+   * is dropped, so the pass allocates afresh.
+   */
+  async retryNodePreview(id: string): Promise<WorkboardCard> {
+    return await this.enqueueMutation(async () => {
+      const result = await this.updateLatestCard(
+        id,
+        (card) => {
+          const target = card.metadata?.automation?.target;
+          const worktree = target?.worktree;
+          const preview = worktree?.preview;
+          if (!target || !worktree || preview?.state !== "failed") {
+            throw new Error("only a failed review preview can be retried.");
+          }
+          const { preview: _failed, ...rest } = worktree;
+          const { error: _error, port, ...kept } = preview;
+          return {
+            metadata: {
+              ...card.metadata,
+              automation: {
+                ...card.metadata?.automation,
+                target: {
+                  ...target,
+                  worktree:
+                    port === undefined
+                      ? rest
+                      : { ...rest, preview: { ...kept, state: "starting", port, at: Date.now() } },
                 },
               },
             },

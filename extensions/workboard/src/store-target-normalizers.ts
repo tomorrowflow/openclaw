@@ -5,6 +5,7 @@ import type {
   WorkboardNodeFeedback,
   WorkboardNodeGrill,
   WorkboardNodeHandoff,
+  WorkboardNodePreview,
   WorkboardNodeQuestions,
   WorkboardNodeReviewVerdict,
   WorkboardNodeRework,
@@ -454,6 +455,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
   const verification = normalizeNodeVerification(value.verification);
   const crossVerification = normalizeNodeVerification(value.crossVerification);
   const stopRequestedAt = resolveOptionalIntegerOption(value.stopRequestedAt, { min: 0 });
+  const preview = normalizeNodePreview(value.preview);
   return worktreePath && branch && baseCommit
     ? {
         path: worktreePath,
@@ -470,8 +472,71 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         ...(crossVerification ? { crossVerification } : {}),
         ...(value.rung === "b" || value.rung === "c" ? { rung: value.rung } : {}),
         ...(stopRequestedAt !== undefined ? { stopRequestedAt } : {}),
+        ...(preview ? { preview } : {}),
       }
     : undefined;
+}
+
+const MAX_PREVIEW_ARGV = 32;
+const MAX_PREVIEW_ARG_CHARS = 500;
+
+/** A board preview's `up` or `down`: a non-empty argv, run without a shell. */
+export function normalizePreviewArgv(value: unknown, field: string): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > MAX_PREVIEW_ARGV ||
+    !value.every(
+      (arg): arg is string =>
+        typeof arg === "string" && arg.length > 0 && arg.length <= MAX_PREVIEW_ARG_CHARS,
+    ) ||
+    !value[0]?.trim()
+  ) {
+    throw new Error(
+      `${field} must be an argv of 1 to ${MAX_PREVIEW_ARGV} non-empty strings of at most ${MAX_PREVIEW_ARG_CHARS} characters.`,
+    );
+  }
+  return value;
+}
+
+function normalizeNodePreview(value: unknown): WorkboardNodePreview | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.headCommit !== "string" ||
+    typeof value.nodeId !== "string" ||
+    typeof value.path !== "string" ||
+    !Array.isArray(value.down) ||
+    !value.down.every((arg): arg is string => typeof arg === "string")
+  ) {
+    return undefined;
+  }
+  const at = resolveOptionalIntegerOption(value.at, { min: 0 });
+  const port = resolveOptionalIntegerOption(value.port, { min: 1, max: 65535 });
+  if (at === undefined) {
+    return undefined;
+  }
+  const base = {
+    headCommit: value.headCommit,
+    nodeId: value.nodeId,
+    path: value.path,
+    down: value.down,
+    at,
+  };
+  if (value.state === "starting" && port !== undefined) {
+    return { ...base, state: "starting", port };
+  }
+  if (value.state === "up" && port !== undefined && typeof value.url === "string") {
+    return { ...base, state: "up", port, url: value.url };
+  }
+  if (value.state === "failed" && typeof value.error === "string") {
+    return {
+      ...base,
+      state: "failed",
+      error: value.error,
+      ...(port !== undefined ? { port } : {}),
+    };
+  }
+  return undefined;
 }
 
 export type WorkboardNodeHandoffInput = {

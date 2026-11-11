@@ -209,6 +209,48 @@ function normalizeVisualCheck(value: unknown): WorkboardCard["visualCheck"] {
   };
 }
 
+function normalizePreview(value: unknown): WorkboardCard["preview"] {
+  if (
+    !isRecord(value) ||
+    typeof value.headCommit !== "string" ||
+    typeof value.nodeId !== "string" ||
+    typeof value.path !== "string" ||
+    typeof value.at !== "number"
+  ) {
+    return undefined;
+  }
+  const base = {
+    headCommit: value.headCommit,
+    nodeId: value.nodeId,
+    path: value.path,
+    down: Array.isArray(value.down)
+      ? value.down.filter((arg): arg is string => typeof arg === "string")
+      : [],
+    at: value.at,
+  };
+  const port = typeof value.port === "number" ? value.port : undefined;
+  if (value.state === "starting" && port !== undefined) {
+    return { ...base, state: "starting", port };
+  }
+  if (
+    value.state === "up" &&
+    port !== undefined &&
+    typeof value.url === "string" &&
+    value.url.startsWith("https://")
+  ) {
+    return { ...base, state: "up", port, url: value.url };
+  }
+  if (value.state === "failed" && typeof value.error === "string") {
+    return {
+      ...base,
+      state: "failed",
+      error: value.error,
+      ...(port !== undefined ? { port } : {}),
+    };
+  }
+  return undefined;
+}
+
 function normalizeCard(value: unknown): WorkboardCard | null {
   if (!isRecord(value)) {
     return null;
@@ -232,6 +274,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
   const reviewTimes = normalizeReviewTimes(value.reviewTimes);
   const grill = normalizeGrill(value.grill);
   const visualCheck = normalizeVisualCheck(value.visualCheck);
+  const preview = normalizePreview(value.preview);
   return {
     id,
     title,
@@ -258,6 +301,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
     ...(reviewTimes.length > 0 ? { reviewTimes } : {}),
     ...(grill ? { grill } : {}),
     ...(visualCheck ? { visualCheck } : {}),
+    ...(preview ? { preview } : {}),
     ...(typeof value.pullRequestUrl === "string" && value.pullRequestUrl.startsWith("https://")
       ? { pullRequestUrl: value.pullRequestUrl }
       : {}),

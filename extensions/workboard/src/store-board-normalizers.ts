@@ -3,6 +3,7 @@ import {
   type WorkboardBoardMetadata,
   type WorkboardClassRung,
   type WorkboardOrchestrationSettings,
+  type WorkboardPreviewSettings,
   type WorkboardTargetRoute,
   type WorkboardVerifierSettings,
 } from "@openclaw/workboard-contract";
@@ -12,7 +13,7 @@ import { normalizeHeldPaths } from "./held-paths.js";
 import type { WorkboardBoardInput } from "./store-inputs.js";
 import { normalizeBoardId, normalizeWorkspace } from "./store-normalizers.js";
 import { normalizeCappedStringList } from "./store-string-lists.js";
-import { normalizeExecutionTarget } from "./store-target-normalizers.js";
+import { normalizeExecutionTarget, normalizePreviewArgv } from "./store-target-normalizers.js";
 import { normalizeBoundedString } from "./store-value-normalizers.js";
 
 export function normalizeBoardMetadata(
@@ -137,6 +138,9 @@ function normalizeOrchestration(
   const crossVerifier = Object.hasOwn(record, "crossVerifier")
     ? normalizeVerifier(record.crossVerifier, "crossVerifier")
     : fallback?.crossVerifier;
+  const preview = Object.hasOwn(record, "preview")
+    ? normalizePreviewSettings(record.preview)
+    : fallback?.preview;
   // It runs only after the verifier passed, so alone it would never run.
   if (crossVerifier && !verifier) {
     throw new Error("crossVerifier needs a verifier: it runs after the verifier passed.");
@@ -152,8 +156,40 @@ function normalizeOrchestration(
     ...(heldPaths?.length ? { heldPaths } : {}),
     ...(verifier ? { verifier } : {}),
     ...(crossVerifier ? { crossVerifier } : {}),
+    ...(preview ? { preview } : {}),
   };
   return Object.keys(next).length ? next : undefined;
+}
+
+const MIN_PREVIEW_PORT = 1024;
+const MAX_PREVIEW_PORT = 65535;
+
+// `preview: null` removes it.
+function normalizePreviewSettings(value: unknown): WorkboardPreviewSettings | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value) || !isRecord(value.ports)) {
+    throw new Error("preview needs up, down, and ports: { from, to }.");
+  }
+  const up = normalizePreviewArgv(value.up, "preview up");
+  const down = normalizePreviewArgv(value.down, "preview down");
+  const { from, to } = value.ports;
+  if (!isPreviewPort(from) || !isPreviewPort(to) || from > to) {
+    throw new Error(
+      `preview ports must be integers from ${MIN_PREVIEW_PORT} to ${MAX_PREVIEW_PORT} with from <= to.`,
+    );
+  }
+  return { up, down, ports: { from, to } };
+}
+
+function isPreviewPort(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= MIN_PREVIEW_PORT &&
+    value <= MAX_PREVIEW_PORT
+  );
 }
 
 // The same `provider/model` shape a session's `model` takes; `verifier: null` removes it.

@@ -9,6 +9,7 @@ import {
 } from "../../lib/workboard/index.ts";
 import { ChangesPanel, hasCardChanges } from "./view-card-changes.tsx";
 import { GrillingPanel } from "./view-card-grilling.tsx";
+import { PreviewPanel } from "./view-card-preview.tsx";
 import { hasPrototypes, PrototypePanel } from "./view-card-prototypes.tsx";
 import { hasCommittedScreenshots, ScreenshotsPanel } from "./view-card-screenshots.tsx";
 import { canMutate, type WorkboardProps, workboardMutationContext } from "./view-helpers.tsx";
@@ -106,7 +107,7 @@ export function detailPrototypes(props: WorkboardProps, card: WorkboardCard) {
   return controller && listed && hasPrototypes(listed) ? { controller, listed } : undefined;
 }
 
-/** A node ticket's Grilling, Changes, Screenshots, and Prototype tab panels, each only when it has content. */
+/** A node ticket's Grilling, Changes, Screenshots, Prototype, and Preview tab panels, each only when it has content. */
 export function NodeTicketTabPanels(props: {
   workboard: WorkboardProps;
   card: WorkboardCard;
@@ -167,6 +168,16 @@ export function NodeTicketTabPanels(props: {
             listed={shown().listed}
             active={props.activeTab === "prototype"}
             revision={props.workboard.revision}
+          />
+        )}
+      </Show>
+      <Show when={props.card.preview}>
+        {(preview) => (
+          <PreviewPanel
+            workboard={props.workboard}
+            card={props.card}
+            preview={preview()}
+            active={props.activeTab === "preview"}
           />
         )}
       </Show>

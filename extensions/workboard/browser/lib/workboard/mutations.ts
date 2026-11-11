@@ -290,6 +290,15 @@ export async function recordWorkboardVisualCheck(
   });
 }
 
+/** Starts a failed review preview again; the preview pass first stops what it left running. */
+export async function retryWorkboardPreview(params: WorkboardCardMutationParams) {
+  return runWorkboardCardMutation(params, async (state, client) => {
+    const payload = await client.request("workboard.cards.preview.retry", { id: params.cardId });
+    replaceCard(state, normalizeCardPayload(payload));
+    return true;
+  });
+}
+
 /** Changes the model a stopped node ticket runs on; its next start uses it. */
 export async function setWorkboardCardModel(
   params: WorkboardCardMutationParams & { model: string },

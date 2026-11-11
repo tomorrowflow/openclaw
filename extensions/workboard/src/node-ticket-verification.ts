@@ -316,21 +316,20 @@ export function parseVerificationReply(text: string): ParsedVerification {
 }
 
 /**
- * A detached worktree of the imported head in the node clone. The import
- * removed the ticket worktree and branch, so the head is reachable only from
- * here; a clone whose `gc` pruned it meanwhile fails the add, and the run
- * records that as an error for the operator to re-run.
+ * A detached worktree of `headCommit` in the node clone at `worktreePath`,
+ * reused when it is already there. The import removed the ticket worktree and
+ * branch, so an imported head is reachable only from a checkout like this.
  */
-async function prepareVerifyWorktree(
+export async function checkoutDetachedWorktree(
   runtime: WorkboardNodeTicketRuntime,
-  target: ImportedReviewRound["target"],
-  verifyPath: string,
+  target: { nodeId: string; repoPath: string },
+  worktreePath: string,
   headCommit: string,
 ): Promise<void> {
   const current = await runNodeCommand(runtime, target.nodeId, [
     "git",
     "-C",
-    verifyPath,
+    worktreePath,
     "rev-parse",
     "HEAD",
   ]).catch(() => undefined);
@@ -340,9 +339,9 @@ async function prepareVerifyWorktree(
   const git = (...args: string[]) =>
     runNodeCommand(runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);
   if (current !== undefined) {
-    await git("worktree", "remove", "--force", verifyPath);
+    await git("worktree", "remove", "--force", worktreePath);
   }
-  await git("worktree", "add", "--detach", verifyPath, headCommit);
+  await git("worktree", "add", "--detach", worktreePath, headCommit);
 }
 
 async function createVerificationSession(params: {
@@ -522,7 +521,9 @@ async function startNodeVerification(
     if (existing?.hasActiveRun === true) {
       session = { sessionKey: existing.key };
     } else {
-      await prepareVerifyWorktree(
+      // A clone whose `gc` pruned the head fails the checkout; the run
+      // records that as an error for the operator to re-run.
+      await checkoutDetachedWorktree(
         params.runtime,
         round.target,
         verifyPath,

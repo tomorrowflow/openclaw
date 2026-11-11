@@ -120,6 +120,7 @@ export type WorkboardUiState = {
     | "changes"
     | "screenshots"
     | "prototype"
+    | "preview"
     | "session"
     | "details";
   detailCommentBody: string;
