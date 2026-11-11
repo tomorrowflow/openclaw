@@ -1,5 +1,5 @@
 // Workboard tests cover node tickets' review previews: up on review, torn down on leaving it.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import type { WorkboardCard, WorkboardPreviewSettings } from "@openclaw/workboard-contract";
@@ -65,9 +65,19 @@ function withTailscale(local: WorkboardNodeTicketRuntime, options: { failServe?:
 }
 
 async function previewInReview(
-  options: { preview?: WorkboardPreviewSettings; failServe?: boolean } = {},
+  options: {
+    preview?: WorkboardPreviewSettings;
+    failServe?: boolean;
+    symlinkedRoot?: boolean;
+  } = {},
 ) {
   const ticket = await finishNodeTicket({});
+  if (options.symlinkedRoot) {
+    // The worktrees root is reached through a symlink, so git records the preview worktree under its real path.
+    const { worktreesRoot } = ticket.repos.target;
+    renameSync(worktreesRoot, `${worktreesRoot}-real`);
+    symlinkSync(`${worktreesRoot}-real`, worktreesRoot);
+  }
   await ticket.handoffs.resume(ticket.warn);
   const imported = await ticket.store.get(ticket.card.id);
   expect(imported?.status).toBe("review");
@@ -343,6 +353,133 @@ describe("node ticket review previews", () => {
       cwd: previewPath,
     });
     expect(await previewOf(store, card.id)).toMatchObject({ state: "up", port: 48600 });
+  });
+
+  it("stops and removes a preview whose worktrees root is a symlink", async () => {
+    const { store, card, repos, warn, sync, previewPath } = await previewInReview({
+      symlinkedRoot: true,
+    });
+    await sync(warn);
+    expect(await previewOf(store, card.id)).toMatchObject({ state: "up", path: previewPath });
+
+    await store.archive(card.id, true);
+    await sync(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(
+      readFileSync(
+        path.join(repos.target.worktreesRoot, `preview-down-${card8(card)}.txt`),
+        "utf8",
+      ),
+    ).toBe("48600\n");
+    expect(existsSync(previewPath)).toBe(false);
+    expect(await previewOf(store, card.id)).toBeUndefined();
+  });
+
+  it("runs one start per card when passes overlap, and leaves a running up alone", async () => {
+    const { store, card, node, warn } = await previewInReview();
+    let enterUp = () => {};
+    const upEntered = new Promise<void>((resolve) => {
+      enterUp = resolve;
+    });
+    let releaseUp = () => {};
+    const upReleased = new Promise<void>((resolve) => {
+      releaseUp = resolve;
+    });
+    let upHeld = false;
+    const held: WorkboardNodeTicketRuntime = {
+      request: async (method, params) => {
+        const argv = (params?.params as { command?: string[] } | undefined)?.command ?? [];
+        // Only the first `up` waits, so a wrongly restarted preview fails the assertions rather than hanging.
+        if (argv.join(" ").includes("preview-up.txt") && !upHeld) {
+          upHeld = true;
+          enterUp();
+          await upReleased;
+        }
+        return await node.request(method, params);
+      },
+    };
+    // Both passes list the card before either reads its board.
+    let listed = 0;
+    const list = store.list.bind(store);
+    vi.spyOn(store, "list").mockImplementation(async (options) => {
+      const cards = await list(options);
+      listed += 1;
+      return cards;
+    });
+    let releaseBoard = () => {};
+    const boardReleased = new Promise<void>((resolve) => {
+      releaseBoard = resolve;
+    });
+    const boardOrchestration = store.boardOrchestration.bind(store);
+    vi.spyOn(store, "boardOrchestration").mockImplementation(async (boardId) => {
+      await boardReleased;
+      return await boardOrchestration(boardId);
+    });
+    const overlapping = createNodePreviews({ store, runtime: held, now: Date.now });
+
+    const first = overlapping(warn);
+    const second = overlapping(warn);
+    await vi.waitFor(() => expect(listed).toBe(2));
+    releaseBoard();
+    await upEntered;
+    // The pass that did not get the card has settled; the other's `up` still runs.
+    await Promise.race([first, second]);
+    await overlapping(warn);
+    releaseUp();
+    await Promise.all([first, second]);
+
+    expect(warn).not.toHaveBeenCalled();
+    const argvs = node.calls.map((call) => call.argv.join(" "));
+    expect(argvs.filter((argv) => argv.includes("preview-up.txt"))).toHaveLength(1);
+    expect(argvs.filter((argv) => argv.endsWith(" off"))).toEqual([]);
+    expect(await previewOf(store, card.id)).toMatchObject({ state: "up", port: 48600 });
+  });
+
+  it("keeps a teardown that ran while a rework launch fetched", async () => {
+    const { store, card, repos, gateway, github, handoffs, warn, sync } = await previewInReview();
+    await sync(warn);
+    await postVerdict(store, card.id, "Verdict: rework: wrong flag");
+    git(repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
+    github.tokens.set("acme/app", "token-app");
+    github.openPulls.push("https://github.com/acme/app/pull/7");
+    await store.addComment(card.id, { body: "Rename the flag." });
+    const request = gateway.request.bind(gateway);
+    let tornDown = false;
+    vi.spyOn(gateway, "request").mockImplementation(async (method, params) => {
+      const argv = (params?.params as { command?: string[] } | undefined)?.command ?? [];
+      if (!tornDown && argv.includes("fetch") && argv.includes("--prune")) {
+        tornDown = true;
+        await sync(warn);
+        expect(await previewOf(store, card.id)).toBeUndefined();
+      }
+      return await request(method, params);
+    });
+
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(tornDown).toBe(true);
+    expect((await store.get(card.id))?.status).toBe("running");
+    expect(await previewOf(store, card.id)).toBeUndefined();
+  });
+
+  it("names the failed command and keeps the end of a verbose up's error", async () => {
+    const { store, card, warn, sync } = await previewInReview({
+      preview: {
+        ...PREVIEW,
+        up: ["sh", "-c", "head -c 2000 /dev/zero | tr '\\0' x >&2; echo ' disk full' >&2; exit 1"],
+      },
+    });
+    await sync(warn);
+
+    const preview = await previewOf(store, card.id);
+    expect(preview?.state).toBe("failed");
+    expect(preview?.state === "failed" ? preview.error : "").toMatch(
+      /^The board's preview up failed on mac-factory: node mac-factory failed `sh -c head -c 2000.*…x+ disk full\. Fix the stack/,
+    );
   });
 
   it("starts nothing on a board without previews", async () => {

@@ -18,7 +18,9 @@ import type { WorkboardStore } from "./store.js";
 // A stack's first `up` can build images for minutes.
 const PREVIEW_UP_TIMEOUT_MS = 15 * 60_000;
 const PREVIEW_DOWN_TIMEOUT_MS = 5 * 60_000;
-const MAX_PREVIEW_ERROR_CHARS = 400;
+// A failed command's message starts with the command and ends with its output.
+const PREVIEW_ERROR_HEAD_CHARS = 150;
+const PREVIEW_ERROR_TAIL_CHARS = 250;
 
 type NodeTarget = NonNullable<ReturnType<typeof nodeTicketTarget>>;
 
@@ -68,11 +70,11 @@ function substitute(argv: readonly string[], port: number, cardId: string): stri
   );
 }
 
-/** The error's last characters: a failed command's message ends with its output. */
-function errorTail(error: unknown): string {
+/** The error's start and end, which name the failed command and how its output ended. */
+function errorDetail(error: unknown): string {
   const message = formatErrorMessage(error).trim();
-  return message.length > MAX_PREVIEW_ERROR_CHARS
-    ? `…${message.slice(-MAX_PREVIEW_ERROR_CHARS)}`
+  return message.length > PREVIEW_ERROR_HEAD_CHARS + PREVIEW_ERROR_TAIL_CHARS
+    ? `${message.slice(0, PREVIEW_ERROR_HEAD_CHARS)}…${message.slice(-PREVIEW_ERROR_TAIL_CHARS)}`
     : message;
 }
 
@@ -123,13 +125,19 @@ export function createNodePreviews(params: {
       // Unserving a port nothing serves fails; a stale route is replaced when the port is served again.
       await node(["tailscale", "serve", `--https=${record.port}`, "off"]).catch((error: unknown) =>
         warn(
-          `workboard: could not unserve port ${record.port} on ${record.nodeId} for card ${card.id}: ${errorTail(error)}`,
+          `workboard: could not unserve port ${record.port} on ${record.nodeId} for card ${card.id}: ${errorDetail(error)}`,
         ),
       );
     }
     try {
       const listed = await node(["git", "-C", target.repoPath, "worktree", "list", "--porcelain"]);
-      if (listed.split("\n").includes(`worktree ${record.path}`)) {
+      // git lists real paths, and the record may reach the worktree through a
+      // symlinked worktrees root; the card id makes the directory name unique.
+      const name = path.posix.basename(record.path);
+      const exists = listed
+        .split("\n")
+        .some((line) => line.startsWith("worktree ") && path.posix.basename(line) === name);
+      if (exists) {
         if (record.down.length > 0) {
           await node(record.down, { cwd: record.path, timeoutMs: PREVIEW_DOWN_TIMEOUT_MS });
         }
@@ -137,7 +145,7 @@ export function createNodePreviews(params: {
       }
     } catch (error) {
       warn(
-        `workboard: could not stop the review preview of card ${card.id} on ${record.nodeId}; the next pass retries: ${errorTail(error)}`,
+        `workboard: could not stop the review preview of card ${card.id} on ${record.nodeId}; the next pass retries: ${errorDetail(error)}`,
       );
       return false;
     }
@@ -216,7 +224,7 @@ export function createNodePreviews(params: {
       next = {
         ...starting,
         state: "failed",
-        error: STEP_FAILURES[step](target.nodeId, errorTail(error)),
+        error: STEP_FAILURES[step](target.nodeId, errorDetail(error)),
         at: now(),
       };
     }
@@ -244,36 +252,47 @@ export function createNodePreviews(params: {
       return settings;
     };
     const runs: Promise<void>[] = [];
-    for (const card of await store.list()) {
-      const target = nodeTicketTarget(card);
-      const worktree = target?.worktree;
-      const record = worktree?.preview;
-      if (!target || !worktree || (!record && card.status !== "review") || inFlight.has(card.id)) {
+    for (const listed of await store.list()) {
+      const listedTarget = nodeTicketTarget(listed);
+      if (
+        !listedTarget?.worktree ||
+        (!listedTarget.worktree.preview && listed.status !== "review") ||
+        inFlight.has(listed.id)
+      ) {
         continue;
       }
-      const settings = await settingsOf(card).catch((error: unknown) => {
-        warn(
-          `workboard review previews could not read board ${cardBoardId(card)}: ${errorTail(error)}`,
-        );
-        return null;
-      });
-      // An unread board leaves the card as it is.
-      if (settings === null) {
-        continue;
-      }
-      const want = previewWant(card, settings);
-      // A `starting` record no run of this process owns was cut off by a
-      // restart or reset by the operator's Retry: stop what it left, start again.
-      const stale =
-        record !== undefined &&
-        (!want || record.headCommit !== want.headCommit || record.state === "starting");
-      if (!stale && (record || !want)) {
-        continue;
-      }
-      inFlight.add(card.id);
-      const item = { card, target, worktreePath: worktree.path };
+      // Claimed before any await, so an overlapping pass skips the card.
+      inFlight.add(listed.id);
       runs.push(
         (async () => {
+          // Decide on the card as it is now: the listing may predate another pass's run.
+          const card = await store.get(listed.id);
+          const target = card && nodeTicketTarget(card);
+          const worktree = target?.worktree;
+          if (!card || !target || !worktree) {
+            return;
+          }
+          const settings = await settingsOf(card).catch((error: unknown) => {
+            warn(
+              `workboard review previews could not read board ${cardBoardId(card)}: ${errorDetail(error)}`,
+            );
+            return null;
+          });
+          // An unread board leaves the card as it is.
+          if (settings === null) {
+            return;
+          }
+          const want = previewWant(card, settings);
+          const record = worktree.preview;
+          // A `starting` record no run of this process owns was cut off by a
+          // restart or reset by the operator's Retry: stop what it left, start again.
+          const stale =
+            record !== undefined &&
+            (!want || record.headCommit !== want.headCommit || record.state === "starting");
+          if (!stale && (record || !want)) {
+            return;
+          }
+          const item = { card, target, worktreePath: worktree.path };
           if (record && !(await teardown(item, record, warn))) {
             return;
           }
@@ -282,9 +301,9 @@ export function createNodePreviews(params: {
           }
         })()
           .catch((error: unknown) =>
-            warn(`workboard review preview failed for card ${card.id}: ${errorTail(error)}`),
+            warn(`workboard review preview failed for card ${listed.id}: ${errorDetail(error)}`),
           )
-          .finally(() => inFlight.delete(card.id)),
+          .finally(() => inFlight.delete(listed.id)),
       );
     }
     const settled = Promise.all(runs);

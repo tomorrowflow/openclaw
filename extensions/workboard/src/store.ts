@@ -238,6 +238,9 @@ export class WorkboardStore extends WorkboardNodeProbeStore {
                         ...target,
                         worktree: {
                           ...input.nodeWorktree,
+                          // The preview pass owns this record and may have torn the preview
+                          // down while the launch fetched; it tears down one still up.
+                          ...(target.worktree?.preview ? { preview: target.worktree.preview } : {}),
                           ...(workboardAgentDecides(classRung) ? { rung: classRung } : {}),
                         },
                       },

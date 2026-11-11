@@ -1465,8 +1465,9 @@ cards' previews nor the node-ticket handoffs. The pass runs outside the
 store's operations: a Gateway stopping mid-`up` leaves the record `starting`,
 and the next Gateway start tears that preview down and starts it again.
 Accepted edges: deleting a card, or replacing its target, while it has a
-preview leaves the stack running on the node; stop it by hand with the
-board's `down`.
+preview leaves the stack running on the node, and its port counts as free, so
+the next preview may be given it; stop the stack by hand with the board's
+`down` first.
 
 #### Trust KPIs
 

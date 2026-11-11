@@ -451,8 +451,6 @@ export async function createNodeTicketWorktree(params: {
     ...(previous?.crossVerification?.phase === "running"
       ? { crossVerification: previous.crossVerification }
       : {}),
-    // The preview pass tears down a review preview still up when the card left review.
-    ...(previous?.preview ? { preview: previous.preview } : {}),
   };
   const git = (...args: string[]) =>
     runNodeCommand(runtime, target.nodeId, ["git", "-C", target.repoPath, ...args]);
