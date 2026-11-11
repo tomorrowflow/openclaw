@@ -31,6 +31,7 @@ import {
 } from "./store-card-helpers.js";
 import {
   isWorkboardClaimReclaimable,
+  isWorkboardNodeTicket,
   secondsToDurationMs,
   workboardClassRung,
 } from "./store-constants.js";
@@ -372,6 +373,21 @@ export class WorkboardStore extends WorkboardNodeProbeStore {
           ) {
             metadata = { ...metadata, claim: undefined };
           }
+        }
+        // A node ticket moved out of running mid-run keeps its claim as the
+        // fence against a second start until that run ends. Its report no
+        // longer applies to the card, so its end releases the claim here.
+        const runClaim = card.metadata?.claim;
+        if (
+          associationIsCurrent &&
+          input.sourceUpdatedAt !== undefined &&
+          (input.targetStatus === "review" || input.targetStatus === "blocked") &&
+          card.status !== "running" &&
+          isWorkboardNodeTicket(card) &&
+          runClaim &&
+          runClaim.claimedAt <= input.sourceUpdatedAt
+        ) {
+          metadata = { ...metadata, claim: undefined };
         }
         const acceptedLaunch = input.association
           ? acceptedLaunchForAssociation(card, input.association)

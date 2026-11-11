@@ -14,7 +14,7 @@ import {
   lifecycleStatusSourceUpdatedAtFromPatch,
   shouldSkipPersistedLifecycleStatusUpdate,
 } from "./store-card-helpers.js";
-import { isWorkboardNodeTicket, MAX_CARD_NOTIFICATIONS } from "./store-constants.js";
+import { MAX_CARD_NOTIFICATIONS } from "./store-constants.js";
 import type { WorkboardCardPatch } from "./store-inputs.js";
 import { trimMetadataToBudget } from "./store-metadata-budget.js";
 
@@ -105,12 +105,7 @@ export function settleManualStatusTransition(params: {
   // lifecycle source is provenance; copied markers must not survive a manual transition.
   const metadata = { ...params.metadata, lifecycleStatusSourceUpdatedAt: undefined };
   if (status !== "done" && status !== "blocked") {
-    // Review is not terminal for a generic worker, which keeps its claim. A
-    // node ticket's run reports only while the card is running, so after this
-    // move nothing releases the claim and it refuses restarts until it expires.
-    return existing.status === "running" && metadata.claim && isWorkboardNodeTicket(existing)
-      ? { execution, metadata: { ...metadata, claim: undefined } }
-      : { execution, metadata };
+    return { execution, metadata };
   }
   const runActive =
     execution?.status === "running" ||
