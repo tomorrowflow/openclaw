@@ -223,9 +223,10 @@ export async function syncWorkboardAgentEnded(params: {
     (card) => !card.metadata?.archivedAt && workboardCardTakesEndedRunReport(card, source),
   );
   // A retry only settles a session that outlived its hook. The hook already mapped
-  // a node ticket's report, so applying it again would repeat the round, and the
-  // sweep's idle verdict covers a session that then stays idle.
-  if (params.allowIdleRunningTerminal && linked.some((card) => nodeTicketTarget(card))) {
+  // a running node ticket's report, so applying it again would repeat the round,
+  // and the sweep's idle verdict covers a session that then stays idle.
+  const mapped = linked.some((card) => card.status === "running" && nodeTicketTarget(card));
+  if (params.allowIdleRunningTerminal && mapped) {
     return 0;
   }
   const observation = !session

@@ -376,12 +376,14 @@ export class WorkboardStore extends WorkboardNodeProbeStore {
         }
         // A node ticket moved out of running mid-run keeps its claim as the
         // fence against a second start until that run ends. Its report no
-        // longer applies to the card, so its end releases the claim here.
+        // longer applies to the card, so the first observation of the session
+        // without an active run releases the claim here.
         const runClaim = card.metadata?.claim;
         if (
           associationIsCurrent &&
           input.sourceUpdatedAt !== undefined &&
-          (input.targetStatus === "review" || input.targetStatus === "blocked") &&
+          input.executionStatus !== undefined &&
+          input.executionStatus !== "running" &&
           card.status !== "running" &&
           isWorkboardNodeTicket(card) &&
           runClaim &&
