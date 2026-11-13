@@ -2,6 +2,7 @@ import path from "node:path";
 import type {
   WorkboardCard,
   WorkboardNodePreview,
+  WorkboardOrchestrationSettings,
   WorkboardPreviewSecretRef,
   WorkboardPreviewSettings,
 } from "@openclaw/workboard-contract";
@@ -33,7 +34,11 @@ type PreviewCard = { card: WorkboardCard; target: NodeTarget; worktreePath: stri
 type StartingPreview = Extract<WorkboardNodePreview, { state: "starting" }>;
 
 /** The preview a card should have: its imported head, while it waits in review on a board with previews. */
-type PreviewWant = { headCommit: string; settings: WorkboardPreviewSettings };
+type PreviewWant = {
+  headCommit: string;
+  settings: WorkboardPreviewSettings;
+  projectEnv: Record<string, string> | undefined;
+};
 
 type StartStep = "checkout" | "env" | "up" | "serve" | "status";
 
@@ -53,8 +58,9 @@ const STEP_FAILURES: Record<StartStep, (nodeId: string, detail: string) => strin
 
 function previewWant(
   card: WorkboardCard,
-  settings: WorkboardPreviewSettings | undefined,
+  board: WorkboardOrchestrationSettings | undefined,
 ): PreviewWant | undefined {
+  const settings = board?.preview;
   const handoff = nodeTicketTarget(card)?.worktree?.handoff;
   // Nobody reviews a probe's round.
   if (
@@ -66,7 +72,7 @@ function previewWant(
   ) {
     return undefined;
   }
-  return { headCommit: handoff.headCommit, settings };
+  return { headCommit: handoff.headCommit, settings, projectEnv: board?.env };
 }
 
 function substitute(argv: readonly string[], port: number, cardId: string): string[] {
@@ -262,13 +268,14 @@ export function createNodePreviews(params: {
     try {
       await checkoutDetachedWorktree(runtime, target, previewPath, want.headCommit);
       step = "env";
-      const env = await resolvePreviewEnv(want.settings.env, config());
-      secrets = Object.values(env);
+      const resolved = await resolvePreviewEnv(want.settings.env, config());
+      secrets = Object.values(resolved);
+      const env = { ...want.projectEnv, ...resolved };
       step = "up";
       await node(substitute(want.settings.up, port, card.id), {
         cwd: previewPath,
         timeoutMs: PREVIEW_UP_TIMEOUT_MS,
-        ...(secrets.length > 0 ? { env } : {}),
+        ...(Object.keys(env).length > 0 ? { env } : {}),
       });
       step = "serve";
       await node(["tailscale", "serve", "--bg", `--https=${port}`, `http://127.0.0.1:${port}`]);
@@ -294,14 +301,12 @@ export function createNodePreviews(params: {
     warn: (message: string) => void,
     stopped?: AbortSignal,
   ): Promise<void> {
-    const boards = new Map<string, Promise<WorkboardPreviewSettings | undefined>>();
+    const boards = new Map<string, Promise<WorkboardOrchestrationSettings | undefined>>();
     const settingsOf = (card: WorkboardCard) => {
       const boardId = cardBoardId(card);
       let settings = boards.get(boardId);
       if (!settings) {
-        settings = store
-          .boardOrchestration(boardId)
-          .then((orchestration) => orchestration?.preview);
+        settings = store.boardOrchestration(boardId);
         boards.set(boardId, settings);
       }
       return settings;

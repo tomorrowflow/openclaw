@@ -143,6 +143,7 @@ function normalizeOrchestration(
   const preview = Object.hasOwn(record, "preview")
     ? normalizePreviewSettings(record.preview)
     : fallback?.preview;
+  const env = Object.hasOwn(record, "env") ? normalizeProjectEnv(record.env) : fallback?.env;
   // It runs only after the verifier passed, so alone it would never run.
   if (crossVerifier && !verifier) {
     throw new Error("crossVerifier needs a verifier: it runs after the verifier passed.");
@@ -159,8 +160,44 @@ function normalizeOrchestration(
     ...(verifier ? { verifier } : {}),
     ...(crossVerifier ? { crossVerifier } : {}),
     ...(preview ? { preview } : {}),
+    ...(env ? { env } : {}),
   };
   return Object.keys(next).length ? next : undefined;
+}
+
+const MAX_PROJECT_ENV_VALUE_CHARS = 1000;
+
+// One line each: the values are listed in every ticket brief.
+function normalizeProjectEnv(value: unknown): Record<string, string> | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error("env must map variable names to plain values.");
+  }
+  const entries = Object.entries(value);
+  if (entries.length > MAX_PREVIEW_ENV) {
+    throw new Error(`env takes at most ${MAX_PREVIEW_ENV} variables.`);
+  }
+  const env: Record<string, string> = {};
+  for (const [name, entry] of entries) {
+    if (!PREVIEW_ENV_NAME.test(name)) {
+      throw new Error(
+        `env name ${JSON.stringify(name.slice(0, 64))} must be upper-case letters, digits, and underscores, not starting with a digit.`,
+      );
+    }
+    if (
+      typeof entry !== "string" ||
+      entry.length > MAX_PROJECT_ENV_VALUE_CHARS ||
+      /[\r\n]/.test(entry)
+    ) {
+      throw new Error(
+        `env ${name} must be one line of at most ${MAX_PROJECT_ENV_VALUE_CHARS} characters; a credential belongs in preview.env as a store SecretRef.`,
+      );
+    }
+    env[name] = entry;
+  }
+  return entries.length > 0 ? env : undefined;
 }
 
 const MIN_PREVIEW_PORT = 1024;
@@ -223,19 +260,24 @@ function normalizePreviewEnv(
 }
 
 /**
- * Whether a save changes what a preview's `up` receives: its env, or its argv
- * while the board has env, since a new `up` could send the values anywhere.
+ * Whether a save changes what a preview's `up` receives while it holds
+ * secrets: its secret env, or its argv or the project env while the board
+ * has secret env, since either could send the values anywhere.
  */
 export function changesPreviewSecrets(
-  before: WorkboardPreviewSettings | undefined,
-  after: WorkboardPreviewSettings | undefined,
+  before: WorkboardOrchestrationSettings | undefined,
+  after: WorkboardOrchestrationSettings | undefined,
 ): boolean {
-  const envKey = (preview: WorkboardPreviewSettings | undefined) =>
-    JSON.stringify(Object.entries(preview?.env ?? {}).toSorted(([a], [b]) => a.localeCompare(b)));
-  if (envKey(before) !== envKey(after)) {
+  const sorted = (env: Record<string, unknown> | undefined) =>
+    JSON.stringify(Object.entries(env ?? {}).toSorted(([a], [b]) => a.localeCompare(b)));
+  if (sorted(before?.preview?.env) !== sorted(after?.preview?.env)) {
     return true;
   }
-  return after?.env !== undefined && JSON.stringify(before?.up) !== JSON.stringify(after.up);
+  return (
+    after?.preview?.env !== undefined &&
+    (JSON.stringify(before?.preview?.up) !== JSON.stringify(after.preview.up) ||
+      sorted(before?.env) !== sorted(after.env))
+  );
 }
 
 function isPreviewPort(value: unknown): value is number {

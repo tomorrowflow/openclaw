@@ -14,6 +14,32 @@ import { createWorkboardTools } from "./tools.js";
 import { guardWorkboardToolsForWorkspaceAccess } from "./workspace-access.js";
 
 describe("dispatchAndStartWorkboardCards node-claude target", () => {
+  it("lists the board's project env in the ticket brief", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({
+      id: "default",
+      orchestration: { env: { MODEL_URL: "http://192.0.2.7:11434", MODEL_NAME: "qwen3:32b" } },
+    });
+    await createNodeCard(store);
+    const nodeTickets = createNodeGateway();
+
+    const result = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets,
+      options: { now: Date.now(), maxStarts: 1 },
+    });
+
+    expect(result.startFailures).toEqual([]);
+    const brief = nodeTickets.respond.mock.calls.flatMap(([method, params]) =>
+      method === "sessions.create" ? [String(params?.message)] : [],
+    )[0];
+    expect(brief?.split("## Turn contract")[0]).toContain(
+      "## Project environment\nThe operator set these variables for this project. They are not secrets.",
+    );
+    expect(brief).toContain("```\nMODEL_URL=http://192.0.2.7:11434\nMODEL_NAME=qwen3:32b\n```");
+  });
+
   it("creates the node worktree and starts a Claude session in it", async () => {
     const store = createWorkboardSqliteTestStore();
     const card = await createNodeCard(store);

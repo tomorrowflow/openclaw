@@ -290,10 +290,10 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
       const board = normalizeBoardMetadata({ ...input, id }, existing?.board);
       if (
         !caller.admin &&
-        changesPreviewSecrets(existing?.board.orchestration?.preview, board.orchestration?.preview)
+        changesPreviewSecrets(existing?.board.orchestration, board.orchestration)
       ) {
         throw new Error(
-          "Changing a board's preview env, or its preview up while it has env, needs operator.admin.",
+          "Changing a board's preview env, or its preview up or env while it has preview env, needs operator.admin.",
         );
       }
       this.assertTargetModelAllowed(input, board);
