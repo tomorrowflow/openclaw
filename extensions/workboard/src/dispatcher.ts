@@ -184,23 +184,32 @@ function selectStartableCards(
     const parentsWait =
       nodeTicketSlot &&
       nodeTicketDependencyWait(card, cards, now, claimRefusal, nodeTicketOccupants);
+    // A round the operator moved from review to rework publishes its draft PR
+    // first; the handoff's reopen then starts it, so a start now would only block it.
+    const awaitingPublish =
+      (card.status === "todo" || card.status === "ready") &&
+      nodeTicketTarget(card)?.worktree?.handoff?.phase === "imported";
     // A card the claim would refuse gets that reason on a full slot as on a
     // free one; only a refusal for its parents or the slot alone may queue it.
     const cardRefusal = card.metadata?.archivedAt
       ? "Card is archived; restore it before starting."
       : cardHasActiveClaim(card, now)
         ? `Card is already claimed by ${card.metadata?.claim?.ownerId ?? "another worker"}.`
-        : mode === "scheduled" &&
-            (card.status !== "ready" || nodeTicketReopen(card, now)?.reviewed === false)
-          ? ""
-          : mode === "exact" &&
-              card.status !== "backlog" &&
-              card.status !== "todo" &&
-              card.status !== "ready"
-            ? `Card cannot start from ${card.status}; move it to backlog, todo, or ready first.`
-            : parentsWait
-              ? undefined
-              : claimRefusal;
+        : awaitingPublish
+          ? mode === "exact"
+            ? "This round's draft PR is published first; the rework round starts by itself right after, so there is nothing to start now."
+            : ""
+          : mode === "scheduled" &&
+              (card.status !== "ready" || nodeTicketReopen(card, now)?.reviewed === false)
+            ? ""
+            : mode === "exact" &&
+                card.status !== "backlog" &&
+                card.status !== "todo" &&
+                card.status !== "ready"
+              ? `Card cannot start from ${card.status}; move it to backlog, todo, or ready first.`
+              : parentsWait
+                ? undefined
+                : claimRefusal;
     const wait: NodeTicketStartWait | undefined =
       cardRefusal !== undefined
         ? undefined

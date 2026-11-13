@@ -1265,7 +1265,8 @@ model on its own, so a verdict always comes from a model the board names
    whose round is imported but not yet published goes straight to rework the
    same way: the operator's move to `todo` or `ready` waits for the round's
    verification and verdict like a move to `done`, then the handoff pushes the
-   round to the draft PR and starts the rework round. Comments after the
+   round to the draft PR and starts the rework round by itself; **Start** on
+   the card meanwhile is refused and leaves it in `todo`. Comments after the
    round's last verdict or verification comment count as its review feedback,
    so a comment written before the move is enough; block reasons never count,
    and a move with none goes back to `backlog` as above. A failed publish
