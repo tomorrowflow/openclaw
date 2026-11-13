@@ -13,6 +13,7 @@ import type {
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sessions.js";
+import { projectEnvSection } from "./node-ticket-brief.js";
 import { lastAssistantReply } from "./node-ticket-report.js";
 import { normalizeNodeVisualRead, normalizeVerificationFindings } from "./node-ticket-rounds.js";
 import {
@@ -99,7 +100,10 @@ function runningNodeVerification(card: WorkboardCard): RunningVerification | und
   return undefined;
 }
 
-export type NodeVerifiers = Pick<WorkboardOrchestrationSettings, "verifier" | "crossVerifier">;
+export type NodeVerifiers = Pick<
+  WorkboardOrchestrationSettings,
+  "verifier" | "crossVerifier" | "env"
+>;
 
 export type NodeVerificationStep =
   | {
@@ -107,6 +111,7 @@ export type NodeVerificationStep =
       round: ImportedReviewRound;
       slot: VerificationSlot;
       verifier: WorkboardVerifierSettings;
+      projectEnv: Record<string, string> | undefined;
     }
   | ({ kind: "settle" } & RunningVerification);
 
@@ -163,8 +168,16 @@ export async function nodeVerificationStep(
   }
   const verification = currentNodeVerification(round.worktree, round.handoff);
   if (!verification) {
-    const verifier = (await verifiersOf())?.verifier;
-    return verifier ? { kind: "start", round, slot: "verification", verifier } : undefined;
+    const board = await verifiersOf();
+    return board?.verifier
+      ? {
+          kind: "start",
+          round,
+          slot: "verification",
+          verifier: board.verifier,
+          projectEnv: board.env,
+        }
+      : undefined;
   }
   if (
     verification.phase !== "done" ||
@@ -174,9 +187,15 @@ export async function nodeVerificationStep(
   ) {
     return undefined;
   }
-  const crossVerifier = (await verifiersOf())?.crossVerifier;
-  return crossVerifier
-    ? { kind: "start", round, slot: "crossVerification", verifier: crossVerifier }
+  const board = await verifiersOf();
+  return board?.crossVerifier
+    ? {
+        kind: "start",
+        round,
+        slot: "crossVerification",
+        verifier: board.crossVerifier,
+        projectEnv: board.env,
+      }
     : undefined;
 }
 
@@ -212,6 +231,7 @@ export function verificationMessage(params: {
   card: WorkboardCard;
   round: ImportedReviewRound;
   verifyPath: string;
+  projectEnv: Record<string, string> | undefined;
 }): string {
   const { card, verifyPath } = params;
   const { target, worktree, handoff, round } = params.round;
@@ -245,6 +265,7 @@ export function verificationMessage(params: {
       ? ["The card's notes are the spec. Their Proof section names the proof to re-run.", "", notes]
       : ["The card has no notes; the commit messages and the diff are the spec."]),
     "",
+    ...projectEnvSection(params.projectEnv),
     "## What to do",
     "1. Re-run the proof the notes name from this worktree and note what each command printed. Run each command as one exec call and wait for that call's result, with a timeout that covers it (a full iOS test suite can run past ten minutes); never wrap a run in a background script of your own that you poll with sleeps, and never re-run a step whose result you already have.",
     "   Where the proof runs the same test suite on the base commit and again on the head only to show the suite was green before the change, run the head first and the base only when the head fails, to tell a failure the round caused from one it inherited. A base run the notes need for its own result (a new test that must fail on the base) still runs.",
@@ -355,8 +376,9 @@ async function createVerificationSession(params: {
   verifier: WorkboardVerifierSettings;
   key: string;
   verifyPath: string;
+  projectEnv: Record<string, string> | undefined;
 }): Promise<{ sessionKey: string; model: string }> {
-  const { card, round, verifier, key, verifyPath } = params;
+  const { card, round, verifier, key, verifyPath, projectEnv } = params;
   const create = (model: string) =>
     params.runtime.request(
       "sessions.create",
@@ -369,7 +391,7 @@ async function createVerificationSession(params: {
         cwd: verifyPath,
         displayName: `Verify ${card.title}`.slice(0, 120),
         category: VERIFICATION_SESSION_GROUP,
-        message: verificationMessage({ card, round, verifyPath }),
+        message: verificationMessage({ card, round, verifyPath, projectEnv }),
       },
       { scopes: ["operator.admin"] },
     );
@@ -541,6 +563,7 @@ async function startNodeVerification(
         verifier,
         key,
         verifyPath,
+        projectEnv: step.projectEnv,
       });
     }
   } catch (error) {

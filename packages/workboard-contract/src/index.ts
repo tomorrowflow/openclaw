@@ -861,6 +861,14 @@ export type WorkboardOrchestrationSettings = {
    * Operator-set only.
    */
   preview?: WorkboardPreviewSettings;
+  /**
+   * The project's non-secret variables (a self-hosted service's URL, a model
+   * name): every node ticket brief and verification brief lists them, and the
+   * review preview's `up` gets them as environment under `preview.env`, which
+   * wins on a shared name. Board reads carry the values, so a credential
+   * belongs in `preview.env`. Operator-set only.
+   */
+  env?: Record<string, string>;
 };
 
 /**

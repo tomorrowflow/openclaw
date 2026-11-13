@@ -902,8 +902,30 @@ every element. The optional `env` maps environment variable names to
 ports outside 1024 to 65535 or with `from` above `to`, an `env` name that is
 not upper-case letters, digits, and underscores, an `env` value that is not a
 `store` SecretRef, and more than 32 `env` entries; `preview: null` removes it.
-Changing `env`, or changing `up` while the board has `env`, needs
-`operator.admin`; `operator.write` callers can edit everything else.
+Changing `env`, or changing `up` or the board's `orchestration.env` while the
+board has `env`, needs `operator.admin`; `operator.write` callers can edit
+everything else.
+
+A board's `orchestration.env`, operator-set the same way, holds the project's
+non-secret variables, such as a self-hosted inference server's URL or a model
+name. Workboard cannot set a node session's environment, so every node ticket
+brief and every verification brief lists them under **Project environment**,
+and the session sets them for the commands that need them. The review
+preview's `up` gets them as environment, beneath `preview.env`, which wins on
+a shared name. Board reads carry the values, so a credential belongs in
+`preview.env` instead. Saving refuses a name that is not upper-case letters,
+digits, and underscores, a value that is not one line of at most 1000
+characters, and more than 32 entries; `env: null` removes it. Agent board
+tools cannot set it. On a board with `preview.env`, changing `env` needs
+`operator.admin`, since `up` runs with the secrets and a changed address
+could send them elsewhere. The node's environment policy for `up` (see
+[Preview credentials](#preview-credentials)) applies to these names too, so a
+refused name such as `HTTP_PROXY` or `HOME` fails every preview start.
+
+```bash
+openclaw gateway call workboard.boards.upsert --params \
+  '{"id":"lindra","orchestration":{"env":{"LINDRA_TEXT_URL":"http://192.0.2.17:11434"}}}'
+```
 
 The plugin passes the session no tool restriction: the agent's own tools are
 the boundary. `agentId` must name a dedicated agent that has only `exec` and

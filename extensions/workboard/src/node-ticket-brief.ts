@@ -41,6 +41,23 @@ function grillSection(grill: WorkboardNodeGrill, log: string | undefined): strin
   ];
 }
 
+/** The board's project variables, which the session sets itself: Workboard cannot set a node session's environment. */
+export function projectEnvSection(env: Record<string, string> | undefined): string[] {
+  const entries = Object.entries(env ?? {});
+  if (entries.length === 0) {
+    return [];
+  }
+  return [
+    "## Project environment",
+    "The operator set these variables for this project. They are not secrets. Set them for the commands that need them, for example by prefixing the command with the assignment; do not commit the values unless the ticket asks for them.",
+    "",
+    "```",
+    ...entries.map(([name, value]) => `${name}=${value}`),
+    "```",
+    "",
+  ];
+}
+
 /** The message that starts or resumes a node ticket session: the round's input and the turn contract. */
 export function buildNodeTicketMessage(params: {
   card: WorkboardCard;
@@ -48,6 +65,7 @@ export function buildNodeTicketMessage(params: {
   context: string;
   /** The grilling log while an end is pending; undefined when it is gone. */
   grillLog: string | undefined;
+  projectEnv: Record<string, string> | undefined;
 }): string {
   const round = params.worktree.feedback;
   const answering = round?.kind === "answer";
@@ -101,6 +119,7 @@ export function buildNodeTicketMessage(params: {
             : []),
         ]
       : []),
+    ...projectEnvSection(params.projectEnv),
     "## Turn contract",
     `- Your working directory is the ticket worktree ${params.worktree.path} on branch ${params.worktree.branch}. Stay inside it.`,
     "- Commit your work on this branch. Never push, add remotes, or change other branches.",

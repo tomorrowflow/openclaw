@@ -140,6 +140,20 @@ describe("node ticket verification", () => {
     expect(message).not.toContain(base);
   });
 
+  it("lists the board's project env in the verifier's brief", async () => {
+    const ticket = await verifiedTicket();
+    await ticket.store.upsertBoard({
+      id: "default",
+      orchestration: { env: { MODEL_URL: "http://192.0.2.7:11434" } },
+    });
+
+    await ticket.handoffs.resume(ticket.warn);
+
+    const message = (ticket.verifier.creates[0] as { message: string }).message;
+    expect(message).toContain("## Project environment");
+    expect(message).toContain("```\nMODEL_URL=http://192.0.2.7:11434\n```");
+  });
+
   it("verifies an imported round on the node before waking the board automation, then settles it", async () => {
     const notes = "Spec: empty input returns [].\n\nProof: `pytest tests/test_parser.py`.";
     const ticket = await verifiedTicket({ notes });

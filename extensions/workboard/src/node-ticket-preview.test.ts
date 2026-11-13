@@ -595,6 +595,48 @@ describe("node ticket review previews", () => {
     }
   });
 
+  it("passes the board's project env to up beneath its preview secrets", async () => {
+    const tokenRef = { source: "store", provider: "default", id: "WB_PREVIEW_TEST_TOKEN" } as const;
+    const preview: WorkboardPreviewSettings = {
+      ...PREVIEW,
+      up: [process.execPath, "-e", WRITE_TOKEN],
+      env: { PREVIEW_TOKEN: tokenRef },
+    };
+    const { store, node, warn, sync, previewPath } = await previewInReview({ preview });
+    await isolatedSecretStore()(tokenRef.id, "store-value");
+    const env = { PROJECT_URL: "http://192.0.2.7:11434", PREVIEW_TOKEN: "board-value" };
+    // up holds the secrets, so only an admin may change what else it receives.
+    await expect(store.upsertBoard({ id: "default", orchestration: { env } })).rejects.toThrow(
+      "needs operator.admin",
+    );
+    await store.upsertBoard({ id: "default", orchestration: { env } }, { admin: true });
+    await sync(warn);
+
+    expect(readFileSync(path.join(previewPath, "preview-token.txt"), "utf8")).toBe("store-value");
+    expect(node.calls.filter((call) => call.env)).toEqual([
+      {
+        argv: preview.up,
+        cwd: previewPath,
+        env: { PROJECT_URL: "http://192.0.2.7:11434", PREVIEW_TOKEN: "store-value" },
+      },
+    ]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("passes the board's project env to up on a board without preview secrets", async () => {
+    const { store, node, warn, sync, previewPath } = await previewInReview();
+    await store.upsertBoard({
+      id: "default",
+      orchestration: { env: { PROJECT_URL: "http://192.0.2.7:11434" } },
+    });
+    await sync(warn);
+
+    expect(node.calls.filter((call) => call.env)).toMatchObject([
+      { cwd: previewPath, env: { PROJECT_URL: "http://192.0.2.7:11434" } },
+    ]);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("cuts every resolved value out of a failed up's recorded error, longest first", async () => {
     const storeSecret = isolatedSecretStore();
     // The short value is the long one's prefix, so cutting it first would leave the long one's tail.
@@ -633,6 +675,32 @@ describe("node ticket review previews", () => {
 });
 
 const STORE_REF = { source: "store", provider: "default", id: "LINDRA_PREVIEW_TOKEN" } as const;
+
+describe("board project env", () => {
+  it("stores, keeps, validates, and clears a board's project env", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const env = async () =>
+      (await store.listBoards()).boards.find((board) => board.id === "app")?.orchestration?.env;
+    await store.upsertBoard({ id: "app", orchestration: { env: { MODEL_URL: "http://x:1" } } });
+    await store.upsertBoard({ id: "app", orchestration: { autoDecompose: true } });
+    await expect(env()).resolves.toEqual({ MODEL_URL: "http://x:1" });
+    for (const [input, error] of [
+      [{ "model-url": "x" }, 'env name "model-url" must be'],
+      [JSON.parse('{"__proto__": "x"}'), 'env name "__proto__" must be'],
+      [{ MODEL_URL: "a\nb" }, "env MODEL_URL must be one line"],
+      [{ MODEL_URL: "x".repeat(1001) }, "env MODEL_URL must be one line"],
+      [{ MODEL_URL: STORE_REF }, "a credential belongs in preview.env"],
+      [Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`V${i}`, "x"])), "at most 32"],
+    ] as const) {
+      await expect(store.upsertBoard({ id: "app", orchestration: { env: input } })).rejects.toThrow(
+        error,
+      );
+    }
+    await expect(env()).resolves.toEqual({ MODEL_URL: "http://x:1" });
+    await store.upsertBoard({ id: "app", orchestration: { env: null } });
+    await expect(env()).resolves.toBeUndefined();
+  });
+});
 
 describe("board preview settings", () => {
   it("stores, carries, validates, and clears a board's preview", async () => {
