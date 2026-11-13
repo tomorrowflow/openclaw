@@ -541,6 +541,8 @@ export async function finishNodeTicket(params: {
   now?: () => number;
   /** Launches the ticket as a `class:docs` card at this rung. */
   docsRung?: WorkboardClassRung["rung"];
+  /** Runs in the node worktree before the session commits its files, such as pulling main. */
+  beforeCommit?: (worktree: string, repos: ReturnType<typeof createNodeRepos>) => void;
 }) {
   const root = tempRoot("workboard-handoff-");
   const repos = createNodeRepos(root);
@@ -562,6 +564,7 @@ export async function finishNodeTicket(params: {
     params.docsRung ? ["class:docs"] : undefined,
   );
   const worktree = path.join(repos.target.worktreesRoot, `wb-${card.id}`);
+  params.beforeCommit?.(worktree, repos);
   const files = Object.entries(params.files ?? { "parser.py": "ok\n" });
   for (const [name, body] of files) {
     writeFileSync(path.join(worktree, name), body);

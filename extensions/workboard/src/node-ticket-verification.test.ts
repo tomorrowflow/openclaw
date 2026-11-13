@@ -45,6 +45,7 @@ async function verifiedTicket(
     cross?: boolean | { sampleEvery: number };
     fallbacks?: string[];
     refuse?: string[];
+    beforeCommit?: Parameters<typeof finishNodeTicket>[0]["beforeCommit"];
   } = {},
 ) {
   const onReview = vi.fn(async (_card: WorkboardCard) => {});
@@ -61,7 +62,12 @@ async function verifiedTicket(
       complete: true,
     };
   };
-  const ticket = await finishNodeTicket({ onReview, readSessions, docsRung: params.docsRung });
+  const ticket = await finishNodeTicket({
+    onReview,
+    readSessions,
+    docsRung: params.docsRung,
+    beforeCommit: params.beforeCommit,
+  });
   await ticket.store.upsertBoard({
     id: "default",
     orchestration: {
@@ -115,6 +121,25 @@ async function verifiedTicket(
 }
 
 describe("node ticket verification", () => {
+  it("hands the verifier the round's own range when the session pulled main mid-ticket", async () => {
+    const ticket = await verifiedTicket({
+      beforeCommit: (worktree, repos) => {
+        git(repos.origin, "commit", "-q", "--allow-empty", "-m", "another ticket");
+        git(worktree, "fetch", "-q", "origin");
+        git(worktree, "merge", "-q", "--ff-only", "origin/main");
+      },
+    });
+    const base = git(ticket.repos.target.repoPath, "rev-parse", "main");
+    const pulled = git(ticket.repos.origin, "rev-parse", "main");
+    const head = git(ticket.worktree, "rev-parse", "HEAD");
+
+    await ticket.handoffs.resume(ticket.warn);
+
+    const message = (ticket.verifier.creates[0] as { message: string }).message;
+    expect(message).toContain(`The round's range is \`${pulled}..${head}\``);
+    expect(message).not.toContain(base);
+  });
+
   it("verifies an imported round on the node before waking the board automation, then settles it", async () => {
     const notes = "Spec: empty input returns [].\n\nProof: `pytest tests/test_parser.py`.";
     const ticket = await verifiedTicket({ notes });

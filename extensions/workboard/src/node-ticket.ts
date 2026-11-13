@@ -47,6 +47,11 @@ import type { WorkboardStore } from "./store.js";
 // Node output that reaches host git as a revision argument.
 export const COMMIT_ID = /^[0-9a-f]{40,64}$/;
 
+/** The ref a fresh ticket branches from on the node, and the main its rounds are measured against. */
+export function nodeTicketBaseRef(target: { baseRef?: string }): string {
+  return target.baseRef ?? "origin/HEAD";
+}
+
 /** Gateway methods a node ticket needs; both run with the dispatcher's admin authority. */
 export type WorkboardNodeTicketRuntime = Pick<PluginRuntime["gateway"], "request">;
 
@@ -498,7 +503,7 @@ export async function createNodeTicketWorktree(params: {
         ...(unchangedRounds.length > 0 ? { unchangedRounds } : {}),
       };
     } else {
-      const baseRef = target.baseRef ?? "origin/HEAD";
+      const baseRef = nodeTicketBaseRef(target);
       const resolved = await resolveNodeBaseCommit({
         git,
         baseRef,
