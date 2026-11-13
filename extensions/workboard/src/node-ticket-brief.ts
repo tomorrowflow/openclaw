@@ -41,15 +41,15 @@ function grillSection(grill: WorkboardNodeGrill, log: string | undefined): strin
   ];
 }
 
-/** The board's project variables, which the session sets itself: Workboard cannot set a node session's environment. */
-export function projectEnvSection(env: Record<string, string> | undefined): string[] {
+/** The board's project variables and how the session gets them, which differs per session kind. */
+export function projectEnvSection(env: Record<string, string> | undefined, how: string): string[] {
   const entries = Object.entries(env ?? {});
   if (entries.length === 0) {
     return [];
   }
   return [
     "## Project environment",
-    "The operator set these variables for this project. They are not secrets. Set them for the commands that need them, for example by prefixing the command with the assignment; do not commit the values unless the ticket asks for them.",
+    `The operator set these variables for this project. They are not secrets. ${how} Do not commit the values unless the ticket asks for them.`,
     "",
     "```",
     ...entries.map(([name, value]) => `${name}=${value}`),
@@ -119,7 +119,10 @@ export function buildNodeTicketMessage(params: {
             : []),
         ]
       : []),
-    ...projectEnvSection(params.projectEnv),
+    ...projectEnvSection(
+      params.projectEnv,
+      "They are already set in this session's environment (the worktree's git-ignored `.claude/workboard.env`, loaded when the session starts), so run commands without a variable prefix.",
+    ),
     "## Turn contract",
     `- Your working directory is the ticket worktree ${params.worktree.path} on branch ${params.worktree.branch}. Stay inside it.`,
     "- Commit your work on this branch. Never push, add remotes, or change other branches.",

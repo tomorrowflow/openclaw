@@ -908,14 +908,21 @@ everything else.
 
 A board's `orchestration.env`, operator-set the same way, holds the project's
 non-secret variables, such as a self-hosted inference server's URL or a model
-name. Workboard cannot set a node session's environment, so every node ticket
-brief and every verification brief lists them under **Project environment**,
-and the session sets them for the commands that need them. The review
+name. Before each round Workboard writes them as `export` lines to the
+worktree's `.claude/workboard.env`, kept out of `git status` by the clone's
+`info/exclude`, and a board without `env` removes the file. The node profile's
+Claude Code SessionStart hook appends that file to `$CLAUDE_ENV_FILE`, so
+every command the session runs has them without a variable prefix, which the
+node's Bash allow rules would not match. The worktree's own Claude settings
+can't carry them: OpenClaw runs Claude Code with user setting sources only. The ticket brief and every
+verification brief list them under **Project environment**; the verifier sets
+them for the commands that need them. The review
 preview's `up` gets them as environment, beneath `preview.env`, which wins on
 a shared name. Board reads carry the values, so a credential belongs in
 `preview.env` instead. Saving refuses a name that is not upper-case letters,
 digits, and underscores, a value that is not one line of at most 1000
-characters, and more than 32 entries; `env: null` removes it. Agent board
+characters, and more than 32 entries; `env: null` removes it. A save
+replaces the whole map, so send every variable the board keeps. Agent board
 tools cannot set it. On a board with `preview.env`, changing `env` needs
 `operator.admin`, since `up` runs with the secrets and a changed address
 could send them elsewhere. The node's environment policy for `up` (see

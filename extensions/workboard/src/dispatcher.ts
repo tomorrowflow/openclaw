@@ -18,6 +18,7 @@ import {
   type ResolveAgentWorkspaceRuntime,
 } from "./dispatcher-workspace.js";
 import { buildNodeTicketMessage } from "./node-ticket-brief.js";
+import { writeNodeProjectEnv } from "./node-ticket-project-env.js";
 import {
   nodeTicketDependencyWait,
   type NodeTicketStartWait,
@@ -524,6 +525,17 @@ async function runWorkboardDispatch(
       assertOwnerCurrent?.();
       // The launch recorded the round's rung on the worktree it persisted.
       const roundWorktree = nodeTicketTarget(launched)?.worktree ?? nodeWorktree;
+      const projectEnv = claimedTarget
+        ? (await params.store.boardOrchestration(cardBoardId(claimed.card)))?.env
+        : undefined;
+      if (claimedTarget && roundWorktree && params.nodeTickets) {
+        await writeNodeProjectEnv(
+          params.nodeTickets,
+          claimedTarget.nodeId,
+          roundWorktree.path,
+          projectEnv,
+        );
+      }
       const run =
         claimedTarget && roundWorktree && params.nodeTickets
           ? await startNodeTicketSession({
@@ -539,7 +551,7 @@ async function runWorkboardDispatch(
                 grillLog: roundWorktree.grill?.pending
                   ? await params.store.readNodeGrillLog(roundWorktree)
                   : undefined,
-                projectEnv: (await params.store.boardOrchestration(cardBoardId(claimed.card)))?.env,
+                projectEnv,
               }),
             })
           : await params.subagent.run({
