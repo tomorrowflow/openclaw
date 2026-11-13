@@ -31,8 +31,10 @@ import {
   runNodeVerification,
 } from "./node-ticket-verification.js";
 import {
+  COMMIT_ID,
   HandoffSupersededError,
   hostGit,
+  nodeTicketBaseRef,
   nodeTicketReopen,
   nodeTicketTarget,
   requireHostGit,
@@ -141,6 +143,13 @@ async function importNodeBundle(
     await assertCurrent();
     return undefined;
   }
+  // Where the branch last left main, by the node's own refs: a session that
+  // pulls main mid-ticket fetched them, so they hold what it merged.
+  const target = nodeTicketTarget(item.card);
+  const leftMain = target
+    ? await git("merge-base", worktreeHead, nodeTicketBaseRef(target)).catch(() => undefined)
+    : undefined;
+  const pulledMain = leftMain && COMMIT_ID.test(leftMain) ? leftMain : undefined;
   return await withNodeBundle(runtime, item, async (localBundle) => {
     const ref = `refs/heads/${worktree.branch}`;
     const heads = (await requireHostGit(hostRepoPath, ["bundle", "list-heads", localBundle]))
@@ -169,9 +178,19 @@ async function importNodeBundle(
     // A rework round answers for its own commits, not for what a reviewer pushed
     // (an "Update branch" merge carries all of main). Records from before
     // startCommit fall back to the head the host imported last.
-    const checkFrom = worktree.rework
+    const roundStart = worktree.rework
       ? (worktree.rework.startCommit ?? (existingHead || worktree.baseCommit))
       : worktree.baseCommit;
+    // Main pulled after the round started is not the round's work. A merge of
+    // main into a rework round keeps its start, since main does not descend
+    // from it; that round's range still carries the merge (accepted edge case).
+    const checkFrom =
+      pulledMain &&
+      pulledMain !== roundStart &&
+      (await hostGit(hostRepoPath, ["merge-base", "--is-ancestor", roundStart, pulledMain]))
+        .code === 0
+        ? pulledMain
+        : roundStart;
     const check = await hostGit(hostRepoPath, ["diff", "--check", checkFrom, headCommit]);
     if (check.code !== 0 && check.stdout.trim()) {
       // A superseded card must not be blocked by its stale import.

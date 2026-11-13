@@ -151,6 +151,38 @@ describe("node ticket handoff", () => {
     expect(existsSync(worktree)).toBe(false);
   });
 
+  it("measures a round that pulled main mid-ticket from where it left main", async () => {
+    // main gains a file the ticket must not answer for: its whitespace would
+    // fail the import check, and its path would land in the round's changes.
+    const { store, card, repos, worktree, handoffs, warn } = await finishNodeTicket({
+      beforeCommit: (worktree, repos) => {
+        writeFileSync(path.join(repos.origin, "upstream.md"), "merged elsewhere  \n");
+        git(repos.origin, "add", "-A");
+        git(repos.origin, "commit", "-q", "-m", "another ticket");
+        git(worktree, "fetch", "-q", "origin");
+        git(worktree, "merge", "-q", "--ff-only", "origin/main");
+      },
+    });
+    const pulled = git(repos.origin, "rev-parse", "main");
+    const head = git(worktree, "rev-parse", "HEAD");
+
+    await handoffs.resume(warn);
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("review");
+    expect(stored?.metadata?.automation?.target?.worktree?.rounds).toEqual([
+      {
+        round: 0,
+        changes: {
+          from: pulled,
+          to: head,
+          files: [{ path: "parser.py", added: 1, deleted: 0 }],
+          totals: { files: 1, added: 1, deleted: 0 },
+        },
+      },
+    ]);
+  });
+
   it("blocks the card and keeps the node worktree when work is uncommitted", async () => {
     const { store, card, repos, worktree, handoffs, warn } = await finishNodeTicket({
       uncommitted: true,
