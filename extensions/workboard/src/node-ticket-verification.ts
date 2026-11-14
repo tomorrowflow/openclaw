@@ -265,7 +265,10 @@ export function verificationMessage(params: {
       ? ["The card's notes are the spec. Their Proof section names the proof to re-run.", "", notes]
       : ["The card has no notes; the commit messages and the diff are the spec."]),
     "",
-    ...projectEnvSection(params.projectEnv),
+    ...projectEnvSection(
+      params.projectEnv,
+      "Set them for the commands that need them, for example by prefixing the command with the assignment.",
+    ),
     "## What to do",
     "1. Re-run the proof the notes name from this worktree and note what each command printed. Run each command as one exec call and wait for that call's result, with a timeout that covers it (a full iOS test suite can run past ten minutes); never wrap a run in a background script of your own that you poll with sleeps, and never re-run a step whose result you already have.",
     "   Where the proof runs the same test suite on the base commit and again on the head only to show the suite was green before the change, run the head first and the base only when the head fails, to tell a failure the round caused from one it inherited. A base run the notes need for its own result (a new test that must fail on the base) still runs.",

@@ -1,43 +1,58 @@
-import { expectDefined } from "@openclaw/normalization-core";
 // Workboard tests cover dispatching cards to paired-node Claude Code sessions.
-import { describe, expect, it, vi } from "vitest";
+import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { expectDefined } from "@openclaw/normalization-core";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { nodeTicketTarget } from "./node-ticket.js";
 import {
   BASE_COMMIT,
+  createLocalNodeGateway,
   createNodeCard,
   createNodeGateway,
+  createNodeRepos,
+  git,
   NODE_TARGET as TARGET,
+  removeTempRoots,
+  startNodeCard,
+  tempRoot,
 } from "./node-ticket.test-support.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 import { createWorkboardTools } from "./tools.js";
 import { guardWorkboardToolsForWorkspaceAccess } from "./workspace-access.js";
 
+afterEach(() => {
+  removeTempRoots();
+});
+
 describe("dispatchAndStartWorkboardCards node-claude target", () => {
-  it("lists the board's project env in the ticket brief", async () => {
+  it("writes the board's project env for the ticket session, out of git status", async () => {
+    const repos = createNodeRepos(tempRoot("workboard-project-env-"));
     const store = createWorkboardSqliteTestStore();
-    await store.upsertBoard({
-      id: "default",
-      orchestration: { env: { MODEL_URL: "http://192.0.2.7:11434", MODEL_NAME: "qwen3:32b" } },
-    });
-    await createNodeCard(store);
-    const nodeTickets = createNodeGateway();
+    const env = { MODEL_URL: "http://192.0.2.7:11434", MODEL_NOTE: "it's quoted" };
+    await store.upsertBoard({ id: "default", orchestration: { env } });
+    const nodeTickets = createLocalNodeGateway();
 
-    const result = await dispatchAndStartWorkboardCards({
-      store,
-      subagent: { run: vi.fn() },
-      nodeTickets,
-      options: { now: Date.now(), maxStarts: 1 },
-    });
+    const { card } = await startNodeCard(store, nodeTickets, repos.target);
 
-    expect(result.startFailures).toEqual([]);
+    const worktree = path.join(repos.target.worktreesRoot, `wb-${card.id}`);
+    const file = path.join(worktree, ".claude/workboard.env");
+    const sourced = spawnSync(
+      "bash",
+      ["-c", `. "$1"; printf '%s|%s' "$MODEL_URL" "$MODEL_NOTE"`, "-", file],
+      {
+        encoding: "utf8",
+      },
+    );
+    expect(sourced.stdout).toBe("http://192.0.2.7:11434|it's quoted");
+    expect(git(worktree, "status", "--porcelain")).toBe("");
     const brief = nodeTickets.respond.mock.calls.flatMap(([method, params]) =>
       method === "sessions.create" ? [String(params?.message)] : [],
     )[0];
     expect(brief?.split("## Turn contract")[0]).toContain(
-      "## Project environment\nThe operator set these variables for this project. They are not secrets.",
+      "They are already set in this session's environment",
     );
-    expect(brief).toContain("```\nMODEL_URL=http://192.0.2.7:11434\nMODEL_NAME=qwen3:32b\n```");
+    expect(brief).toContain("```\nMODEL_URL=http://192.0.2.7:11434\nMODEL_NOTE=it's quoted\n```");
   });
 
   it("creates the node worktree and starts a Claude session in it", async () => {
@@ -73,6 +88,15 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
         expect.objectContaining({
           params: expect.objectContaining({
             command: ["git", "-C", worktreePath, "rev-parse", "HEAD"],
+          }),
+        }),
+      ],
+      [
+        "node.invoke",
+        expect.objectContaining({
+          params: expect.objectContaining({
+            // A board without env removes the env file an earlier round wrote.
+            command: ["rm", "-f", `${worktreePath}/.claude/workboard.env`],
           }),
         }),
       ],
