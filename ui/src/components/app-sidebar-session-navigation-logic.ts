@@ -6,6 +6,7 @@ import type { GatewayControlUiPluginTab } from "../api/gateway.ts";
 import type { GatewaySessionRow, SessionsListResult } from "../api/types.ts";
 import { parseSidebarEntry, serializeSidebarEntry, SIDEBAR_NAV_ROUTES } from "../app-navigation.ts";
 import type { ApplicationContext } from "../app/context.ts";
+import { gatewayPresentationScope } from "../app/gateway-presentation-scope.ts";
 import { listSelectableAgents } from "../lib/agents/display.ts";
 import { resolveSessionChannelPresentation } from "../lib/session-channel.ts";
 import {
@@ -548,10 +549,9 @@ export function projectSidebarVisibleMainSession(
       agentId: string,
     ): SidebarRecentSession & { metadataVisible: boolean };
     selectedAgentMainSessionKey(agentId: string): string;
-    readonly sessionOwnerFilterActive: boolean;
-    readonly sessionInvolvingMeFilterActive: boolean;
+    readonly sessionOwnerFilterId: string | null;
     readonly sessionsStatusFilter: SidebarSessionStatusFilter;
-    readonly sessionDataContext: Pick<ApplicationContext, "sessions"> | undefined;
+    readonly sessionDataContext: Pick<ApplicationContext, "sessions" | "gateway"> | undefined;
     getSessionNavigationState(): SidebarSessionNavigationState;
     resolveSessionAttention(
       row: Pick<GatewaySessionRow, "key" | "agentId">,
@@ -565,11 +565,15 @@ export function projectSidebarVisibleMainSession(
     return home.metadataVisible ? home : null;
   }
   const key = host.selectedAgentMainSessionKey(agentId);
+  const context = host.sessionDataContext;
+  const ownerFilterId = host.sessionOwnerFilterId;
+  // "My sessions" and "Involving me" lists never carry the agent's shared,
+  // ownerless main row; only another person's filter hides Home's attention.
   if (
-    host.sessionOwnerFilterActive ||
-    host.sessionInvolvingMeFilterActive ||
+    (ownerFilterId !== null &&
+      ownerFilterId !== (context && gatewayPresentationScope(context.gateway).displayUser?.id)) ||
     (host.sessionsStatusFilter !== "active" && host.sessionsStatusFilter !== "all") ||
-    host.sessionDataContext?.sessions.deletionState(key, agentId)
+    context?.sessions.deletionState(key, agentId)
   ) {
     return null;
   }

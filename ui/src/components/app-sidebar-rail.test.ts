@@ -4,6 +4,7 @@ import { createDeferred } from "../../../test/helpers/promise.js";
 import type { GatewayBrowserClient } from "../api/gateway.ts";
 import { normalizeSidebarEntries } from "../app-navigation.ts";
 import * as toast from "../lib/toast.ts";
+import { selectSessionMenuValue } from "../test-helpers/app-sidebar-menu.ts";
 import {
   createGatewayHarness,
   createSessionsHarness,
@@ -136,6 +137,38 @@ describe("personal navigation rail", () => {
     expect(home.querySelector(".session-row-badge--attention")).toBeNull();
     expect(home.querySelector(".session-row-badge--draft")).toBeNull();
     expect(home.querySelector(".session-glyph__ring")).not.toBeNull();
+  });
+
+  it("keeps Home approval attention when the owner-filtered list omits the ownerless main row", async () => {
+    const gateway = createGatewayHarness({} as GatewayBrowserClient);
+    gateway.publish({ selfUser: { id: "self", name: "Self" } });
+    // The Gateway's "My sessions" list never returns the agent's shared,
+    // ownerless main session, so Home cannot read its row from that list.
+    const sessions = createSessionsHarness("main", ["agent:main:mine", "agent:main:other"]);
+    const result = sessions.sessions.state.result!;
+    result.owners = [
+      { type: "human", id: "self", label: "Self" },
+      { type: "human", id: "other", label: "Other" },
+    ];
+    for (const row of result.sessions) {
+      row.owner = { actor: { type: "human", id: row.key.endsWith(":mine") ? "self" : "other" } };
+    }
+    const { sidebar } = await mountSidebar(gateway.gateway, sessions.sessions, "panel", null, [
+      {
+        id: "approval-home",
+        kind: "exec",
+        request: { command: "git status", sessionKey: "agent:main:main" },
+        createdAtMs: Date.now(),
+        expiresAtMs: Date.now() + 60_000,
+      },
+    ]);
+    sidebar.connected = true;
+    await sidebar.updateComplete;
+    await selectSessionMenuValue(sidebar, "owner:self");
+    expect(sidebar.sessionOwnerFilterId).toBe("self");
+    expect(
+      sidebar.querySelector('.sidebar-footer-bar__home [data-session-attention="approval"]'),
+    ).not.toBeNull();
   });
 
   it("pins and unpins sessions personally without sessions.patch", async () => {
