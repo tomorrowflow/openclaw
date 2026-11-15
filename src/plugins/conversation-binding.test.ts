@@ -55,9 +55,18 @@ const sessionBindingState = vi.hoisted(() => {
         targetSessionKey: string;
         targetKind: "session" | "subagent";
         conversation: ConversationRef;
+        placement?: "current" | "child";
         metadata?: Record<string, unknown>;
       }) => {
-        const normalized = normalizeRef(input.conversation);
+        // A child placement stands for the channel creating a thread under the conversation.
+        const normalized =
+          input.placement === "child"
+            ? normalizeRef({
+                ...input.conversation,
+                conversationId: `thread-${nextId}`,
+                parentConversationId: input.conversation.conversationId,
+              })
+            : normalizeRef(input.conversation);
         const record: SessionBindingRecord = {
           bindingId: `binding-${nextId++}`,
           targetSessionKey: input.targetSessionKey,
@@ -120,6 +129,8 @@ vi.mock("./runtime.js", async () => {
   };
 });
 
+let bindOwnedPluginConversation: typeof import("./conversation-binding.js").bindOwnedPluginConversation;
+let detachPluginConversationBinding: typeof import("./conversation-binding.js").detachPluginConversationBinding;
 let buildPluginBindingApprovalCustomId: typeof import("./conversation-binding.js").buildPluginBindingApprovalCustomId;
 let bindPluginSessionConversation: typeof import("./session-conversation-binding.js").bindPluginSessionConversation;
 let hasShownPluginBindingFallbackNotice: typeof import("./conversation-binding.js").hasShownPluginBindingFallbackNotice;
@@ -166,6 +177,8 @@ afterAll(async () => {
 
 beforeAll(async () => {
   ({
+    bindOwnedPluginConversation,
+    detachPluginConversationBinding,
     buildPluginBindingApprovalCustomId,
     hasShownPluginBindingFallbackNotice,
     markPluginBindingFallbackNoticeShown,
@@ -760,5 +773,59 @@ describe("plugin conversation binding approvals", () => {
         "This conversation is already bound by core routing and cannot be claimed by a plugin.",
     });
     expect(sessionBindingState.bind).not.toHaveBeenCalled();
+  });
+
+  it("binds a plugin's own thread without an approval and returns it on rebind", async () => {
+    const owner = { pluginId: "workboard", pluginName: "Workboard", pluginRoot: "/plugins/wb" };
+    const thread = {
+      channel: "discord",
+      accountId: "default",
+      conversationId: "thread-1",
+      parentConversationId: "feed-channel",
+    };
+    const created = await bindOwnedPluginConversation(owner, {
+      conversation: { channel: "discord", accountId: "default", conversationId: "feed-channel" },
+      placement: "child",
+      threadName: "[A-1] Title",
+      data: { cardId: "A-1" },
+    });
+    expect(created).toMatchObject({
+      pluginId: "workboard",
+      conversationId: "thread-1",
+      data: { cardId: "A-1" },
+    });
+    expect(sessionBindingState.bind.mock.calls[0]?.[0]).toMatchObject({
+      placement: "child",
+      metadata: { threadName: "[A-1] Title", pluginRoot: "/plugins/wb" },
+    });
+
+    const again = await bindOwnedPluginConversation(owner, {
+      conversation: thread,
+      placement: "current",
+    });
+    expect(again.bindingId).toBe(created.bindingId);
+    expect(sessionBindingState.bind).toHaveBeenCalledTimes(1);
+
+    await expect(
+      bindOwnedPluginConversation(
+        { pluginId: "other", pluginRoot: "/plugins/other" },
+        {
+          conversation: thread,
+          placement: "current",
+        },
+      ),
+    ).rejects.toThrow('already bound by plugin "Workboard"');
+    expect(
+      await detachPluginConversationBinding({
+        pluginRoot: "/plugins/other",
+        conversation: thread,
+      }),
+    ).toEqual({ removed: false });
+    expect(
+      await detachPluginConversationBinding({
+        pluginRoot: owner.pluginRoot,
+        conversation: thread,
+      }),
+    ).toEqual({ removed: true });
   });
 });

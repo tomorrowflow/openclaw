@@ -2,6 +2,8 @@ import { createHostChannelInboundEventContextBuilder } from "../channels/inbound
 import { createHostChannelIngressRuntime } from "../channels/message-access/runtime.js";
 import { assertSessionEntryPatchAuthority } from "../config/sessions/session-entry-patch-authority.js";
 import { composeSessionSourceAssertion } from "../config/sessions/session-source-authority.js";
+import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
+import type { PluginBindingIdentity } from "./conversation-binding.js";
 import { isPluginRecordActive, revokePluginRecord } from "./registry-lifecycle.js";
 import type { PluginRegistryState } from "./registry-state.js";
 import type { PluginRecord } from "./registry-types.js";
@@ -11,6 +13,8 @@ import {
   getGatewayContextResolver,
 } from "./runtime/gateway-request-scope.js";
 import type { PluginRuntime } from "./runtime/types.js";
+
+const loadConversationBinding = createLazyRuntimeModule(() => import("./conversation-binding.js"));
 
 type BuildContextParams = Parameters<PluginRuntime["channel"]["inbound"]["buildContext"]>[0];
 type BuiltContext = ReturnType<PluginRuntime["channel"]["inbound"]["buildContext"]>;
@@ -124,7 +128,15 @@ export function createScopedPluginChannelRuntime(
   channel: PluginRuntime["channel"],
   invokeSelectedRuntime: <T>(run: () => T) => T,
   assertRuntimeCurrent: () => void,
+  identity: PluginBindingIdentity | undefined,
 ): PluginRuntime["channel"] {
+  const bindingOwner = () => {
+    assertRuntimeCurrent();
+    if (!identity) {
+      throw new Error("Conversation bindings need a plugin loaded from a root directory.");
+    }
+    return identity;
+  };
   const inbound = {
     ...channel.inbound,
     run: ((...args: Parameters<typeof channel.inbound.run>) =>
@@ -177,6 +189,21 @@ export function createScopedPluginChannelRuntime(
     outbound: {
       ...channel.outbound,
       loadAdapter: (...args) => invokeSelectedRuntime(() => channel.outbound.loadAdapter(...args)),
+    },
+    bindings: {
+      bindOwned: async (params) => {
+        const owner = bindingOwner();
+        const { bindOwnedPluginConversation } = await loadConversationBinding();
+        return await bindOwnedPluginConversation(owner, params);
+      },
+      unbindOwned: async ({ conversation }) => {
+        const owner = bindingOwner();
+        const { detachPluginConversationBinding } = await loadConversationBinding();
+        return await detachPluginConversationBinding({
+          pluginRoot: owner.pluginRoot,
+          conversation,
+        });
+      },
     },
     threadBindings: {
       setIdleTimeoutBySessionKey: (...args) =>

@@ -517,6 +517,10 @@ export function createPluginRuntimeMock(overrides: PluginRuntimeMockOverrides = 
       outbound: {
         loadAdapter: vi.fn<PluginRuntime["channel"]["outbound"]["loadAdapter"]>(),
       },
+      bindings: {
+        bindOwned: vi.fn<PluginRuntime["channel"]["bindings"]["bindOwned"]>(),
+        unbindOwned: vi.fn<PluginRuntime["channel"]["bindings"]["unbindOwned"]>(),
+      },
       inbound: inboundRuntime,
       turn: inboundRuntime,
       threadBindings: createPluginThreadBindingsRuntimeMock(),
