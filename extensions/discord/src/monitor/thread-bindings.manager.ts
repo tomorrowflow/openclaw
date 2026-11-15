@@ -189,7 +189,12 @@ function createLoadedThreadBindingManager(
         });
         continue;
       }
-      if (isDirectConversationBindingId(binding.threadId)) {
+      // A plugin's own thread stays bound through archiving: a reply reopens
+      // the thread and still reaches the plugin, and no probe runs per sweep.
+      if (
+        isDirectConversationBindingId(binding.threadId) ||
+        binding.metadata?.ownerManaged === true
+      ) {
         continue;
       }
       if (!rest) {

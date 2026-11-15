@@ -8,6 +8,23 @@ export type PluginConversationBindingRequestParams = {
   data?: Record<string, unknown>;
 };
 
+/** A channel conversation a plugin binds through its runtime. */
+export type PluginOwnedConversationRef = {
+  channel: string;
+  accountId: string;
+  conversationId: string;
+  parentConversationId?: string;
+};
+
+/** A new thread a plugin's own service has the channel create and binds to that plugin. */
+export type PluginOwnedConversationBindParams = PluginConversationBindingRequestParams & {
+  /** The channel conversation the thread is created under. */
+  conversation: PluginOwnedConversationRef;
+  threadName?: string;
+  /** The new binding's inactivity window; 0 never expires. Absent keeps the channel's default. */
+  idleTimeoutMs?: number;
+};
+
 /** Maintainer/user decision recorded for a plugin conversation binding request. */
 export type PluginConversationBindingResolutionDecision = "allow-once" | "allow-always" | "deny";
 

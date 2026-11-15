@@ -283,6 +283,9 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
             channel,
             invokeSelectedRuntime,
             assertRuntimeCurrent,
+            record.rootDir
+              ? { pluginId, pluginName: record.name, pluginRoot: record.rootDir }
+              : undefined,
           );
           scopedChannelRuntime = { source: channel, value };
           return value;

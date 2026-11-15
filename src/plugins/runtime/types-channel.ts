@@ -30,6 +30,10 @@ import type {
   UpsertChannelPairingRequestForAccount,
 } from "../../pairing/pairing-store.types.js";
 import type { PublicReplyParams } from "../../plugin-sdk/reply-options.js";
+import type {
+  PluginConversationBinding,
+  PluginOwnedConversationBindParams,
+} from "../conversation-binding.types.js";
 
 type DispatchReplyWithBufferedBlockDispatcher =
   import("../../plugin-sdk/reply-dispatch-runtime.js").DispatchReplyWithBufferedBlockDispatcher;
@@ -157,6 +161,11 @@ export type PluginRuntimeChannel = {
   };
   outbound: {
     loadAdapter: LoadChannelOutboundAdapter;
+  };
+  /** Conversations bound to the calling plugin, so their inbound messages reach its `inbound_claim`. */
+  bindings: {
+    /** Has the channel create a new thread under `conversation` and binds it, without an approval. */
+    bindOwned: (params: PluginOwnedConversationBindParams) => Promise<PluginConversationBinding>;
   };
   inbound: {
     /** Ingress policy and identity handoff bound to this channel's host instance. */

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { ReplyPayload } from "../auto-reply/reply-payload.js";
+import { setChannelConversationBindingIdleTimeoutBySessionKeyAsync } from "../channels/plugins/conversation-bindings.js";
 import { getChannelPlugin, normalizeChannelId } from "../channels/plugins/index.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import {
@@ -16,6 +17,7 @@ import {
 } from "../infra/outbound/session-binding-service.js";
 import type {
   SessionBindingBindInput,
+  SessionBindingPlacement,
   SessionBindingRecord,
   SessionBindingUnbindInput,
 } from "../infra/outbound/session-binding.types.js";
@@ -42,6 +44,7 @@ import type {
   PluginConversationBindingResolutionDecision,
   PluginConversationBindingRequestParams,
   PluginConversationBindingRequestResult,
+  PluginOwnedConversationBindParams,
 } from "./conversation-binding.types.js";
 import { getActivePluginRegistry } from "./runtime.js";
 
@@ -59,7 +62,7 @@ type PluginBindingApprovalAction = {
   decision: PluginBindingApprovalDecision;
 };
 
-type PluginBindingIdentity = {
+export type PluginBindingIdentity = {
   pluginId: string;
   pluginName?: string;
   pluginRoot: string;
@@ -129,7 +132,14 @@ function toConversationRef(params: PluginBindingConversation): ConversationRef {
 }
 
 function logPluginBindingLifecycleEvent(params: {
-  event: "auto-refresh" | "auto-approved" | "requested" | "detached" | "denied" | "approved";
+  event:
+    | "auto-refresh"
+    | "auto-approved"
+    | "owned"
+    | "requested"
+    | "detached"
+    | "denied"
+    | "approved";
   identity: PluginBindingIdentity;
   conversation: ConversationRef;
   decision?: PluginBindingApprovalDecision;
@@ -243,6 +253,10 @@ export async function bindConversationNow(params: {
   bindingAttemptId?: string;
   expectedBinding?: SessionBindingRecord | null;
   assertCurrent?: () => void;
+  placement?: SessionBindingPlacement;
+  threadName?: string;
+  /** The plugin keeps the binding for the thread's life; channels skip their archive sweep. */
+  ownerManaged?: boolean;
 }): Promise<PluginConversationBinding> {
   const assertCurrent = params.assertCurrent;
   const ref = toConversationRef(params.conversation);
@@ -259,7 +273,7 @@ export async function bindConversationNow(params: {
     targetSessionKey,
     targetKind: "session",
     conversation: ref,
-    placement: "current",
+    placement: params.placement ?? "current",
     ...(assertCurrent ? { assertCurrent } : {}),
     metadata: {
       pluginBindingOwner: "plugin",
@@ -270,6 +284,8 @@ export async function bindConversationNow(params: {
       detachHint: normalizeOptionalString(params.detachHint),
       data: normalizeBindingData(params.data),
       bindingAttemptId: normalizeOptionalString(params.bindingAttemptId),
+      threadName: normalizeOptionalString(params.threadName),
+      ...(params.ownerManaged ? { ownerManaged: true } : {}),
     },
   };
   const record = await getSessionBindingService().bind(bindingInput);
@@ -534,6 +550,49 @@ export async function detachPluginConversationBinding(params: {
     conversation: binding,
   });
   return { removed: true };
+}
+
+/**
+ * Has the channel create a thread under `conversation` and binds it to the
+ * calling plugin without an approval. The runtime closure supplies
+ * `identity`. Only new threads are bindable this way, so a plugin cannot take
+ * over a conversation people or agents already use; that still needs the
+ * approval of `requestConversationBinding`.
+ */
+export async function bindOwnedPluginConversation(
+  identity: PluginBindingIdentity,
+  params: PluginOwnedConversationBindParams,
+): Promise<PluginConversationBinding> {
+  const conversation = normalizeConversation(params.conversation);
+  const ref = toConversationRef(conversation);
+  // The thread does not exist yet, so its session key cannot come from its id.
+  const targetSessionKey = buildPluginBindingSessionKey({
+    pluginId: identity.pluginId,
+    channel: ref.channel,
+    accountId: ref.accountId,
+    conversationId: `${ref.conversationId}#${crypto.randomUUID()}`,
+  });
+  const binding = await bindConversationNow({
+    identity,
+    conversation,
+    targetSessionKey,
+    summary: params.summary,
+    detachHint: params.detachHint,
+    data: params.data,
+    placement: "child",
+    threadName: params.threadName,
+    ownerManaged: true,
+  });
+  logPluginBindingLifecycleEvent({ event: "owned", identity, conversation: binding });
+  if (params.idleTimeoutMs !== undefined) {
+    await setChannelConversationBindingIdleTimeoutBySessionKeyAsync({
+      channelId: ref.channel,
+      targetSessionKey,
+      accountId: ref.accountId,
+      idleTimeoutMs: params.idleTimeoutMs,
+    });
+  }
+  return binding;
 }
 
 export async function resolvePluginConversationBindingApproval(params: {

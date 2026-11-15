@@ -1,4 +1,5 @@
 import type { WorkboardCardSession } from "./card-sessions.js";
+import type { WorkboardBoardFeed, WorkboardHealthFeed } from "./feed.js";
 import type { WorkboardNodePreview, WorkboardPreviewSettings } from "./preview.js";
 import type { WorkboardProbe } from "./probes.js";
 import type { WorkboardSessionsBoardSpec } from "./sessions-board.js";
@@ -15,6 +16,7 @@ import type {
 export type * from "./preview.js";
 export type * from "./verification.js";
 export type * from "./card-sessions.js";
+export type * from "./feed.js";
 
 export type WorkboardDatabasePortApi<Database, Input> = {
   inspectWorkboardPortSource(db: Database): {
@@ -869,6 +871,8 @@ export type WorkboardOrchestrationSettings = {
    * belongs in `preview.env`. Operator-set only.
    */
   env?: Record<string, string>;
+  /** Projects the board's cards into a chat channel. Absent or null = no feed. Operator-set only. */
+  feed?: WorkboardBoardFeed;
 };
 
 /**
@@ -1227,6 +1231,8 @@ export type WorkboardHealthResult = {
   automations: WorkboardHealthAutomation[] | WorkboardHealthUnknown;
   nodes: WorkboardHealthNode[] | WorkboardHealthUnknown;
   accounts: WorkboardHealthAccount[] | WorkboardHealthUnknown;
+  /** The board feed's posts since the Gateway started; absent before its first attempt. */
+  feed?: WorkboardHealthFeed;
 };
 
 /** `workboard.transcriptViewer`: the transcript viewer's loopback port on the Gateway host, or null when unset. */

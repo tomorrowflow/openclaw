@@ -2,6 +2,7 @@ import type {
   WorkboardBoardSummary,
   WorkboardHealthAccount,
   WorkboardHealthAutomation,
+  WorkboardHealthFeed,
   WorkboardHealthNode,
   WorkboardHealthProfile,
   WorkboardHealthResult,
@@ -247,6 +248,8 @@ export function createWorkboardHealthService(params: {
       "ensureAuthProfileStoreAsync" | "listProfilesForProvider"
     >;
   };
+  /** The board feed's post counters, owned by the feed service. */
+  feed?: { health: () => WorkboardHealthFeed | undefined };
 }): OpenClawPluginService & WorkboardHealthReader {
   const { store, runtime } = params;
   let owned: OpenClawPluginServiceContext["getCron"];
@@ -303,7 +306,11 @@ export function createWorkboardHealthService(params: {
         readFact(async () => (await runtime.nodes.list()).nodes),
         readFact(() => Promise.all(scope.agentIds.map((agentId) => readAccount(cfg, agentId)))),
       ]);
-      return projectWorkboardHealth(scope, { jobs, nodes, accounts }, now);
+      const feed = params.feed?.health();
+      return {
+        ...projectWorkboardHealth(scope, { jobs, nodes, accounts }, now),
+        ...(feed ? { feed } : {}),
+      };
     },
   };
 }

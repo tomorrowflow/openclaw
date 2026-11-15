@@ -125,6 +125,10 @@ const runChannelTurn = createLazyRuntimeMethod(
   // SAFETY: Forwarding async overloads unchanged preserves the raw-event and dispatch-result generics.
 ) as typeof import("../../channels/turn/run-channel-turn.js").runChannelTurn;
 
+async function unboundPluginBinding(): Promise<never> {
+  throw new Error("Plugin-owned conversation bindings need a registered plugin's runtime.");
+}
+
 export function createRuntimeChannel(options?: {
   dispatchReplyFromConfig?: typeof dispatchLowLevelChannelReplyFromConfig;
 }): PluginRuntime["channel"] {
@@ -257,6 +261,10 @@ export function createRuntimeChannel(options?: {
     },
     outbound: {
       loadAdapter: loadChannelOutboundAdapter,
+    },
+    // The registry binds these to the calling plugin's identity.
+    bindings: {
+      bindOwned: unboundPluginBinding,
     },
     inbound: inboundRuntime,
     turn: inboundRuntime,

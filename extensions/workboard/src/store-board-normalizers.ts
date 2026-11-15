@@ -1,5 +1,6 @@
 import {
   createDefaultWorkboardSessionsBoardSpec,
+  type WorkboardBoardFeed,
   type WorkboardBoardMetadata,
   type WorkboardClassRung,
   type WorkboardOrchestrationSettings,
@@ -144,6 +145,7 @@ function normalizeOrchestration(
     ? normalizePreviewSettings(record.preview)
     : fallback?.preview;
   const env = Object.hasOwn(record, "env") ? normalizeProjectEnv(record.env) : fallback?.env;
+  const feed = Object.hasOwn(record, "feed") ? normalizeBoardFeed(record.feed) : fallback?.feed;
   // It runs only after the verifier passed, so alone it would never run.
   if (crossVerifier && !verifier) {
     throw new Error("crossVerifier needs a verifier: it runs after the verifier passed.");
@@ -161,8 +163,32 @@ function normalizeOrchestration(
     ...(crossVerifier ? { crossVerifier } : {}),
     ...(preview ? { preview } : {}),
     ...(env ? { env } : {}),
+    ...(feed ? { feed } : {}),
   };
   return Object.keys(next).length ? next : undefined;
+}
+
+// `feed: null` turns the feed off.
+function normalizeBoardFeed(value: unknown): WorkboardBoardFeed | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error("feed must be { channel, to, accountId?, operatorId? } or null.");
+  }
+  const channel = normalizeBoundedString(value.channel, undefined, 40, "feed channel");
+  const to = normalizeBoundedString(value.to, undefined, 200, "feed to");
+  if (!channel || !to) {
+    throw new Error("feed needs a channel and a to target.");
+  }
+  const accountId = normalizeBoundedString(value.accountId, undefined, 120, "feed accountId");
+  const operatorId = normalizeBoundedString(value.operatorId, undefined, 120, "feed operatorId");
+  return {
+    channel,
+    to,
+    ...(accountId ? { accountId } : {}),
+    ...(operatorId ? { operatorId } : {}),
+  };
 }
 
 const MAX_PROJECT_ENV_VALUE_CHARS = 1000;

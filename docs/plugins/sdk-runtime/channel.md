@@ -32,6 +32,7 @@ Channel-specific runtime helpers, available when a channel plugin is loaded. Par
     | `outbound` | Load a channel's outbound adapter. |
     | `inbound` | Resolve ingress with the host-bound `ingress` helpers, build inbound event context, and run the shared inbound-event/reply kernel. |
     | `threadBindings` | Adjust idle-timeout/max-age for bound session threads. |
+    | `bindings` | Bind a conversation, or a thread the channel creates, to the calling plugin (see below). |
     | `runtimeContexts` | Register, read, and watch process-local per-channel/account/capability context. |
 
     `api.runtime.channel.media` is the preferred surface for channel media downloads and storage:
@@ -102,6 +103,37 @@ Channel-specific runtime helpers, available when a channel plugin is loaded. Par
 </AccordionGroup>
 
 Reply options accept `onVisibleWorkSessions(sessions)` to receive visible work sessions. For a fresh child created through the local Gateway, the host awaits this callback before the child's first turn, so plugins can persist session-scoped context first. Accepted sessions are also reported before final reply delivery, including when the settled run failed. Each descriptor carries `sessionKey`, the session `url`, and an optional `label`. A child can be reported at creation and again at settlement; consumers must be idempotent by session key.
+
+## Plugin-owned conversation bindings
+
+A plugin service that projects its own state into a channel can open threads
+for it and bind them, so replies there reach its `inbound_claim` hook.
+`api.runtime.channel.bindings.bindOwned(params)` has the channel create a new
+thread under `conversation` and binds it to the calling plugin, without the
+interactive approval that `requestConversationBinding` asks for. The runtime
+supplies the plugin's identity. Only new threads can be bound this way: binding
+a conversation people or agents already use still needs the approval.
+
+```ts
+const binding = await api.runtime.channel.bindings.bindOwned({
+  conversation: { channel: "discord", accountId: "default", conversationId: parentChannelId },
+  threadName: "[CARD-1] Fix login",
+  data: { cardId: "CARD-1" },
+  idleTimeoutMs: 0,
+});
+// binding.conversationId is the new thread; post into it with the outbound
+// adapter's `threadId`.
+```
+
+- Each call creates a new thread, so store the returned `conversationId`.
+- The binding lasts for the thread's life. Discord does not unbind it when the
+  thread archives; a reply reopens the thread and still reaches the plugin.
+- `idleTimeoutMs` sets the binding's inactivity window through the channel's
+  lifecycle setter; `0` never expires. Absent keeps the channel's default,
+  after which the channel may post its expiry notice.
+- `data` comes back as `ctx.pluginBinding.data` in `inbound_claim`. Return
+  `{ handled: true }` for every message in the thread: an unhandled message gets
+  the channel's "did not handle" notice instead of normal routing.
 
 ## Awaited conversation binding mutations
 
