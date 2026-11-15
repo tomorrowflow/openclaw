@@ -39,7 +39,10 @@ export function updateWorkboardToastOutcome(owner: object, props: WorkboardToast
 export function WorkboardToast(props: WorkboardToastProps) {
   const localOwner = {};
   const [visible, setVisible] = createSignal(false);
+  const [copyState, setCopyState] = createSignal<"idle" | "copied" | "failed">("idle");
   let host: HTMLElement | undefined;
+  let messageElement: HTMLElement | undefined;
+  let copyReset: ReturnType<typeof setTimeout> | undefined;
   let lastMessage = "";
   let lastKey: unknown;
   let lastTone: ToastOutcome["tone"] = "info";
@@ -67,6 +70,23 @@ export function WorkboardToast(props: WorkboardToastProps) {
     }
     deadline = performance.now() + remaining;
     timer = setTimeout(dismiss, remaining);
+  }
+
+  async function copyMessage() {
+    try {
+      await navigator.clipboard.writeText(props.message);
+      setCopyState("copied");
+    } catch {
+      // Clipboard access needs a secure context and permission; leave the text
+      // selected so the keyboard shortcut still copies it.
+      if (messageElement) {
+        const selection = messageElement.ownerDocument.getSelection();
+        selection?.selectAllChildren(messageElement);
+      }
+      setCopyState("failed");
+    }
+    clearTimeout(copyReset);
+    copyReset = setTimeout(() => setCopyState("idle"), 2_000);
   }
 
   function dismiss() {
@@ -103,6 +123,8 @@ export function WorkboardToast(props: WorkboardToastProps) {
         next.owner !== lastOwner
       ) {
         pause();
+        clearTimeout(copyReset);
+        setCopyState("idle");
         lastMessage = next.message;
         lastKey = next.key;
         lastTone = next.tone;
@@ -132,7 +154,10 @@ export function WorkboardToast(props: WorkboardToastProps) {
     },
   );
   onSettled(resume);
-  onCleanup(pause);
+  onCleanup(() => {
+    pause();
+    clearTimeout(copyReset);
+  });
 
   return (
     <openclaw-workboard-toast
@@ -163,12 +188,32 @@ export function WorkboardToast(props: WorkboardToastProps) {
           }}
         >
           <span
+            ref={(element) => {
+              messageElement = element;
+            }}
             class="message"
             role={props.tone === "error" ? "alert" : "status"}
             aria-atomic="true"
           >
             {props.message}
           </span>
+          <Show when={props.tone === "error"}>
+            <button
+              type="button"
+              class="copy"
+              aria-label={
+                copyState() === "copied"
+                  ? t("common.copied")
+                  : copyState() === "failed"
+                    ? t("common.copyFailed")
+                    : t("common.copy")
+              }
+              title={t("common.copy")}
+              onClick={() => void copyMessage()}
+            >
+              {copyState() === "copied" ? icons.check : icons.copy}
+            </button>
+          </Show>
           <button type="button" aria-label={t("common.close")} onClick={dismiss}>
             {icons.x}
           </button>
