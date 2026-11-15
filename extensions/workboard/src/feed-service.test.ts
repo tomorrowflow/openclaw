@@ -23,16 +23,15 @@ function fakeChannel() {
       params.placement === "child" ? `thread-${++threads}` : params.conversation.conversationId,
     boundAt: 0,
   }));
-  const unbindOwned = vi.fn<Bindings["unbindOwned"]>(async () => ({ removed: true }));
   const channel: Pick<PluginRuntime["channel"], "outbound" | "bindings"> = {
     outbound: {
       loadAdapter: vi.fn<LoadAdapter>(async () => ({ deliveryMode: "direct", sendText })),
     },
-    bindings: { bindOwned, unbindOwned },
+    bindings: { bindOwned },
   };
   const posts = () =>
     sendText.mock.calls.map(([ctx]) => `${ctx.threadId} ${ctx.identity?.name}: ${ctx.text}`);
-  return { channel, sendText, bindOwned, unbindOwned, posts };
+  return { channel, sendText, bindOwned, posts };
 }
 
 // The plugin keyed store's entries/register contract over a Map.
@@ -124,7 +123,6 @@ describe("workboard board feed", () => {
       await store.update(card.id, { status: "done" });
       await feed.sync();
       expect(fake.posts().at(-1)).toBe(`thread-1 Workboard: ${ref} is done.`);
-      expect(fake.unbindOwned).toHaveBeenCalledOnce();
     } finally {
       nudge.stop();
       await feed.stop();

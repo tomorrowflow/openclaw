@@ -265,7 +265,6 @@ export function createRuntimeChannel(options?: {
     // The registry binds these to the calling plugin's identity.
     bindings: {
       bindOwned: unboundPluginBinding,
-      unbindOwned: unboundPluginBinding,
     },
     inbound: inboundRuntime,
     turn: inboundRuntime,

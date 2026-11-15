@@ -220,7 +220,9 @@ function createLoadedThreadBindingManager(
             threadId: binding.threadId,
             expected: binding,
             reason: "thread-archived",
-            sendFarewell: true,
+            // A plugin projecting into its own threads rebinds on its next
+            // post; a session farewell would only reopen the archived thread.
+            sendFarewell: binding.metadata?.pluginBindingOwner !== "plugin",
           });
         }
       } catch (err) {

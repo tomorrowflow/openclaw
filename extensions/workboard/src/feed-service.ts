@@ -231,20 +231,12 @@ export function createWorkboardFeedService(params: {
     }
     const events = [...diffFeedFacts(state.seen, next), ...feedCommentEvents(card, state)];
     if (events.length > 0) {
-      // A finished card's later posts (its PR merging) go out from the plain
-      // bot: rebinding its thread would only unbind it again, with the
-      // channel's unbind notice. A reopened card binds its thread again.
-      const wasActive = !state.seen.archived && state.seen.status !== "done";
-      if (active) {
-        await ensureBinding(card, board, state.threadId);
-      }
+      // Threads stay bound after the card closes, so late steps keep their
+      // persona and replies still land; the channel drops the binding when
+      // the thread is archived, and this rebinds it on the next post.
+      await ensureBinding(card, board, state.threadId);
       for (const event of events) {
         await send(board.feed, state.threadId, event, card, board);
-      }
-      if (!active && wasActive) {
-        await channel.bindings
-          .unbindOwned({ conversation: conversation(board.feed, state.threadId) })
-          .catch(counted);
       }
     }
     if (JSON.stringify(state.seen) === JSON.stringify(next) && !state.claimedCommentIds?.length) {
@@ -323,10 +315,15 @@ export function createWorkboardFeedService(params: {
       if (typeof cardId !== "string" || typeof boardId !== "string") {
         return undefined;
       }
+      const board = (await store.listBoards()).boards.find((entry) => entry.id === boardId);
+      const operatorId = board?.orchestration?.feed?.operatorId;
+      // A board whose feed was turned off leaves its threads bound until they
+      // archive; replies there take normal routing instead of vanishing.
+      if (!operatorId) {
+        return undefined;
+      }
       await serialize(async () => {
-        const board = (await store.listBoards()).boards.find((entry) => entry.id === boardId);
-        const operatorId = board?.orchestration?.feed?.operatorId;
-        if (!operatorId || event.senderId !== operatorId || !event.content.trim()) {
+        if (event.senderId !== operatorId || !event.content.trim()) {
           return;
         }
         const card = await store.addComment(cardId, { body: event.content }, undefined, "operator");

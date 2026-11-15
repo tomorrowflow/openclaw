@@ -121,14 +121,6 @@ const binding = await api.runtime.channel.bindings.bindOwned({
   idleTimeoutMs: 0,
 });
 // binding.conversationId is the thread the channel created.
-await api.runtime.channel.bindings.unbindOwned({
-  conversation: {
-    channel: "discord",
-    accountId: "default",
-    conversationId: binding.conversationId,
-    parentConversationId: parentChannelId,
-  },
-});
 ```
 
 - `placement: "current"` binds `conversation` itself. When the plugin already
@@ -138,11 +130,10 @@ await api.runtime.channel.bindings.unbindOwned({
   under `conversation`, named `threadName`. Each call creates a new thread, so
   store the returned `conversationId` and rebind it with `current`.
 - `idleTimeoutMs` sets the new binding's inactivity window through the
-  channel's lifecycle setter; `0` keeps it until the plugin unbinds it.
-  Absent keeps the channel's default, after which the channel may post its
-  expiry notice.
-- `unbindOwned` removes only the calling plugin's binding and reports
-  `{ removed: false }` otherwise. The channel may post its unbind notice.
+  channel's lifecycle setter; `0` keeps it until the channel's own cleanup
+  removes it (Discord drops it silently when the thread is archived or
+  deleted). Absent keeps the channel's default, after which the channel may
+  post its expiry notice.
 - `data` comes back as `ctx.pluginBinding.data` in `inbound_claim`.
 
 ## Awaited conversation binding mutations

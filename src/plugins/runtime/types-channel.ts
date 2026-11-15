@@ -33,7 +33,6 @@ import type { PublicReplyParams } from "../../plugin-sdk/reply-options.js";
 import type {
   PluginConversationBinding,
   PluginOwnedConversationBindParams,
-  PluginOwnedConversationRef,
 } from "../conversation-binding.types.js";
 
 type DispatchReplyWithBufferedBlockDispatcher =
@@ -167,10 +166,6 @@ export type PluginRuntimeChannel = {
   bindings: {
     /** Binds without an approval; a conversation the plugin already owns returns its binding. */
     bindOwned: (params: PluginOwnedConversationBindParams) => Promise<PluginConversationBinding>;
-    /** Removes the plugin's own binding of `conversation`; reports false when it held none. */
-    unbindOwned: (params: {
-      conversation: PluginOwnedConversationRef;
-    }) => Promise<{ removed: boolean }>;
   };
   inbound: {
     /** Ingress policy and identity handoff bound to this channel's host instance. */

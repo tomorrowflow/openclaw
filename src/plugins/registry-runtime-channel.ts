@@ -196,14 +196,6 @@ export function createScopedPluginChannelRuntime(
         const { bindOwnedPluginConversation } = await loadConversationBinding();
         return await bindOwnedPluginConversation(owner, params);
       },
-      unbindOwned: async ({ conversation }) => {
-        const owner = bindingOwner();
-        const { detachPluginConversationBinding } = await loadConversationBinding();
-        return await detachPluginConversationBinding({
-          pluginRoot: owner.pluginRoot,
-          conversation,
-        });
-      },
     },
     threadBindings: {
       setIdleTimeoutBySessionKey: (...args) =>
