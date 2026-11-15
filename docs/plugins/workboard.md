@@ -1273,9 +1273,11 @@ model on its own, so a verdict always comes from a model the board names
 5. **Rework:** to address review feedback, add a comment with the feedback,
    then move the published card back to `todo`. The move starts the rework
    round on its own; `workboard.cards.start` is not needed. Add the comment
-   first: a published card moved to `todo` with no comment newer than its
-   publish goes back to `backlog` with a comment naming the next step, and
-   Workboard's own comments never count as review feedback. When every
+   first: a published card moved to `todo` with no comment after its round's
+   last verdict or verification comment goes back to `backlog` with a comment
+   naming the next step, and Workboard's own comments never count as review
+   feedback. Comments written between the verdict and an accept count too, so
+   decisions posted before the move to `done` reach the rework session in full. When every
    [node ticket slot](#configuration) is busy, the card joins the
    [start queue](#queued-starts) in `todo` with one comment saying it waits.
    If the start is refused for another reason, the card is blocked with that

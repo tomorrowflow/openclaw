@@ -619,8 +619,9 @@ export async function publishNodeTicket(params: {
         headCommit: item.headCommit,
         importedAt: item.importedAt,
         publishedAt,
-        // Feedback written before the move to todo is the rework's review.
-        ...(reworkDecided(card) ? { reviewFrom: reviewedAt(item) } : {}),
+        // Comments after the round's verdict are the next rework's feedback,
+        // also when the round was accepted first and reopened later.
+        reviewFrom: reviewedAt(item),
         pullRequestUrl,
         pullRequest: {
           state: pullRequest.merged ? "merged" : draft ? "draft" : "open",

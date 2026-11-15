@@ -44,6 +44,36 @@ describe("node ticket rework from review", () => {
     expect(message).toContain("Rename the flag to --strict.");
     expect(message.split("## Turn contract")[0]).not.toContain("Draft PR failed");
   });
+  it("reworks an accepted round with the comments written between its verdict and the accept", async () => {
+    const { store, card, repos, handoffs, warn, github, gateway } = await finishNodeTicket({});
+    await handoffs.resume(warn);
+    await postVerdict(store, card.id);
+    git(repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
+    github.tokens.set("acme/app", "token-app");
+    github.openPulls.push("https://github.com/acme/app/pull/7");
+    // Longer than the 400 chars the Recent comments list keeps of each comment.
+    const decisions = `Operator decisions: ${"keep the archive read-only. ".repeat(20)}Then draft the ADR.`;
+    await store.addComment(card.id, { body: decisions });
+
+    await store.move(card.id, "done", undefined);
+    await handoffs.resume(warn);
+    expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.handoff?.phase).toBe(
+      "published",
+    );
+    await store.addComment(card.id, { body: "Rework as recommended." });
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect((await store.get(card.id))?.status).toBe("running");
+    const message = String(
+      gateway.respond.mock.calls.findLast(([method]) => method === "sessions.create")?.[1]?.message,
+    );
+    const feedback = message.split("## Turn contract")[0];
+    expect(feedback).toContain(decisions);
+    expect(feedback).toContain("Rework as recommended.");
+  });
+
   it("refuses an operator's Start while a round moved to todo waits for its draft PR, then reworks it", async () => {
     const { store, card, repos, handoffs, warn, github, gateway } = await finishNodeTicket({});
     await handoffs.resume(warn);
