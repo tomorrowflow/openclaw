@@ -379,12 +379,20 @@ function createLoadedThreadBindingManager(
         }
         const targetKind = normalizeTargetKind(bindParams.targetKind, targetSessionKey);
         let agentId = normalizeOptionalString(bindParams.agentId);
+        // No agent owns a plugin's binding; the record names the plugin, which
+        // only serves as the webhook's fallback display name.
+        const pluginId =
+          bindParams.metadata?.pluginBindingOwner === "plugin"
+            ? normalizeOptionalString(bindParams.metadata.pluginId)
+            : undefined;
+        const resolveBindingAgentId = () =>
+          pluginId ?? resolveSessionAgentIdStrict({ config: cfg, sessionKey: targetSessionKey });
 
         if (!threadId && bindParams.createThread) {
           if (!channelId) {
             return null;
           }
-          agentId ??= resolveSessionAgentIdStrict({ config: cfg, sessionKey: targetSessionKey });
+          agentId ??= resolveBindingAgentId();
           const threadName = resolveThreadBindingThreadName({
             agentId: bindParams.agentId,
             label: bindParams.label,
@@ -429,9 +437,7 @@ function createLoadedThreadBindingManager(
           existingValue.targetKind === targetKind
             ? existingValue
             : undefined;
-        agentId ??=
-          normalizeOptionalString(previous?.agentId) ??
-          resolveSessionAgentIdStrict({ config: cfg, sessionKey: targetSessionKey });
+        agentId ??= normalizeOptionalString(previous?.agentId) ?? resolveBindingAgentId();
         let webhookId =
           normalizeOptionalString(bindParams.webhookId) ??
           normalizeOptionalString(existingValue?.webhookId) ??

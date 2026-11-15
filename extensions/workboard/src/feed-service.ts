@@ -30,6 +30,8 @@ import { cardBoardId } from "./store-card-helpers.js";
 import type { WorkboardStore } from "./store.js";
 
 const FEED_DEBOUNCE_MS = 2_000;
+// A thread that failed to open is tried again on a pass after this long.
+const FEED_OPEN_RETRY_MS = 10 * 60_000;
 
 type FeedStore = Pick<
   WorkboardStore,
@@ -203,14 +205,18 @@ export function createWorkboardFeedService(params: {
     // No backfill: a card the feed has not seen gets one opening line once it
     // is active, and its later steps from then on.
     if (!state?.threadId) {
-      if (!active || (state && diffFeedFacts(state.seen, next).length === 0)) {
+      const retryDue = now() - (state?.openFailedAt ?? 0) >= FEED_OPEN_RETRY_MS;
+      if (!active || (state && !retryDue && diffFeedFacts(state.seen, next).length === 0)) {
         return;
       }
       const threadId = await openThread(card, board);
       if (threadId) {
         await send(board.feed, threadId, { kind: "opened", status: next.status }, card, board);
       }
-      await record(card.id, { ...(threadId ? { threadId } : {}), seen: next });
+      await record(
+        card.id,
+        threadId ? { threadId, seen: next } : { seen: next, openFailedAt: now() },
+      );
       return;
     }
     const events = [...diffFeedFacts(state.seen, next), ...feedCommentEvents(card, state)];

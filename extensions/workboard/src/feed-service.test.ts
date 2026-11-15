@@ -133,4 +133,36 @@ describe("workboard board feed", () => {
       await feed.stop();
     }
   });
+
+  it("tries a thread that failed to open again after ten minutes", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({
+      id: "factory",
+      orchestration: { feed: { channel: "discord", to: "chan-1", operatorId: "op-1" } },
+    });
+    await store.create({ title: "[FAC-1] Fix login", status: "todo", boardId: "factory" });
+    const fake = fakeChannel();
+    fake.bindOwned.mockRejectedValueOnce(new Error("no explicit owner"));
+    let at = 1_000;
+    const feed = createWorkboardFeedService({
+      store,
+      openState: () => fakeState(),
+      channel: fake.channel,
+      config: () => ({}),
+      now: () => at,
+    });
+    try {
+      await feed.sync();
+      at += 9 * 60_000;
+      await feed.sync();
+      expect(fake.bindOwned).toHaveBeenCalledOnce();
+      expect(feed.health()).toMatchObject({ failures: 1, lastError: "no explicit owner" });
+      at += 60_000;
+      await feed.sync();
+      expect(fake.bindOwned).toHaveBeenCalledTimes(2);
+      expect(fake.posts()).toEqual(["thread-1 Workboard: FAC-1: todo."]);
+    } finally {
+      await feed.stop();
+    }
+  });
 });
