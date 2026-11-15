@@ -2025,7 +2025,59 @@ profiles for that provider, each `ok` or in a `cooldown`, `disabled`, or
 `blocked` window `until` an epoch ms with its `reason`. A fact whose source
 could not be read (the health service not running, no node runtime, an
 unreadable auth store) is `{status: "unknown", reason}` in its place; the method
-never guesses.
+never guesses. `feed`, present once the [board feed](#board-feed) has tried a
+post since the Gateway started, counts `posts` and `failures` with
+`lastPostAt`, `lastFailureAt`, and `lastError`.
+
+### Board feed
+
+A board's `orchestration.feed`, set only through `workboard.boards.upsert`,
+projects its cards into a chat channel: each active card gets one thread under
+the channel `to` of the channel plugin `channel`, and Workboard posts the
+card's steps there under the acting agent's configured name and avatar. The
+board stays the record; the chat is a copy.
+
+```json5
+{
+  id: "voice-diary",
+  orchestration: {
+    feed: {
+      channel: "discord",
+      to: "1234567890", // the parent text channel
+      accountId: "default", // optional
+      operatorId: "9876543210", // your chat user id, optional
+    },
+  },
+}
+```
+
+- The first time a card on the board is active (not done or archived),
+  Workboard opens a thread named `[<id>] <title>` with one summary line. There
+  is no backfill: earlier steps and comments are not posted.
+- From then on it posts each step from fixed templates, with no model calls:
+  a start on a node, the round handed to the verifier, each verification
+  verdict with its one-line summary, review verdicts, rework rounds, the PR
+  opened, held for held paths, and merged, the card blocked or labeled
+  `needs:user`, done, and archived. Card comments are posted under their
+  author: the agent, `operator`, or `Workboard` for its own notices. Tool
+  output, logs, diffs, and transcripts are never posted.
+- Agents address each other in plain text (`@verifier`), which pings nobody.
+  Only `blocked` and `needs:user` mention `operatorId`. Text from the card
+  cannot mention anyone.
+- Replies in a card's thread from `operatorId` become operator comments on
+  the card and wake the board's automation job like a comment from the
+  Control UI; the feed does not post them back. Other people's replies stay in
+  the thread only.
+- Posting is best effort: a failed post is retried once, then counted in
+  `workboard.health` `feed`, and never replayed.
+- On Discord the thread is a conversation binding owned by Workboard, which
+  needs thread bindings (on by default; `channels.discord.threadBindings.enabled`).
+  The binding never idles out while the card is active. When the card is done
+  or archived Workboard unbinds it, and Discord posts its usual unbind notice;
+  later posts, such as the PR merging, come from the bot without the agent's
+  name. A reopened card binds the same thread again.
+
+`feed: null` turns the feed off.
 
 ### Session-board widgets
 

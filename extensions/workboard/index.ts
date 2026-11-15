@@ -7,6 +7,8 @@ import { createWorkboardAutomationNudgeService } from "./src/automation-nudge.js
 import { createWorkboardChangeEventService } from "./src/change-events.js";
 import { registerWorkboardCommand } from "./src/command.js";
 import { dispatchAndStartWorkboardCards } from "./src/dispatcher.js";
+import { createWorkboardFeedService } from "./src/feed-service.js";
+import type { WorkboardCardFeed } from "./src/feed.js";
 import { createWorkboardHealthService } from "./src/health.js";
 import {
   readWorkboardLifecycleSessions,
@@ -125,7 +127,21 @@ export default definePluginEntry({
       onMatched: automationNudge.nudge,
     });
     resourceServices.push(lifecycleSync);
-    const health = createWorkboardHealthService({ store, runtime: api.runtime });
+    const feed = createWorkboardFeedService({
+      store,
+      // Oldest first out: a card evicted here only gets a new thread if it moves again.
+      openState: () =>
+        api.runtime.state.openKeyedStoreV2<WorkboardCardFeed>({
+          namespace: "board-feed",
+          maxEntries: 5_000,
+        }),
+      channel: api.runtime.channel,
+      // Identity and send reads only read the snapshot; their SDK types predate DeepReadonly.
+      config: () => api.runtime.config.current() as OpenClawConfig,
+      onOperatorComment: automationNudge.nudge,
+    });
+    resourceServices.push(feed);
+    const health = createWorkboardHealthService({ store, runtime: api.runtime, feed });
     api.session.controls.registerControlUiDescriptor({
       surface: "tab",
       id: "workboard",
@@ -156,9 +172,17 @@ export default definePluginEntry({
       health,
     });
     registerWorkboardCommand({ api, store });
-    for (const service of [changeEvents, automationNudge, sessionsBoard, lifecycleSync, health]) {
+    for (const service of [
+      changeEvents,
+      automationNudge,
+      sessionsBoard,
+      lifecycleSync,
+      feed,
+      health,
+    ]) {
       api.registerService(service);
     }
+    api.on("inbound_claim", (event, context) => feed.claim(event, context));
     api.on("gateway_start", (_event, context) => lifecycleSync.onGatewayStart(context.abortSignal));
     api.on("gateway_stop", () => lifecycleSync.onGatewayStop());
     api.on("subagent_ended", (event) =>
