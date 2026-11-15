@@ -3,6 +3,7 @@ import { resolveGlobalSingleton } from "openclaw/plugin-sdk/global-singleton";
 import { isCronSessionKey } from "openclaw/plugin-sdk/routing";
 import type { OpenClawPluginService } from "../api.js";
 import { workboardCardStage } from "./card-stage.js";
+import { nodeTicketTarget } from "./node-ticket.js";
 import { cardBoardId } from "./store-card-helpers.js";
 import { MAX_CARDS } from "./store-constants.js";
 import type { WorkboardStore } from "./store.js";
@@ -15,6 +16,8 @@ const WORKBOARD_AUTOMATION_NUDGE_MAX_RERUNS = 15;
 type WorkboardAutomationNudgeInput = {
   cards: readonly WorkboardCard[];
   sessionKey?: string;
+  /** An operator comment can ask anything of the automation, so it always runs it. */
+  operatorComment?: boolean;
 };
 
 type WorkboardAutomationNudgeService = OpenClawPluginService & {
@@ -25,6 +28,8 @@ type WorkboardAutomationNudgeService = OpenClawPluginService & {
 type PendingBoardNudge = {
   timer?: ReturnType<typeof setTimeout>;
   rerun?: boolean;
+  /** Whether the rerun waits for a node ticket that needs the automation. */
+  rerunGated?: boolean;
   rerunCount: number;
 };
 
@@ -66,6 +71,26 @@ function isCronOriginSession(sessionKey: string | undefined): boolean {
   return normalized?.startsWith("cron:") === true || isCronSessionKey(normalized);
 }
 
+/**
+ * Whether a node ticket waits on the board automation: questions not yet
+ * escalated, or an imported round whose verifications ended without a verdict.
+ * Every other node ticket turn end (a running round, a verdict awaiting the
+ * operator) would only wake a review job that finds nothing to do.
+ */
+function nodeTicketNeedsAutomation(card: WorkboardCard): boolean {
+  const stage = workboardCardStage(card);
+  switch (stage?.kind) {
+    case "questions":
+      return stage.escalatedAt === undefined;
+    case "reviewing":
+      return true;
+    case "review_incomplete":
+      return stage.missing.includes("verdict");
+    default:
+      return false;
+  }
+}
+
 export function createWorkboardAutomationNudgeService(params: {
   store: WorkboardStore;
 }): WorkboardAutomationNudgeService {
@@ -76,6 +101,7 @@ export function createWorkboardAutomationNudgeService(params: {
     jobId: string,
     owner: NudgeOwner,
     rerunCount: number,
+    gated: boolean,
   ) => {
     const state = getWorkboardAutomationNudgeState();
     if (state.owner !== owner) {
@@ -85,6 +111,7 @@ export function createWorkboardAutomationNudgeService(params: {
     if (existing) {
       // A node ticket's done report nudges at agent_end, and its import reaches
       // review moments later; the automation must still see the review.
+      existing.rerunGated = (existing.rerunGated ?? true) && gated;
       existing.rerun = true;
       return;
     }
@@ -104,12 +131,21 @@ export function createWorkboardAutomationNudgeService(params: {
       if (!enqueueRun) {
         throw new Error("Workboard automation scheduler is unavailable");
       }
+      // Read the board now, not the event's card: lifecycle hooks pass the card
+      // as it was before their write.
+      if (gated && !(await params.store.list({ boardId })).some(nodeTicketNeedsAutomation)) {
+        owner.logger.info(
+          `workboard automation nudge skipped for board ${boardId}: no node ticket waits on job ${jobId}`,
+        );
+        return;
+      }
       const result = await enqueueRun(jobId, "if-enabled");
       if (!result.ok || ("ran" in result && !result.ran)) {
         const reason = "reason" in result ? result.reason : "not-run";
         // The busy run may have read the board before this event's card changed.
         if (reason === "already-running" && rerunCount < WORKBOARD_AUTOMATION_NUDGE_MAX_RERUNS) {
           pending.rerun = true;
+          pending.rerunGated = gated;
         }
         owner.logger.warn(
           `workboard automation nudge skipped for board ${boardId}: job ${jobId} ${reason}`,
@@ -132,7 +168,11 @@ export function createWorkboardAutomationNudgeService(params: {
               state.pendingByBoard.delete(boardId);
               if (pending.rerun) {
                 // Reread the board: its automation may have changed or gone meanwhile.
-                void nudgeBoards(new Set([boardId]), owner, pending.rerunCount + 1);
+                void nudgeBoards(
+                  new Map([[boardId, pending.rerunGated !== false]]),
+                  owner,
+                  pending.rerunCount + 1,
+                );
               }
             }
           },
@@ -143,8 +183,9 @@ export function createWorkboardAutomationNudgeService(params: {
     }
   };
 
+  /** Each board with whether its nudge waits for a node ticket that needs it. */
   const nudgeBoards = async (
-    boardIds: ReadonlySet<string>,
+    gatedByBoard: ReadonlyMap<string, boolean>,
     owner: NudgeOwner,
     rerunCount: number,
   ) => {
@@ -155,9 +196,9 @@ export function createWorkboardAutomationNudgeService(params: {
         ),
       );
       await Promise.all(
-        [...boardIds].flatMap((boardId) => {
+        [...gatedByBoard].flatMap(([boardId, gated]) => {
           const jobId = automationByBoard.get(boardId);
-          return jobId ? [nudgeBoard(boardId, jobId, owner, rerunCount)] : [];
+          return jobId ? [nudgeBoard(boardId, jobId, owner, rerunCount, gated)] : [];
         }),
       );
     } catch (error) {
@@ -192,7 +233,15 @@ export function createWorkboardAutomationNudgeService(params: {
       if (!owner || isCronOriginSession(input.sessionKey) || cards.length === 0) {
         return;
       }
-      await nudgeBoards(new Set(cards.map((card) => cardBoardId(card))), owner, 0);
+      // Only node ticket turn ends are gated: any other card's event may be what
+      // its board's automation (categorizing, triage) is for.
+      const gatedByBoard = new Map<string, boolean>();
+      for (const card of cards) {
+        const boardId = cardBoardId(card);
+        const gated = !input.operatorComment && nodeTicketTarget(card) !== undefined;
+        gatedByBoard.set(boardId, (gatedByBoard.get(boardId) ?? true) && gated);
+      }
+      await nudgeBoards(gatedByBoard, owner, 0);
     },
   };
 }

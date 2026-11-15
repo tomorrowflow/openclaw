@@ -487,6 +487,53 @@ describe("node ticket grilling handoff", () => {
       service.stop();
     }
   });
+
+  it("wakes the board automation for a node ticket turn only while a ticket waits on it, or for an operator comment", async () => {
+    const store = createWorkboardSqliteTestStore();
+    await store.upsertBoard({ id: "default", automationJobId: "job-review" });
+    const request = vi.fn().mockResolvedValue({ ok: true, ran: true });
+    const service = createWorkboardAutomationNudgeService({ store });
+    // Each step starts the service afresh, which ends the previous step's cooldown.
+    const restart = async () => {
+      service.stop();
+      await service.start(nudgeContext(request));
+    };
+    const end = async (messages: unknown[]) => {
+      const { card, sessionKey, runId } = await startNodeCard(store);
+      await syncWorkboardAgentEnded({
+        store,
+        event: { runId, success: true, messages },
+        context: { runId, sessionKey },
+        readSessions: endedSession(),
+        onMatched: service.nudge,
+      });
+      return card;
+    };
+    try {
+      await restart();
+      const blocked = await end(reportMessages({ outcome: "blocked", summary: "Gave up." }));
+      expect((await store.get(blocked.id))?.status).toBe("blocked");
+      expect(request).not.toHaveBeenCalled();
+
+      await restart();
+      await service.nudge({ cards: [blocked], operatorComment: true });
+      expect(request).toHaveBeenCalledOnce();
+
+      await restart();
+      const asked = await end(
+        reportMessages({ outcome: "needs_input", summary: "Two fit", questions: ["Q1"] }),
+      );
+      expect(request).toHaveBeenCalledTimes(2);
+
+      // Escalated questions wait for the operator, so nothing on the board needs the job.
+      await store.escalateNodeTicketQuestions(asked.id);
+      await restart();
+      await service.nudge({ cards: [blocked] });
+      expect(request).toHaveBeenCalledTimes(2);
+    } finally {
+      service.stop();
+    }
+  });
 });
 
 describe("Grill this on a questions round", () => {
