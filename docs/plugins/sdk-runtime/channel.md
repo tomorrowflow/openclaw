@@ -106,35 +106,34 @@ Reply options accept `onVisibleWorkSessions(sessions)` to receive visible work s
 
 ## Plugin-owned conversation bindings
 
-A plugin service that projects its own state into a channel can bind the
-conversations it posts into, so replies there reach its `inbound_claim` hook.
-`api.runtime.channel.bindings.bindOwned(params)` binds without the interactive
-approval that `requestConversationBinding` asks for. The runtime supplies the
-plugin's identity, so a plugin binds only for itself.
+A plugin service that projects its own state into a channel can open threads
+for it and bind them, so replies there reach its `inbound_claim` hook.
+`api.runtime.channel.bindings.bindOwned(params)` has the channel create a new
+thread under `conversation` and binds it to the calling plugin, without the
+interactive approval that `requestConversationBinding` asks for. The runtime
+supplies the plugin's identity. Only new threads can be bound this way: binding
+a conversation people or agents already use still needs the approval.
 
 ```ts
 const binding = await api.runtime.channel.bindings.bindOwned({
   conversation: { channel: "discord", accountId: "default", conversationId: parentChannelId },
-  placement: "child",
   threadName: "[CARD-1] Fix login",
   data: { cardId: "CARD-1" },
   idleTimeoutMs: 0,
 });
-// binding.conversationId is the thread the channel created.
+// binding.conversationId is the new thread; post into it with the outbound
+// adapter's `threadId`.
 ```
 
-- `placement: "current"` binds `conversation` itself. When the plugin already
-  owns that binding, the call returns it unchanged. A conversation that core
-  routing or another plugin owns is refused with an error.
-- `placement: "child"` asks the channel's binding adapter to create a thread
-  under `conversation`, named `threadName`. Each call creates a new thread, so
-  store the returned `conversationId` and rebind it with `current`.
-- `idleTimeoutMs` sets the new binding's inactivity window through the
-  channel's lifecycle setter; `0` keeps it until the channel's own cleanup
-  removes it (Discord drops it silently when the thread is archived or
-  deleted). Absent keeps the channel's default, after which the channel may
-  post its expiry notice.
-- `data` comes back as `ctx.pluginBinding.data` in `inbound_claim`.
+- Each call creates a new thread, so store the returned `conversationId`.
+- The binding lasts for the thread's life. Discord does not unbind it when the
+  thread archives; a reply reopens the thread and still reaches the plugin.
+- `idleTimeoutMs` sets the binding's inactivity window through the channel's
+  lifecycle setter; `0` never expires. Absent keeps the channel's default,
+  after which the channel may post its expiry notice.
+- `data` comes back as `ctx.pluginBinding.data` in `inbound_claim`. Return
+  `{ handled: true }` for every message in the thread: an unhandled message gets
+  the channel's "did not handle" notice instead of normal routing.
 
 ## Awaited conversation binding mutations
 

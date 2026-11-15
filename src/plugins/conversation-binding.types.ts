@@ -16,12 +16,10 @@ export type PluginOwnedConversationRef = {
   parentConversationId?: string;
 };
 
-/** A conversation a plugin's own service binds to that plugin, without an approval. */
+/** A new thread a plugin's own service has the channel create and binds to that plugin. */
 export type PluginOwnedConversationBindParams = PluginConversationBindingRequestParams & {
+  /** The channel conversation the thread is created under. */
   conversation: PluginOwnedConversationRef;
-  /** `current` binds `conversation` itself; `child` has the channel create a thread under it. */
-  placement: "current" | "child";
-  /** The name of the thread a `child` placement creates. */
   threadName?: string;
   /** The new binding's inactivity window; 0 never expires. Absent keeps the channel's default. */
   idleTimeoutMs?: number;

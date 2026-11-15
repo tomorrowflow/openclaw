@@ -301,7 +301,8 @@ const TITLE_KEY = /^\[([^\]\s]{1,32})\]/u;
 
 /** The card's own key from a `[KEY] title`, else a short id. */
 export function feedCardRef(card: Pick<WorkboardCard, "id" | "title">): string {
-  return TITLE_KEY.exec(card.title)?.[1] ?? card.id.slice(0, 8);
+  const key = TITLE_KEY.exec(card.title)?.[1];
+  return key ? quiet(key) : card.id.slice(0, 8);
 }
 
 /** Discord caps thread names at 100 characters. */

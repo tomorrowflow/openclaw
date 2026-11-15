@@ -11,6 +11,7 @@ import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import type {
   PluginHookInboundClaimContext,
   PluginHookInboundClaimEvent,
+  PluginHookInboundClaimResult,
 } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginStateKeyedStore } from "openclaw/plugin-sdk/plugin-state-runtime";
 import type { OpenClawPluginService } from "../api.js";
@@ -46,7 +47,7 @@ export type WorkboardFeedService = OpenClawPluginService & {
   claim: (
     event: PluginHookInboundClaimEvent,
     ctx: PluginHookInboundClaimContext,
-  ) => Promise<{ handled: boolean } | undefined>;
+  ) => Promise<PluginHookInboundClaimResult | undefined>;
   health: () => WorkboardHealthFeed | undefined;
 };
 
@@ -120,11 +121,10 @@ export function createWorkboardFeedService(params: {
     }
   };
 
-  const conversation = (feed: WorkboardBoardFeed, threadId?: string) => ({
+  const conversation = (feed: WorkboardBoardFeed) => ({
     channel: feed.channel,
     accountId: feed.accountId ?? "default",
-    conversationId: threadId ?? feed.to,
-    ...(threadId ? { parentConversationId: feed.to } : {}),
+    conversationId: feed.to,
   });
 
   const bindingData = (card: WorkboardCard, board: FeedBoard) => ({
@@ -178,25 +178,10 @@ export function createWorkboardFeedService(params: {
     }
   };
 
-  const ensureBinding = async (card: WorkboardCard, board: FeedBoard, threadId: string) => {
-    try {
-      await channel.bindings.bindOwned({
-        conversation: conversation(board.feed, threadId),
-        placement: "current",
-        data: bindingData(card, board),
-        idleTimeoutMs: 0,
-      });
-    } catch (error) {
-      // The post still goes out, from the plain bot without the persona.
-      counted(error);
-    }
-  };
-
   const openThread = async (card: WorkboardCard, board: FeedBoard) => {
     try {
       const binding = await channel.bindings.bindOwned({
         conversation: conversation(board.feed),
-        placement: "child",
         threadName: feedThreadName(card),
         data: bindingData(card, board),
         idleTimeoutMs: 0,
@@ -231,10 +216,6 @@ export function createWorkboardFeedService(params: {
     }
     const events = [...diffFeedFacts(state.seen, next), ...feedCommentEvents(card, state)];
     if (events.length > 0) {
-      // Threads stay bound after the card closes, so late steps keep their
-      // persona and replies still land; the channel drops the binding when
-      // the thread is archived, and this rebinds it on the next post.
-      await ensureBinding(card, board, state.threadId);
       for (const event of events) {
         await send(board.feed, state.threadId, event, card, board);
       }
@@ -317,11 +298,19 @@ export function createWorkboardFeedService(params: {
       }
       const board = (await store.listBoards()).boards.find((entry) => entry.id === boardId);
       const operatorId = board?.orchestration?.feed?.operatorId;
-      // A board whose feed was turned off leaves its threads bound until they
-      // archive; replies there take normal routing instead of vanishing.
+      // Threads stay bound after a board's feed is turned off, and an
+      // unhandled message in a bound thread gets no normal routing.
       if (!operatorId) {
-        return undefined;
+        return {
+          handled: true,
+          reply: {
+            text: "This board's Workboard feed takes no replies right now. Comment on the card in the Control UI instead.",
+          },
+        };
       }
+      // Waits behind a running feed pass so the claimed id lands before the
+      // next pass reads the card; a pass is short except when a feed is first
+      // turned on for a board with many active cards.
       await serialize(async () => {
         if (event.senderId !== operatorId || !event.content.trim()) {
           return;

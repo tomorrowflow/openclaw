@@ -129,7 +129,7 @@ export default definePluginEntry({
     resourceServices.push(lifecycleSync);
     const feed = createWorkboardFeedService({
       store,
-      // Oldest first out: a card evicted here only gets a new thread if it moves again.
+      // Oldest first out: an evicted card that is still active gets a new thread.
       openState: () =>
         api.runtime.state.openKeyedStoreV2<WorkboardCardFeed>({
           namespace: "board-feed",

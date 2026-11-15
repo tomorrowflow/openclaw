@@ -189,7 +189,12 @@ function createLoadedThreadBindingManager(
         });
         continue;
       }
-      if (isDirectConversationBindingId(binding.threadId)) {
+      // A plugin's own thread stays bound through archiving: a reply reopens
+      // the thread and still reaches the plugin, and no probe runs per sweep.
+      if (
+        isDirectConversationBindingId(binding.threadId) ||
+        binding.metadata?.ownerManaged === true
+      ) {
         continue;
       }
       if (!rest) {
@@ -220,9 +225,7 @@ function createLoadedThreadBindingManager(
             threadId: binding.threadId,
             expected: binding,
             reason: "thread-archived",
-            // A plugin projecting into its own threads rebinds on its next
-            // post; a session farewell would only reopen the archived thread.
-            sendFarewell: binding.metadata?.pluginBindingOwner !== "plugin",
+            sendFarewell: true,
           });
         }
       } catch (err) {

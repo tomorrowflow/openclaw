@@ -4,6 +4,7 @@ import {
   collectFeedFacts,
   diffFeedFacts,
   feedCommentEvents,
+  feedCardRef,
   feedThreadName,
   renderFeedEvent,
   type FeedEvent,
@@ -126,6 +127,15 @@ describe("collectFeedFacts and feedCommentEvents", () => {
 
   it("caps thread names at 100 characters", () => {
     expect(feedThreadName({ ...card, title: "x".repeat(200) })).toHaveLength(100);
+  });
+
+  it.each([
+    ["[IOS-A90] Fix excerpt", "IOS-A90", "[IOS-A90] Fix excerpt"],
+    ["Fix login", card.id.slice(0, 8), `[${card.id.slice(0, 8)}] Fix login`],
+    ["[@everyone] x", "@\u200beveryone", "[@everyone] x"],
+  ])("keys %j", (title, ref, name) => {
+    expect(feedCardRef({ ...card, title })).toBe(ref);
+    expect(feedThreadName({ ...card, title })).toBe(name);
   });
 });
 

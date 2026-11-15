@@ -54,24 +54,31 @@ describe("thread binding lifecycle", () => {
   });
 
   it.each([
-    { owner: "session", metadata: undefined, farewells: 1 },
-    { owner: "plugin", metadata: { pluginBindingOwner: "plugin" }, farewells: 0 },
+    { owner: "session", metadata: undefined, probes: 1, keeps: false, farewells: 1 },
+    {
+      owner: "plugin-managed",
+      metadata: { ownerManaged: true },
+      probes: 0,
+      keeps: true,
+      farewells: 0,
+    },
   ])(
-    "unbinds an archived thread ($owner farewells: $farewells)",
-    async ({ metadata, farewells }) => {
+    "sweeps archived threads ($owner keeps: $keeps)",
+    async ({ metadata, probes, keeps, farewells }) => {
       vi.useFakeTimers();
       try {
         const manager = await createTestThreadBindingManager({ enableSweeper: true });
         await bindTestThread(manager, metadata ? { metadata } : {});
         hoisted.sendMessageDiscord.mockClear();
-        hoisted.restGet.mockResolvedValueOnce({
+        hoisted.restGet.mockResolvedValue({
           id: "thread-1",
           type: 11,
           parent_id: "parent-1",
           thread_metadata: { archived: true },
         });
         await vi.advanceTimersByTimeAsync(120_000);
-        expect(manager.getByThreadId("thread-1")).toBeUndefined();
+        expect(hoisted.restGet).toHaveBeenCalledTimes(probes);
+        expect(Boolean(manager.getByThreadId("thread-1"))).toBe(keeps);
         expect(hoisted.sendMessageDiscord).toHaveBeenCalledTimes(farewells);
       } finally {
         vi.useRealTimers();

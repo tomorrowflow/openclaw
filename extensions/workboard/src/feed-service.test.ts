@@ -13,14 +13,13 @@ type SendText = NonNullable<NonNullable<Awaited<ReturnType<LoadAdapter>>>["sendT
 function fakeChannel() {
   let threads = 0;
   const sendText = vi.fn<SendText>(async () => ({ channel: "discord", messageId: "m" }));
-  const bindOwned = vi.fn<Bindings["bindOwned"]>(async (params) => ({
+  const bindOwned = vi.fn<Bindings["bindOwned"]>(async () => ({
     bindingId: "b",
     pluginId: "workboard",
     pluginRoot: "/wb",
     channel: "discord",
     accountId: "default",
-    conversationId:
-      params.placement === "child" ? `thread-${++threads}` : params.conversation.conversationId,
+    conversationId: `thread-${++threads}`,
     boundAt: 0,
   }));
   const channel: Pick<PluginRuntime["channel"], "outbound" | "bindings"> = {
@@ -75,9 +74,7 @@ describe("workboard board feed", () => {
     try {
       await feed.sync();
       await feed.sync();
-      expect(fake.bindOwned.mock.calls.map(([p]) => [p.placement, p.threadName])).toEqual([
-        ["child", `[${ref}] Fix login`],
-      ]);
+      expect(fake.bindOwned.mock.calls.map(([p]) => p.threadName)).toEqual([`[${ref}] Fix login`]);
       expect(fake.posts()).toEqual([`thread-1 Workboard: ${ref} Fix login: todo.`]);
 
       await store.update(card.id, { status: "running", agentId: "dev" });
@@ -123,6 +120,14 @@ describe("workboard board feed", () => {
       await store.update(card.id, { status: "done" });
       await feed.sync();
       expect(fake.posts().at(-1)).toBe(`thread-1 Workboard: ${ref} is done.`);
+
+      await store.upsertBoard({ id: "factory", orchestration: { feed: null } });
+      const off = await reply("op-1", "Still there?");
+      expect(off).toMatchObject({
+        handled: true,
+        reply: { text: expect.stringContaining("Control UI") },
+      });
+      expect((await store.get(card.id))?.metadata?.comments).toHaveLength(2);
     } finally {
       nudge.stop();
       await feed.stop();

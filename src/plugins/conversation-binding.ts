@@ -255,6 +255,8 @@ export async function bindConversationNow(params: {
   assertCurrent?: () => void;
   placement?: SessionBindingPlacement;
   threadName?: string;
+  /** The plugin keeps the binding for the thread's life; channels skip their archive sweep. */
+  ownerManaged?: boolean;
 }): Promise<PluginConversationBinding> {
   const assertCurrent = params.assertCurrent;
   const ref = toConversationRef(params.conversation);
@@ -283,6 +285,7 @@ export async function bindConversationNow(params: {
       data: normalizeBindingData(params.data),
       bindingAttemptId: normalizeOptionalString(params.bindingAttemptId),
       threadName: normalizeOptionalString(params.threadName),
+      ...(params.ownerManaged ? { ownerManaged: true } : {}),
     },
   };
   const record = await getSessionBindingService().bind(bindingInput);
@@ -550,10 +553,11 @@ export async function detachPluginConversationBinding(params: {
 }
 
 /**
- * Binds a conversation to the calling plugin without an approval. The runtime
- * closure supplies `identity`, so a plugin can only bind for itself; a
- * conversation another plugin or core routing owns is refused. Rebinding a
- * conversation the plugin already owns returns that binding unchanged.
+ * Has the channel create a thread under `conversation` and binds it to the
+ * calling plugin without an approval. The runtime closure supplies
+ * `identity`. Only new threads are bindable this way, so a plugin cannot take
+ * over a conversation people or agents already use; that still needs the
+ * approval of `requestConversationBinding`.
  */
 export async function bindOwnedPluginConversation(
   identity: PluginBindingIdentity,
@@ -561,28 +565,12 @@ export async function bindOwnedPluginConversation(
 ): Promise<PluginConversationBinding> {
   const conversation = normalizeConversation(params.conversation);
   const ref = toConversationRef(conversation);
-  let expectedBinding: SessionBindingRecord | null = null;
-  if (params.placement === "current") {
-    const state = await resolvePluginConversationBindingState(conversation);
-    const conflict = pluginBindingOwnershipConflict(state, identity.pluginRoot);
-    if (conflict) {
-      throw new Error(conflict);
-    }
-    if (state.binding) {
-      return withConversationBindingContext(state.binding, conversation);
-    }
-    expectedBinding = state.record;
-  }
-  // A child binding names a thread the channel has yet to create, so its
-  // session key cannot come from the conversation id the way a current one does.
+  // The thread does not exist yet, so its session key cannot come from its id.
   const targetSessionKey = buildPluginBindingSessionKey({
     pluginId: identity.pluginId,
     channel: ref.channel,
     accountId: ref.accountId,
-    conversationId:
-      params.placement === "child"
-        ? `${ref.conversationId}#${crypto.randomUUID()}`
-        : ref.conversationId,
+    conversationId: `${ref.conversationId}#${crypto.randomUUID()}`,
   });
   const binding = await bindConversationNow({
     identity,
@@ -591,9 +579,9 @@ export async function bindOwnedPluginConversation(
     summary: params.summary,
     detachHint: params.detachHint,
     data: params.data,
-    expectedBinding,
-    placement: params.placement,
+    placement: "child",
     threadName: params.threadName,
+    ownerManaged: true,
   });
   logPluginBindingLifecycleEvent({ event: "owned", identity, conversation: binding });
   if (params.idleTimeoutMs !== undefined) {

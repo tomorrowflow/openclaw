@@ -2027,7 +2027,7 @@ could not be read (the health service not running, no node runtime, an
 unreadable auth store) is `{status: "unknown", reason}` in its place; the method
 never guesses. `feed`, present once the [board feed](#board-feed) has tried a
 post since the Gateway started, counts `posts` and `failures` (a post given up
-after its retry, or a card thread that could not be bound or unbound) with
+after its retry, or a card thread that could not be opened) with
 `lastPostAt`, `lastFailureAt`, and `lastError`.
 
 ### Board feed
@@ -2053,7 +2053,8 @@ board stays the record; the chat is a copy.
 ```
 
 - The first time a card on the board is active (not done or archived),
-  Workboard opens a thread named `[<id>] <title>` with one summary line. There
+  Workboard opens a thread named after the card (its `[KEY]` title, or
+  `[<id>] <title>`) with one summary line. There
   is no backfill: earlier steps and comments are not posted.
 - From then on it posts each step from fixed templates, with no model calls:
   a start on a node, the round handed to the verifier, each verification
@@ -2073,12 +2074,14 @@ board stays the record; the chat is a copy.
   `workboard.health` `feed`, and never replayed.
 - On Discord the thread is a conversation binding owned by Workboard, which
   needs thread bindings (on by default; `channels.discord.threadBindings.enabled`).
-  The binding never idles out while the card is active. When the card is done
-  or archived Workboard unbinds it, and Discord posts its usual unbind notice;
-  later posts, such as the PR merging, come from the bot without the agent's
-  name. A reopened card binds the same thread again.
+  The parent channel must be allowed for the account under
+  `channels.discord.guilds.<guild>.channels`; replies in a bound thread skip
+  `requireMention`. The binding lasts for the thread's life, through Discord
+  archiving it, so late steps such as the PR merging keep the agent's name and
+  a reply reopens the thread.
 
-`feed: null` turns the feed off.
+`feed: null` turns the feed off. Existing threads stay bound; a reply there
+gets a note to comment in the Control UI instead.
 
 ### Session-board widgets
 

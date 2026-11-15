@@ -775,17 +775,10 @@ describe("plugin conversation binding approvals", () => {
     expect(sessionBindingState.bind).not.toHaveBeenCalled();
   });
 
-  it("binds a plugin's own thread without an approval and returns it on rebind", async () => {
+  it("binds a new thread to its plugin without an approval", async () => {
     const owner = { pluginId: "workboard", pluginName: "Workboard", pluginRoot: "/plugins/wb" };
-    const thread = {
-      channel: "discord",
-      accountId: "default",
-      conversationId: "thread-1",
-      parentConversationId: "feed-channel",
-    };
     const created = await bindOwnedPluginConversation(owner, {
       conversation: { channel: "discord", accountId: "default", conversationId: "feed-channel" },
-      placement: "child",
       threadName: "[A-1] Title",
       data: { cardId: "A-1" },
     });
@@ -796,36 +789,15 @@ describe("plugin conversation binding approvals", () => {
     });
     expect(sessionBindingState.bind.mock.calls[0]?.[0]).toMatchObject({
       placement: "child",
-      metadata: { threadName: "[A-1] Title", pluginRoot: "/plugins/wb" },
+      conversation: { conversationId: "feed-channel" },
+      metadata: { threadName: "[A-1] Title", pluginRoot: "/plugins/wb", ownerManaged: true },
     });
-
-    const again = await bindOwnedPluginConversation(owner, {
-      conversation: thread,
-      placement: "current",
-    });
-    expect(again.bindingId).toBe(created.bindingId);
-    expect(sessionBindingState.bind).toHaveBeenCalledTimes(1);
-
-    await expect(
-      bindOwnedPluginConversation(
-        { pluginId: "other", pluginRoot: "/plugins/other" },
-        {
-          conversation: thread,
-          placement: "current",
-        },
-      ),
-    ).rejects.toThrow('already bound by plugin "Workboard"');
+    const thread = { ...created, parentConversationId: "feed-channel" };
     expect(
-      await detachPluginConversationBinding({
-        pluginRoot: "/plugins/other",
-        conversation: thread,
-      }),
+      await detachPluginConversationBinding({ pluginRoot: "/plugins/other", conversation: thread }),
     ).toEqual({ removed: false });
     expect(
-      await detachPluginConversationBinding({
-        pluginRoot: owner.pluginRoot,
-        conversation: thread,
-      }),
+      await detachPluginConversationBinding({ pluginRoot: owner.pluginRoot, conversation: thread }),
     ).toEqual({ removed: true });
   });
 });
