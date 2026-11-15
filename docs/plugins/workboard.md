@@ -2026,7 +2026,8 @@ profiles for that provider, each `ok` or in a `cooldown`, `disabled`, or
 could not be read (the health service not running, no node runtime, an
 unreadable auth store) is `{status: "unknown", reason}` in its place; the method
 never guesses. `feed`, present once the [board feed](#board-feed) has tried a
-post since the Gateway started, counts `posts` and `failures` with
+post since the Gateway started, counts `posts` and `failures` (a post given up
+after its retry, or a card thread that could not be bound or unbound) with
 `lastPostAt`, `lastFailureAt`, and `lastError`.
 
 ### Board feed

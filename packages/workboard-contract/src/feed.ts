@@ -13,7 +13,10 @@ export type WorkboardBoardFeed = {
   operatorId?: string;
 };
 
-/** Board feed posts since the Gateway started; a failure is a post given up after its retry. */
+/**
+ * Board feed posts since the Gateway started. A failure is a post given up
+ * after its retry, or a card thread that could not be bound or unbound.
+ */
 export type WorkboardHealthFeed = {
   posts: number;
   failures: number;
