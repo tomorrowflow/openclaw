@@ -137,3 +137,41 @@ it.each([
     expect(boardToast.querySelector('[role="status"]')).not.toBeNull();
   },
 );
+
+it("copies an error message and falls back to selecting it", async () => {
+  const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  disposeRoot = render(
+    () =>
+      createComponent(WorkboardToast, { message: "Dispatch failed: node offline", tone: "error" }),
+    container,
+  );
+  flush();
+  const copy = expectDefined(container.querySelector<HTMLButtonElement>("button.copy"), "copy");
+  expect(copy.getAttribute("aria-label")).toBe("Copy");
+  copy.click();
+  await vi.advanceTimersByTimeAsync(0);
+  flush();
+  expect(writeText).toHaveBeenCalledWith("Dispatch failed: node offline");
+  expect(copy.getAttribute("aria-label")).toBe("Copied!");
+  await vi.advanceTimersByTimeAsync(2_000);
+  flush();
+  expect(copy.getAttribute("aria-label")).toBe("Copy");
+
+  writeText.mockRejectedValueOnce(new Error("NotAllowedError"));
+  copy.click();
+  await vi.advanceTimersByTimeAsync(0);
+  flush();
+  expect(copy.getAttribute("aria-label")).toBe("Copy failed");
+  expect(document.getSelection()?.toString()).toBe("Dispatch failed: node offline");
+  vi.unstubAllGlobals();
+});
+
+it("offers no copy button on info toasts", () => {
+  disposeRoot = render(
+    () => createComponent(WorkboardToast, { message: "Applied to 2 of 2 cards." }),
+    container,
+  );
+  flush();
+  expect(container.querySelector("button.copy")).toBeNull();
+});
