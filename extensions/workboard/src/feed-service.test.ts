@@ -75,7 +75,7 @@ describe("workboard board feed", () => {
       await feed.sync();
       await feed.sync();
       expect(fake.bindOwned.mock.calls.map(([p]) => p.threadName)).toEqual([`[${ref}] Fix login`]);
-      expect(fake.posts()).toEqual([`thread-1 Workboard: ${ref} Fix login: todo.`]);
+      expect(fake.posts()).toEqual([`thread-1 Workboard: ${ref}: todo.`]);
 
       await store.update(card.id, { status: "running", agentId: "dev" });
       await store.addComment(card.id, { body: "Halfway there." }, undefined, "agent:dev");

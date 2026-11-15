@@ -164,7 +164,7 @@ export type PluginRuntimeChannel = {
   };
   /** Conversations bound to the calling plugin, so their inbound messages reach its `inbound_claim`. */
   bindings: {
-    /** Binds without an approval; a conversation the plugin already owns returns its binding. */
+    /** Has the channel create a new thread under `conversation` and binds it, without an approval. */
     bindOwned: (params: PluginOwnedConversationBindParams) => Promise<PluginConversationBinding>;
   };
   inbound: {

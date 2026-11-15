@@ -74,7 +74,6 @@ describe("diffFeedFacts", () => {
 describe("collectFeedFacts and feedCommentEvents", () => {
   const card: WorkboardCard = {
     id: "0123456789abcdef",
-    title: "Fix login",
     status: "review",
     priority: "normal",
     labels: ["needs:user"],
@@ -142,7 +141,6 @@ describe("collectFeedFacts and feedCommentEvents", () => {
 describe("renderFeedEvent", () => {
   const ctx = {
     ref: "abc12345",
-    title: "Fix login",
     agentId: "dev",
     orchestration: {
       verifier: { agentId: "verifier", model: "m" },

@@ -151,7 +151,6 @@ export function createWorkboardFeedService(params: {
     const cfg = params.config();
     const rendered = renderFeedEvent(event, {
       ref: feedCardRef(card),
-      title: card.title,
       agentId: card.agentId,
       orchestration: board.orchestration,
     });

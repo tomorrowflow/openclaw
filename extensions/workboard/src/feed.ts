@@ -94,7 +94,6 @@ export type FeedPost = { text: string; persona: FeedPersona; mentionOperator: bo
 /** What a template needs beyond its event: the card and the board's verifiers. */
 export type FeedRenderContext = {
   ref: string;
-  title: string;
   agentId?: string;
   orchestration?: Pick<WorkboardOrchestrationSettings, "verifier" | "crossVerifier">;
 };
@@ -242,10 +241,7 @@ function post(persona: FeedPersona, text: string, mentionOperator = false): Feed
 
 const TEMPLATES: Templates = {
   opened: (e, ctx) =>
-    post(
-      WORKBOARD,
-      `${ctx.ref} ${quiet(ctx.title)}: ${e.status}${ctx.agentId ? `, with @${ctx.agentId}` : ""}.`,
-    ),
+    post(WORKBOARD, `${ctx.ref}: ${e.status}${ctx.agentId ? `, with @${ctx.agentId}` : ""}.`),
   started: (e, ctx) =>
     post(agent(ctx.agentId), `Started ${ctx.ref}${e.nodeId ? ` on ${quiet(e.nodeId)}` : ""}.`),
   handoff: (_e, ctx) => {
