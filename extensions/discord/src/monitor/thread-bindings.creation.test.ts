@@ -132,6 +132,40 @@ describe("thread binding creation and ACP startup reconciliation", () => {
     ]);
   });
 
+  it.each([
+    {
+      owner: "plugin",
+      metadata: { pluginBindingOwner: "plugin", pluginId: "workboard" },
+      creates: true,
+    },
+    { owner: "session", metadata: undefined, creates: false },
+  ])(
+    "creates a thread without an owning agent only for plugin bindings ($owner)",
+    async ({ metadata, creates }) => {
+      const manager = await createTestThreadBindingManager();
+      setRuntimeConfigSnapshot({
+        ...EMPTY_DISCORD_TEST_CONFIG,
+        agents: { entries: { main: {}, dev: {} } },
+      });
+      const bind = bindTestThread(manager, {
+        threadId: undefined,
+        createThread: true,
+        targetKind: "acp",
+        targetSessionKey: "plugin-binding:workboard:abc",
+        agentId: undefined,
+        ...(metadata ? { metadata } : {}),
+      });
+      if (creates) {
+        await expect(bind).resolves.toMatchObject({
+          threadId: "thread-created",
+          agentId: "workboard",
+        });
+      } else {
+        await expect(bind).rejects.toThrow("no explicit owner");
+      }
+    },
+  );
+
   it.each([false, true])(
     "inherits direct-binding metadata only for the same target (replace=%s)",
     async (replace) => {

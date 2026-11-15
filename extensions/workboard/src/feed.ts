@@ -51,6 +51,8 @@ export type WorkboardCardFeed = {
   threadId?: string;
   seen: WorkboardFeedFacts;
   claimedCommentIds?: string[];
+  /** When opening the thread last failed; it is tried again after a while. */
+  openFailedAt?: number;
 };
 
 const NEEDS_USER_LABEL = "needs:user";
