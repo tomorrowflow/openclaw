@@ -1,5 +1,6 @@
 import type { PluginRuntime } from "openclaw/plugin-sdk/core";
 import { describe, expect, it, vi } from "vitest";
+import type { OpenClawPluginService } from "../api.js";
 import { createWorkboardAutomationNudgeService } from "./automation-nudge.js";
 import { createWorkboardFeedService } from "./feed-service.js";
 import type { WorkboardCardFeed } from "./feed.js";
@@ -9,6 +10,8 @@ import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 type Bindings = PluginRuntime["channel"]["bindings"];
 type LoadAdapter = PluginRuntime["channel"]["outbound"]["loadAdapter"];
 type SendText = NonNullable<NonNullable<Awaited<ReturnType<LoadAdapter>>>["sendText"]>;
+
+type ServiceContext = Parameters<OpenClawPluginService["start"]>[0];
 
 function fakeChannel() {
   let threads = 0;
@@ -134,7 +137,7 @@ describe("workboard board feed", () => {
     }
   });
 
-  it("tries a thread that failed to open again after ten minutes", async () => {
+  it("tries a thread that failed to open again after ten minutes, without a card change", async () => {
     const store = createWorkboardSqliteTestStore();
     await store.upsertBoard({
       id: "factory",
@@ -142,8 +145,15 @@ describe("workboard board feed", () => {
     });
     await store.create({ title: "[FAC-1] Fix login", status: "todo", boardId: "factory" });
     const fake = fakeChannel();
-    fake.bindOwned.mockRejectedValueOnce(new Error("no explicit owner"));
+    fake.bindOwned.mockRejectedValueOnce(new Error("adapter unavailable"));
     let at = 1_000;
+    const jobs = new Map<string, { delayMs: number; run: () => unknown }>();
+    const runJob = async (id: string) => {
+      const job = jobs.get(id);
+      jobs.delete(id);
+      at += job?.delayMs ?? 0;
+      await job?.run();
+    };
     const feed = createWorkboardFeedService({
       store,
       openState: () => fakeState(),
@@ -151,16 +161,29 @@ describe("workboard board feed", () => {
       config: () => ({}),
       now: () => at,
     });
+    type Scheduler = NonNullable<ServiceContext["scheduler"]>;
+    const scheduler: Scheduler = {
+      version: 1,
+      signal: new AbortController().signal,
+      now: () => at,
+      schedule: (job) => {
+        jobs.set(job.id, { delayMs: "delayMs" in job ? job.delayMs : 0, run: job.run });
+        return { cancel: () => jobs.delete(job.id), stop: async () => {} };
+      },
+      scope: () => scheduler,
+      beginClose: () => {},
+      stop: async () => {},
+    };
+    await feed.start({ ...nudgeContext(vi.fn()), scheduler });
     try {
-      await feed.sync();
-      at += 9 * 60_000;
-      await feed.sync();
-      expect(fake.bindOwned).toHaveBeenCalledOnce();
-      expect(feed.health()).toMatchObject({ failures: 1, lastError: "no explicit owner" });
-      at += 60_000;
-      await feed.sync();
+      await runJob("workboard-feed");
+      expect(feed.health()).toMatchObject({ failures: 1, lastError: "adapter unavailable" });
+      expect(jobs.get("workboard-feed-retry")?.delayMs).toBe(10 * 60_000);
+
+      await runJob("workboard-feed-retry");
       expect(fake.bindOwned).toHaveBeenCalledTimes(2);
       expect(fake.posts()).toEqual(["thread-1 Workboard: FAC-1: todo."]);
+      expect(jobs.has("workboard-feed-retry")).toBe(false);
     } finally {
       await feed.stop();
     }

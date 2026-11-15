@@ -74,6 +74,9 @@ export function createWorkboardFeedService(params: {
   let unsubscribe: (() => void) | undefined;
   let tail: Promise<unknown> = Promise.resolve();
   let health: WorkboardHealthFeed | undefined;
+  // Set by a pass that left a card waiting to retry its thread open, so the
+  // retry runs on a timer and not only on the next card change.
+  let openRetryPending = false;
 
   // Passes and claims share one queue, so a claim's comment and its
   // claimedCommentIds land before the next pass reads the card.
@@ -206,7 +209,11 @@ export function createWorkboardFeedService(params: {
     // is active, and its later steps from then on.
     if (!state?.threadId) {
       const retryDue = now() - (state?.openFailedAt ?? 0) >= FEED_OPEN_RETRY_MS;
-      if (!active || (state && !retryDue && diffFeedFacts(state.seen, next).length === 0)) {
+      if (!active) {
+        return;
+      }
+      if (state && !retryDue && diffFeedFacts(state.seen, next).length === 0) {
+        openRetryPending = true;
         return;
       }
       const threadId = await openThread(card, board);
@@ -217,6 +224,7 @@ export function createWorkboardFeedService(params: {
         card.id,
         threadId ? { threadId, seen: next } : { seen: next, openFailedAt: now() },
       );
+      openRetryPending ||= !threadId;
       return;
     }
     const events = [...diffFeedFacts(state.seen, next), ...feedCommentEvents(card, state)];
@@ -235,6 +243,7 @@ export function createWorkboardFeedService(params: {
   };
 
   const pass = async () => {
+    openRetryPending = false;
     const boards = new Map<string, FeedBoard>();
     for (const board of (await store.listBoards()).boards) {
       const feed = board.orchestration?.feed;
@@ -268,22 +277,34 @@ export function createWorkboardFeedService(params: {
         return;
       }
       await store.ready();
-      let job: { cancel: () => void } | undefined;
-      const schedule = () => {
-        job = scheduler.schedule({
-          id: "workboard-feed",
-          delayMs: FEED_DEBOUNCE_MS,
-          mode: "earliest",
-          run: () =>
-            sync().catch((error: unknown) => {
-              ctx.logger.warn(`workboard feed pass failed: ${formatErrorMessage(error)}`);
-            }),
-        });
+      const jobs = new Map<string, { cancel: () => void }>();
+      const schedule = (id = "workboard-feed", delayMs = FEED_DEBOUNCE_MS) => {
+        jobs.set(
+          id,
+          scheduler.schedule({
+            id,
+            delayMs,
+            mode: "earliest",
+            run: () =>
+              sync().then(
+                () => {
+                  if (openRetryPending) {
+                    schedule("workboard-feed-retry", FEED_OPEN_RETRY_MS);
+                  }
+                },
+                (error: unknown) => {
+                  ctx.logger.warn(`workboard feed pass failed: ${formatErrorMessage(error)}`);
+                },
+              ),
+          }),
+        );
       };
-      const subscription = store.subscribeChanges(schedule);
+      const subscription = store.subscribeChanges(() => schedule());
       unsubscribe = () => {
         subscription();
-        job?.cancel();
+        for (const job of jobs.values()) {
+          job.cancel();
+        }
       };
       schedule();
     },
