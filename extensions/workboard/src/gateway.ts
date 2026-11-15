@@ -142,6 +142,7 @@ export function registerWorkboardGatewayMethods(params: {
   onOperatorComment?: (input: {
     cards: readonly WorkboardCard[];
     sessionKey?: string;
+    operatorComment: true;
   }) => Promise<void>;
   health?: WorkboardHealthReader;
 }) {
@@ -429,6 +430,7 @@ export function registerWorkboardGatewayMethods(params: {
     await params.onOperatorComment?.({
       cards: [card],
       sessionKey: client?.internal?.agentRuntimeIdentity?.sessionKey,
+      operatorComment: true,
     });
     return { card: redactOperatorCard(card) };
   });
