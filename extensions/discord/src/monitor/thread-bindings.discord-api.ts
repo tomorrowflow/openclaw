@@ -181,8 +181,10 @@ export async function createWebhookForChannel(params: {
     }
     return { webhookId, webhookToken };
   } catch (err) {
-    logVerbose(
-      `discord thread binding webhook create failed for ${params.channelId}: ${summarizeDiscordError(err)}`,
+    // Without a webhook every agent persona falls back to the bot's own name,
+    // so the cause (usually a missing Manage Webhooks permission) must be visible.
+    log.warn(
+      `discord thread binding webhook create failed for ${params.channelId}: ${summarizeDiscordError(err)}; agent personas fall back to the bot name until the bot has Manage Webhooks in this channel`,
     );
     return {};
   }
