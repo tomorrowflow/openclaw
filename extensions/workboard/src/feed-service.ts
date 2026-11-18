@@ -19,6 +19,7 @@ import {
   buildFeedAnswerMessage,
   FEED_ANSWER_TIMEOUT_MS,
   feedAnswerSessionKey,
+  finalAssistantText,
   unansweredOperatorComments,
 } from "./feed-answer.js";
 import {
@@ -67,13 +68,28 @@ export type WorkboardFeedService = OpenClawPluginService & {
  * effort: a post gets one retry, then counts as a failure and the snapshot
  * moves on, so nothing is replayed.
  */
+/** Settles with `work`, or rejects once `signal` aborts so a stop never waits on it. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(signal.reason);
+  }
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
 export function createWorkboardFeedService(params: {
   store: FeedStore;
   /** Opens the store of each card's thread and last posted facts, keyed by card id. */
   openState: () => Pick<PluginStateKeyedStore<WorkboardCardFeed, 2>, "entries" | "register">;
   channel: Pick<PluginRuntime["channel"], "outbound" | "bindings">;
   /** Runs the board's `feed.agentId` on the operator's thread replies. */
-  subagent?: Pick<PluginRuntime["subagent"], "run" | "waitForRun" | "deleteSession">;
+  subagent?: Pick<
+    PluginRuntime["subagent"],
+    "run" | "waitForRun" | "getSessionMessages" | "deleteSession"
+  >;
   config: () => OpenClawConfig;
   /** The nudge an operator comment from the Control UI gets. */
   onOperatorComment?: (input: { cards: readonly WorkboardCard[] }) => Promise<void>;
@@ -88,8 +104,9 @@ export function createWorkboardFeedService(params: {
   // retry runs on a timer and not only on the next card change.
   let openRetryPending = false;
   let scheduler: Scheduler | undefined;
-  // Cards with an answer turn in flight; `again` asks for one more turn after it.
-  const answering = new Map<string, { again: boolean }>();
+  // Cards with an answer turn in flight; `again` asks for one more turn after
+  // it, and `throughId` is the last operator comment a turn already included.
+  const answering = new Map<string, { again: boolean; throughId?: string }>();
 
   // Passes and claims share one queue, so a claim's comment and its
   // claimedCommentIds land before the next pass reads the card.
@@ -219,15 +236,28 @@ export function createWorkboardFeedService(params: {
     }
   };
 
-  /** One turn of the feed's agent on the card's unanswered operator messages. */
-  const answerOnce = async (cardId: string, feed: WorkboardBoardFeed, agentId: string) => {
+  /**
+   * One turn of the feed's agent on the card's unanswered operator messages.
+   * Workboard records the turn's final reply as the agent's comment, so the
+   * answer lands even on a card another agent has claimed for its round.
+   */
+  const answerOnce = async (
+    cardId: string,
+    feed: WorkboardBoardFeed,
+    agentId: string,
+    turn: { throughId?: string },
+  ) => {
     const card = await store.get(cardId);
     const threadId = (await loadFeeds()).get(cardId)?.threadId;
-    const latest = card ? unansweredOperatorComments(card, agentId).at(-1) : undefined;
+    const unanswered = card ? unansweredOperatorComments(card, agentId, turn.throughId) : [];
+    const latest = unanswered.at(-1);
     if (!card || !threadId || !latest || !scheduler || !params.subagent) {
       return;
     }
+    turn.throughId = latest.id;
+    const { subagent } = params;
     const lifetime = scheduler.signal;
+    const sessionKey = feedAnswerSessionKey(agentId, cardId);
     const typing = new AbortController();
     const typed = channel.outbound
       .keepTyping({
@@ -240,12 +270,11 @@ export function createWorkboardFeedService(params: {
       })
       // The indicator is decoration; the answer or the failure line still follows.
       .catch(() => undefined);
-    const startedAt = now();
     try {
-      const run = await params.subagent.run({
+      const run = await subagent.run({
         assertCurrent: () => lifetime.throwIfAborted(),
-        sessionKey: feedAnswerSessionKey(agentId, cardId),
-        message: buildFeedAnswerMessage({ card, boardId: cardBoardId(card), agentId }),
+        sessionKey,
+        message: buildFeedAnswerMessage({ card, boardId: cardBoardId(card), unanswered }),
         lane: `workboard-thread:${cardId}`,
         idempotencyKey: `workboard-feed-answer:${cardId}:${latest.id}`,
         deliver: false,
@@ -256,21 +285,25 @@ export function createWorkboardFeedService(params: {
           await record(cardId, { ...feedState, answerSession: true });
         }
       });
-      const wait = await params.subagent.waitForRun({
-        runId: run.runId,
-        timeoutMs: FEED_ANSWER_TIMEOUT_MS,
-      });
+      // A run that outlasts the wait keeps going on the card's lane; its late
+      // reply is dropped and the next turn queues behind it. Accepted: the
+      // failure line already told the operator, and their comment is saved.
+      const wait = await untilAborted(
+        subagent.waitForRun({ runId: run.runId, timeoutMs: FEED_ANSWER_TIMEOUT_MS }),
+        lifetime,
+      );
       if (wait.status !== "ok") {
         throw new Error(
           wait.status === "timeout" ? "no answer within 5 minutes" : (wait.error ?? wait.status),
         );
       }
-      const answered = (await store.get(cardId))?.metadata?.comments?.some(
-        (comment) => comment.source === `agent:${agentId}` && comment.createdAt >= startedAt,
+      const answer = finalAssistantText(
+        (await subagent.getSessionMessages({ sessionKey, limit: 5 })).messages,
       );
-      if (!answered) {
-        throw new Error("the turn ended without a comment on the card");
+      if (!answer) {
+        throw new Error("the turn ended without an answer");
       }
+      await store.addComment(cardId, { body: answer }, undefined, `agent:${agentId}`);
     } catch (error) {
       if (lifetime.aborted) {
         return;
@@ -301,7 +334,7 @@ export function createWorkboardFeedService(params: {
       turn.again = true;
       return;
     }
-    const state = { again: false };
+    const state: { again: boolean; throughId?: string } = { again: false };
     answering.set(cardId, state);
     scheduler.schedule({
       id: `workboard-feed-answer:${cardId}`,
@@ -310,7 +343,7 @@ export function createWorkboardFeedService(params: {
         try {
           do {
             state.again = false;
-            await answerOnce(cardId, feed, agentId);
+            await answerOnce(cardId, feed, agentId, state);
           } while (state.again && !scheduler?.signal.aborted);
         } finally {
           answering.delete(cardId);

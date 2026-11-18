@@ -211,12 +211,22 @@ describe("workboard board feed", () => {
       boardId: "glovebox",
     });
     const fake = fakeChannel();
+    const answers = ["Noted: zotac1070 and port 8780.", "Yes, I recorded the backup host too."];
+    let duringFirstTurn: (() => Promise<unknown>) | undefined;
+    let runs = 0;
     const subagent = {
       run: vi.fn<PluginRuntime["subagent"]["run"]>(async () => {
-        await store.addComment(card.id, { body: "Noted: zotac1070." }, undefined, "agent:chef");
-        return { runId: "run-1" };
+        await duringFirstTurn?.();
+        duringFirstTurn = undefined;
+        return { runId: `run-${++runs}` };
       }),
       waitForRun: vi.fn<PluginRuntime["subagent"]["waitForRun"]>(async () => ({ status: "ok" })),
+      getSessionMessages: vi.fn<PluginRuntime["subagent"]["getSessionMessages"]>(async () => ({
+        messages: [
+          { role: "user", content: "..." },
+          { role: "assistant", content: [{ type: "text", text: answers.shift() ?? "" }] },
+        ],
+      })),
       deleteSession: vi.fn<PluginRuntime["subagent"]["deleteSession"]>(async () => {}),
     };
     const clock = { at: 1_000 };
@@ -247,20 +257,28 @@ describe("workboard board feed", () => {
       await reply("production host is zotac1070");
       await reply("and keep port 8780");
       expect([...jobs.keys()].filter((id) => id === answerJob)).toHaveLength(1);
+      // Sent while the first turn runs; its answer lands after this message.
+      duringFirstTurn = () => reply("also note the backup host");
 
       await runJob(answerJob);
-      expect(subagent.run).toHaveBeenCalledOnce();
-      const [turn] = subagent.run.mock.calls[0] ?? [];
-      expect(turn?.sessionKey).toBe(`agent:chef:workboard-thread:${card.id}`);
-      expect(turn?.message).toContain("operator: production host is zotac1070");
-      expect(turn?.message).toContain("operator: and keep port 8780");
+      expect(subagent.run).toHaveBeenCalledTimes(2);
+      const [first, second] = subagent.run.mock.calls.map(([turn]) => turn);
+      expect(first?.sessionKey).toBe(`agent:chef:workboard-thread:${card.id}`);
+      expect(first?.message).toContain("operator: production host is zotac1070");
+      expect(first?.message).toContain("operator: and keep port 8780");
+      expect(second?.message).toContain("operator: also note the backup host");
+      expect(second?.message).not.toContain(
+        "## The operator's messages to answer\n- operator: production",
+      );
       expect(fake.keepTyping).toHaveBeenCalledWith(
         expect.objectContaining({ channel: "discord", to: "chan-1", threadId: "thread-1" }),
       );
       await feed.sync();
-      expect(fake.posts().at(-1)).toBe("thread-1 chef: Noted: zotac1070.");
+      expect(fake.posts().slice(-2)).toEqual([
+        "thread-1 chef: Noted: zotac1070 and port 8780.",
+        "thread-1 chef: Yes, I recorded the backup host too.",
+      ]);
 
-      subagent.run.mockResolvedValueOnce({ runId: "run-2" });
       subagent.waitForRun.mockResolvedValueOnce({ status: "timeout" });
       await reply("still there?");
       await runJob(answerJob);

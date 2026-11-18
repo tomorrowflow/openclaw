@@ -2076,10 +2076,11 @@ board stays the record; the chat is a copy.
 - With `agentId`, that agent answers each of your replies in the thread. Workboard
   runs it in one session per card (`agent:<agentId>:workboard-thread:<cardId>`)
   with a short card summary and your unanswered messages, and shows the channel's
-  typing indicator meanwhile. The agent answers with one card comment, which the
-  feed posts under its name. It acts on clear instructions with its own Workboard
-  tools, moves a card to done only after an accept or your explicit say-so, never
-  starts cards, and never interrupts a running round. A card gets one turn at a
+  typing indicator meanwhile. Workboard records the agent's final reply as its
+  card comment, which the feed posts under its name; this works on a card
+  another agent has claimed for its round. The agent acts on clear instructions
+  with its own Workboard tools, moves a card to done only after an accept or
+  your explicit say-so, never starts cards, and leaves a running round alone. A card gets one turn at a
   time; replies sent meanwhile are answered together by the next turn. A turn that
   fails, or ends without a comment within 5 minutes, posts one line saying why and
   counts as a feed failure. The session is deleted when the card is archived.
