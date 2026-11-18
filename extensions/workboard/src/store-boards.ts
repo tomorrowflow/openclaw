@@ -216,12 +216,12 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
     };
   }
 
-  /** A board's live orchestration settings, read where a rung or verifier decision is made. */
   /** The board's ID key; its cards are numbered only while it has one. */
   async boardKey(boardId: string): Promise<string | undefined> {
     return (await this.boardOrchestration(boardId))?.key;
   }
 
+  /** A board's live orchestration settings, read where a rung or verifier decision is made. */
   async boardOrchestration(boardId: string): Promise<WorkboardOrchestrationSettings | undefined> {
     return (await this.boardStore.lookup(boardId))?.board.orchestration;
   }
