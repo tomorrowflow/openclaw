@@ -206,6 +206,8 @@ describe("ensureSandboxContainer config-hash recreation", () => {
     expect(createCall.envFileContents).toContain("GEMINI_API_KEY=dummy-gemini\n");
     expect(createCall.args.join(" ")).not.toContain("dummy-gemini");
     expect(createCall.envFileContents).toContain("OPENCLAW_CLI=1\n");
+    const hashParts = createCall.args.find((arg) => arg.startsWith("openclaw.configHashParts="));
+    expect(hashParts).toContain('"docker.env.GEMINI_API_KEY"');
     const envFile = collectDockerFlagValues(createCall.args, "--env-file")[0];
     expect(envFile).toBeDefined();
     expect(fs.existsSync(envFile!)).toBe(false);

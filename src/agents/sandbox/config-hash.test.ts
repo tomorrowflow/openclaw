@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { computeSandboxBrowserConfigHash, computeSandboxConfigHash } from "./config-hash.js";
+import {
+  computeSandboxBrowserConfigHash,
+  computeSandboxConfigHash,
+  computeSandboxConfigHashParts,
+  diffSandboxConfigHashParts,
+} from "./config-hash.js";
 import { SANDBOX_DOCKER_CREATE_ARGS_EPOCH } from "./constants.js";
 import type { SandboxDockerConfig } from "./types.js";
 import { SANDBOX_MOUNT_FORMAT_VERSION } from "./workspace-mounts.js";
@@ -121,5 +126,39 @@ describe("sandbox config hashes", () => {
       browser: { ...shared.browser, cdpSourceRange: "172.22.0.1/32" },
     });
     expect(left).not.toBe(right);
+  });
+});
+
+describe("sandbox config hash parts", () => {
+  it("names the changed docker setting and env variable without exposing values", () => {
+    const before = computeSandboxConfigHashParts(createHashInput({ env: { TOKEN: "secret-a" } }));
+    const after = computeSandboxConfigHashParts(
+      createHashInput({ env: { TOKEN: "secret-b" }, network: "bridge" }),
+    );
+
+    expect(diffSandboxConfigHashParts(before, after)).toEqual([
+      "docker.env.TOKEN",
+      "docker.network",
+    ]);
+    expect(JSON.stringify(after)).not.toContain("secret-b");
+  });
+
+  it("names added and removed inputs", () => {
+    const before = computeSandboxConfigHashParts(createHashInput());
+    const after = computeSandboxConfigHashParts({
+      ...createHashInput({ env: { LANG: "C.UTF-8", EXTRA: "1" } }),
+      managedMounts: ["/src:/dst:ro"],
+    });
+
+    expect(diffSandboxConfigHashParts(before, after)).toEqual([
+      "docker.env.EXTRA",
+      "managedMounts",
+    ]);
+  });
+
+  it("reports unknown when the container has no recorded parts", () => {
+    expect(
+      diffSandboxConfigHashParts(undefined, computeSandboxConfigHashParts(createHashInput())),
+    ).toBe(undefined);
   });
 });

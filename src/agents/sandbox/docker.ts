@@ -3,7 +3,11 @@ import { withContainerEnvFile } from "../../infra/container-env-file.js";
 import { markOpenClawExecEnv } from "../../infra/openclaw-exec-env.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { AdmittedRunOperatorAuthority } from "../admitted-run-context.js";
-import { computeSandboxConfigHash } from "./config-hash.js";
+import {
+  computeSandboxConfigHash,
+  computeSandboxConfigHashParts,
+  diffSandboxConfigHashParts,
+} from "./config-hash.js";
 import { DEFAULT_SANDBOX_IMAGE, SANDBOX_DOCKER_CREATE_ARGS_EPOCH } from "./constants.js";
 import {
   DOCKER_SANDBOX_ENGINE,
@@ -94,6 +98,21 @@ export async function execDockerRaw(
 const log = createSubsystemLogger("docker");
 
 const HOT_CONTAINER_WINDOW_MS = 5 * 60 * 1000;
+const CONFIG_HASH_PARTS_LABEL = "openclaw.configHashParts";
+
+function parseSandboxConfigHashParts(raw: string | null | undefined) {
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, string>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export async function execDocker(args: string[], opts?: ExecContainerRawOptions) {
   return await execContainer(DOCKER_SANDBOX_ENGINE, args, opts);
@@ -298,6 +317,7 @@ async function createSandboxContainer(params: {
   agentWorkspaceDir: string;
   scopeKey: string;
   configHash?: string;
+  configHashParts?: Record<string, string>;
   mountPlan: SandboxMountPlan;
   podmanRuntimeInfo?: PodmanSandboxRuntimeInfo;
   onAllocated?: (id: string) => void;
@@ -325,6 +345,9 @@ async function createSandboxContainer(params: {
     cfg: createCfg,
     scopeKey,
     configHash: params.configHash,
+    labels: params.configHashParts
+      ? { [CONFIG_HASH_PARTS_LABEL]: JSON.stringify(params.configHashParts) }
+      : undefined,
     bindSourceRoots: [workspaceDir, params.agentWorkspaceDir],
   });
   if (podmanPolicy) {
@@ -463,7 +486,7 @@ async function ensureSandboxContainerLifecycle(
     tmpfs: params.cfg.docker.tmpfs,
     readOnlyResourceMounts: params.readOnlyResourceMounts,
   });
-  const genericConfigHash = computeSandboxConfigHash({
+  const hashInput = {
     docker: params.cfg.docker,
     dockerEnvPolicyEpoch: resolveDockerEnvPolicyEpoch(params.cfg.docker.env),
     workspaceAccess: params.cfg.workspaceAccess,
@@ -472,7 +495,9 @@ async function ensureSandboxContainerLifecycle(
     mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
     createArgsEpoch: SANDBOX_DOCKER_CREATE_ARGS_EPOCH,
     managedMounts: mountPlan.binds,
-  });
+  };
+  const genericConfigHash = computeSandboxConfigHash(hashInput);
+  const configHashParts = computeSandboxConfigHashParts(hashInput);
   const expectedHash =
     engine.id === "podman"
       ? resolvePodmanSandboxConfigHash({
@@ -517,10 +542,19 @@ async function ensureSandboxContainerLifecycle(
     }
     hashMismatch = !currentHash || currentHash !== expectedHash;
     if (hashMismatch) {
+      const changed = diffSandboxConfigHashParts(
+        parseSandboxConfigHashParts(
+          await readContainerLabel(engine, containerName, CONFIG_HASH_PARTS_LABEL),
+        ),
+        configHashParts,
+      );
       const lastUsedAtMs = registryEntry?.lastUsedAtMs;
       const isHot =
         running &&
         (typeof lastUsedAtMs !== "number" || now - lastUsedAtMs < HOT_CONTAINER_WINDOW_MS);
+      log.info(
+        `Sandbox config hash changed for ${containerName} (${isHot ? "recently used, kept" : "idle, replacing"}); changed inputs: ${changed ? changed.join(", ") || "none recorded" : "unknown (container predates hash parts)"}`,
+      );
       if (isHot) {
         const mountsMatch =
           params.requireCurrentConfig ||
@@ -585,6 +619,7 @@ async function ensureSandboxContainerLifecycle(
         agentWorkspaceDir: params.agentWorkspaceDir,
         scopeKey: params.scopeKey,
         configHash: expectedHash,
+        configHashParts,
         mountPlan,
         podmanRuntimeInfo,
         onAllocated: (id) => {
