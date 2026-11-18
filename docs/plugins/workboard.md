@@ -2116,6 +2116,11 @@ Diagnostics are computed from local card metadata. Built-in checks flag:
 | `orphaned_session`          | `running` card with a `sessionKey` but no `execution` metadata.                |
 | `archived_but_active`       | Archived card remains in any non-`done` lifecycle status.                      |
 
+"Not updated" counts card changes other than diagnostics. A diagnostics refresh
+(the Control UI runs one on each Workboard load) writes a card only when its
+findings change, and records that change as a `diagnostic` event. A finding's
+`lastSeenAt` and `count` move only when the finding itself changes.
+
 ## Permissions
 
 Gateway RPC methods live under `workboard.*`. Sessions board methods use the same
