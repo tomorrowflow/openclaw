@@ -118,14 +118,17 @@ response remains authoritative even if it contains no visible models; HTTP
 `401` and `403` return an empty catalog rather than exposing fallback models.
 
 <Note>
-The current bundled harness is `@openai/codex` `0.160.0`. A `model/list`
-check against that app-server in an isolated, unauthenticated Codex home returned
-these visible bundled catalog entries on October 2, 2026:
+The current bundled harness is `@openai/codex` `0.169.1`. Its bundled
+`model/list` catalog (`codex-rs/models-manager/models.json` at `rust-v0.169.1`)
+contains these visible entries:
 
 | Model id        | Input modalities | Reasoning efforts                    | Default effort |
 | --------------- | ---------------- | ------------------------------------ | -------------- |
-| `gpt-6.1-sol`   | text, image      | low, medium, high, xhigh, max, ultra | low            |
+| `gpt-6.2-sol`   | text, image      | low, medium, high, xhigh, max, ultra | low            |
+| `gpt-6.2-astra` | text, image      | low, medium, high, xhigh, max, ultra | low            |
 | `gpt-6-astra`   | text, image      | low, medium, high, xhigh, max, ultra | low            |
+| `gpt-6.1-sol`   | text, image      | low, medium, high, xhigh, max, ultra | low            |
+| `gpt-6.1-terra` | text, image      | low, medium, high, xhigh, max, ultra | low            |
 | `gpt-6-sol`     | text, image      | low, medium, high, xhigh, max, ultra | medium         |
 | `gpt-6-luna`    | text, image      | low, medium, high, xhigh, max        | medium         |
 | `gpt-5.6-sol`   | text, image      | low, medium, high, xhigh, max, ultra | low            |
@@ -133,7 +136,7 @@ these visible bundled catalog entries on October 2, 2026:
 | `gpt-5.6-luna`  | text, image      | low, medium, high, xhigh, max        | medium         |
 | `gpt-5.5`       | text, image      | low, medium, high, xhigh             | medium         |
 
-The `gpt-6.1-sol` entry also advertises the `priority` service tier as Fast. This bundled
+Every visible entry advertises the `priority` service tier as Fast. This bundled
 snapshot does not establish account access: authenticated catalogs can differ,
 and native discovery still requires a current account. Run `/codex models`
 after starting or upgrading the gateway to inspect the actual public picker

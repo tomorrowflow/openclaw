@@ -202,6 +202,13 @@ describe("readCodexTurnCompletedNotification", () => {
       },
     })?.turn;
 
-    expect(turn?.items[0]).toEqual({ id: "item-1", type: "plan", text: "ship it" });
+    // startedAtMs/completedAtMs are shared ThreadItem properties (0.169+), not branch defaults.
+    expect(turn?.items[0]).toEqual({
+      id: "item-1",
+      type: "plan",
+      text: "ship it",
+      startedAtMs: null,
+      completedAtMs: null,
+    });
   });
 });
