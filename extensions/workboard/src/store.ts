@@ -21,10 +21,8 @@ import {
   cardParentIds,
   cardRunId,
   cardSessionKey,
-  computeCardDiagnostics,
   isDependencyPromotableStatus,
   latestRunningAttempt,
-  mergeDiagnostics,
   retryBudgetExhausted,
   shouldSkipPersistedLifecycleStatusUpdate,
   shouldSyncWorkboardLifecycleStatus,
@@ -35,6 +33,11 @@ import {
   secondsToDurationMs,
   workboardClassRung,
 } from "./store-constants.js";
+import {
+  computeCardDiagnostics,
+  diagnosticsChanged,
+  mergeDiagnostics,
+} from "./store-diagnostics.js";
 import type {
   WorkboardBulkInput,
   WorkboardDiagnosticsResult,
@@ -653,7 +656,8 @@ export class WorkboardStore extends WorkboardNodeProbeStore {
             current.metadata?.diagnostics,
             computeCardDiagnostics(current, now),
           );
-          if (diagnostics.length === 0 && !current.metadata?.diagnostics?.length) {
+          // Control UI loads refresh every card; re-observing a finding is no card change.
+          if (!diagnosticsChanged(current.metadata?.diagnostics, diagnostics)) {
             return undefined;
           }
           return { metadata: { ...current.metadata, diagnostics } };
