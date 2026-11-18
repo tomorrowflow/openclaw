@@ -433,6 +433,10 @@ export function readCard(
     sessionKey: stringValue(row, "session_key"),
     runId: stringValue(row, "run_id"),
     sourceUrl: stringValue(row, "source_url"),
+    // SAFETY: insertCard persists a normalized WorkboardCardKind unchanged.
+    kind: stringValue(row, "kind") as WorkboardCard["kind"],
+    release: numberValue(row, "release"),
+    seq: numberValue(row, "seq"),
     execution,
     startedAt: numberValue(row, "started_at"),
     completedAt: numberValue(row, "completed_at"),

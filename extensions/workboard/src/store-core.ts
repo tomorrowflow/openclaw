@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type {
   WorkboardCard,
@@ -16,6 +16,7 @@ import { assertAgentMayMoveCard } from "./node-ticket-probe.js";
 import { withImportedNodeTicketMove } from "./node-ticket.js";
 import type { PersistedWorkboardCard } from "./persistence-types.js";
 import { reviewVerdictOf, withVerdictSession } from "./review-readiness.js";
+import { sessionCaptureCardId } from "./session-capture-id.js";
 import { normalizeAutomationPatch, normalizeCardAutomation } from "./store-automation.js";
 import { WorkboardBoardStore } from "./store-boards.js";
 import {
@@ -29,6 +30,7 @@ import {
   updateEvent,
   appendEvent,
 } from "./store-card-helpers.js";
+import { newCardIdentity, updatedCardIdentity } from "./store-card-number.js";
 import {
   MAX_CARD_COMMENTS,
   MAX_CARD_WORKER_LOGS,
@@ -62,7 +64,6 @@ import {
   normalizeStringList,
   normalizeTemplateId,
   normalizeTimestamp,
-  normalizeTitle,
   syncExecutionSessionKey,
 } from "./store-normalizers.js";
 import { readCards } from "./store-read.js";
@@ -310,6 +311,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       syncExecutionAttemptMetadata(metadata, execution, now),
     );
     const boardId = syncedMetadata.automation?.boardId ?? "default";
+    const identity = await newCardIdentity(this, { cards, boardId, input, probe: options.probe });
     const position = Number.isFinite(normalizedPosition)
       ? normalizedPosition
       : Math.max(
@@ -320,7 +322,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
         ) + POSITION_STEP;
     let card: WorkboardCard = {
       id: options.cardId ?? randomUUID(),
-      title: normalizeTitle(input.title),
+      ...identity,
       status,
       priority: normalizePriority(input.priority, "normal"),
       labels: normalizeCappedStringList(input.labels, "labels"),
@@ -394,16 +396,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
         });
         return restored.card;
       }
-      const digest = createHash("sha256")
-        .update("openclaw.workboard.session-capture.v1\0")
-        .update(sessionKey)
-        .digest();
-      // RFC 9562 version 8 keeps the documented UUID-shaped card id while the
-      // existing primary key becomes the cross-process session identity.
-      digest.writeUInt8((digest.readUInt8(6) & 0x0f) | 0x80, 6);
-      digest.writeUInt8((digest.readUInt8(8) & 0x3f) | 0x80, 8);
-      const hex = digest.toString("hex", 0, 16);
-      const cardId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+      const cardId = sessionCaptureCardId(sessionKey);
       const winner = await this.createDirect({ ...input, boardId, parents: undefined }, undefined, {
         cardId,
         insertIfAbsent: true,
@@ -492,10 +485,10 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     if (automationPatch) {
       metadata = trimMetadataToBudget({ ...metadata, ...automationPatch }, options);
     }
+    const identity = await updatedCardIdentity(this, existing, effectivePatch);
     let next = definedFields<WorkboardCard>({
       ...existing,
-      title:
-        effectivePatch.title === undefined ? existing.title : normalizeTitle(effectivePatch.title),
+      ...identity,
       notes:
         effectivePatch.notes === undefined ? existing.notes : normalizeNotes(effectivePatch.notes),
       status,

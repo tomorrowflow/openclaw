@@ -100,6 +100,7 @@ function createDefaultState(): WorkboardUiState {
     query: "",
     searchOpen: false,
     priorityFilter: new Set(),
+    kindFilter: new Set(),
     statusFilter: new Set(),
     attentionFilter: new Set(),
     donePeriod: "all",

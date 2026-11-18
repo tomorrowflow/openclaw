@@ -1,4 +1,8 @@
-import { WORKBOARD_STATUSES, type WorkboardCard } from "@openclaw/workboard-contract";
+import {
+  WORKBOARD_CARD_KINDS,
+  WORKBOARD_STATUSES,
+  type WorkboardCard,
+} from "@openclaw/workboard-contract";
 import { jsonResult, readStringArrayParam, readStringParam } from "openclaw/plugin-sdk/core";
 import { resolveIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import type { AnyAgentTool, OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
@@ -31,6 +35,7 @@ function summarizeCard(card: WorkboardCard) {
     status: card.status,
     priority: card.priority,
     labels: card.labels,
+    kind: card.kind ?? "task",
     agentId: card.agentId,
     tenant: card.metadata?.automation?.tenant,
     boardId: card.metadata?.automation?.boardId ?? "default",
@@ -209,6 +214,22 @@ export function createWorkboardTools(params: {
         status: Type.Optional(Type.String({ description: "Initial status." })),
         priority: Type.Optional(Type.String({ description: "low, normal, high, or urgent." })),
         labels: Type.Optional(Type.Array(Type.String(), { description: "Card labels." })),
+        kind: Type.Optional(
+          Type.Union(
+            WORKBOARD_CARD_KINDS.map((kind) => Type.Literal(kind)),
+            {
+              description:
+                "What the card is for; default task. A spec on a board with a key opens the next release.",
+            },
+          ),
+        ),
+        seq: Type.Optional(
+          Type.Integer({
+            minimum: 0,
+            description:
+              "On a board with a key: this card's number in the current release, e.g. a spec ticket's file number. Default: the next free number.",
+          }),
+        ),
         agentId: Type.Optional(Type.String({ description: "Assigned agent id." })),
         parents: Type.Optional(Type.Array(Type.String(), { description: "Parent card ids." })),
         token: Type.Optional(Type.String({ description: "Claim token for claimed parent cards." })),

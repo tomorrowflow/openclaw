@@ -13,10 +13,12 @@ import {
 import {
   isValidWorkboardBoardId,
   normalizeWorkboardSessionsBoardSpec,
+  WORKBOARD_CARD_KINDS,
   WORKBOARD_PRIORITIES,
   WORKBOARD_STATUSES,
   type WorkboardBoardSummary,
   type WorkboardCard,
+  type WorkboardCardKind,
   type WorkboardCardStage,
   type WorkboardPriority,
   type WorkboardStatus,
@@ -291,6 +293,12 @@ function normalizeCard(value: unknown): WorkboardCard | null {
     position: typeof value.position === "number" ? value.position : 0,
     createdAt: typeof value.createdAt === "number" ? value.createdAt : 0,
     updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : 0,
+    ...(value.kind !== "task" && WORKBOARD_CARD_KINDS.includes(value.kind as WorkboardCardKind)
+      ? { kind: value.kind as WorkboardCardKind }
+      : {}),
+    ...(Number.isInteger(value.release) && Number.isInteger(value.seq)
+      ? { release: value.release as number, seq: value.seq as number }
+      : {}),
     ...(typeof value.notes === "string" ? { notes: value.notes } : {}),
     ...(typeof value.agentId === "string" ? { agentId: value.agentId } : {}),
     ...(typeof value.sessionKey === "string" ? { sessionKey: value.sessionKey } : {}),

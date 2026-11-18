@@ -20,6 +20,7 @@ import {
 import {
   CardAlertView,
   CardUpdatedTime,
+  CardKind,
   CardPriority,
   CardMeta,
   CardCounts,
@@ -235,6 +236,7 @@ export function WorkboardCardView(input: {
                   ) : null}
                 </div>
               ) : null}
+              <CardKind card={input.card} />
               <CardQueued card={input.card} />
               {action().archived ? (
                 <span class="workboard-card__archived">{t("workboard.archived")}</span>
@@ -279,6 +281,7 @@ export function WorkboardCardView(input: {
         selected() ? "workboard-card--selected" : "",
         widget() ? "workboard-card--widget" : "workboard-card--openable",
       ]}
+      data-kind={input.card.kind}
       role={widget() ? undefined : "button"}
       tabindex={widget() ? undefined : "0"}
       aria-pressed={selectionMode() ? (selected() ? "true" : "false") : undefined}
@@ -362,6 +365,7 @@ export function WorkboardCardView(input: {
       ) : (
         <>
           {" "}
+          <CardKind card={input.card} />
           <header class="workboard-card__title">
             <h3 class="workboard-truncate-two" title={input.card.title}>
               {input.card.title}

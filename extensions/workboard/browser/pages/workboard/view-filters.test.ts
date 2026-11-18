@@ -77,6 +77,38 @@ describe("WorkboardView", () => {
     expect(container.querySelector(".workboard-board")?.textContent).toContain("Done card");
   });
 
+  it("names every kind but a task on its card and filters the board by kind", () => {
+    const { state, container, renderView } = createWorkboardView();
+    state.cards = [
+      createWorkboardCard({ id: "task", title: "[LIN-2.01] Case data", status: "todo" }),
+      createWorkboardCard({ id: "proto", title: "[LIN-2.03] Screens", kind: "prototype" }),
+      createWorkboardCard({ id: "bug", title: "[LIN-2.14] Upload drops a page", kind: "bug" }),
+    ];
+    renderView();
+    const board = () => expectDefined(container.querySelector(".workboard-board"), "board");
+    expect(
+      [...board().querySelectorAll(".workboard-card__kind")].map((chip) => chip.textContent),
+    ).toEqual(["Prototype", "Bug"]);
+    expect(board().querySelector('[data-kind="prototype"]')?.textContent).toContain("Screens");
+
+    const taskOption = expectDefined(
+      [
+        ...container.querySelectorAll<HTMLLabelElement>(
+          '[role="group"][aria-label="Kind"] .workboard-filter-option',
+        ),
+      ].find((option) => option.textContent?.includes("Task")),
+      "Task kind option",
+    );
+    taskOption.querySelector("input")?.click();
+    renderView();
+    expect(state.kindFilter).toEqual(new Set(["task"]));
+    expect(board().textContent).toContain("Case data");
+    expect(board().textContent).not.toContain("Screens");
+    requireButton(container, "Remove filter: Kind: Task").click();
+    renderView();
+    expect(board().textContent).toContain("Upload drops a page");
+  });
+
   it("keeps zero-result status filters selectable and clearable", () => {
     const { state, container, renderView } = createWorkboardView();
     state.cards = [createWorkboardCard({ id: "ready", title: "Ready card", status: "ready" })];

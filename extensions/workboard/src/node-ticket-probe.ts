@@ -54,6 +54,7 @@ export function nodeProbeCreate(
       ...(notes ? { notes } : {}),
       status: "todo",
       priority: source.priority,
+      ...(source.kind ? { kind: source.kind } : {}),
       ...(source.agentId ? { agentId: source.agentId } : {}),
       // A trial label marks the source's own harness, which the arm replaces.
       labels: [

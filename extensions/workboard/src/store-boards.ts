@@ -32,7 +32,12 @@ import type {
   WorkboardWriteAuthority,
 } from "./persistence-types.js";
 import { changesPreviewSecrets, normalizeBoardMetadata } from "./store-board-normalizers.js";
-import { findWorkboardTargetRoute, workboardRouteTargets } from "./store-constants.js";
+import { normalizeCardKind } from "./store-card-number.js";
+import {
+  findWorkboardTargetRoute,
+  workboardRouteLabels,
+  workboardRouteTargets,
+} from "./store-constants.js";
 import type {
   WorkboardBoardInput,
   WorkboardLinkedCreateInput,
@@ -211,6 +216,11 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
     };
   }
 
+  /** The board's ID key; its cards are numbered only while it has one. */
+  async boardKey(boardId: string): Promise<string | undefined> {
+    return (await this.boardOrchestration(boardId))?.key;
+  }
+
   /** A board's live orchestration settings, read where a rung or verifier decision is made. */
   async boardOrchestration(boardId: string): Promise<WorkboardOrchestrationSettings | undefined> {
     return (await this.boardStore.lookup(boardId))?.board.orchestration;
@@ -262,7 +272,10 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
     const agentId = requestedAgentId ?? orchestration?.defaultAssignee;
     const requestedAutomation = isRecord(input.metadata) ? input.metadata.automation : undefined;
     const workspace = automation?.workspace;
-    const labels = normalizeCappedStringList(input.labels, "labels");
+    const labels = workboardRouteLabels({
+      labels: normalizeCappedStringList(input.labels, "labels"),
+      kind: normalizeCardKind(input.kind),
+    });
     const target =
       (isRecord(requestedAutomation) && Object.hasOwn(requestedAutomation, "target")) ||
       (workspace && workspace.kind !== "scratch")

@@ -1,9 +1,11 @@
 // Control UI Workboard public surface.
 export {
+  WORKBOARD_CARD_KINDS,
   WORKBOARD_PRIORITIES,
   WORKBOARD_CHANGED_EVENT,
   type WorkboardBoardSummary,
   type WorkboardCard,
+  type WorkboardCardKind,
   type WorkboardCardStage,
   type WorkboardDependencyState,
   type WorkboardEvent,

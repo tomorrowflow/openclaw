@@ -12,6 +12,7 @@ import {
   filterWorkboardCards,
   workboardCardMatchesHealthKey,
   workboardHasActiveWrites,
+  WORKBOARD_CARD_KINDS,
   WORKBOARD_PRIORITIES,
   type WorkboardCard,
   type WorkboardStatus,
@@ -137,7 +138,7 @@ export function WorkboardView(props: WorkboardProps & { onRefresh: () => void })
       .filter((card) => matchesWorkboardCardScope(props, card))
       .filter((card) => matchesCardQuery(card, current.query));
     const now = Date.now();
-    const cardsForFilters = (ignore?: "status" | "priority" | "attention") =>
+    const cardsForFilters = (ignore?: "status" | "priority" | "kind" | "attention") =>
       filterWorkboardCards({
         cards: scopedCards,
         filters: current,
@@ -161,6 +162,13 @@ export function WorkboardView(props: WorkboardProps & { onRefresh: () => void })
       label: formatPriorityLabel(priority),
       icon: () => <PriorityIcon priority={priority} />,
       count: priorityCards.filter((card) => card.priority === priority).length,
+    }));
+    const kindCards = cardsForFilters("kind");
+    const kindOptions = WORKBOARD_CARD_KINDS.map((kind) => ({
+      value: kind,
+      label: t(`workboard.kind.${kind}`),
+      icon: () => <span class="workboard-kind-swatch" data-kind={kind} aria-hidden="true" />,
+      count: kindCards.filter((card) => (card.kind ?? "task") === kind).length,
     }));
     const attentionCards = cardsForFilters("attention");
     const attentionOptions = (["stale", "missingProof"] as const).map((key) => ({
@@ -197,6 +205,13 @@ export function WorkboardView(props: WorkboardProps & { onRefresh: () => void })
           true,
         ),
         clear: () => state().priorityFilter.clear(),
+      });
+    }
+    if (current.kindFilter.size) {
+      activeFilters.push({
+        id: "kind",
+        label: multiFilterLabel(t("workboard.fieldKind"), current.kindFilter, kindOptions),
+        clear: () => state().kindFilter.clear(),
       });
     }
     if (current.attentionFilter.size) {
@@ -282,6 +297,7 @@ export function WorkboardView(props: WorkboardProps & { onRefresh: () => void })
       byStatus,
       visibleStatuses,
       priorityOptions,
+      kindOptions,
       attentionOptions,
       agentFilterOptions,
       activeFilters,
@@ -314,6 +330,7 @@ export function WorkboardView(props: WorkboardProps & { onRefresh: () => void })
     current.searchOpen = false;
     current.statusFilter.clear();
     current.priorityFilter.clear();
+    current.kindFilter.clear();
     current.attentionFilter.clear();
     current.donePeriod = "all";
     current.showArchived = false;
@@ -492,6 +509,12 @@ export function WorkboardView(props: WorkboardProps & { onRefresh: () => void })
                   label={t("workboard.fieldPriority")}
                   values={state().priorityFilter}
                   options={view().priorityOptions}
+                  onChange={() => props.onRequestUpdate?.()}
+                />
+                <MultiFilter
+                  label={t("workboard.fieldKind")}
+                  values={state().kindFilter}
+                  options={view().kindOptions}
                   onChange={() => props.onRequestUpdate?.()}
                 />
                 <MultiFilter

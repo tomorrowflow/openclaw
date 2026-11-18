@@ -5395,3 +5395,50 @@ workboard-inline-text {
   color: var(--muted);
   font-size: 12px;
 }
+
+/* Card kinds: one fixed color each on every board; a task stays neutral. */
+[data-kind="spec"] {
+  --workboard-kind-color: var(--info);
+}
+
+[data-kind="prototype"] {
+  --workboard-kind-color: var(--accent-2);
+}
+
+[data-kind="research"] {
+  --workboard-kind-color: var(--warn);
+}
+
+[data-kind="bug"] {
+  --workboard-kind-color: var(--danger);
+}
+
+.workboard-card[data-kind]::before {
+  content: "";
+  position: absolute;
+  inset: 10px auto 10px 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--workboard-kind-color);
+}
+
+.workboard-card__kind {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--workboard-kind-color);
+  background: color-mix(in srgb, var(--workboard-kind-color) 14%, transparent);
+}
+
+.workboard-kind-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--workboard-kind-color, var(--muted));
+}

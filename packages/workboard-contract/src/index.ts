@@ -1,4 +1,5 @@
 import type { WorkboardCardSession } from "./card-sessions.js";
+import type { WorkboardCardKind, WorkboardPriority, WorkboardStatus } from "./card-vocabulary.js";
 import type { WorkboardBoardFeed, WorkboardHealthFeed } from "./feed.js";
 import type { WorkboardNodePreview, WorkboardPreviewSettings } from "./preview.js";
 import type { WorkboardProbe } from "./probes.js";
@@ -13,6 +14,7 @@ import type {
   WorkboardVisualVerdict,
 } from "./verification.js";
 
+export * from "./card-vocabulary.js";
 export type * from "./preview.js";
 export type * from "./verification.js";
 export type * from "./card-sessions.js";
@@ -28,19 +30,6 @@ export type WorkboardDatabasePortApi<Database, Input> = {
   WorkboardPortSchemaError: new (message?: string) => Error;
 };
 
-export const WORKBOARD_STATUSES = [
-  "triage",
-  "backlog",
-  "todo",
-  "scheduled",
-  "ready",
-  "running",
-  "review",
-  "blocked",
-  "done",
-] as const;
-
-export const WORKBOARD_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 /** Built-in launch choices. Persisted execution engines remain an open runtime identifier. */
 export const WORKBOARD_EXECUTION_ENGINES = ["codex", "claude"] as const;
 export const WORKBOARD_EXECUTION_MODES = ["autonomous", "manual"] as const;
@@ -115,8 +104,6 @@ export type WorkboardDeleteResult = {
   referenceUpdates?: Array<{ id: string; previousUpdatedAt: number; updatedAt: number }>;
 };
 
-export type WorkboardStatus = (typeof WORKBOARD_STATUSES)[number];
-export type WorkboardPriority = (typeof WORKBOARD_PRIORITIES)[number];
 export type WorkboardExecutionEngine = string;
 export type WorkboardExecutionMode = (typeof WORKBOARD_EXECUTION_MODES)[number];
 export type WorkboardExecutionStatus = (typeof WORKBOARD_EXECUTION_STATUSES)[number];
@@ -820,6 +807,12 @@ export type WorkboardOrchestrationSettings = {
   defaultAssignee?: string;
   orchestratorProfile?: string;
   /**
+   * The board's ID key (`LIN`): new cards are numbered `<key>-<release>.<NN>`
+   * and carry that ID in their title. A spec card opens the next release as
+   * `.00`; other cards continue the highest release. Operator-set only.
+   */
+  key?: string;
+  /**
    * Project boards name their node target once: new cards on the board copy
    * it unless they bring their own target, a non-scratch workspace, or a
    * linked session. Operator-set only; agent board tools cannot write it.
@@ -966,6 +959,11 @@ export type WorkboardCard = {
   status: WorkboardStatus;
   priority: WorkboardPriority;
   labels: string[];
+  /** Absent on a task. Changeable until the card first starts. */
+  kind?: WorkboardCardKind;
+  /** The board-assigned ID `<key>-<release>.<seq>`; set only on a board with a key. */
+  release?: number;
+  seq?: number;
   agentId?: string;
   sessionKey?: string;
   runId?: string;

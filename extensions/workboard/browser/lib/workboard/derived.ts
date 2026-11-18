@@ -46,18 +46,21 @@ export function filterWorkboardCards(params: {
   cards: readonly WorkboardCard[];
   filters: Pick<
     WorkboardUiState,
-    "statusFilter" | "priorityFilter" | "attentionFilter" | "donePeriod"
+    "statusFilter" | "priorityFilter" | "kindFilter" | "attentionFilter" | "donePeriod"
   >;
   sessions: readonly GatewaySessionRow[];
   now: number;
-  ignore?: "status" | "priority" | "attention";
+  ignore?: "status" | "priority" | "kind" | "attention";
 }): WorkboardCard[] {
-  const { statusFilter, priorityFilter, attentionFilter, donePeriod } = params.filters;
+  const { statusFilter, priorityFilter, kindFilter, attentionFilter, donePeriod } = params.filters;
   return params.cards.filter((card) => {
     if (params.ignore !== "status" && statusFilter.size && !statusFilter.has(card.status)) {
       return false;
     }
     if (params.ignore !== "priority" && priorityFilter.size && !priorityFilter.has(card.priority)) {
+      return false;
+    }
+    if (params.ignore !== "kind" && kindFilter.size && !kindFilter.has(card.kind ?? "task")) {
       return false;
     }
     if (

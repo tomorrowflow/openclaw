@@ -374,6 +374,33 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     );
   });
 
+  it("caps a kind:spec route by the cards' kind, also in the claim itself", async () => {
+    const store = createWorkboardSqliteTestStore();
+    store.nodeTicketConcurrency = 3;
+    await store.upsertBoard({
+      id: "app",
+      orchestration: {
+        defaultTarget: TARGET,
+        defaultAssignee: "dev",
+        targetRoutes: [{ labels: ["kind:spec"], target: TARGET, maxConcurrent: 1 }],
+      },
+    });
+    const spec = async (title: string) =>
+      await store.create({ title, boardId: "app", status: "ready", kind: "spec" });
+    const first = await spec("Define the release");
+    const second = await spec("Define the next release");
+    const started = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets: createNodeGateway(),
+      options: { now: Date.now(), maxStarts: 3 },
+    });
+    expect(started.started.map((run) => run.cardId)).toEqual([first.id]);
+    await expect(store.claim(second.id, { ownerId: "dev" })).rejects.toThrow(
+      "The kind:spec route's 1 node ticket slot is in use",
+    );
+  });
+
   it("starts a pooled route's tickets on its first node with a free slot, and keeps a started ticket on its node", async () => {
     const store = createWorkboardSqliteTestStore();
     store.nodeTicketConcurrency = 4;

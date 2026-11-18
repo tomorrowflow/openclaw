@@ -16,6 +16,10 @@ type WorkboardCardInput = {
   status?: unknown;
   priority?: unknown;
   labels?: unknown;
+  kind?: unknown;
+  /** Operator-placed number on a board with a key; see `assignCardNumber`. */
+  release?: unknown;
+  seq?: unknown;
   agentId?: unknown;
   sessionKey?: unknown;
   runId?: unknown;

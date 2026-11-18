@@ -155,6 +155,7 @@ class WorkboardSqliteCardStore implements SyncStore<WorkboardCardStore> {
           "automation_json",
           "execution_id",
           "execution_status",
+          "kind",
         ])
         .where("id", "!=", key)
         .where((eb) => eb.or([eb("archived_at", "is", null), eb("archived_at", "=", 0)]))
@@ -176,6 +177,8 @@ class WorkboardSqliteCardStore implements SyncStore<WorkboardCardStore> {
             // SAFETY: insertCard persists WorkboardCard.status; this keeps readCard's required-string boundary.
             status: requiredString(row, "status") as WorkboardCard["status"],
             agentId: stringValue(row, "agent_id"),
+            // SAFETY: insertCard persists a normalized WorkboardCardKind; routes match it as a label.
+            kind: stringValue(row, "kind") as WorkboardCard["kind"],
             labels:
               route &&
               route.boardId === boardId &&

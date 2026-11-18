@@ -183,6 +183,9 @@ CREATE TABLE "workboard_cards" (
   "stale_json" text COLLATE "C",
   "lifecycle_status_source_updated_at" bigint,
   "failure_count" bigint,
+  "kind" text COLLATE "C",
+  "release" bigint,
+  "seq" bigint,
   PRIMARY KEY ("id")
 );
 
