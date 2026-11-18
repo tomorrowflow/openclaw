@@ -136,6 +136,7 @@ export default definePluginEntry({
           maxEntries: 5_000,
         }),
       channel: api.runtime.channel,
+      subagent: api.runtime.subagent,
       // Identity and send reads only read the snapshot; their SDK types predate DeepReadonly.
       config: () => api.runtime.config.current() as OpenClawConfig,
       onOperatorComment: automationNudge.nudge,

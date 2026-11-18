@@ -2049,6 +2049,7 @@ board stays the record; the chat is a copy.
       to: "1234567890", // the parent text channel
       accountId: "default", // optional
       operatorId: "9876543210", // your chat user id, optional
+      agentId: "chef", // the agent that answers your replies, optional
     },
   },
 }
@@ -2072,6 +2073,17 @@ board stays the record; the chat is a copy.
   the card and wake the board's automation job like a comment from the
   Control UI; the feed does not post them back. Other people's replies stay in
   the thread only.
+- With `agentId`, that agent answers each of your replies in the thread. Workboard
+  runs it in one session per card (`agent:<agentId>:workboard-thread:<cardId>`)
+  with a short card summary and your unanswered messages, and shows the channel's
+  typing indicator meanwhile. Workboard records the agent's final reply as its
+  card comment, which the feed posts under its name; this works on a card
+  another agent has claimed for its round. The agent acts on clear instructions
+  with its own Workboard tools, moves a card to done only after an accept or
+  your explicit say-so, never starts cards, and leaves a running round alone. A card gets one turn at a
+  time; replies sent meanwhile are answered together by the next turn. A turn that
+  fails, or ends without a comment within 5 minutes, posts one line saying why and
+  counts as a feed failure. The session is deleted when the card is archived.
 - Posting is best effort: a failed post is retried once, then counted in
   `workboard.health` `feed`, and never replayed.
 - On Discord the thread is a conversation binding owned by Workboard, which

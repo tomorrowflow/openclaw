@@ -187,7 +187,7 @@ function normalizeBoardFeed(value: unknown): WorkboardBoardFeed | undefined {
     return undefined;
   }
   if (!isRecord(value)) {
-    throw new Error("feed must be { channel, to, accountId?, operatorId? } or null.");
+    throw new Error("feed must be { channel, to, accountId?, operatorId?, agentId? } or null.");
   }
   const channel = normalizeBoundedString(value.channel, undefined, 40, "feed channel");
   const to = normalizeBoundedString(value.to, undefined, 200, "feed to");
@@ -196,11 +196,13 @@ function normalizeBoardFeed(value: unknown): WorkboardBoardFeed | undefined {
   }
   const accountId = normalizeBoundedString(value.accountId, undefined, 120, "feed accountId");
   const operatorId = normalizeBoundedString(value.operatorId, undefined, 120, "feed operatorId");
+  const agentId = normalizeBoundedString(value.agentId, undefined, 120, "feed agentId");
   return {
     channel,
     to,
     ...(accountId ? { accountId } : {}),
     ...(operatorId ? { operatorId } : {}),
+    ...(agentId ? { agentId } : {}),
   };
 }
 
