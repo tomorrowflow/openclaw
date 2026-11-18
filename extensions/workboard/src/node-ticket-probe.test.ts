@@ -161,6 +161,8 @@ describe("node ticket probes", () => {
     expect(onReview).toHaveBeenCalledOnce();
     const base = (await store.get(card.id))?.metadata?.automation?.target?.worktree?.baseCommit;
     git(repos.origin, "commit", "-q", "--allow-empty", "-m", "main moved on");
+    // A probe is a copy of its source, never a numbered card of its own.
+    await store.upsertBoard({ id: "default", orchestration: { key: "WB" } });
 
     const { card: probe, created } = await store.createNodeProbe(card.id, {
       arm: "poteto",
@@ -169,6 +171,7 @@ describe("node ticket probes", () => {
     });
 
     expect(created).toBe(true);
+    expect(probe.release).toBeUndefined();
     expect(probe).toMatchObject({
       title: `[PROBE:poteto] ${card.title}`,
       status: "todo",

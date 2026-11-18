@@ -81,6 +81,16 @@ describe("card numbers", () => {
     );
   });
 
+  it("measures the title limit on the text, so the ID never makes a title too long", async () => {
+    const { store, create } = await keyedBoard();
+    const text = "x".repeat(180);
+    const card = await create({ title: text });
+    expect(card.title).toBe(`[LIN-1.01] ${text}`);
+    const edited = await store.update(card.id, { title: `${card.title.slice(0, -1)}y` });
+    expect(edited.title).toBe(`[LIN-1.01] ${"x".repeat(179)}y`);
+    await expect(create({ title: "x".repeat(181) })).rejects.toThrow("180 characters");
+  });
+
   it("routes a card by its kind as the label kind:<kind>", async () => {
     const store = createWorkboardSqliteTestStore();
     const fable = { ...NODE_TARGET, model: "anthropic/claude-fable-5-2" };

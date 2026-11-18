@@ -9,7 +9,11 @@ import type { WorkboardCardPatch, WorkboardLinkedCreateInput } from "./store-inp
 import { normalizeTitle } from "./store-normalizers.js";
 
 type CardIdentity = Pick<WorkboardCard, "title" | "kind" | "release" | "seq">;
-type BoardKey = (boardId: string) => Promise<string | undefined>;
+/** The store as the numbering reads it: board keys and every card. */
+type CardNumberReader = {
+  boardKey(boardId: string): Promise<string | undefined>;
+  list(): Promise<readonly WorkboardCard[]>;
+};
 
 /** A task is stored without a kind; `undefined` keeps `fallback`. */
 export function normalizeCardKind(
@@ -34,9 +38,15 @@ export function cardRef(key: string, number: WorkboardCardNumber): string {
   return `${key}-${number.release}.${String(number.seq).padStart(2, "0")}`;
 }
 
-/** The title with the card's ID in front, replacing any `[...]` tag it already led with. */
-export function withRefTitle(title: string, ref: string): string {
-  return `[${ref}] ${title.replace(/^\[[^\]\n]{1,40}\]\s*/, "")}`;
+/**
+ * The title with the card's ID in front, replacing any `[...]` tag it led
+ * with. The length limit applies to the text, so the ID never pushes a title
+ * over it, and an edit that sends the prefixed title back is measured the same.
+ */
+export function withRefTitle(title: unknown, ref: string): string {
+  const text =
+    typeof title === "string" ? title.trim().replace(/^\[[^\]\n]{1,40}\]\s*/, "") : title;
+  return `[${ref}] ${normalizeTitle(text)}`;
 }
 
 function numberOption(value: unknown, field: string, min: number): number | undefined {
@@ -95,13 +105,13 @@ export function assignCardNumber(params: {
 async function boardCardNumber(params: {
   cards: readonly WorkboardCard[];
   boardId: string;
-  boardKey: BoardKey;
+  reader: CardNumberReader;
   kind: WorkboardCardKind | undefined;
   release?: unknown;
   seq?: unknown;
   cardId?: string;
 }): Promise<(WorkboardCardNumber & { key: string }) | undefined> {
-  const key = await params.boardKey(params.boardId);
+  const key = await params.reader.boardKey(params.boardId);
   if (!key) {
     if (params.release !== undefined || params.seq !== undefined) {
       throw new Error(`board ${params.boardId} has no key, so its cards are not numbered.`);
@@ -112,34 +122,41 @@ async function boardCardNumber(params: {
 }
 
 function identityOf(
-  title: string,
+  title: unknown,
   kind: WorkboardCardKind | undefined,
   number: (WorkboardCardNumber & { key?: string }) | undefined,
 ): CardIdentity {
   return {
-    title: number?.key ? withRefTitle(title, cardRef(number.key, number)) : title,
+    title: number?.key ? withRefTitle(title, cardRef(number.key, number)) : normalizeTitle(title),
     ...(kind ? { kind } : {}),
     ...(number ? { release: number.release, seq: number.seq } : {}),
   };
 }
 
-export async function newCardIdentity(params: {
-  cards: readonly WorkboardCard[];
-  boardId: string;
-  boardKey: BoardKey;
-  input: Pick<WorkboardLinkedCreateInput, "title" | "kind" | "release" | "seq">;
-}): Promise<CardIdentity> {
-  const kind = normalizeCardKind(params.input.kind);
-  const { cards, boardId, boardKey, input } = params;
+export async function newCardIdentity(
+  reader: CardNumberReader,
+  params: {
+    cards: readonly WorkboardCard[];
+    boardId: string;
+    input: Pick<WorkboardLinkedCreateInput, "title" | "kind" | "release" | "seq">;
+    /** A probe is a copy of a numbered card, not a card of its own release. */
+    probe?: unknown;
+  },
+): Promise<CardIdentity> {
+  const { cards, boardId, input } = params;
+  const kind = normalizeCardKind(input.kind);
+  if (params.probe) {
+    return identityOf(input.title, kind, undefined);
+  }
   const number = await boardCardNumber({
     cards,
     boardId,
-    boardKey,
+    reader,
     kind,
     release: input.release,
     seq: input.seq,
   });
-  return identityOf(normalizeTitle(input.title), kind, number);
+  return identityOf(input.title, kind, number);
 }
 
 /**
@@ -147,9 +164,9 @@ export async function newCardIdentity(params: {
  * starts. A numbered card keeps its ID in front of any new title.
  */
 export async function updatedCardIdentity(
+  reader: CardNumberReader,
   existing: WorkboardCard,
   patch: WorkboardCardPatch,
-  read: { boardKey: BoardKey; cards: () => Promise<readonly WorkboardCard[]> },
 ): Promise<CardIdentity> {
   const kind = normalizeCardKind(patch.kind, existing.kind);
   const renumber = patch.release !== undefined || patch.seq !== undefined;
@@ -166,18 +183,18 @@ export async function updatedCardIdentity(
   const boardId = cardBoardId(existing);
   const number = renumber
     ? await boardCardNumber({
-        cards: await read.cards(),
+        cards: await reader.list(),
         boardId,
-        boardKey: read.boardKey,
+        reader,
         kind,
         release: patch.release ?? existing.release,
         seq: patch.seq ?? existing.seq,
         cardId: existing.id,
       })
-    : kept && { ...kept, key: await read.boardKey(boardId) };
+    : kept && { ...kept, key: await reader.boardKey(boardId) };
   // Every field explicit: the patch spreads over the existing card, so an absent kind must clear it.
   return {
-    ...identityOf(normalizeTitle(patch.title ?? existing.title), kind, number),
+    ...identityOf(patch.title ?? existing.title, kind, number),
     kind,
     release: number?.release,
     seq: number?.seq,

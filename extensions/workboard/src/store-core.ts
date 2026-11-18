@@ -72,8 +72,6 @@ import { normalizeCappedStringList } from "./store-string-lists.js";
 import { normalizeBoundedString, normalizeRunId } from "./store-value-normalizers.js";
 
 export class WorkboardCoreStore extends WorkboardBoardStore {
-  private readonly boardKey = async (boardId: string) =>
-    (await this.boardOrchestration(boardId))?.key;
   private lastNotificationSequence = 0;
 
   async compensateWorkspaceMutation(before: WorkboardCard, after: WorkboardCard): Promise<void> {
@@ -313,7 +311,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       syncExecutionAttemptMetadata(metadata, execution, now),
     );
     const boardId = syncedMetadata.automation?.boardId ?? "default";
-    const identity = await newCardIdentity({ cards, boardId, boardKey: this.boardKey, input });
+    const identity = await newCardIdentity(this, { cards, boardId, input, probe: options.probe });
     const position = Number.isFinite(normalizedPosition)
       ? normalizedPosition
       : Math.max(
@@ -487,10 +485,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     if (automationPatch) {
       metadata = trimMetadataToBudget({ ...metadata, ...automationPatch }, options);
     }
-    const identity = await updatedCardIdentity(existing, effectivePatch, {
-      boardKey: this.boardKey,
-      cards: async () => await this.list(),
-    });
+    const identity = await updatedCardIdentity(this, existing, effectivePatch);
     let next = definedFields<WorkboardCard>({
       ...existing,
       ...identity,
