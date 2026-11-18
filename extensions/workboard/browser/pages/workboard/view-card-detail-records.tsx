@@ -433,9 +433,7 @@ function getDetailSections(card: WorkboardCard) {
         joinDetailParts(
           `${entry.severity}: ${formatUiExternalText(entry.title)}`,
           formatUiExternalText(entry.detail),
-          t("workboard.detailOccurrences", { count: String(entry.count) }),
           t("workboard.detailFirstSeen", { time: formatUpdatedTime(entry.firstSeenAt) }),
-          t("workboard.detailLastSeen", { time: formatUpdatedTime(entry.lastSeenAt) }),
         ),
       ),
     ],
