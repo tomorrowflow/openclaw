@@ -14,6 +14,7 @@ import type {
   PluginHookInboundClaimResult,
 } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginStateKeyedStore } from "openclaw/plugin-sdk/plugin-state-runtime";
+import { resolveFirstBoundAccountId } from "openclaw/plugin-sdk/routing";
 import type { OpenClawPluginService } from "../api.js";
 import {
   buildFeedAnswerMessage,
@@ -259,17 +260,26 @@ export function createWorkboardFeedService(params: {
     const lifetime = scheduler.signal;
     const sessionKey = feedAnswerSessionKey(agentId, cardId);
     const typing = new AbortController();
-    const typed = channel.outbound
-      .keepTyping({
-        cfg: params.config(),
+    const cfg = params.config();
+    const keepTyping = (accountId: string | undefined) =>
+      channel.outbound.keepTyping({
+        cfg,
         channel: feed.channel,
         to: feed.to,
-        ...(feed.accountId ? { accountId: feed.accountId } : {}),
+        ...(accountId ? { accountId } : {}),
         threadId,
         signal: AbortSignal.any([typing.signal, lifetime]),
-      })
-      // The indicator is decoration; the answer or the failure line still follows.
-      .catch(() => undefined);
+      });
+    // The agent's own bot types when one is bound to it on this channel, since
+    // a webhook persona cannot; the feed's bot types when that one cannot see
+    // the thread. The indicator is decoration: the answer or the failure line
+    // still follows.
+    const agentAccountId = resolveFirstBoundAccountId({ cfg, channelId: feed.channel, agentId });
+    const typed = (
+      agentAccountId && agentAccountId !== feed.accountId
+        ? keepTyping(agentAccountId).catch(() => keepTyping(feed.accountId))
+        : keepTyping(feed.accountId)
+    ).catch(() => undefined);
     try {
       const run = await subagent.run({
         assertCurrent: () => lifetime.throwIfAborted(),
