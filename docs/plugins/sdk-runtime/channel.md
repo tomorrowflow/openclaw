@@ -135,6 +135,30 @@ const binding = await api.runtime.channel.bindings.bindOwned({
   `{ handled: true }` for every message in the thread: an unhandled message gets
   the channel's "did not handle" notice instead of normal routing.
 
+## Typing indicator
+
+`api.runtime.channel.outbound.keepTyping(params)` shows a channel's typing
+indicator in a conversation (or a thread of it) until `params.signal` aborts,
+for work that runs outside a reply dispatch, such as a service answering in a
+thread it owns.
+
+```ts
+const stop = new AbortController();
+const typing = api.runtime.channel.outbound
+  .keepTyping({ cfg, channel: "discord", to: parentChannelId, threadId, signal: stop.signal })
+  .catch(() => undefined); // decoration: a missing indicator should not fail the work
+try {
+  await doTheWork();
+} finally {
+  stop.abort();
+  await typing;
+}
+```
+
+It refreshes the indicator every 8 seconds through the channel's guarded
+heartbeat typing. It resolves at once when the channel has no typing, and
+rejects on the first failed send.
+
 ## Awaited conversation binding mutations
 
 Import routing and service helpers from

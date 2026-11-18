@@ -53,6 +53,8 @@ export type WorkboardCardFeed = {
   claimedCommentIds?: string[];
   /** When opening the thread last failed; it is tried again after a while. */
   openFailedAt?: number;
+  /** The feed's agent has a session for this card, deleted when the card is archived. */
+  answerSession?: true;
 };
 
 const NEEDS_USER_LABEL = "needs:user";

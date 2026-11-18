@@ -54,6 +54,7 @@ import {
   setChannelConversationBindingMaxAgeBySessionKey,
   setChannelConversationBindingMaxAgeBySessionKeyAsync,
 } from "../../channels/plugins/conversation-bindings.js";
+import { keepChannelTyping } from "../../channels/plugins/outbound/keep-typing.js";
 import { loadChannelOutboundAdapter } from "../../channels/plugins/outbound/load.js";
 import { recordInboundSession } from "../../channels/session.js";
 import type {
@@ -261,6 +262,7 @@ export function createRuntimeChannel(options?: {
     },
     outbound: {
       loadAdapter: loadChannelOutboundAdapter,
+      keepTyping: keepChannelTyping,
     },
     // The registry binds these to the calling plugin's identity.
     bindings: {

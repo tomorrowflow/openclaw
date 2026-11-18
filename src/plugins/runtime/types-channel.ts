@@ -18,6 +18,7 @@ import type {
 } from "../../auto-reply/reply/mentions.types.js";
 import type { CreateReplyDispatcherWithTyping } from "../../auto-reply/reply/reply-dispatcher.runtime-types.js";
 import type { ChannelRuntimeContextRegistry } from "../../channels/plugins/channel-runtime-surface.types.js";
+import type { KeepChannelTypingParams } from "../../channels/plugins/outbound/keep-typing.js";
 import type { LoadChannelOutboundAdapter } from "../../channels/plugins/outbound/load.types.js";
 import type { ResolveMarkdownTableMode } from "../../config/markdown-tables.types.js";
 import type {
@@ -161,6 +162,12 @@ export type PluginRuntimeChannel = {
   };
   outbound: {
     loadAdapter: LoadChannelOutboundAdapter;
+    /**
+     * Shows the channel's typing indicator in `to` (and `threadId`) until
+     * `signal` aborts. Resolves when the channel has no typing; rejects on the
+     * first failed send.
+     */
+    keepTyping: (params: KeepChannelTypingParams) => Promise<void>;
   };
   /** Conversations bound to the calling plugin, so their inbound messages reach its `inbound_claim`. */
   bindings: {

@@ -516,6 +516,7 @@ export function createPluginRuntimeMock(overrides: PluginRuntimeMockOverrides = 
       },
       outbound: {
         loadAdapter: vi.fn<PluginRuntime["channel"]["outbound"]["loadAdapter"]>(),
+        keepTyping: vi.fn<PluginRuntime["channel"]["outbound"]["keepTyping"]>(async () => {}),
       },
       bindings: {
         bindOwned: vi.fn<PluginRuntime["channel"]["bindings"]["bindOwned"]>(),
