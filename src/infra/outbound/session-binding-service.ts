@@ -1,5 +1,6 @@
 import { uniqueValues } from "@openclaw/normalization-core/string-normalization";
 import { resolveSpawnThreadBindingPlacement } from "../../channels/conversation-resolution.js";
+import { wrapCurrentPluginInstance } from "../../plugins/plugin-instance-scope.js";
 import { warnPluginSdkDeprecation } from "../../plugins/sdk-deprecation.js";
 import { resolveGlobalMap } from "../../shared/global-singleton.js";
 import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-worker-context.js";
@@ -148,8 +149,10 @@ export function registerSessionBindingAdapter(adapter: SessionBindingAdapter): v
 }
 
 function registerAdapter(adapter: SessionBindingAdapter | SessionBindingAdapterV2): void {
+  // Callers bind from their own invocation (core, or another plugin's bindOwned);
+  // the channel's callbacks must still resolve the registering plugin's runtime slot.
   const normalizedAdapter: NativeCapableSessionBindingAdapter = {
-    ...adapter,
+    ...wrapCurrentPluginInstance(adapter),
     ...normalizeConversationRef({
       channel: adapter.channel,
       accountId: adapter.accountId,

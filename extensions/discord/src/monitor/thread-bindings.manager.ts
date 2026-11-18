@@ -168,6 +168,12 @@ function createLoadedThreadBindingManager(
       if (!binding || stopping) {
         continue;
       }
+      // A plugin's own thread follows its owner's lifecycle: no idle or age
+      // expiry, and it stays bound through archiving, where a reply reopens the
+      // thread and still reaches the plugin. No probe runs per sweep.
+      if (binding.metadata?.ownerManaged === true) {
+        continue;
+      }
       const now = Date.now();
       const lifecycle = resolvePreparedThreadBindingLifecycle({
         record: binding,
@@ -189,12 +195,7 @@ function createLoadedThreadBindingManager(
         });
         continue;
       }
-      // A plugin's own thread stays bound through archiving: a reply reopens
-      // the thread and still reaches the plugin, and no probe runs per sweep.
-      if (
-        isDirectConversationBindingId(binding.threadId) ||
-        binding.metadata?.ownerManaged === true
-      ) {
+      if (isDirectConversationBindingId(binding.threadId)) {
         continue;
       }
       if (!rest) {

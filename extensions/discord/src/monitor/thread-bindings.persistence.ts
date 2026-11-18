@@ -1,5 +1,5 @@
 import { createPluginStateErrorReporter } from "openclaw/plugin-sdk/plugin-state-runtime";
-import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
+import { createSubsystemLogger, logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { asOptionalObjectRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { getDiscordRuntime } from "../runtime.js";
 import {
@@ -13,6 +13,8 @@ import {
   setBindingRecord,
 } from "./thread-bindings.state.js";
 import type { ThreadBindingManager, ThreadBindingRecord } from "./thread-bindings.types.js";
+
+const log = createSubsystemLogger("discord/thread-bindings");
 
 export function shouldPersistAnyBindingState(): boolean {
   return [...PERSIST_BY_ACCOUNT_ID.values()].some(Boolean);
@@ -175,7 +177,11 @@ export async function commitBindingRecord(params: {
         }
       } else {
         THREAD_BINDINGS_STATE.persistenceAvailable = false;
-        logVerbose("discord thread binding persistence unavailable; keeping bindings in memory");
+        // Every later binding in this process stays memory-only and is lost on
+        // restart, so the cause must be visible.
+        log.warn(
+          `discord thread binding persistence unavailable; keeping bindings in memory until restart: ${String(failure)}`,
+        );
       }
     }
   }

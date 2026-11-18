@@ -86,6 +86,24 @@ describe("thread binding lifecycle", () => {
     },
   );
 
+  it("never expires a plugin-managed thread", async () => {
+    vi.useFakeTimers();
+    try {
+      const manager = await createTestThreadBindingManager({
+        enableSweeper: true,
+        idleTimeoutMs: 60_000,
+        maxAgeMs: 60_000,
+      });
+      await bindTestThread(manager, { metadata: { ownerManaged: true } });
+      hoisted.sendMessageDiscord.mockClear();
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(manager.getByThreadId("thread-1")).toBeDefined();
+      expect(hoisted.sendMessageDiscord).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([{ idleTimeoutMs: 0, maxAgeMs: 60_000, farewell: "max age of 1m" }])(
     "expires bindings without probing ($farewell)",
     async ({ idleTimeoutMs, maxAgeMs, farewell }) => {

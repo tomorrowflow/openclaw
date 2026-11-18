@@ -7,6 +7,8 @@ import {
 } from "openclaw/plugin-sdk/conversation-binding-inspection-runtime";
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getPluginInstanceRuntimeSlot } from "../../plugins/plugin-instance-scope.js";
+import { PluginInstance } from "../../plugins/plugin-instance.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
@@ -614,6 +616,36 @@ describe("session binding service", () => {
       }),
     });
     expect(service.resolveByConversation(childThread)?.targetSessionKey).toBe(workerKey);
+  });
+
+  it("runs an adapter in its registering plugin's instance when another plugin binds", async () => {
+    const channel = new PluginInstance("demo-channel");
+    const caller = new PluginInstance("demo-caller");
+    const seen: unknown[] = [];
+    channel.run(() => {
+      expectDefined(getPluginInstanceRuntimeSlot("runtime"), "channel slot").runtime = "channel";
+      registerSessionBindingAdapter({
+        channel: "demo-binding",
+        accountId: "default",
+        bind: async (input) => {
+          seen.push(getPluginInstanceRuntimeSlot("runtime")?.runtime);
+          return createRecord(input);
+        },
+        listBySession: () => [],
+        resolveByConversation: () => null,
+      });
+    });
+    const bind = () =>
+      getSessionBindingService().bind({
+        targetSessionKey: "plugin-binding:demo-caller:x",
+        targetKind: "session",
+        conversation: { channel: "demo-binding", accountId: "default", conversationId: "t-1" },
+      });
+
+    await caller.run(bind);
+    await bind();
+
+    expect(seen).toEqual(["channel", "channel"]);
   });
 
   it("shares registered adapters across duplicate module instances", async () => {
