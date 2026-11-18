@@ -2,7 +2,6 @@ import type * as Llm from "@openclaw/llm-core";
 export type * from "./types.js";
 
 export const PROVIDER_CONTEXT_HANDOFF: unique symbol = Symbol("providerContextHandoff");
-
 export const PROVIDER_MODEL_INPUT: unique symbol = Symbol("providerModelInput");
 
 export type VideoContent = Omit<Llm.ImageContent, "type"> & { type: "video" };

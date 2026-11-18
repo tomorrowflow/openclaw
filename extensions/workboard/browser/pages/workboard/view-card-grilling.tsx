@@ -4,11 +4,9 @@ import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { Markdown } from "../../components/host-components.tsx";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
-import {
-  endWorkboardGrill,
-  workboardGrillSessionName,
-  type WorkboardCard,
-} from "../../lib/workboard/index.ts";
+import { workboardGrillSessionName } from "../../lib/workboard/card-state.ts";
+import { endWorkboardGrill } from "../../lib/workboard/mutations.ts";
+import type { WorkboardCard } from "../../lib/workboard/types.ts";
 import { getCardActionState } from "./view-card-actions.tsx";
 import { workboardMutationContext, type WorkboardProps } from "./view-helpers.tsx";
 

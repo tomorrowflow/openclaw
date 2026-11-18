@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { resolveConfigPath, resolveStateDir } from "../../config/paths.js";
+import type { ConfigFileSnapshot } from "../../config/types.openclaw.js";
 import { resolvePathViaExistingAncestorSync } from "../../infra/boundary-path.js";
+import { formatDiskSpaceBytes } from "../../infra/disk-space.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { findUpdateCaptureSpaceError } from "../../infra/update-capture-space.js";
 import { canResolveRegistryVersionForPackageTarget } from "../../infra/update-global.js";
+import { createUpdatePreflightFailure } from "../../infra/update-preflight-details.js";
 import { readUpdateRunDriver } from "../../infra/update-run-driver.js";
 import { updateRunStepsFromResultStep } from "../../infra/update-run-step.js";
 import { DEFAULT_UPDATE_STEP_TIMEOUT_MS } from "../../infra/update-run-timeouts.js";
@@ -10,6 +14,7 @@ import { redactSupportString } from "../../logging/diagnostic-support-redaction.
 import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import { resolveDebugProxySettings } from "../../proxy-capture/env.js";
 import { defaultRuntime } from "../../runtime.js";
+import type { OpenClawSchemaVersions } from "../../state/openclaw-schema-versions.js";
 import { OPENCLAW_STATE_SCHEMA_VERSION } from "../../state/openclaw-state-db-contract.js";
 import { resolveOpenClawStateSqlitePath } from "../../state/openclaw-state-db.paths.js";
 import { createUpdateProgress } from "./progress.js";
@@ -18,6 +23,7 @@ import {
   usesCandidateUpdateAdmission,
   type UpdateCommandOptions,
 } from "./shared.js";
+import { reportUnreportedUpdateAdmissionOutcome } from "./update-command-admission-report.js";
 import { withPrivateStagedPackageInstall } from "./update-command-artifact.js";
 import {
   applyUpdateCandidateAdmission,
@@ -25,7 +31,10 @@ import {
   inspectStagedUpdateCandidateAdmission,
 } from "./update-command-candidate-admission.js";
 import { readUpdateChannelConfig } from "./update-command-config.js";
-import type { UpdateCommandExecutorOptions } from "./update-command-executor-options.js";
+import type {
+  UpdateCommandExecutor,
+  UpdateCommandExecutorOptions,
+} from "./update-command-executor-options.js";
 import {
   captureUpdateCommandExecutorAuthority,
   withUpdateCommandExecutor,
@@ -40,7 +49,8 @@ import {
 } from "./update-command-initialization.js";
 import { preparePackageUpdateRuntime } from "./update-command-node-runtime.js";
 import { assertUpdatePackageActivationAdmission } from "./update-command-package-activation.js";
-import { UnreportedUpdateAdmissionOutcome } from "./update-command-result.js";
+import { withUpdatePreviewSignals } from "./update-command-preview-signals.js";
+import { UnreportedUpdateAdmissionOutcome, type RefuseUpdate } from "./update-command-result.js";
 import { recordUpdateCommandTarget, type prepareUpdateCommand } from "./update-command-run.js";
 import { preflightUpdateCommandSchemas, previewUpdateCommand } from "./update-command-schema.js";
 import {
@@ -49,12 +59,25 @@ import {
   withUpdateInProgressEnv,
 } from "./update-command-service-env.js";
 import type { UpdateCommandRecoveryState } from "./update-command-service-maintenance.js";
-import { resolveFreshUpdateMetadata, resolveUpdateCommandTarget } from "./update-command-target.js";
-import {
-  reportUnreportedUpdateAdmissionOutcome,
-  withUpdateCommandTerminalResult,
-} from "./update-command-terminal.js";
+import { resolveUpdateCommandTarget } from "./update-command-target.js";
+import { withUpdateCommandTerminalResult } from "./update-command-terminal.js";
 import { prepareUpdateCommandFailureTriage } from "./update-command-triage.js";
+
+/** A fresh profile must be initialized by an identified, schema-declaring target. */
+async function resolveFreshUpdateMetadata(target: {
+  targetVersion: string | null;
+  packageTargetSchemaVersions?: OpenClawSchemaVersions;
+  refuseUpdate: RefuseUpdate;
+}) {
+  if (target.targetVersion && target.packageTargetSchemaVersions) {
+    return { version: target.targetVersion, schemaVersions: target.packageTargetSchemaVersions };
+  }
+  const failure = createUpdatePreflightFailure(
+    target.targetVersion ? "target-schema-metadata" : "target-registry-dist-tag",
+  );
+  await target.refuseUpdate("target-metadata-preflight", failure.message, failure.failureFacts);
+  return undefined;
+}
 
 export async function initializeAndRunUpdate(
   opts: UpdateCommandOptions,
@@ -63,20 +86,33 @@ export async function initializeAndRunUpdate(
   invocationCwd: string | undefined,
   env: NodeJS.ProcessEnv,
   runInitialized: (initialization: InitializedUpdate) => Promise<void>,
-  policy: { needsInitialization: boolean; captureOriginal: boolean },
+  policy: {
+    needsInitialization: boolean;
+    captureOriginal: boolean;
+    malformedConfig?: ConfigFileSnapshot;
+  },
   executorOptions?: UpdateCommandExecutorOptions,
 ): Promise<void> {
   const targetEnv = resolveUpdateTargetEnv({ baseEnv: env, nodeRunner: process.execPath });
   const runId = env.OPENCLAW_UPDATE_RUN_ID?.trim() || randomUUID();
   let handleFailure: Awaited<ReturnType<typeof prepareUpdateCommandFailureTriage>> | undefined;
   let disposePresentation: (() => void) | undefined;
+  let admissionAttempted = false;
   try {
     await withUpdateCommandTerminalResult(
       (registerRun) =>
         withUpdateInProgressEnv(invocationCwd, () =>
           withUpdateCommandExecutor(
             runId,
-            async (executor) => {
+            async (originalExecutor) => {
+              const executor: UpdateCommandExecutor = {
+                enter: (...args) => {
+                  // enter can acquire ownership before failing. Once attempted, an
+                  // unregistered refusal cannot borrow shared state after settlement.
+                  admissionAttempted = true;
+                  return originalExecutor.enter(...args);
+                },
+              };
               const selection: UpdateTargetSelection | undefined = await withOwnedManagedUpdateEnv(
                 targetEnv,
                 () =>
@@ -87,6 +123,7 @@ export async function initializeAndRunUpdate(
                     prepared,
                     executor,
                     prepared.timeoutMs ?? DEFAULT_UPDATE_STEP_TIMEOUT_MS,
+                    policy.malformedConfig,
                   ),
               ).then(
                 (target) => (target ? { target } : undefined),
@@ -105,33 +142,13 @@ export async function initializeAndRunUpdate(
                 return;
               }
               const selectedTarget = selection.target;
-              const assertSelectedRuntimeCurrent = async () => {
-                if (!selectedTarget) {
-                  return;
-                }
-                try {
-                  await selectedTarget.assertPackageRuntimeCurrent?.();
-                } catch (error) {
-                  if (
-                    hasCommandProcessCleanupError(error) ||
-                    !(error instanceof UpdatePreMutationError)
-                  ) {
-                    throw error;
-                  }
-                  await selectedTarget.refuseUpdate(
-                    error.reason,
-                    error.message,
-                    error.failureFacts,
-                    error.recoverySteps,
-                  );
-                }
-              };
               const candidateAdmissionEnabled =
                 selectedTarget?.updateInstallKind === "package" &&
                 usesCandidateUpdateAdmission(opts, prepared.installKind);
               // Candidate execution stays in the selected profile; only installed union checks
               // can need a separate caller projection.
               const callerLegacyConfigPlan =
+                !policy.malformedConfig &&
                 selectedTarget &&
                 !selectedTarget.managedServiceRootRedirect &&
                 !candidateAdmissionEnabled &&
@@ -235,6 +252,7 @@ export async function initializeAndRunUpdate(
                     assertCurrent,
                     nodeRunner: selectedTarget?.packageUpdateNodeRunner,
                     timeoutMs: prepared.timeoutMs ?? DEFAULT_UPDATE_STEP_TIMEOUT_MS,
+                    fullIntegrityCheck: opts.fullIntegrityCheck,
                   });
                   assertCurrent();
                   initialization.originalRecoveryCapture = captured.ref;
@@ -251,8 +269,11 @@ export async function initializeAndRunUpdate(
                   }
                   // Capture is best effort. Lead with continuation guidance because the
                   // warning is length-bounded and the nested cause can be long.
+                  const space = findUpdateCaptureSpaceError(error)?.capacity;
                   warn(
-                    `Original state capture is unavailable; the update continues without it. A running Gateway or another active writer changing state during capture is expected to cause this. Database rollback uses the pre-migration snapshots taken after the Gateway stops. A completed update does not need to be restarted because of this warning. Cause: ${formatErrorMessage(error)}`,
+                    space
+                      ? `NO ORIGINAL-STATE SNAPSHOT: insufficient disk space. Needed ${space.requiredBytes} bytes (${formatDiskSpaceBytes(space.requiredBytes)}); available ${space.availableBytes} bytes (${formatDiskSpaceBytes(space.availableBytes)}). The update continues without a complete pre-update recovery copy. Free space before a future update to allow original-state capture.`
+                      : `Original state capture is unavailable; the update continues without it. A running Gateway or another active writer changing state during capture is expected to cause this. Database rollback uses the pre-migration snapshots taken after the Gateway stops. A completed update does not need to be restarted because of this warning. Cause: ${formatErrorMessage(error)}`,
                   );
                 }
                 assertCurrent();
@@ -263,7 +284,6 @@ export async function initializeAndRunUpdate(
                 }
               };
               const runCapturedInitialization = async () => {
-                await assertSelectedRuntimeCurrent();
                 await captureOriginal();
                 await runInitialized(initialization);
               };
@@ -272,14 +292,17 @@ export async function initializeAndRunUpdate(
               }
               const target = initialization.target;
               if (opts.dryRun) {
-                return await previewUpdateCommand({
-                  target,
-                  prepared,
-                  opts,
-                  runId,
-                  invocationCwd,
-                  updateStepTimeoutMs: prepared.timeoutMs ?? DEFAULT_UPDATE_STEP_TIMEOUT_MS,
-                });
+                return await withUpdatePreviewSignals(opts, () =>
+                  previewUpdateCommand({
+                    target,
+                    prepared,
+                    opts,
+                    runId,
+                    invocationCwd,
+                    updateStepTimeoutMs: prepared.timeoutMs ?? DEFAULT_UPDATE_STEP_TIMEOUT_MS,
+                    malformedConfig: policy.malformedConfig,
+                  }),
+                );
               }
               const artifact =
                 target.updateInstallKind === "package" &&
@@ -404,7 +427,6 @@ export async function initializeAndRunUpdate(
                 await captureOriginal();
                 const runtime = await preparePackageUpdateRuntime({
                   ...target,
-                  assertPackageRuntimeCurrent: assertSelectedRuntimeCurrent,
                   managedService: schemaPreflight.service,
                   shouldRestart: prepared.shouldRestart,
                   opts,
@@ -449,7 +471,6 @@ export async function initializeAndRunUpdate(
                         await checkSchemas();
                         assertCurrent();
                         if (!target.packageAlreadyCurrent && !initialization.stagedPackage) {
-                          await assertSelectedRuntimeCurrent();
                           initializationStage = await stagePackageInstallUpdate(
                             stageParams(presentation),
                           );
@@ -498,7 +519,6 @@ export async function initializeAndRunUpdate(
                 ) {
                   const presentation = createUpdateProgress(!opts.json);
                   try {
-                    await assertSelectedRuntimeCurrent();
                     return await withPrivateStagedPackageInstall(
                       stageParams(presentation),
                       async ({ stage }) => {
@@ -525,7 +545,7 @@ export async function initializeAndRunUpdate(
     );
   } catch (error) {
     if (!handleFailure) {
-      return await reportUnreportedUpdateAdmissionOutcome(error);
+      return await reportUnreportedUpdateAdmissionOutcome(error, { detached: admissionAttempted });
     }
     // The admitted run's prepared handler outlives both staged cleanup and the
     // executor, so no failure is reported while either mutation owner remains live.

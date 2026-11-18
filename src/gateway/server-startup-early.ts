@@ -1,4 +1,3 @@
-// Gateway early-startup runtime helpers.
 // Starts discovery, remote skills, and delayed maintenance setup.
 import { setSessionMcpRuntimeScheduler } from "../agents/agent-bundle-mcp-manager-api.js";
 import { isNixMode } from "../config/paths.js";
@@ -10,7 +9,6 @@ import type { PluginRegistry } from "../plugins/registry-types.js";
 import { withPluginRuntimeGatewayContextResolver } from "../plugins/runtime/gateway-request-scope.js";
 import type { GatewayDiscovery } from "./server-discovery-runtime.js";
 import type { GatewayContextResolver } from "./server-methods/types.js";
-import type { GatewayPluginRuntimeClaim } from "./server-plugin-runtime-generation.js";
 import { measureStartup, type GatewayStartupTrace } from "./server-startup-trace.js";
 
 type StartGatewayMaintenanceTimers =
@@ -40,18 +38,16 @@ export async function startGatewayEarlyRuntime(params: {
   nodeRegistry: Parameters<typeof import("../skills/runtime/remote.js").setSkillsRemoteRegistry>[0];
   swapDiscovery: (next: GatewayDiscovery | null) => GatewayDiscovery | null;
   pluginRegistry?: PluginRegistry;
-  pluginRuntimeClaim: GatewayPluginRuntimeClaim;
   broadcast: GatewayMaintenanceParams["broadcast"];
   maintenance: Omit<
     GatewayMaintenanceParams,
+    | "resolveGatewayContext"
     | "scheduler"
     | "broadcast"
     | "getRuntimeConfig"
     | "activeWorkInspectors"
     | "isNixMode"
-    | "runWorktreeGc"
     | "runDeliveryQueueMediaGc"
-    | "runManagedOutgoingMediaGc"
   >;
   getRuntimeConfig: () => OpenClawConfig;
   startupTrace?: GatewayStartupTrace;
@@ -82,7 +78,6 @@ export async function startGatewayEarlyRuntime(params: {
             discovery: params.cfgAtStart.discovery,
             tailscaleMode: params.tailscaleMode,
             gatewayDiscoveryServices: params.pluginRegistry?.gatewayDiscoveryServices,
-            pluginRuntimeClaim: params.pluginRuntimeClaim,
             logDiscovery: params.logDiscovery,
           });
         },
@@ -179,6 +174,7 @@ export async function startGatewayEarlyRuntime(params: {
         () =>
           startGatewayMaintenanceTimers({
             ...params.maintenance,
+            resolveGatewayContext,
             scheduler: params.scheduler,
             broadcast: params.broadcast,
             activeWorkInspectors,

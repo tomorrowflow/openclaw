@@ -101,6 +101,7 @@
       "workboard_block",
       "workboard_boards",
       "workboard_board_create",
+      "workboard_class_rung",
       "workboard_board_archive",
       "workboard_board_delete",
       "workboard_sessions_board_read",
@@ -176,6 +177,9 @@
       "optional": true
     },
     "workboard_board_create": {
+      "optional": true
+    },
+    "workboard_class_rung": {
       "optional": true
     },
     "workboard_board_archive": {

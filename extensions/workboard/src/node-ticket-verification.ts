@@ -545,7 +545,7 @@ async function startNodeVerification(
   let prepared = false;
   try {
     const existing = params.readSessions
-      ? (await params.readSessions({ includeUnknown: false, sessionKey: key })).sessions[0]
+      ? (await params.readSessions({ sessionKey: key })).sessions[0]
       : undefined;
     if (existing?.hasActiveRun === true) {
       session = { sessionKey: existing.key };

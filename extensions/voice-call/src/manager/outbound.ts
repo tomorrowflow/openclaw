@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { normalizeAgentId } from "openclaw/plugin-sdk/routing";
-import { CallBriefSchema } from "../call-brief.js";
 import {
   resolveVoiceCallEffectiveConfig,
   resolveVoiceCallNumberRouteKeyForCall,
@@ -84,15 +83,7 @@ export async function initiateCall(
   const dtmfSequence = opts.dtmfSequence;
   const requesterSessionKey = opts.requesterSessionKey?.trim();
   const agentId = normalizeAgentId(opts.agentId ?? ctx.config.agentId);
-  const parsedBrief = CallBriefSchema.optional().safeParse(opts.brief);
-  if (!parsedBrief.success) {
-    return {
-      callId: "",
-      success: false,
-      error: `Invalid call brief: ${parsedBrief.error.message}`,
-    };
-  }
-  const brief = parsedBrief.data;
+  const brief = opts.brief;
   if (dtmfSequence) {
     const validationError = validateDtmfDigits(dtmfSequence);
     if (validationError) {
@@ -256,7 +247,6 @@ export async function initiateCall(
 
 export type SpeakOptions = {
   listenAfterPlayback?: boolean;
-  turnToken?: string;
   isCurrent?: () => boolean;
 };
 
@@ -318,7 +308,6 @@ export async function speak(
       text,
       voice,
       ...(options?.listenAfterPlayback ? { listenAfterPlayback: true } : {}),
-      ...(options?.turnToken ? { turnToken: options.turnToken } : {}),
     });
 
     if (!(await updateCall(ctx, call, (next) => addTranscriptEntry(next, "bot", text)))) {
@@ -417,9 +406,7 @@ export async function speakInitialMessage(
 
   try {
     console.log(`[voice-call] Speaking initial message for call ${call.callId} (mode: ${mode})`);
-    const result = await speak(ctx, call.callId, initialMessage, {
-      listenAfterPlayback: mode === "conversation" && ctx.provider?.name === "twilio",
-    });
+    const result = await speak(ctx, call.callId, initialMessage);
     if (!result.success) {
       console.warn(`[voice-call] Failed to speak initial message: ${result.error}`);
       return;
@@ -487,13 +474,10 @@ export async function speakInitialMessage(
       if (ctx.isStopping()) {
         throw new Error("Voice Call manager is stopping");
       }
-      // Twilio's Say already owns the following Gather; replacing it cuts playback short.
-      if (ctx.provider.name !== "twilio") {
-        await ctx.provider.startListening({
-          callId: call.callId,
-          providerCallId: call.providerCallId ?? providerCallId,
-        });
-      }
+      await ctx.provider.startListening({
+        callId: call.callId,
+        providerCallId: call.providerCallId ?? providerCallId,
+      });
     }
   } finally {
     ctx.initialMessageInFlight.delete(call.callId);
@@ -520,14 +504,7 @@ export async function continueCall(
   const turnToken = provider.name === "twilio" ? crypto.randomUUID() : undefined;
 
   try {
-    const listenAfterPlayback =
-      provider.name === "twilio" && !hasConversationStreamConnect(provider, ctx.config);
-    const speakResult = await speak(
-      ctx,
-      callId,
-      prompt,
-      listenAfterPlayback ? { listenAfterPlayback: true, turnToken } : undefined,
-    );
+    const speakResult = await speak(ctx, callId, prompt);
     if (!speakResult.success) {
       return speakResult;
     }
@@ -543,13 +520,11 @@ export async function continueCall(
       throw new Error("Voice Call manager is stopping");
     }
     const listenStartedAt = Date.now();
-    if (!listenAfterPlayback) {
-      await provider.startListening({
-        callId,
-        providerCallId: call.providerCallId ?? providerCallId,
-        turnToken,
-      });
-    }
+    await provider.startListening({
+      callId,
+      providerCallId: call.providerCallId ?? providerCallId,
+      turnToken,
+    });
     if (ctx.isStopping()) {
       throw new Error("Voice Call manager is stopping");
     }

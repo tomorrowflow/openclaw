@@ -1,11 +1,10 @@
 /* @vitest-environment jsdom */
 
-import { ContextProvider } from "@lit/context";
 import type { CanvasDocumentViewResult } from "@openclaw/gateway-protocol";
 import { afterEach, expect, it, onTestFinished, vi } from "vitest";
 import { CONTROL_UI_BOOTSTRAP_CONFIG_ATTRIBUTE } from "../../../src/gateway/control-ui-bootstrap-contract.js";
-import { applicationContext } from "../app/context.ts";
 import { createContext, createGateway, createSessions } from "../test-helpers/app-sidebar.ts";
+import { createApplicationContextProvider } from "../test-helpers/application-context.ts";
 import { createTestGatewayClient } from "../test-helpers/gateway-client.ts";
 import { createControlUiComponents } from "./control-ui-components.ts";
 
@@ -39,17 +38,12 @@ function mountPreview(embedSandbox: "scripts" | "strict") {
   const lifetime = new AbortController();
   const onError = vi.fn();
   // The application root provides the context to plugin containers in the shell.
-  const shell = document.createElement("div");
-  const provider = new ContextProvider(shell, {
-    context: applicationContext,
-    initialValue: context,
-  });
+  const shell = createApplicationContextProvider(context);
   const container = document.createElement("div");
   shell.append(container);
   document.body.append(shell);
   onTestFinished(() => {
     lifetime.abort();
-    provider.clearCallbacks();
   });
   const components = createControlUiComponents({
     current: () => context,

@@ -12,6 +12,7 @@ import {
 import type { WorkboardCard, WorkboardStatus } from "../../lib/workboard/types.ts";
 import { workboardTestHost } from "../../test/host.setup.ts";
 import { waitForFast } from "../../test/wait-for.ts";
+import { WorkboardCardMenus } from "./view-card-menu.tsx";
 import type { WorkboardCardSurface } from "./view-card.tsx";
 import { WorkboardColumn } from "./view-column.tsx";
 import { createWorkboardView } from "./view.test-support.ts";
@@ -33,21 +34,25 @@ function renderColumn(
   const container = document.createElement("div");
   document.body.append(container);
   workboardTestHost().connection.connected = true;
+  const workboard = {
+    host,
+    client: createWorkboardTestClient({}),
+    connected: true,
+    canWrite: true,
+    agentsList: null,
+    sessions: [],
+    onOpenSession: vi.fn(),
+  };
+  // Card faces read their action menu from the board-owned menu provider.
   const dispose = render(
     () =>
-      createComponent(WorkboardColumn, {
-        workboard: {
-          host,
-          client: createWorkboardTestClient({}),
-          connected: true,
-          canWrite: true,
-          agentsList: null,
-          sessions: [],
-          onOpenSession: vi.fn(),
-        },
-        status,
+      createComponent(WorkboardCardMenus, {
+        workboard,
         cards,
-        options: { surface },
+        children: (panel) => [
+          createComponent(WorkboardColumn, { workboard, status, cards, options: { surface } }),
+          panel,
+        ],
       }),
     container,
   );

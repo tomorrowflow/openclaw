@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { runWithoutOwnedSessionTranscriptWrites } from "../../config/sessions/transcript-write-context.js";
+import { runWithoutOwnedSessionTranscriptWrites } from "../../config/sessions/transcript-write-context-store.js";
 import { retainGatewayDeviceRevocation } from "../../gateway/device-revocation.js";
 import {
   createAbortError,
@@ -20,7 +20,7 @@ import {
   waitForCronJobRun,
   type RequestedCronRun,
 } from "./run-queue.js";
-import type { CronRunMode, CronRunResult, CronServiceState, CronWakeMode } from "./state.js";
+import type { CronRunMode, CronRunResult, CronServiceState } from "./state.js";
 import { captureCronServiceMutationSource } from "./store.js";
 import { wake } from "./wake.js";
 
@@ -109,7 +109,7 @@ export async function enqueueRun(
   opts?: Pick<ManualRunOptions, "commitGuard" | "event" | "onEventTransferred" | "runId">,
 ) {
   const runId = opts?.runId ?? `cron-request.${randomUUID()}`;
-  const releaseCaller = retainGatewayDeviceRevocation(opts?.commitGuard);
+  const releaseCaller = opts?.event ? retainGatewayDeviceRevocation(opts.commitGuard) : undefined;
   const trackAdmission = captureCronRunAdmissionTracker();
   // The run outlives the calling agent turn, so it must not write through that
   // turn's transcript lifecycle or track work in its async work scope, which
@@ -201,15 +201,6 @@ export async function waitForManualRun(
 }
 
 /** Enqueues manual wake text through the cron wake API. */
-export function wakeNow(
-  state: CronServiceState,
-  opts: {
-    mode: CronWakeMode;
-    text: string;
-    sessionKey?: string;
-    agentId?: string;
-    commitGuard?: () => void;
-  },
-) {
+export function wakeNow(state: CronServiceState, opts: Parameters<typeof wake>[1]) {
   return wake(state, opts);
 }

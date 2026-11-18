@@ -2,15 +2,12 @@
 // run-loop.ts primes this hub before the HTTP listener binds, so each re-export
 // must target the module that defines the symbol rather than a re-export facade;
 // a facade also evaluates its siblings and drags their graphs onto cold start.
-export { abortEmbeddedAgentRun } from "../../agents/embedded-agent-runner/runs.js";
-export { listActiveEmbeddedRunSessionIds } from "../../agents/embedded-agent-runner/active-run-projections.js";
-export { getDiagnosticSessionActivitySnapshot } from "../../logging/diagnostic-run-activity.js";
 export {
   resolveGatewayRestartDecision,
+  registerGatewayRuntimeRecovery,
   respawnGatewayProcessForUpdate,
   restartGatewayProcessWithFreshPid,
 } from "../../infra/process-respawn.js";
-export { resolveGatewayRestartDrainTimeoutMs } from "../../infra/restart-budget.js";
 export {
   consumeGatewayRestartIntent,
   consumeGatewayRestartAuthorization,
@@ -45,10 +42,6 @@ export { waitForGatewayHealthyRestart } from "../daemon-cli/restart-health.js";
 export { detectGatewayRespawnSupervisorIdentity } from "../../infra/supervisor-markers.js";
 export { writeDiagnosticStabilityBundleForFailureSync } from "../../logging/diagnostic-stability-bundle.js";
 export {
-  createGatewayActiveWorkSnapshot,
-  waitForGatewayActiveWork,
-} from "../../infra/gateway-active-work.js";
-export {
   advanceCronActiveJobGeneration,
   resetCronActiveJobs,
   waitForActiveCronJobs,
@@ -59,7 +52,6 @@ export {
   waitForActiveCronTaskRuns,
 } from "../../cron/service/active-run-cancellation.js";
 export { markGatewayDraining, resetAllLanes } from "../../process/command-queue.js";
-export { isGatewayRestartBlockedSession } from "../../process/gateway-work-admission.js";
 export { abortPendingChannelReloads } from "../../gateway/server-reload-generation.js";
 
 export { stopActiveManagedProviderLocalServices } from "../../agents/provider-runtime-lifecycle.js";

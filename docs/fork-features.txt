@@ -21,7 +21,7 @@ DEFAULT_FFMPEG_API_URL | src/media-understanding/providers/whisper-asr/audio.ts 
 # --- Streaming / Tag Stripping ---
 stripReasoningTagsFromText | src/shared/text/reasoning-tags.ts | Reasoning tag stripping helper
 stripReasoningTags | src/tui/tui-formatters.ts | TUI reasoning tag stripping
-stripReasoningTagsFromText\(projected\.text | src/gateway/server-chat.ts | Gateway reasoning tag stripping on the final chat broadcast. Matches the call, not the import: the 2026.9.5 re-cut dropped the call while the helper stayed importable elsewhere.
+stripReasoningTagsFromText\(terminalBuffer\.text | src/gateway/server-chat.ts | Gateway reasoning tag stripping on the final chat broadcast. Matches the call, not the import: the 2026.9.5 re-cut dropped the call while the helper stayed importable elsewhere.
 splitTrailingBlockTagFragment | src/agents/embedded-agent-subscribe.stream-rendering.ts | Streaming partial tag stripping (upstreamed 2026.8.1; the fork's stripTrailingPartialTag DISCARDED a trailing "<..." fragment, upstream buffers it as pendingTagFragment and re-emits it with the next chunk — strictly better, and code-span aware. Do not re-add the fork helper.)
 # RETIRED: the fork helper is gone from that file (and was already gone pre-rebase).
 # Partial-tag handling is upstream's splitTrailingBlockTagFragment, checked above.
@@ -123,7 +123,7 @@ X11-unix | scripts/sandbox-browser-entrypoint.sh | Recreate X11-unix dir for tmp
 question-gateway-runtime | package.json | Upstream plugin-sdk export the rebase keeps dropping — signal plugin fails to register with ERR_PACKAGE_PATH_NOT_EXPORTED without it
 
 # --- Reply delivery (heartbeat prose leaks) ---
-else if \(beforeTag\.trim\(\)\) | packages/markdown-core/src/reasoning-tag-parser.ts | An orphan reasoning close tag ends reasoning whatever follows it. Upstream only reclassifies the body before a stray </think> when visible text FOLLOWS the tag (beforeTag && after), so a tool-call turn whose text ends at the close tag delivers its whole reasoning body — the heartbeat published its own thinking to Signal. Asserts the unconditional branch: if "after" comes back into the condition the leak returns.
+if \(rawBefore\) \{ | packages/markdown-core/src/reasoning-tag-syntax.ts | An orphan reasoning close tag ends reasoning whatever follows it. Upstream only reclassifies the body before a stray </think> when visible text FOLLOWS the tag (beforeTag && after), so a tool-call turn whose text ends at the close tag delivers its whole reasoning body — the heartbeat published its own thinking to Signal. Asserts the unconditional branch: if "after" comes back into the condition the leak returns.
 if \(before\.trim\(\)\) \{ | src/agents/embedded-agent-subscribe.stream-rendering.ts | The streaming pass matches the reducer above and clears staged text at an orphan close tag without requiring text after it. Upstream gates this on hasOrphanReasoningCloseBoundary({before, after}); that helper is deliberately gone from src/shared/text/reasoning-tags.ts, so a rebase restoring the import also restores the leak.
 kind: "thinking", text: "private chain | packages/ai/src/utils/reasoning-tag-text-partitioner.test.ts | Upstream test expectation the fork supersedes: the body before an orphan close tag moves to the thinking stream instead of being discarded. A rebase that takes upstream's copy of this test turns the divergence above into a red test, not a silent revert — keep the fork's expectation.
 treats everything before an orphan close tag as reasoning | ui/src/lib/format.test.ts | Upstream test expectation the fork supersedes: text before an orphan close tag is reasoning even when nothing follows the tag.
@@ -140,10 +140,9 @@ tailscaleBrowserDeviceTokenGeneration !== undefined, | src/gateway/server/ws-con
 entry.authRejected = true | ui/src/lib/authenticated-avatar-route.ts | The avatar loader holds an all-credentials-rejected route until browser auth is restored. Without it every Lit render replays refused credentials and feeds the Gateway's auth limiter, which also guards control-ui-config.json. 2026.10.2: the hold is released by the loader's own auth-recovery hook (upstream clears held entries there), not a module-level epoch.
 
 # --- Heartbeat delivery ---
-suppressHeartbeatReadOnlyFailure | src/agents/embedded-agent-runner/run/payloads.ts | A heartbeat that hit a proven read-only tool failure and then went quiet does not post a tool-failure notice to the owner's chat. Mutating or unknown failures still surface.
 lastLine.startsWith\(token\) | src/auto-reply/heartbeat.ts | A closing "HEARTBEAT_OK — nothing to report." line is dropped whole, not just the token, so the ack commentary never reaches Signal.
-stripSilentToken\(textForStrip\) | src/infra/heartbeat-reply-normalization.ts | A NO_REPLY token appended to prose is judged as an acknowledgement by the same ack threshold as a trailing HEARTBEAT_OK.
-attempt.settledTurnMessages | src/agents/embedded-agent-runner/run/attempt-history-prepare.ts | Settled-tool finalization answers from the settled attempt's exact transcript. The bounded store view can omit the tool batch being summarized, so the finalizer wrote prose about nothing (heartbeat leak #2).
+stripSilentToken\(textForStrip\) | src/infra/heartbeat-reply-normalization.ts | A NO_REPLY token appended to prose is judged as an acknowledgement by the same ack threshold as a trailing HEARTBEAT_OK. ORPHANED since 2026.11.5: upstream retired the heartbeat executor and heartbeat.ackMaxChars, so nothing calls normalizeHeartbeatReply; heartbeat automations deliver through cron, where a trailing NO_REPLY after prose is stripped and the prose delivered. Kept compiling pending a decision to re-home or drop.
+attempt.settledTurnFinalizationMessages | src/agents/embedded-agent-runner/run/attempt-history-prepare.ts | Settled-tool finalization answers from the settled attempt's exact transcript (upstreamed in 2026.11.5 under this name; kept as a guard). The bounded store view can omit the tool batch being summarized, so the finalizer wrote prose about nothing (heartbeat leak #2).
 terminalStopAfterSettledBatch | src/agents/embedded-agent-runner/run/incomplete-turn-recovery.ts | A completed "stop" after the settled tool batch is the model's terminal decision; only a turn that owes a visible reply may reopen it.
 hasExplicitSilentAssistantReply\(params.attempt\) | src/agents/embedded-agent-runner/run/incomplete-turn-classification.ts | An authored NO_REPLY is classified as a completed silent turn, not an empty response that triggers the "restate your request" retry. Asserts the call: the 2026.9.6 rebase left this export orphaned once already.
 isRuntimeOwnedSessionKey\(event.sessionKey\) | src/hooks/bundled/session-memory/handler.ts | Heartbeat, cron, and subagent transcripts stay out of session memory; they are polls and hand-offs, not conversation.
@@ -151,3 +150,13 @@ isRuntimeOwnedSessionKey\(event.sessionKey\) | src/hooks/bundled/session-memory/
 # --- Workboard viewers ---
 register\("workboard.architectureViewer" | extensions/workboard/src/gateway.ts | The architecture viewer port (plugins.entries.workboard.config.architectureViewer.port) served to the Control UI. Asserts the registration, not the contract type: without it the board header never shows the Architecture button, and the SeeCode viewer (tomorrowflow/SeeCode viewer/) is unreachable from the board.
 openPortalTab\(client, \{ | extensions/workboard/browser/pages/workboard/view-board-title.tsx | The board header opens /board/<boardId>/ of the architecture viewer through an OpenClaw Portal. Matches the call, not the import.
+
+# --- Restart recovery ---
+!isHeartbeatSessionKey\(sessionKey\) | src/gateway/session-restart-resume.ts | Restart resume never replays isolated heartbeat sessions (they re-answered old turns in the user's chat). Moved here from restart-recovery-state.ts in the 2026.11.5 sync.
+
+# --- Claude CLI runner on nodes ---
+createRetainedOutputLedger | src/agents/cli-output-stream-limits.ts | The CLI turn budget meters the output the parser retains, not wire bytes; upstream's 2026.11.5 wire-byte metering is deliberately not taken.
+stopSignal: outputRejected.signal | src/agents/cli-runner/execute-process.ts | A rejected-output budget stop aborts the CLI process instead of letting it run on.
+persistStartedCliSession | src/agents/cli-runner/execute.ts | The CLI session id is bound as soon as the stream reports it, so an aborted node turn can still be resumed.
+CLAUDE_NODE_CLEAR_ENV.has | src/agents/cli-runner/execute.ts | Node-placed Claude CLI runs clear the Gateway's env before spawning.
+context.executionTarget.kind === "node" | src/agents/cli-runner.ts | Node-placement guard for CLI turns.

@@ -1,5 +1,4 @@
 import { listMappedModelThinkingLevels } from "@openclaw/model-catalog-core/model-catalog-types";
-// Thinking/reasoning level catalog helpers for auto-reply model controls.
 import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import {
   normalizeOptionalLowercaseString,
@@ -230,17 +229,13 @@ function resolveModelThinkingProfile(params: ThinkingProfileParams): ResolvedThi
     ...(candidate?.params ? { params: candidate.params } : {}),
     compat: candidate?.compat,
   };
-  const rowDefaultLevel = context.compat?.defaultThinkingLevel
-    ? normalizeThinkLevel(context.compat.defaultThinkingLevel)
-    : undefined;
   const providerProfileParams = {
     provider,
     context,
     ...(candidate ? { catalogEntry: candidate } : {}),
   };
-  const providerProfile = rowDefaultLevel
-    ? undefined
-    : typeof params.providerPolicySource === "object"
+  const providerProfile =
+    typeof params.providerPolicySource === "object"
       ? resolveEffectiveThinkingProfile(providerProfileParams, {
           registry: params.providerPolicySource,
         })
@@ -255,7 +250,7 @@ function resolveModelThinkingProfile(params: ThinkingProfileParams): ResolvedThi
   // base set, deliberately bypassing the later compat-driven xhigh upgrade —
   // anthropic-messages does not carry a generic xhigh contract.
   const anthropicMessagesProfile =
-    !rowDefaultLevel && context.api === "anthropic-messages"
+    context.api === "anthropic-messages"
       ? resolveClaudeThinkingProfile(context.modelId, context.params, {
           includeNativeMax: true,
         })
@@ -283,7 +278,6 @@ function resolveModelThinkingProfile(params: ThinkingProfileParams): ResolvedThi
 
   const profile = buildBaseThinkingProfile();
   appendCatalogAdvancedThinkingLevels(profile, context.compat, context.thinkingLevelMap);
-  profile.defaultLevel = rowDefaultLevel;
   return normalizeThinkingProfile(profile, context.thinkingLevelMap, mappedLevels);
 }
 

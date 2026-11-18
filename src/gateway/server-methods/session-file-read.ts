@@ -1,12 +1,17 @@
 import path from "node:path";
+import { resolveSandboxPathMapping } from "../../agents/path-policy.js";
 import {
+  resolveSandboxContainerPathMount,
   resolveSandboxHostPathForContainerPath,
   type SandboxContainerMount,
 } from "../../agents/sandbox/fs-paths.js";
 import { resolveSandboxHostPathViaExistingAncestor } from "../../agents/sandbox/host-paths.js";
 import { resolveToCwd } from "../../agents/sessions/tools/path-utils.js";
+import { getAgentWorkspaceAccess } from "../../agents/workspace-access.js";
 import { resolveAbsolutePathForRead, root as fsSafeRoot } from "../../infra/fs-safe.js";
 import { isPathInside } from "../../infra/path-guards.js";
+import type { SessionFileSandboxWorkspace } from "../session-file-workspace.js";
+import { sessionMutationForbiddenError } from "../session-mutation-authorization-error.js";
 import { WORKSPACE_PREVIEW_MAX_BYTES } from "../workspace-file-limits.js";
 import type { WorkspaceRoot } from "./workspace-fs.js";
 
@@ -68,6 +73,94 @@ export function resolveSessionRootFilePath(
     filePath,
     ...(boundary.sandbox ? { sandbox: boundary.sandbox } : {}),
   });
+}
+
+/** Translate a sandbox reference only after its existing allocation proves the same backing. */
+export async function prepareSessionFileReadPath(
+  params: SessionFileReadBoundary & {
+    filePath?: string;
+    sandboxWorkspace?: SessionFileSandboxWorkspace;
+    worktreeId?: string;
+    historical?: boolean;
+    assertCurrent: () => void;
+    assertReadCurrent: () => void;
+  },
+): Promise<{ path: string | null | undefined; assertCurrent?: () => void }> {
+  const sandbox = params.sandboxWorkspace;
+  const absolute =
+    params.filePath && params.root
+      ? resolveToCwd(params.filePath, params.fileRoot ?? params.root)
+      : undefined;
+  const mapped =
+    absolute && params.root && sandbox && !isPathInside(params.root, absolute)
+      ? resolveSandboxPathMapping([sandbox], absolute)
+      : null;
+  const assertCurrent = () => {
+    params.assertReadCurrent();
+    if (mapped && params.root && getAgentWorkspaceAccess(params.root)) {
+      throw sessionMutationForbiddenError("Sandbox file backing is not on this Gateway");
+    }
+  };
+  if (mapped) {
+    assertCurrent();
+  }
+  let runtimeWorkspaceDir: string | undefined = sandbox?.runtimeWorkspaceDir;
+  let backingRoot = sandbox?.hostRoot;
+  if (params.worktreeId && params.root && !params.historical) {
+    const { checkpointLocalWorkspacePath, withSettledLocalWorkspacePath } =
+      await import("../worker-environments/local-workspace-projection.js");
+    const request = { cwd: params.root, assertCurrent: params.assertCurrent };
+    if (mapped) {
+      runtimeWorkspaceDir = await withSettledLocalWorkspacePath(request, async (custody) =>
+        custody && custody.worktreeId === params.worktreeId ? custody.projectionPath : undefined,
+      );
+      backingRoot = runtimeWorkspaceDir;
+    } else {
+      await checkpointLocalWorkspacePath(request);
+    }
+    params.assertCurrent();
+  }
+  if (!mapped || !sandbox || !absolute) {
+    return { path: params.filePath };
+  }
+  // Without live backing proof (no registered container, as after every deploy,
+  // or a nested mount such as /workspace/shared or the skills mount, which the
+  // proof reads as a shadowed alias), the session's mount table still names the
+  // host file the container was given. The container spelling passes on to the
+  // file surface, which translates it through that table under the same root
+  // containment and host-read grant as any other requested path.
+  const unproven = () =>
+    params.sandbox &&
+    resolveSandboxContainerPathMount({ containerPath: absolute, mounts: params.sandbox.mounts })
+      ? { path: params.filePath }
+      : { path: null };
+  if (
+    !params.root ||
+    !isPathInside(params.root, mapped.hostPath) ||
+    !runtimeWorkspaceDir ||
+    !backingRoot
+  ) {
+    return unproven();
+  }
+  try {
+    const { prepareLocalWorkspaceFileRead } =
+      await import("../../agents/sandbox/local-workspace-quiescence.js");
+    assertCurrent();
+    const assertBackingCurrent = await prepareLocalWorkspaceFileRead({
+      workspaceDir: backingRoot,
+      runtimeWorkspaceDir,
+      containerRoot: sandbox.containerRoot,
+      targets: [absolute],
+      assertCurrent,
+    });
+    assertBackingCurrent();
+    return { path: mapped.hostPath, assertCurrent: assertBackingCurrent };
+  } catch {
+    params.assertReadCurrent();
+    // Without a session mount table (guest sessions), an unavailable or shadowed
+    // alias is never retried as a host filesystem grant.
+    return unproven();
+  }
 }
 
 /** Containment is decided before probing host paths, including paths that do not exist. */

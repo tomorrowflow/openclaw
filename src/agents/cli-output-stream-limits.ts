@@ -1,13 +1,13 @@
 // Stream-json output limits and raw-line framing for the CLI streaming parser.
 // Kept beside `cli-output-stream.ts` so the parser stays within the file-size
 // budget; the limits are process constants, not per-backend configuration.
-import type { CliStreamJsonOutputLimits } from "./cli-output-contracts.js";
-
 const CLI_STREAM_JSON_DEFAULT_BUDGET_CHARS = 8 * 1024 * 1024;
 export const CLI_STREAM_JSON_OUTPUT_LIMITS = Object.freeze({
+  /** Characters the parser may append to retained turn state (text, reasoning, tool bookkeeping). */
   maxTurnRetainedChars: CLI_STREAM_JSON_DEFAULT_BUDGET_CHARS,
+  /** Longest single JSONL line the framer buffers; records beyond it are never parsed. */
   maxPendingLineChars: CLI_STREAM_JSON_DEFAULT_BUDGET_CHARS,
-} satisfies CliStreamJsonOutputLimits);
+});
 
 // Every retained append also keeps a string piece or map entry behind the
 // payload, so a flood of one-character appends costs memory the payload length

@@ -66,6 +66,7 @@ async function createNamespaceMock() {
   };
 }
 
+// mock-isolation: Browser sandbox provisioning tests model container, registry and bridge I/O; real modules would start Docker and bridges.
 vi.mock("./docker-mount-source.js", createNamespaceMock);
 async function createEngineMock() {
   const actual =
@@ -82,6 +83,7 @@ function createRegistryMock() {
   };
 }
 
+// mock-isolation: Browser sandbox provisioning tests model container, registry and bridge I/O; real modules would start Docker and bridges.
 vi.mock("./registry.js", createRegistryMock);
 
 function createBridgeMock() {
@@ -91,6 +93,7 @@ function createBridgeMock() {
   };
 }
 
+// mock-isolation: Browser sandbox provisioning tests model container, registry and bridge I/O; real modules would start Docker and bridges.
 vi.mock("../../plugin-sdk/browser-bridge.js", createBridgeMock);
 
 function createRuntimeMock() {
@@ -99,6 +102,7 @@ function createRuntimeMock() {
   };
 }
 
+// mock-isolation: Browser sandbox provisioning tests model container, registry and bridge I/O; real modules would start Docker and bridges.
 vi.mock("../../runtime.js", createRuntimeMock);
 
 async function createProfilesMock() {
@@ -149,10 +153,14 @@ export function createSandboxBrowserTestHarness() {
   async function loadFreshBrowserModulesForTest() {
     vi.resetModules();
     vi.doMock("./docker.js", createDockerMock);
+    // mock-isolation: Browser sandbox provisioning tests model container, registry and bridge I/O; real modules would start Docker and bridges.
     vi.doMock("./docker-mount-source.js", createNamespaceMock);
     vi.doMock("./container-engine.js", createEngineMock);
+    // mock-isolation: Browser sandbox provisioning tests model container, registry and bridge I/O; real modules would start Docker and bridges.
     vi.doMock("./registry.js", createRegistryMock);
+    // mock-isolation: Browser sandbox provisioning tests model container, registry and bridge I/O; real modules would start Docker and bridges.
     vi.doMock("../../plugin-sdk/browser-bridge.js", createBridgeMock);
+    // mock-isolation: Browser sandbox provisioning tests model container, registry and bridge I/O; real modules would start Docker and bridges.
     vi.doMock("../../runtime.js", createRuntimeMock);
     vi.doMock("../../plugin-sdk/browser-profiles.js", createProfilesMock);
     ({ prepareSandboxMountPlan } = await import("./mount-plan.js"));

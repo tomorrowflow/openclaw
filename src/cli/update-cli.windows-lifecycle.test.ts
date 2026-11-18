@@ -58,10 +58,7 @@ import {
   updateFinalizeCommand,
   updateGitCheckout,
 } from "./update-cli-modules.test-support.js";
-import {
-  recoveryVerificationStep,
-  registerFailureSelectorTests,
-} from "./update-cli/update-cli-failure-recovery.test-support.js";
+import { registerFailureSelectorTests } from "./update-cli/update-cli-failure-recovery.test-support.js";
 import {
   writeJsonFixture,
   writeNpmPackageInstall,
@@ -140,7 +137,6 @@ describe("update-cli", () => {
   });
 
   it("does not inspect or mutate a Windows host service from an isolated install", async () => {
-    vi.spyOn(process, "platform", "get").mockReturnValue("win32");
     const tempDir = fixture.tempDirs.make("openclaw-update-isolated-service-");
     const { nodeModules } = await fixture.setupInstalledPackageRoot(tempDir);
     fixture.mockRunningManagedGateway();
@@ -149,6 +145,7 @@ describe("update-cli", () => {
 
     await withEnvAsync({ OPENCLAW_HOME: path.join(tempDir, "relocated-home") }, async () => {
       fixture.initializeExistingUpdateProfile();
+      vi.spyOn(process, "platform", "get").mockReturnValue("win32");
       await updateCommand({ yes: true });
     });
 
@@ -261,7 +258,6 @@ describe("update-cli", () => {
     async ({ command, fault }) => {
       const stopFailure = fault === "stop-enable-committed";
       runtimeRecovery.stubNodeRuntime();
-      vi.spyOn(process, "platform", "get").mockReturnValue("win32");
       fixture.setTty(true);
       fixture.setStdoutTty(true);
       const root = await fixture.mockPackageInstallAtCaseDir("openclaw-update-native-preparation");
@@ -285,6 +281,7 @@ describe("update-cli", () => {
         ...process.env,
         OPENCLAW_STATE_DIR: target.stateDir,
       });
+      vi.spyOn(process, "platform", "get").mockReturnValue("win32");
       fixture.tempDirsToCleanup.add(target.stateDir);
       await fs.mkdir(target.stateDir, { recursive: true });
       await writeJsonFixture(target.configPath, fixture.baseSnapshot.config);
@@ -392,25 +389,31 @@ describe("update-cli", () => {
         version: "1.0.0",
       });
       expect(serviceRestart).not.toHaveBeenCalled();
+      expect(freshRestartCalls()).toEqual([]);
       expect(triageCommand).toHaveBeenCalledOnce();
       expect(reportedError).toEqual(new ExitError(1));
       expect(defaultRuntime.exit).not.toHaveBeenCalled();
-      expect(triageCommand.mock.calls[0]?.[1]?.recovery).toMatchObject({
+      const recovery = triageCommand.mock.calls[0]?.[1]?.recovery;
+      // Native preparation failed before a service stop or package activation;
+      // triage retains the autostart error without claiming verified readiness.
+      expect(recovery).toHaveProperty("updateFailure.result.verification", {});
+      expect(recovery).toMatchObject({
         target,
         updateFailure: {
           result: {
             status: "error",
             recovery: { serviceRestartSafe: false, reason: "runtime-verification-failed" },
-            verification: {
-              runningVersion: "1.0.0",
-              versionMatch: true,
-              readyz: true,
-              settled: true,
-            },
             steps: [
               expect.objectContaining({ name: "updater-runtime-retention", exitCode: 0 }),
               expect.objectContaining({ stderrTail: expect.stringContaining("enable denied") }),
-              recoveryVerificationStep(undefined, root),
+              {
+                name: "gateway recovery observation",
+                command: "gateway verification",
+                cwd: root,
+                durationMs: 0,
+                exitCode: 0,
+                diagnostics: [expect.stringContaining("No service was stopped or started.")],
+              },
             ],
           },
         },
@@ -709,7 +712,7 @@ describe("update-cli", () => {
         async (
           _env,
           options: Parameters<
-            typeof import("../daemon/schtasks.js").resumeScheduledTaskAutoStartAfterUpdate
+            typeof import("../daemon/schtasks-control.js").resumeScheduledTaskAutoStartAfterUpdate
           >[1],
         ) => {
           await options?.beforeMutation?.();

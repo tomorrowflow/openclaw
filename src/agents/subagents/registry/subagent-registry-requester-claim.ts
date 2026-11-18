@@ -22,16 +22,7 @@ export async function acknowledgeSubagentResultForRequesterTurn(params: {
   requesterTurnRunId: string;
 }): Promise<void> {
   const assertCurrent = captureGatewayToolCallerAssertion();
-  const caller = getGatewayToolCallerIdentity();
-  const instance = caller?.operationalRunInstance;
-  if (
-    caller &&
-    (caller.agentId !== params.requesterAgentId ||
-      caller.sessionKey !== params.requesterSessionKey ||
-      (instance && instance.runId !== params.requesterTurnRunId))
-  ) {
-    throw new Error("Inline child result differs from its admitted requester turn.");
-  }
+  const instance = getGatewayToolCallerIdentity()?.operationalRunInstance;
   const accepted = await mutateSubagentRuns(
     [params.runId],
     (rows) => {

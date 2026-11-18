@@ -3,7 +3,8 @@ import { createMemo, createSignal, For, Show } from "solid-js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
-import { setWorkboardCardModel, type WorkboardCard } from "../../lib/workboard/index.ts";
+import { setWorkboardCardModel } from "../../lib/workboard/mutations.ts";
+import type { WorkboardCard } from "../../lib/workboard/types.ts";
 import { workboardMutationContext, type WorkboardProps } from "./view-helpers.tsx";
 
 type ModelChoice = { id: string; provider: string; name: string };

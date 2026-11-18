@@ -1,4 +1,6 @@
-import { AsyncLocalStorage } from "node:async_hooks";
+import { AsyncContext } from "../shared/async-context.js";
+import { runWithAsyncStore } from "../shared/async-store.js";
+import { throwSettledAggregate } from "./error-graph-internal.js";
 import type { SqliteReadOnlyWorkerSession } from "./sqlite-readonly-worker-session-types.js";
 
 export type SqliteReadOnlyWorkerScope = {
@@ -10,7 +12,17 @@ export type SqliteReadOnlyWorkerScope = {
   worker?: SqliteReadOnlyWorkerSession;
   releaseReadWorker?: () => Promise<void>;
 };
-export const readOnlyWorkerScope = new AsyncLocalStorage<SqliteReadOnlyWorkerScope>();
+export const readOnlyWorkerScope = new AsyncContext<SqliteReadOnlyWorkerScope>(
+  Symbol("sqliteReadOnlyWorkerScope"),
+);
+
+export class SqliteReadOnlyWorkerScopeClosedError extends Error {
+  readonly code = "SQLITE_READONLY_WORKER_SCOPE_CLOSED";
+
+  constructor() {
+    super("SQLite read-only worker scope closed");
+  }
+}
 
 /** Reuse child imports until the lifecycle owner closes; reads reacquire source admission. */
 export function createSqliteReadOnlyWorkerScope(options?: {
@@ -32,24 +44,19 @@ export function createSqliteReadOnlyWorkerScope(options?: {
   let closing: Promise<void> | undefined;
   return {
     run<T>(operation: () => T): T {
-      return readOnlyWorkerScope.run(scope, operation);
+      return runWithAsyncStore(readOnlyWorkerScope, scope, operation);
     },
     close(): Promise<void> {
       closing ??= (async () => {
         options?.signal.removeEventListener("abort", abort);
         scope.active = false;
-        scope.controller.abort(new Error("SQLite read-only worker scope closed"));
+        scope.controller.abort(new SqliteReadOnlyWorkerScopeClosedError());
         await Promise.allSettled(scope.pending);
         const closed = await Promise.allSettled([
           scope.worker?.close(),
           scope.releaseReadWorker?.(),
         ]);
-        const failures = closed.flatMap((result) =>
-          result.status === "rejected" ? [result.reason] : [],
-        );
-        if (failures.length > 0) {
-          throw new AggregateError(failures, "SQLite read-only worker scope cleanup failed");
-        }
+        throwSettledAggregate(closed, "SQLite read-only worker scope cleanup failed");
       })();
       return closing;
     },
@@ -61,12 +68,14 @@ export function captureSqliteReadOnlyWorkerScope(): <T>(operation: () => T) => T
   const scope = readOnlyWorkerScope.getStore();
   return (operation) => {
     if (!scope) {
-      return readOnlyWorkerScope.exit(operation);
+      return readOnlyWorkerScope.getStore() === undefined
+        ? operation()
+        : readOnlyWorkerScope.exit(operation);
     }
     if (!scope.active) {
-      throw new Error("SQLite read-only worker scope closed");
+      throw new SqliteReadOnlyWorkerScopeClosedError();
     }
     scope.controller.signal.throwIfAborted();
-    return readOnlyWorkerScope.run(scope, operation);
+    return runWithAsyncStore(readOnlyWorkerScope, scope, operation);
   };
 }

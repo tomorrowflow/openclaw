@@ -19,6 +19,8 @@ Use `openclaw onboard` or `openclaw setup` for the full guided first-run journey
 
 Before `openclaw configure` changes local credentials or configuration, OpenClaw compares the selected CLI state/config paths with the local Gateway or its installed service. A proven mismatch stops before the write. A remote Gateway or an authenticated path that cannot be verified produces a warning instead.
 
+On Windows, this comparison ignores letter case, including for directories that do not exist yet.
+
 This comparison also applies when `OPENCLAW_HOME` relocates the CLI's default state directory. The installed service's recorded environment determines its paths, including while the Gateway is stopped. The CLI's path overrides do not replace them. If the service definition or its recorded paths cannot be verified, OpenClaw warns and leaves configuration available. Inspect the service with `openclaw gateway status --deep` before relying on local changes to reach it.
 
 `--section <section>`: repeatable section filter. Available sections:
@@ -88,8 +90,12 @@ Shell-only environment variables may not be available to the Gateway service.
 
 Skipping, a failed check, or declining to save leaves the memory section unsaved.
 The flow does not download local models, create an index, or re-index memories.
-Existing per-agent overrides remain unchanged. A provider change drops the old
-memory endpoint, headers, and key so they cannot be sent to the new destination.
+A provider change drops the old shared memory endpoint, headers, and key. Agents
+with their own remote settings, or a pinned provider inheriting shared remote
+settings, keep their previous effective provider, model, endpoint, and credentials
+in explicit per-agent overrides. SecretRefs remain references. Other agents adopt
+the new shared defaults. Skipping, failed checks, and declining save leave all
+agent overrides unchanged.
 An embedding identity change can require an explicit index rebuild afterward;
 see [Memory configuration](/reference/memory-config).
 

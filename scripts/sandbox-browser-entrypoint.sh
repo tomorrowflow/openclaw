@@ -96,12 +96,15 @@ mkdir -p "${HOME}" "${HOME}/.chrome" "${XDG_CONFIG_HOME}" "${XDG_CACHE_HOME}"
 # Without this, Chromium refuses to start: "The profile appears to be in use by another process".
 rm -f "${HOME}/.chrome/SingletonLock" "${HOME}/.chrome/SingletonCookie" "${HOME}/.chrome/SingletonSocket" 2>/dev/null || true
 
-# Recreate /tmp/.X11-unix when tmpfs wipes the image-layer copy.
-mkdir -p /tmp/.X11-unix 2>/dev/null || true
-
-Xvfb :1 -screen 0 "${SCREEN_RES}" -ac -nolisten tcp &
-XVFB_PID=$!
-echo "[sandbox] Xvfb started (PID: ${XVFB_PID})"
+# Headless Chromium does not use a display server. Keep the headed/noVNC path
+# unchanged, including when noVNC itself is disabled but Chromium is headed.
+if [[ "${HEADLESS}" != "1" ]]; then
+  # Recreate /tmp/.X11-unix when tmpfs wipes the image-layer copy.
+  mkdir -p /tmp/.X11-unix 2>/dev/null || true
+  Xvfb :1 -screen 0 "${SCREEN_RES}" -ac -nolisten tcp &
+  XVFB_PID=$!
+  echo "[sandbox] Xvfb started (PID: ${XVFB_PID})"
+fi
 
 if [[ "${HEADLESS}" == "1" ]]; then
   CHROME_ARGS=(

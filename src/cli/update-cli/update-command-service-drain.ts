@@ -6,7 +6,7 @@ import type {
 } from "../../../packages/gateway-protocol/src/index.js";
 import { GatewayServiceStopUnsafeError } from "../../daemon/service-inspection-error.js";
 import type { GatewayServiceState } from "../../daemon/service-types.js";
-import { readSystemdGatewayStopTimeout } from "../../daemon/systemd-maintenance.js";
+import { readSystemdGatewayStopTimeout } from "../../daemon/systemd-stop-policy.js";
 import { resolveReadOnlyLocalGatewayAuth } from "../../gateway/call-device-auth.js";
 import { callGatewayCli } from "../../gateway/call.js";
 import { createConfiguredGatewayLocalProbe } from "../../gateway/local-http-probe.js";
@@ -18,14 +18,10 @@ import {
   GATEWAY_SHUTDOWN_TIMEOUT_MS,
 } from "../../infra/gateway-shutdown-budget.js";
 import { inspectPortUsage } from "../../infra/ports-inspect.js";
-import { DEFAULT_UPDATE_STEP_TIMEOUT_MS } from "../../infra/update-run-timeouts.js";
 import { sleep } from "../../utils/sleep.js";
 import { resolveGatewayRestartProbeContext } from "../daemon-cli/restart-health-probe.js";
 import { allListenersOwnedByRuntimePid } from "../daemon-cli/restart-port-ownership.js";
 import { resolveUpdatedGatewayRestartPort } from "./update-command-service-plan.js";
-
-// Longer than a Gateway needs to bind its port after its service reports running.
-const CLOSED_RESIDENT_GRACE_MS = 60_000;
 
 /** Keep short-budget residents behind their own admission fence until stop or release. */
 export async function withGatewayMaintenanceDrain<T>(
@@ -33,12 +29,18 @@ export async function withGatewayMaintenanceDrain<T>(
     state: GatewayServiceState;
     timeoutMs?: number;
     drainPolicy?: "interrupt-after-drain";
+    /** Installation owners can retain an exact trusted control client and supervisor binding. */
+    control?: {
+      call: <R>(method: string, args: unknown, beforeDispatch?: () => void) => Promise<R>;
+      stopTimeoutMs: number;
+    };
     assertCurrent: () => void;
     warn: (message: string) => void;
   },
   stop: (guard: { prepareEffect: (beforeCommit: () => void) => Promise<void> }) => Promise<T>,
 ): Promise<T> {
-  const deadline = performance.now() + (params.timeoutMs ?? DEFAULT_UPDATE_STEP_TIMEOUT_MS);
+  // Leave the remaining 15 seconds of the drain lease for the stop handoff.
+  const drainBudgetMs = Math.min(params.timeoutMs ?? 30_000, 30_000);
   const explicitDrain = params.drainPolicy === "interrupt-after-drain";
   const requestId = randomUUID();
   let suspensionId: string | undefined;
@@ -105,6 +107,19 @@ export async function withGatewayMaintenanceDrain<T>(
   let lastObservation: GatewaySuspendPrepareResult | undefined;
   let observationFailure: { error: unknown } | undefined;
   let processTarget: { pid: number; processInstanceId: string } | undefined;
+  const assertSuspensionCurrent = () => {
+    if (
+      suspensionId &&
+      (!lastObservation ||
+        lastObservation.status === "busy" ||
+        lastObservation.suspensionId !== suspensionId ||
+        lastObservation.expiresAtMs <= Date.now())
+    ) {
+      throw new GatewayServiceStopUnsafeError(
+        "Gateway maintenance suspension expired or changed; the Gateway was not stopped. Retry the update after lifecycle inspection is available.",
+      );
+    }
+  };
   const assertDrainLease = () => {
     assertResidentCurrent();
     if (
@@ -127,25 +142,26 @@ export async function withGatewayMaintenanceDrain<T>(
     }
     return lastObservation;
   };
-  const remaining = () => Math.max(1, deadline - performance.now());
-  const connection = await (async () => {
-    const { config, auth } = await resolveGatewayRestartProbeContext(params.state.env);
-    const port = await resolveUpdatedGatewayRestartPort({
-      config,
-      serviceEnv: params.state.env,
-      serviceCommand: params.state.command,
-    });
-    const target = await createConfiguredGatewayLocalProbe(config).resolveWebSocketTarget(port);
-    const controlAuth = await resolveReadOnlyLocalGatewayAuth({
-      auth,
-      authNone: config.gateway?.auth?.mode === "none",
-      env: params.state.env,
-    });
-    return { config, controlAuth, port, target };
-  })().catch((error: unknown) => {
-    observationFailure = { error };
-    return undefined;
-  });
+  const connection = params.control
+    ? undefined
+    : await (async () => {
+        const { config, auth } = await resolveGatewayRestartProbeContext(params.state.env);
+        const port = await resolveUpdatedGatewayRestartPort({
+          config,
+          serviceEnv: params.state.env,
+          serviceCommand: params.state.command,
+        });
+        const target = await createConfiguredGatewayLocalProbe(config).resolveWebSocketTarget(port);
+        const controlAuth = await resolveReadOnlyLocalGatewayAuth({
+          auth,
+          authNone: config.gateway?.auth?.mode === "none",
+          env: params.state.env,
+        });
+        return { config, controlAuth, port, target };
+      })().catch((error: unknown) => {
+        observationFailure = { error };
+        return undefined;
+      });
   assertResidentCurrent();
   const ownsLegacyListener = async (pid: number) => {
     if (!connection?.target) {
@@ -162,6 +178,14 @@ export async function withGatewayMaintenanceDrain<T>(
     beforeDispatch?: () => void,
   ): Promise<R> => {
     assertResidentCurrent();
+    if (params.control) {
+      const result = await params.control.call<R>(method, args, () => {
+        assertResidentCurrent();
+        beforeDispatch?.();
+      });
+      assertResidentCurrent();
+      return result;
+    }
     if (!connection?.target) {
       throw observationFailure
         ? observationFailure.error
@@ -178,8 +202,8 @@ export async function withGatewayMaintenanceDrain<T>(
       localPortOverride: port,
       ignoreEnvUrlOverride: true,
       tlsFingerprint: target.tlsFingerprint,
-      // The deadline bounds deferral, not the final RPC needed to observe custody.
-      timeoutMs: 10_000,
+      // Handoff may wait for final writes within the original 30-second drain budget.
+      timeoutMs: method === "gateway.suspend.handoff" ? 30_000 : 10_000,
       onHelloOk: (hello) => {
         observedBootId = hello.server.bootId;
       },
@@ -199,7 +223,8 @@ export async function withGatewayMaintenanceDrain<T>(
   let managerTimeout: number | undefined;
   let verifiedResident = false;
   try {
-    managerTimeout = await readSystemdGatewayStopTimeout(params.state);
+    managerTimeout =
+      params.control?.stopTimeoutMs ?? (await readSystemdGatewayStopTimeout(params.state));
     const resident = await call<{ pid?: number; shutdownBudget?: GatewayShutdownStatus }>(
       "status",
       { includeChannelSummary: false },
@@ -248,26 +273,6 @@ export async function withGatewayMaintenanceDrain<T>(
     legacyStalePid = legacy.pid;
     return true;
   };
-  // A running resident whose port stays free past startup has finished its own
-  // shutdown and is only exiting, so it admits no work. Retrying it until the
-  // deadline holds the caller's state custody, which keeps the supervisor's
-  // replacement from starting. The grace keeps a Gateway that has not bound yet
-  // on the normal drain path.
-  let portFreeSince: number | undefined;
-  const closedResident = async () => {
-    if (!observationFailure || !connection?.target || !params.state.running) {
-      portFreeSince = undefined;
-      return false;
-    }
-    const usage = await inspectPortUsage(connection.port, { probeHosts: ["127.0.0.1"] });
-    assertResidentCurrent();
-    if (usage.status !== "free") {
-      portFreeSince = undefined;
-      return false;
-    }
-    portFreeSince ??= performance.now();
-    return performance.now() - portFreeSince >= CLOSED_RESIDENT_GRACE_MS;
-  };
   if (!explicitDrain && (await staleResident())) {
     params.warn(
       "WARNING: The running Gateway's installation was replaced before this stop; it refuses connections, so lifecycle drain is skipped and it is stopped directly.",
@@ -301,7 +306,10 @@ export async function withGatewayMaintenanceDrain<T>(
       processTarget = { pid: identity.pid, processInstanceId: identity.processInstanceId };
       verifiedResident = true;
     }
+    let deadline = performance.now() + drainBudgetMs;
+    const remaining = () => Math.max(1, deadline - performance.now());
     while (true) {
+      assertSuspensionCurrent();
       try {
         if (!verifiedResident) {
           const identity = await call<{ pid: number }>("system.info", {});
@@ -311,15 +319,18 @@ export async function withGatewayMaintenanceDrain<T>(
           }
           verifiedResident = true;
         }
-        // Repeated prepare renews the lease and asks the same lifecycle owner to
-        // observe all admitted work, including write custody, under its fence.
-        lastObservation = await call<GatewaySuspendPrepareResult>("gateway.suspend.prepare", {
-          requestId,
-          drain: true,
-          terminalPolicy: "terminate",
-        });
-        if (lastObservation.status !== "busy") {
+        // Reobserve the original lease without acquiring another after expiry.
+        lastObservation = await call<GatewaySuspendPrepareResult>(
+          "gateway.suspend.prepare",
+          { requestId, drain: true, terminalPolicy: "terminate" },
+          assertSuspensionCurrent,
+        );
+        if (lastObservation.status !== "busy" && !suspensionId) {
           suspensionId = lastObservation.suspensionId;
+          // Preflight does not spend the drain budget; a slow prepare does.
+          deadline =
+            performance.now() +
+            Math.min(drainBudgetMs, Math.max(0, lastObservation.expiresAtMs - Date.now() - 15_000));
         }
         observationFailure = undefined;
       } catch (error) {
@@ -327,18 +338,13 @@ export async function withGatewayMaintenanceDrain<T>(
         observationFailure = { error };
       }
       assertResidentCurrent();
+      assertSuspensionCurrent();
       if (!observationFailure && lastObservation?.status === "ready") {
         return await finish();
       }
       if (!explicitDrain && (await staleResident())) {
         params.warn(
           "WARNING: The running Gateway's installation was replaced during this stop; it refuses connections, so lifecycle drain is skipped and it is stopped directly.",
-        );
-        return await finish();
-      }
-      if (!explicitDrain && (await closedResident())) {
-        params.warn(
-          "WARNING: The running Gateway no longer listens on its port; it has no work left to drain, so lifecycle drain is skipped and it is stopped directly.",
         );
         return await finish();
       }
@@ -392,7 +398,7 @@ export async function withGatewayMaintenanceDrain<T>(
       // stop, resume only the exact resident and token this invocation prepared.
       await call("gateway.suspend.resume", { suspensionId }).catch((error: unknown) =>
         params.warn(
-          `WARNING: Could not resume Gateway suspension ${suspensionId}: ${coerceErrorMessage(error)}; the Gateway reopens admission automatically when the lease expires (within 2 minutes).`,
+          `WARNING: Could not resume Gateway suspension ${suspensionId}: ${coerceErrorMessage(error)}; the Gateway reopens admission automatically when the drain lease expires.`,
         ),
       );
     }

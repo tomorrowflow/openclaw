@@ -1,11 +1,27 @@
 import type { SchemaContract } from "../../../packages/gateway-protocol/src/schema-contract.js";
 import type { AgentSandboxConfig } from "../../config/types.agents-shared.js";
+import type { SandboxDockerSettings } from "../../config/types.sandbox.js";
 import type { SkillEligibilityContext, SkillUsagePath } from "../../skills/types.js";
 import type { SandboxBackendHandle, SandboxBackendId } from "./backend-handle.types.js";
 import type { SandboxFsBridge } from "./fs-bridge.types.js";
-import type { SandboxDockerConfig } from "./types.docker.js";
 
-export type { SandboxDockerConfig } from "./types.docker.js";
+type RequiredDockerConfigKeys =
+  | "image"
+  | "containerPrefix"
+  | "workdir"
+  | "readOnlyRoot"
+  | "tmpfs"
+  | "network"
+  | "capDrop";
+
+export type SandboxDockerConfig = Omit<
+  SandboxDockerSettings,
+  RequiredDockerConfigKeys | "env" | "secretMounts"
+> &
+  Required<Pick<SandboxDockerSettings, RequiredDockerConfigKeys>> & {
+    /** Resolved container environment; SecretRef inputs arrive as runtime snapshot strings. */
+    env?: Record<string, string>;
+  };
 
 /** In-process provenance, bound to the original resolved allowlist; never serialized. */
 export const SANDBOX_DEFAULT_TOOL_ALLOW = Symbol.for("openclaw.sandbox.defaultToolAllow");

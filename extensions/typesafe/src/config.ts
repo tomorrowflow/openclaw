@@ -1,3 +1,4 @@
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "typebox";
 
 // Loopback, or a private IPv4 literal (RFC 1918 and the 100.64/10 range Tailscale uses)
@@ -36,13 +37,45 @@ export const ConfigSchema = Type.Object(
   { additionalProperties: false },
 );
 
+type RuntimeSnapshot = ReturnType<OpenClawPluginApi["runtime"]["config"]["current"]>;
+type ModelProviderConfig = NonNullable<NonNullable<RuntimeSnapshot["models"]>["providers"]>[string];
 export type RuntimeConfig = {
   apiKey?: string;
   baseUrl?: string;
+  providerConfig?: ModelProviderConfig;
+  credentialsUnavailable?: boolean;
   /** Model name sent to a local server that routes by name (Ollama), in place of kev-latest. */
   localModel?: string;
   timeoutMs: number;
 };
+export const HOSTED_ORIGIN = "https://api.typesafe.ai";
+
+/** Model providers configure the API root; origin-only System One URLs imply /v1. */
+export function providerBaseUrl(value: string | undefined): string {
+  const parsed = value ? URL.parse(value) : null;
+  if (
+    !parsed ||
+    !["http:", "https:"].includes(parsed.protocol) ||
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash
+  ) {
+    throw new Error(
+      "Invalid models.providers.typesafe.baseUrl; use an HTTP(S) API base URL without credentials, query, or fragment.",
+    );
+  }
+  parsed.pathname = parsed.pathname.replace(/\/+$/, "") || "/v1";
+  return parsed.toString().replace(/\/+$/, "");
+}
+
+export function usesHostedEndpoint(config: Pick<RuntimeConfig, "baseUrl">): boolean {
+  return !config.baseUrl || new URL(config.baseUrl).origin === HOSTED_ORIGIN;
+}
+
+export function hasCredentials(config: RuntimeConfig): boolean {
+  return !config.credentialsUnavailable && Boolean(config.baseUrl || config.apiKey);
+}
 
 /** A configured endpoint grants access to one loopback or private-IP origin, never a hostname. */
 export function localBaseUrl(value: unknown): string | undefined {

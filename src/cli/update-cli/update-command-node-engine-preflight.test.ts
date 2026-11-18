@@ -6,6 +6,7 @@ import * as packageMetadata from "../../infra/update-check-package-target.js";
 import * as updateGlobal from "../../infra/update-global.js";
 import { defaultRuntime } from "../../runtime.js";
 import * as shared from "./shared.js";
+import { runtimeFixture } from "./update-command-fixtures.test-support.js";
 import { installFreshUpdateFixture, targetMetadata } from "./update-command-fresh.test-support.js";
 import * as runtimeRecovery from "./update-command-node-runtime-resolution.js";
 import * as packageUpdate from "./update-command-package.js";
@@ -17,6 +18,7 @@ const engine = ">=24.22.1 <25 || >=26.12.1";
 
 it.each([
   ["npm", "24.20.0"],
+  ["npm", "26.4.0"],
   ["pnpm", "24.21.0"],
   ["bun", "26.10.0"],
 ] as const)(
@@ -35,13 +37,9 @@ it.each([
         ? { npmOwner: { version: "11.10.0", lifecyclePolicy: "unflagged" } }
         : {}),
     });
-    vi.spyOn(runtimePaths, "resolveNodeRuntimeInfo").mockResolvedValue({
-      status: "supported",
-      version,
-      sqliteVersion: "3.53.0",
-      nodeSharedSqlite: false,
-      sqliteProbe: { available: true, version: "3.53.0", text: true, blob: true, json: true },
-    });
+    vi.spyOn(runtimePaths, "resolveNodeRuntimeInfo").mockResolvedValue(
+      runtimeFixture(version, "3.53.0"),
+    );
     vi.mocked(packageMetadata.fetchNpmPackageTargetStatus).mockResolvedValue({
       ...targetMetadata,
       version: "2026.10.6",

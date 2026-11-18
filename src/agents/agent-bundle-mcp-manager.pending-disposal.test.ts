@@ -1,6 +1,6 @@
 // Disposal settlement owns the last cleanup of bindings left by empty successors.
 import { expectDefined } from "@openclaw/normalization-core";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import { createDeferred, withTestTimeout } from "../../test/helpers/promise.js";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import {
@@ -10,14 +10,10 @@ import {
 import { startCatalogRecoveryMcpServer } from "./agent-bundle-mcp-catalog-recovery.test-support.js";
 import { createSessionMcpRuntimeManager } from "./agent-bundle-mcp-manager.js";
 
-afterEach(() => vi.unstubAllEnvs());
-
 const tempDirTracker = useAutoCleanupTempDirTracker(afterEach);
 type RuntimeParams = Parameters<ReturnType<typeof createSessionMcpRuntimeManager>["acquire"]>[0];
 
 it("forgets an empty successor binding after the original idle disposal settles", async () => {
-  vi.stubEnv("NO_PROXY", "127.0.0.1");
-  vi.stubEnv("no_proxy", "127.0.0.1");
   const terminate = createDeferred();
   const server = await startCatalogRecoveryMcpServer("idle-empty-successor", {
     holdTermination: terminate.promise,
@@ -39,7 +35,7 @@ it("forgets an empty successor binding after the original idle disposal settles"
     },
   };
   const sessionKey = expectDefined(params.sessionKey, "MCP session key");
-  let sweep: Promise<number> | undefined;
+  let sweep: Promise<void> | undefined;
   try {
     const original = await manager.acquire(params);
     try {
@@ -53,17 +49,17 @@ it("forgets an empty successor binding after the original idle disposal settles"
 
     const cfg = { plugins: { enabled: false }, mcp: { servers: {} } };
     await manager.reloadConfig({ cfg });
-    const successor = await manager.acquire({ ...params, cfg });
+    const acquiring = manager.acquire({ ...params, cfg });
+    expect(manager.resolveSessionId(sessionKey)).toBe(params.sessionId);
+    terminate.resolve();
+    await sweep;
+    const successor = await acquiring;
     try {
       expect((await successor.runtime.getCatalog()).tools).toEqual([]);
     } finally {
       successor.releaseLease();
     }
     expect(manager.listRuntimeKeys()).toEqual([]);
-    expect(manager.resolveSessionId(sessionKey)).toBe(params.sessionId);
-
-    terminate.resolve();
-    await expect(sweep).resolves.toBe(1);
     expect(manager.resolveSessionId(sessionKey)).toBeUndefined();
     expect(server.terminationCount()).toBe(1);
   } finally {

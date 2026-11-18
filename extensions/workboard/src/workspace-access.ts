@@ -47,6 +47,7 @@ export const WORKBOARD_CARD_TOOL_NAMES = [
   "workboard_block",
   "workboard_boards",
   "workboard_board_create",
+  "workboard_class_rung",
   "workboard_board_archive",
   "workboard_board_delete",
   "workboard_stats",

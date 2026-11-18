@@ -15,16 +15,13 @@ import {
   WORKBOARD_ALL_BOARDS_FILTER,
 } from "../../lib/workboard/board-filter.ts";
 import { workboardBoardName } from "../../lib/workboard/board-presentation.ts";
+import { getWorkboardDependencyState } from "../../lib/workboard/card-state.ts";
 import { isWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
-import {
-  getWorkboardDependencyState,
-  getWorkboardLifecycle,
-  getWorkboardState,
-  grillWorkboardQuestions,
-  type WorkboardCard,
-  type WorkboardUiState,
-} from "../../lib/workboard/index.ts";
+import { getWorkboardLifecycle } from "../../lib/workboard/lifecycle.ts";
+import { grillWorkboardQuestions } from "../../lib/workboard/mutations.ts";
 import { formatError } from "../../lib/workboard/normalization-utils.ts";
+import { getWorkboardState } from "../../lib/workboard/runtime.ts";
+import type { WorkboardCard, WorkboardUiState } from "../../lib/workboard/types.ts";
 import { cardAgentLabel } from "./agent-filter.ts";
 import { automationDetailFields, BoardAutomation } from "./view-automation.tsx";
 import { getCardActionState, CardAction, StartExecutionButton } from "./view-card-actions.tsx";
@@ -74,7 +71,7 @@ import { workboardScrollFadeRef } from "./view-scroll-fade.ts";
 export const workboardCardDetailDrawerId = "workboard-card-detail-drawer";
 const workboardCardDetailTitleId = "workboard-card-detail-title";
 
-const detailDrawerRefs = new WeakMap<WorkboardUiState, { value?: HTMLElement }>();
+const detailEditors = new WeakMap<WorkboardUiState, Set<WorkboardInlineText>>();
 const inlineDiscardOpen = new WeakMap<WorkboardUiState, () => void>();
 
 export function openCardDetails(state: WorkboardUiState, card: WorkboardCard) {
@@ -98,9 +95,7 @@ export function getVisibleDetailCard(state: WorkboardUiState): WorkboardCard | n
   }
   const card = state.cards.find((entry) => entry.id === state.detailCardId) ?? null;
   if (card?.metadata?.archivedAt && !state.showArchived) {
-    const editors = detailDrawerRefs
-      .get(state)
-      ?.value?.querySelectorAll<WorkboardInlineText>("workboard-inline-text");
+    const editors = detailEditors.get(state);
     const hasDraft = [...(editors ?? [])].some(
       (editor) =>
         editor.draftCardId === card.id && (editor.hasUnsavedChanges || editor.pendingSave),
@@ -134,26 +129,27 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
     void props.revision;
     return props.card;
   };
-  const drawer: { value: HTMLElement | undefined } = { value: undefined };
+  const editors = new Set<WorkboardInlineText>();
+  let body: HTMLElement | undefined;
+  const registerEditor = (editor: WorkboardInlineText) => {
+    editors.add(editor);
+    return () => editors.delete(editor);
+  };
   const drawerOwner = createMemo(() => getWorkboardState(props.host));
   createEffect(drawerOwner, (detailState) => {
-    detailDrawerRefs.set(detailState, drawer);
+    detailEditors.set(detailState, editors);
     return () => {
-      if (detailDrawerRefs.get(detailState) === drawer) {
-        detailDrawerRefs.delete(detailState);
+      if (detailEditors.get(detailState) === editors) {
+        detailEditors.delete(detailState);
         inlineDiscardOpen.delete(detailState);
       }
     };
   });
-  const inlineEditors = () => [
-    ...(drawer.value?.querySelectorAll<WorkboardInlineText>("workboard-inline-text") ?? []),
-  ];
   const requestTransition = (transition: () => void) => {
-    const editors = inlineEditors();
-    if (editors.some((editor) => editor.pendingSave)) {
+    if ([...editors].some((editor) => editor.pendingSave)) {
       return false;
     }
-    if (editors.some((editor) => editor.hasUnsavedChanges)) {
+    if ([...editors].some((editor) => editor.hasUnsavedChanges)) {
       inlineDiscardOpen.set(state(), transition);
       props.onRequestUpdate?.();
       return false;
@@ -201,9 +197,6 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
   const action = createMemo(() => getCardActionState(props, card()));
   const selectTab = (tab: WorkboardUiState["detailTab"], target: EventTarget | null) => {
     if (tab !== state().detailTab && target instanceof HTMLElement) {
-      const body = target
-        .closest(".workboard-detail")
-        ?.querySelector<HTMLElement>(".workboard-detail__body");
       if (body) {
         body.scrollTop = 0;
       }
@@ -220,7 +213,9 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
   const boardId = () => workboardCardBoardId(card());
   const board = () => state().boards.find((entry) => entry.id === boardId());
   const events = createMemo(() => (card().events ?? []).toReversed());
-  const dependencies = createMemo(() => getWorkboardDependencyState(card(), state().cards));
+  const dependencies = createMemo(() =>
+    getWorkboardDependencyState(card(), state().cards, !state().nextCursor),
+  );
   const technical = createMemo(() => technicalDetailsData(card(), action().linkedSessionKey));
   // Opening a portal needs operator.write, so read-only operators get no control that always fails.
   const transcriptViewerPort = () => (props.canWrite === false ? null : props.transcriptViewerPort);
@@ -294,18 +289,12 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
         label: card().title,
         description: lifecycle().session?.displayName ?? formatted().detail,
         style:
-          "--openclaw-modal-width: 620px; --openclaw-modal-backdrop-filter: none; --wa-color-overlay-modal: rgba(0, 0, 0, 0.24);",
+          "--openclaw-modal-width: 620px; --openclaw-modal-backdrop-filter: none; --openclaw-modal-backdrop-color: rgba(0, 0, 0, 0.24);",
         onCancel: dismissDetails,
       }}
     >
       <>
-        <aside
-          id={workboardCardDetailDrawerId}
-          class="workboard-detail-drawer"
-          ref={(element) => {
-            drawer.value = element;
-          }}
-        >
+        <aside id={workboardCardDetailDrawerId} class="workboard-detail-drawer">
           <div class="workboard-detail">
             <header class="workboard-detail__header">
               <div class="workboard-detail__heading">
@@ -315,6 +304,7 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                     owner={props}
                     card={card()}
                     field={"title"}
+                    register={registerEditor}
                     disabled={action().busy}
                     readOnly={!action().writable || action().archived}
                   />
@@ -380,7 +370,15 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
               </div>
             </header>
             <DetailTabs tabs={tabs()} activeTab={activeTab()} onSelect={selectTab} />
-            <div class="workboard-detail__body" ref={workboardScrollFadeRef()}>
+            <div
+              class="workboard-detail__body"
+              ref={[
+                workboardScrollFadeRef(),
+                (element) => {
+                  body = element;
+                },
+              ]}
+            >
               <section
                 class="workboard-detail__tabpanel"
                 id="workboard-detail-panel-overview"
@@ -408,7 +406,10 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                         <InlinePriority workboard={props} card={card()} disabled={action().busy} />
                       ) : (
                         <strong
-                          class={`workboard-detail__priority workboard-detail__priority--${card().priority}`}
+                          class={[
+                            "workboard-detail__priority",
+                            `workboard-detail__priority--${card().priority}`,
+                          ]}
                         >
                           {renderPriorityIcon(card().priority)}
                           {formatPriorityLabel(card().priority)}
@@ -451,6 +452,7 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                         owner={props}
                         card={card()}
                         field={"labels"}
+                        register={registerEditor}
                         disabled={action().busy}
                         readOnly={!action().writable || action().archived}
                       />
@@ -569,6 +571,7 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                       owner={props}
                       card={card()}
                       field={"notes"}
+                      register={registerEditor}
                       disabled={action().busy}
                       readOnly={!action().writable || action().archived}
                     />
@@ -694,7 +697,7 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
             onDiscard: () => {
               const transition = inlineDiscardOpen.get(state());
               inlineDiscardOpen.delete(state());
-              for (const editor of inlineEditors()) {
+              for (const editor of editors) {
                 editor.discardDraft();
               }
               transition?.();

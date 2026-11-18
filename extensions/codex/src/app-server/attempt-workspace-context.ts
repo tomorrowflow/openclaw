@@ -33,7 +33,6 @@ type CodexBootstrapFile = Awaited<
 export type CodexWorkspaceBootstrapContext = {
   bootstrapFiles: CodexBootstrapFile[];
   contextFiles: EmbeddedContextFile[];
-  inheritsAgentWorkspace: boolean;
   promptContextFiles?: EmbeddedContextFile[];
   threadDeveloperInstructionFiles?: EmbeddedContextFile[];
   personaFiles?: EmbeddedContextFile[];
@@ -145,16 +144,14 @@ export async function buildCodexWorkspaceBootstrapContext(params: {
       promptContextFiles,
       memoryReferenceFiles,
       memoryToolRoutedBootstrapFiles,
-      instructionSnapshot,
     } = prepared;
     const threadDeveloperInstructionFiles = includeAgentWorkspaceInstructions
-      ? instructionSnapshot.files
+      ? prepared.instructionSnapshot.files
       : [];
     const personaFiles = injectOpenClawContext ? prepared.personaFiles : [];
     return {
       bootstrapFiles,
       contextFiles,
-      inheritsAgentWorkspace,
       promptContextFiles,
       threadDeveloperInstructionFiles,
       personaFiles,
@@ -163,9 +160,9 @@ export async function buildCodexWorkspaceBootstrapContext(params: {
       memoryToolNames,
       memoryToolRouted,
       promptContext: renderCodexWorkspaceBootstrapPromptContext(promptContextFiles),
-      // Keep the last delivered instructions only when the current file is empty or missing.
+      // Empty is a captured snapshot too; a missing value still permits first capture.
       threadDeveloperInstructions: includeAgentWorkspaceInstructions
-        ? instructionSnapshot.instructions || params.agentWorkspaceDeveloperInstructions || ""
+        ? (params.agentWorkspaceDeveloperInstructions ?? prepared.instructionSnapshot.instructions)
         : undefined,
       personaInstructions: injectOpenClawContext ? prepared.personaInstructions : undefined,
       sharedPersonaInstructions: injectOpenClawContext
@@ -184,7 +181,6 @@ export async function buildCodexWorkspaceBootstrapContext(params: {
     return {
       bootstrapFiles: [],
       contextFiles: [],
-      inheritsAgentWorkspace,
       threadDeveloperInstructions: includeAgentWorkspaceInstructions
         ? params.agentWorkspaceDeveloperInstructions
         : undefined,
@@ -294,6 +290,6 @@ export function getCodexContextFileBasename(filePath: string): string {
   return normalizeCodexContextFilePath(filePath).split("/").pop() ?? "";
 }
 
-export function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0;
+export function isNonEmptyString(value: string | undefined): value is string {
+  return Boolean(value);
 }

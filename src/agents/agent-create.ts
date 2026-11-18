@@ -1,4 +1,3 @@
-import { statSync } from "node:fs";
 import fs from "node:fs/promises";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { applyAgentBindings, parseBindingSpecs } from "../commands/agents.bindings.js";
@@ -23,7 +22,6 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { FsSafeError, root } from "../infra/fs-safe.js";
 import { normalizeAgentId, normalizeAgentIdStrict } from "../routing/session-key.js";
 import { runWithAgentCreationClaim } from "../state/agent-creation-claim.js";
-import { assertAgentDeletionRecoveryHoldPredicate } from "../state/agent-deletion-journal-recovery.kernel.js";
 import {
   readAgentDeletionJournalForCreation,
   readAgentDeletionRecoveryHoldsInWorker,
@@ -33,11 +31,13 @@ import { resolveAgentDeletionRecoveryHoldsInWorker } from "../state/agent-deleti
 import { recordAgentProvenance, type AgentCreatedVia } from "../state/agent-provenance.js";
 import { createOpenClawAgentDatabasePathMatcher } from "../state/openclaw-agent-db.paths.js";
 import { prepareOpenClawAgentDatabaseExecution } from "../state/openclaw-agent-execution.js";
-import { withExistingOpenClawStateDatabaseCurrentReadOnly } from "../state/openclaw-state-db-readonly.js";
 import { isReservedSystemAgentId } from "../system-agent/agent-id.js";
 import { resolveUserPath } from "../utils.js";
 import { DuplicateAgentError } from "./agent-create-error.js";
-import { normalizeAgentDirRegistryPath } from "./agent-dir-registry.js";
+import {
+  migrateRetainedAgentStores,
+  selectedRecoveryPaths,
+} from "./agent-create-retained-stores.js";
 import { claimCompletedAgentDeletion } from "./agent-lifecycle-registry.js";
 import { listAgentRoles, loadAgentRole } from "./agent-roles.js";
 import { toAgentEntriesRecord } from "./agent-scope-config.js";
@@ -49,7 +49,10 @@ import {
   mergeIdentityMarkdownContent,
   sanitizeAgentIdentityLine,
 } from "./identity-file.js";
-import { createWorkspaceFileMutationGuard } from "./workspace-file-mutation-guard.js";
+import {
+  assertCurrentAgentDeletionRecoveryHolds,
+  createWorkspaceFileMutationGuard,
+} from "./workspace-file-mutation-guard.js";
 import type { WorkspaceStateGuard } from "./workspace-state-store.worker-contract.js";
 import {
   DEFAULT_IDENTITY_FILENAME,
@@ -129,43 +132,13 @@ type CreateAgentParams = {
   prepareConfigCommit?: () => Promise<ConfigCommitReceipt | void>;
   /** Observe published config before post-commit bookkeeping that may still fail. */
   onCommitted?: (result: CreateAgentSuccess & { config: OpenClawConfig }) => void;
+  /** Provider cadence resolved from staged onboarding before config publication. */
+  proactiveCadenceMs?: number;
   provenance?: { createdVia: AgentCreatedVia; creatorAgentId?: string };
 };
 
 class InvalidAgentBindingsError extends Error {}
 class UnfinishedRoleBootstrapError extends Error {}
-
-function selectedRecoveryPaths(
-  config: OpenClawConfig,
-  agentId: string,
-  held: readonly HeldAgentDatabase[],
-  samePath: ReturnType<typeof createOpenClawAgentDatabasePathMatcher>,
-  explicitAgentDir?: string,
-): string[] {
-  if (!held.some((entry) => entry.agentId === agentId)) {
-    return [];
-  }
-  const currentDir = resolveAgentDir(config, agentId);
-  const changedDir =
-    explicitAgentDir !== undefined &&
-    normalizeAgentDirRegistryPath(explicitAgentDir) !== normalizeAgentDirRegistryPath(currentDir);
-  if (changedDir && findAgentEntryIndex(listAgentEntries(config), agentId) >= 0) {
-    return [];
-  }
-  const selectedDir = explicitAgentDir ?? currentDir;
-  const targets = resolveConfiguredAgentDatabaseTargets(
-    applyAgentConfig(config, { agentId, agentDir: selectedDir }),
-    { env: process.env, registeredDatabases: held },
-  );
-  return held
-    .filter(
-      (entry) =>
-        entry.agentId === agentId &&
-        statSync(entry.path, { throwIfNoEntry: false })?.isFile() &&
-        targets.some((target) => target.agentId === agentId && samePath(target.path, entry.path)),
-    )
-    .map((entry) => entry.path);
-}
 
 function createError(
   reason: CreateError["reason"],
@@ -224,8 +197,7 @@ function describeLegacySessionOutcome(outcome: LegacyMainSessionMigrationOutcome
     case "no-legacy-rows":
       return "the current session-store layout has no matching completed migration ledger";
   }
-  const unreachable: never = outcome.kind;
-  return unreachable;
+  return outcome.kind satisfies never;
 }
 
 async function evaluateMainCreationGate(
@@ -361,10 +333,7 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
     assertRecoveryPathCurrent();
     const predicate = recoveryHoldPredicate();
     if (predicate.applies) {
-      withExistingOpenClawStateDatabaseCurrentReadOnly(
-        (database) => assertAgentDeletionRecoveryHoldPredicate(database, predicate),
-        { allowNativeRead: true },
-      );
+      assertCurrentAgentDeletionRecoveryHolds(predicate);
     }
   };
   const hasBootstrapHold = async () =>
@@ -419,16 +388,8 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
           agentId,
         );
       }
+      const restoringRetained = recoveryPaths.length > 0 || deletion?.deleteFiles === false;
       let tombstoneClaimed = false;
-      if (
-        deletion?.cleanupCompleted &&
-        findAgentEntryIndex(listAgentEntries(lockedConfig), agentId) >= 0
-      ) {
-        if (!(await claimCompletedAgentDeletion(agentId, deletion.operationId))) {
-          throw new Error(`agent "${agentId}" deletion tombstone changed during creation`);
-        }
-        tombstoneClaimed = true;
-      }
       const committed = await transformConfig<CreateAgentSuccess>({
         afterWrite: { mode: "auto" },
         maxAttempts: 1,
@@ -464,6 +425,26 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
           const currentEntries = bootstrappingFirstAgent ? [] : listAgentEntries(currentConfig);
           const existingIndex = findAgentEntryIndex(currentEntries, agentId);
           const existingEntry = currentEntries[existingIndex];
+          if (existingIndex >= 0 && restoringRetained) {
+            await migrateRetainedAgentStores({
+              agentId,
+              allowRestore: !automaticBootstrap,
+              paths:
+                recoveryPaths.length > 0
+                  ? recoveryPaths
+                  : resolveConfiguredAgentDatabaseTargets(currentConfig, {
+                      env: process.env,
+                      agentId,
+                    }).map((target) => target.path),
+              assertCurrent: beforePersistentApply,
+            });
+          }
+          if (existingIndex >= 0 && deletion?.cleanupCompleted) {
+            if (!(await claimCompletedAgentDeletion(agentId, deletion.operationId))) {
+              throw new Error(`agent "${agentId}" deletion tombstone changed during creation`);
+            }
+            tombstoneClaimed = true;
+          }
           if (
             isBootstrapMain &&
             currentEntries.length > 0 &&
@@ -561,6 +542,20 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
             ? applyAgentBindings(nextConfig, bindingParse.bindings)
             : undefined;
           nextConfig = bindingResult?.config ?? nextConfig;
+          if (restoringRetained) {
+            await migrateRetainedAgentStores({
+              agentId,
+              allowRestore: !automaticBootstrap,
+              paths:
+                recoveryPaths.length > 0
+                  ? recoveryPaths
+                  : resolveConfiguredAgentDatabaseTargets(nextConfig, {
+                      env: process.env,
+                      agentId,
+                    }).map((target) => target.path),
+              assertCurrent: beforePersistentApply,
+            });
+          }
 
           // The outer lock makes this result-bearing transform single-attempt: setup
           // finishes before the final entry becomes visible to readers or delete flows.
@@ -678,6 +673,12 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
       }
       if (result.status === "created") {
         await recordAgentProvenance(agentId, params.provenance ?? { createdVia: "operator" });
+        const { provisionDefaultProactiveJob } = await import("../cron/default-proactive-job.js");
+        await provisionDefaultProactiveJob(result.config, agentId, {
+          cadenceMs: params.proactiveCadenceMs,
+          commitGuard: assertHost,
+          recoveryHoldPredicate: recoveryHoldPredicate(),
+        });
       }
       if (recoveryPaths.length > 0) {
         assertRecoveryCurrent();

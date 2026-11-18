@@ -432,7 +432,7 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
       resetReplySegment();
     }
 
-    let result = parseClaudeCliJsonlResult({
+    const result = parseClaudeCliJsonlResult({
       backend: params.backend,
       providerId: params.providerId,
       parsed,
@@ -447,10 +447,8 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
         result.terminalFailure?.reason === "turn_stopped" ? result.terminalFailure : undefined;
       const stoppedTurnErrorText = stoppedTurn ? (result.errorText ?? "") : "";
       if (stoppedTurn) {
-        const delivered = { ...result };
-        delete delivered.errorText;
-        delete delivered.terminalFailure;
-        result = delivered;
+        delete result.errorText;
+        delete result.terminalFailure;
       } else if (result.errorText) {
         output = result;
         return;
@@ -476,7 +474,7 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
               }),
             );
           }
-          result = { ...result, text: taggedResult.visibleText.trim() };
+          result.text = taggedResult.visibleText.trim();
         }
       }
       // Empty terminal result can follow already-streamed text; keep that text.
@@ -521,6 +519,9 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
           ? { text: "", errorText: stoppedTurnErrorText, terminalFailure: stoppedTurn }
           : {}),
         ...(resumeCheckpointId ? { resumeCheckpointId } : {}),
+        ...(output?.interimNativeReplies
+          ? { interimNativeReplies: output.interimNativeReplies }
+          : {}),
         ...(diagnosticUsage ? { diagnosticUsage } : {}),
       };
       // The result envelope carries the final message when present.
@@ -531,6 +532,13 @@ export function createCliJsonlStreamingParser(params: CliJsonlStreamingParserOpt
         !output.errorText &&
         !output.terminalFailure
       ) {
+        const finalText = output.rawFinalText ?? nextText;
+        if (sessionId && resumeCheckpointId && finalText) {
+          output.interimNativeReplies = [
+            ...(output.interimNativeReplies ?? []),
+            { text: finalText, cliSessionId: sessionId, externalId: resumeCheckpointId },
+          ];
+        }
         params.onCompletedReply?.(completedText, textParts.length - 1);
       }
       // An interim result commits its segment. Rebase boundary state so later

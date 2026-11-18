@@ -185,10 +185,9 @@ export function workboardCardConsumesOwnerSlot(card: WorkboardOwnerSlotCard, now
   return (
     !isWorkboardNodeTicket(card) &&
     !card.metadata?.archivedAt &&
+    card.status !== "done" &&
     !isWorkboardClaimReclaimable(claim, now) &&
-    (card.status === "running" ||
-      (card.status !== "done" && activeClaim) ||
-      card.execution?.status === "running")
+    (card.status === "running" || activeClaim || card.execution?.status === "running")
   );
 }
 

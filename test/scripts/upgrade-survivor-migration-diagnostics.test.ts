@@ -38,7 +38,6 @@ const cronCliLogs = [
   "legacy-operator-candidate-transcript-1-earlier.out",
   "legacy-operator-candidate-transcript-1-earlier.err",
 ];
-const doctorLintLogs = ["doctor-lint.json", "doctor-lint.err"];
 const nativeRecoveryLogs = [
   "native-recover.out",
   "native-recover.err",
@@ -310,61 +309,19 @@ it.each([false, true])(
   },
 );
 
-it.each([false, true])(
-  "publishes bounded redacted sole-policy evidence with unsafe logs: %s",
-  (unsafe) => {
-    const f = fixture();
-    const policy = pluginPolicyReceipt();
-    write(path.join(f.artifacts, "summary.json"), policySuccessSummary({ ...policy, privateBody }));
-    const policyRoot = path.join(f.artifacts, "webhooks-only-policy");
-    if (unsafe) {
-      fs.mkdirSync(policyRoot);
-      const outside = path.join(f.root, "outside.json");
-      write(outside, { privateBody });
-      fs.symlinkSync(outside, path.join(policyRoot, "result.json"));
-      fs.writeFileSync(path.join(policyRoot, "update.json"), "x".repeat(256 * 1024 + 1));
-    } else {
-      write(path.join(policyRoot, "result.json"), policy);
-      write(path.join(policyRoot, "update.json"), {
-        status: "ok",
-        before: { version: "2026.9.2" },
-        after: { version: "2026.9.6" },
-        warning: `token=${secret}`,
-      });
-    }
-    write(path.join(f.artifacts, "webhooks-only-policy/candidate-runtime.out"), {
-      plugins: [{ id: "telegram", enabled: true, runtime: { state: "unloaded" } }],
-      warning: `token=${secret}`,
-    });
-    write(path.join(f.artifacts, "webhooks-only-policy/baseline-runtime.out"), {
-      plugins: [{ id: "telegram", installed: true, enabled: true, state: "enabled" }],
-    });
-    write(path.join(f.artifacts, "webhooks-only-policy/openclaw.json"), { privateBody, secret });
-    const report = capture(f, "passed");
-    expect(report.pluginPolicy).toEqual(policy);
-    if (unsafe) {
-      expect(report.logs["webhooks-only-policy/result.json"]).toBeNull();
-      expect(report.omissions["webhooks-only-policy/result.json"]).toBe("missing or unsafe file");
-      expect(report.logs["webhooks-only-policy/update.json"]).toBeNull();
-      expect(report.omissions["webhooks-only-policy/update.json"]).toBe(
-        "input exceeds cap; omitted whole",
-      );
-    } else {
-      expect(JSON.parse(report.logs["webhooks-only-policy/result.json"])).toEqual(policy);
-      expect(JSON.parse(report.logs["webhooks-only-policy/update.json"])).toMatchObject({
-        before: { version: "2026.9.2" },
-        after: { version: "2026.9.6" },
-      });
-    }
-    expect(JSON.parse(report.logs["webhooks-only-policy/candidate-runtime.out"]).plugins).toEqual([
-      { id: "telegram", enabled: true, runtime: { state: "unloaded" } },
-    ]);
-    expect(JSON.parse(report.logs["webhooks-only-policy/baseline-runtime.out"]).plugins).toEqual([
-      { id: "telegram", installed: true, enabled: true, state: "enabled" },
-    ]);
-    expect(report.logs).not.toHaveProperty("webhooks-only-policy/openclaw.json");
-  },
-);
+it("publishes the allowlisted sole-policy proof and redacted logs", () => {
+  const f = fixture();
+  const policy = pluginPolicyReceipt();
+  write(path.join(f.artifacts, "summary.json"), policySuccessSummary({ ...policy, privateBody }));
+  write(path.join(f.artifacts, "webhooks-only-policy/result.json"), policy);
+  write(path.join(f.artifacts, "webhooks-only-policy/update.json"), { warning: `token=${secret}` });
+  write(path.join(f.artifacts, "webhooks-only-policy/openclaw.json"), { privateBody, secret });
+  const report = capture(f, "passed");
+  expect(report.pluginPolicy).toEqual(policy);
+  expect(JSON.parse(report.logs["webhooks-only-policy/result.json"])).toEqual(policy);
+  expect(report.logs["webhooks-only-policy/update.json"]).not.toContain(secret);
+  expect(report.logs).not.toHaveProperty("webhooks-only-policy/openclaw.json");
+});
 
 it.each([
   { candidateVersion: "2026.9.5" },
@@ -406,11 +363,6 @@ it.each(["failed", "passed"] as const)(
       runId: "refused-run",
       reason: `output-limit; token=${secret}`,
     });
-    write(path.join(f.artifacts, "sibling-refusal-status.json"), {
-      lastRun: { runId: "refused-run", status: "failed" },
-    });
-    write(path.join(f.artifacts, "sibling-refusal-worker.json"), { worker: { pid: 123 } });
-    write(path.join(f.artifacts, "sibling-refusal-cleanup.json"), { survivors: [] });
     const report = capture(f, outcome);
     expect(JSON.parse(report.logs["update.json"]).runId).toBe("healthy-retry");
     expect(JSON.parse(report.logs["sibling-refusal-update.json"])).toMatchObject({
@@ -418,11 +370,6 @@ it.each(["failed", "passed"] as const)(
       runId: "refused-run",
       reason: expect.stringContaining("output-limit"),
     });
-    expect(JSON.parse(report.logs["sibling-refusal-status.json"]).lastRun.runId).toBe(
-      "refused-run",
-    );
-    expect(JSON.parse(report.logs["sibling-refusal-worker.json"]).worker.pid).toBe(123);
-    expect(JSON.parse(report.logs["sibling-refusal-cleanup.json"]).survivors).toEqual([]);
   },
 );
 
@@ -587,6 +534,12 @@ it.each(invalidIntegrityCases)(
 
 it("publishes bounded and redacted Gateway, Cron, native recovery, and update failures", () => {
   const f = fixture();
+  for (const name of ["doctor-lint.json", "doctor-lint.err"]) {
+    fs.writeFileSync(
+      path.join(f.artifacts, name),
+      `Doctor database check failed: token=${secret}\n`,
+    );
+  }
   write(path.join(f.artifacts, "update-noop.json"), {
     status: "error",
     reason: "second update failed",
@@ -600,7 +553,7 @@ it("publishes bounded and redacted Gateway, Cron, native recovery, and update fa
   for (const name of baselineGatewayLogs) {
     fs.writeFileSync(path.join(f.artifacts, name), `Baseline startup failed: token=${secret}\n`);
   }
-  for (const name of [...cronCliLogs, ...doctorLintLogs]) {
+  for (const name of cronCliLogs) {
     fs.writeFileSync(
       path.join(f.artifacts, name),
       `Published Cron run failed: token=${secret}\n` + "Cron run diagnostic line\n".repeat(1000),
@@ -632,6 +585,9 @@ it("publishes bounded and redacted Gateway, Cron, native recovery, and update fa
       "\n",
   );
   const report = capture(f);
+  for (const name of ["doctor-lint.json", "doctor-lint.err"]) {
+    expect(report.logs[name]).toContain("Doctor database check failed");
+  }
   for (const name of nativeRecoveryLogs) {
     expect(report.logs[name]).toContain("native-recovery-probe");
     expect(JSON.parse(report.logs[name])).toMatchObject({
@@ -658,7 +614,7 @@ it("publishes bounded and redacted Gateway, Cron, native recovery, and update fa
   for (const name of baselineGatewayLogs) {
     expect(report.logs[name]).toContain("Baseline startup failed");
   }
-  for (const name of [...cronCliLogs, ...doctorLintLogs]) {
+  for (const name of cronCliLogs) {
     expect(report.logs[name]).toContain("Published Cron run failed");
     expect(Buffer.byteLength(JSON.stringify(report.logs[name]))).toBeLessThanOrEqual(16 * 1024);
     expect(report.omissions[name]).toBe("redacted output truncated at a complete line (16 KiB)");
@@ -958,7 +914,7 @@ it("retains the custom fixture's actual Doctor module and callback identities wi
   expect(report.migration.sibling.registrations[0]).not.toHaveProperty("value");
 });
 
-it("omits unsafe migration files and oversized registration collections without treating missing evidence as success", () => {
+it("omits unsafe files without following state or log symlinks", () => {
   const f = fixture();
   const outside = path.join(f.root, "outside");
   fs.writeFileSync(outside, privateBody);
@@ -968,29 +924,11 @@ it("omits unsafe migration files and oversized registration collections without 
   fs.symlinkSync(f.root, path.join(f.artifacts, "missing-load-path"));
   fs.symlinkSync(outside, path.join(f.artifacts, "backup-rollback-create.json"));
   fs.writeFileSync(path.join(f.artifacts, "backup-rollback.json"), "x".repeat(262145));
-  fs.symlinkSync(outside, path.join(f.artifacts, "update-noop.json"));
-  fs.writeFileSync(path.join(f.artifacts, "update-noop.err"), "x".repeat(262145));
-  fs.writeFileSync(
-    path.join(f.artifacts, "sibling-registrations.jsonl"),
-    Array.from({ length: 129 }, () =>
-      JSON.stringify({
-        surface: "runtime",
-        stateDir: f.state,
-        source: "file:///fixture",
-        sharedSource: "file:///fixture",
-        argv: [],
-      }),
-    ).join("\n"),
-  );
   const report = capture(f);
   expect(report.logs["backup-rollback-create.json"]).toBeNull();
   expect(report.omissions["backup-rollback-create.json"]).toBe("missing or unsafe file");
   expect(report.logs["backup-rollback.json"]).toBeNull();
   expect(report.omissions["backup-rollback.json"]).toBe("input exceeds cap; omitted whole");
-  expect(report.logs["update-noop.json"]).toBeNull();
-  expect(report.omissions["update-noop.json"]).toBe("missing or unsafe file");
-  expect(report.logs["update-noop.err"]).toBeNull();
-  expect(report.omissions["update-noop.err"]).toBe("input exceeds cap; omitted whole");
   for (const section of ["sessions", "archives", "sibling", "doctor"]) {
     expect(report.migration[section].availability).toBe("unavailable");
   }
@@ -998,12 +936,6 @@ it("omits unsafe migration files and oversized registration collections without 
     expect(report.logs[name]).toBeNull();
     expect(report.omissions[name]).toBe("missing or unsafe file");
   }
-  expect(report.limits).toMatchObject({
-    inputBytesPerFile: 262144,
-    outputBytesPerLog: 16384,
-    reportBytes: 524288,
-    entriesPerCollection: 128,
-  });
 });
 
 it("does not reuse sibling or startup observations when an attempt fails before fixture seeding", () => {
@@ -1016,7 +948,6 @@ it("does not reuse sibling or startup observations when an attempt fails before 
     "update-noop.err",
     ...turnLogs,
     ...cronCliLogs,
-    ...doctorLintLogs,
     ...nativeRecoveryLogs,
     "native-assignment-inventory-after-first-hop.json",
     "native-assignment-inventory-before-recovery.json",

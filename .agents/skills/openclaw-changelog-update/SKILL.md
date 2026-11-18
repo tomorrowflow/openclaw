@@ -110,13 +110,15 @@ of this skill; initial generation must never overwrite them.
 
    Add repeatable `--release-provenance '<40sha> -> #PR[, #PR]'` inputs when
    release commits cannot carry provenance metadata. These use the same exact
-   marker grammar and current-main validation as commit-body markers.
+   marker grammar and source validation as commit-body markers. A merged
+   release-branch original is valid only while no corresponding current-main
+   forward-port exists; its GitHub merge commit pins the original source.
 
    The verifier automatically reuses public GitHub GraphQL responses from an
    exact base/target SHA snapshot under the worktree's git metadata. Iterative
    rewrites at the same target avoid repeated network discovery. Use
    `--refresh-github-snapshot` after suspect API data, `--github-snapshot
-<path>` for an explicit artifact, or `--no-github-snapshot` for a live-only
+   <path>` for an explicit artifact, or `--no-github-snapshot` for a live-only
    audit. GitHub release bodies are always read live.
    Explicit `CI #`, `CI run #`, `Actions run #`, and `workflow run #` references
    in active source are classified separately only when issue/PR resolution
@@ -414,9 +416,10 @@ workflow for their verification.
 
 Extended-stable has one release commit and one canonical GitHub Release body.
 After version prep and approved backports, regenerate `CHANGELOG/YYYY.M.P.md`
-with the regular manifest and original-main-PR provenance rules. Land it by PR, then
-validate the final branch tip before tagging. The release closeout renders that
-tag-owned section into the shared draft before the parent pipeline publishes
+with the regular manifest and original-main-PR provenance rules. Commit it directly
+to the canonical release branch, then validate the final branch tip before tagging.
+Do not open a staging/backport PR for release preparation. The release closeout
+renders that tag-owned section into the shared draft before the parent pipeline publishes
 the non-Latest release page. Re-audit after a product
 backport; a tooling-only repair needs no changelog entry. Never rewrite a
 published tag or changelog.

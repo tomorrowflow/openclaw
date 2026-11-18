@@ -13,16 +13,13 @@ import {
 } from "../../infra/sqlite-worker-identity.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import { listOpenClawRegisteredAgentDatabasesAsync } from "../../state/openclaw-agent-db-registry-listing.js";
+import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-worker-context.js";
+import { captureAuthProfileCredentialAuthority } from "../../state/user-model-account-authority.js";
 import { listAgentEntries, resolveAgentDir } from "../agent-scope.js";
-import { AUTH_STORE_VERSION, reportCommittedInlineAuthFailure } from "./constants.js";
+import { AUTH_STORE_VERSION } from "./constants.js";
 import { isSameOAuthRefreshGeneration } from "./oauth-refresh-marker.js";
-import {
-  loadPersistedAuthProfileStoreAtDatabasePath,
-  mergePersistedAuthProfileState,
-} from "./persisted.js";
+import { mergePersistedAuthProfileState } from "./persisted.js";
 import { getWorkerAuthProfileWrites } from "./runtime-scope.js";
-import { invalidateRuntimeAuthProfileStoreSnapshotsForOwner } from "./runtime-snapshots.js";
-import { closeAuthProfileReadPool } from "./sqlite-read-pool.js";
 import {
   loadPersistedAuthProfileStoreFromRows,
   prepareAgentAuthProfileRowsRead,
@@ -37,8 +34,10 @@ import { coerceAuthProfileState } from "./state.js";
 import { saveAuthProfileStoreWithPreparedOwner } from "./store-runtime.js";
 import type { SaveAuthProfileStoreOptions } from "./store-save.js";
 import { AuthProfileStoreUnreadableError } from "./store-unreadable-error.js";
-import { publishAuthProfileStoreUpdate } from "./store-update-publication.js";
-import { runAuthProfileStoreUpdate } from "./store-update.js";
+import {
+  createAuthProfileStoreUpdatePublisher,
+  runAuthProfileStoreUpdate,
+} from "./store-update.js";
 import type { AuthStoreUpdateInput } from "./store.worker-contract.js";
 import type { AuthProfileStore, OAuthCredential } from "./types.js";
 import { runAuthProfileUsage } from "./usage-lifecycle.js";
@@ -155,20 +154,6 @@ function assertCandidateDatabaseIdentity(candidate: CandidateAuthProfileStore): 
   }
 }
 
-/** Read an already-discovered candidate without creating a missing database. */
-export function loadCandidateAuthProfileStore(
-  candidate: CandidateAuthProfileStore,
-): AuthProfileStore | null {
-  try {
-    assertCandidateDatabaseIdentity(candidate);
-    return loadPersistedAuthProfileStoreAtDatabasePath(candidate.databasePath, "agent");
-  } finally {
-    if (!candidate.configured) {
-      closeAuthProfileReadPool({ kind: "database", databasePath: candidate.databasePath });
-    }
-  }
-}
-
 /** Read the captured physical candidate through the existing auth reader. */
 export async function loadCandidateAuthProfileStoreAsync(
   candidate: CandidateAuthProfileStore,
@@ -185,7 +170,34 @@ export async function loadCandidateAuthProfileStoreAsync(
   }
 }
 
+/** Keep the owner's current credential facts available at a later write boundary. */
+export async function prepareCandidateAuthProfileCredentialRead(
+  candidate: CandidateAuthProfileStore,
+  profileId: string,
+): Promise<
+  Pick<
+    ReturnType<typeof captureAuthProfileCredentialAuthority>,
+    "readCurrentCredential" | "waitUntilCurrent"
+  >
+> {
+  // Key the authority by the adopted file identity that later writes publish under.
+  assertCandidateDatabaseIdentity(candidate);
+  const authority = captureAuthProfileCredentialAuthority(
+    captureOpenClawStateWorkerContext({ env: candidate.env }),
+    {
+      identity: `${candidate.databaseIdentity.key}:${candidate.databaseIdentity.birthtime ?? ""}`,
+      databasePath: candidate.databasePath,
+    },
+    profileId,
+  );
+  const store = await loadCandidateAuthProfileStoreAsync(candidate);
+  authority.observe(store?.profiles[profileId]);
+  await authority.waitUntilCurrent();
+  return authority;
+}
+
 type CandidateAuthProfileUpdate = {
+  assertCurrent?: () => void;
   candidate: CandidateAuthProfileStore;
   preserveProfileState?: boolean;
   profileId: string;
@@ -245,6 +257,7 @@ async function runCandidateAuthProfileUpdate(
     const assertCurrent = () => {
       workerWrites.assertOwner(candidate.env);
       assertCandidateDatabaseIdentity(candidate);
+      params.assertCurrent?.();
     };
     return runAuthProfileUsage(() =>
       workerWrites.run(() => {
@@ -322,7 +335,10 @@ async function runCandidateAuthProfileUpdate(
     envOnly: false,
     peerGeneration,
     options: { env: candidate.env },
-    assertCurrent: () => assertCandidateDatabaseIdentity(candidate),
+    assertCurrent: () => {
+      assertCandidateDatabaseIdentity(candidate);
+      params.assertCurrent?.();
+    },
     update(prepared) {
       const store = prepared.store;
       const changed = params.updater(store);
@@ -336,25 +352,9 @@ async function runCandidateAuthProfileUpdate(
           }
         : { save: false };
     },
-    async publish(committed, owner, assertCurrent, nativeCommits, committedIsCurrent) {
-      if (committed) {
-        try {
-          await publishAuthProfileStoreUpdate(
-            owner,
-            committed,
-            assertCurrent,
-            nativeCommits,
-            committedIsCurrent,
-          );
-        } catch (error) {
-          invalidateRuntimeAuthProfileStoreSnapshotsForOwner(owner);
-          reportCommittedInlineAuthFailure(
-            "Auth candidate committed before publication failed",
-            error,
-          );
-        }
-      }
-    },
+    publish: createAuthProfileStoreUpdatePublisher(
+      "Auth candidate committed before publication failed",
+    ),
   });
   return result;
 }

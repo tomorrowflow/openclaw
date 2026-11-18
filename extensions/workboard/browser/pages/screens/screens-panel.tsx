@@ -7,9 +7,9 @@ import { createSignal, Show } from "solid-js";
 import { t } from "../../i18n/index.ts";
 import type { WorkboardCapability } from "../../lib/workboard/capability.ts";
 import { isWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
-import type { WorkboardCard } from "../../lib/workboard/index.ts";
 import { normalizeCardsPayload } from "../../lib/workboard/normalization.ts";
 import { findWorkboardSessionCard } from "../../lib/workboard/session-links.ts";
+import type { WorkboardCard } from "../../lib/workboard/types.ts";
 import {
   createCardScreenshots,
   LiveScreenshots,

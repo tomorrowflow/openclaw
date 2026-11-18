@@ -7,10 +7,9 @@ records the exact merged closeout commit. Publication from the release branch
 and closeout on `main` are separate state transitions; never imply that
 publishing stable also advanced `main`.
 
-Closeout requires the original successful stable/full FRV with soak, blocking
-performance, and every selected lane passing under the branch's
-[strict qualification policy](../SKILL.md#shared-release-boundaries).
-Closeout cannot grant a waiver to a failed FRV. Historical candidate-side
+Closeout requires the original successful stable/full FRV with soak and blocking
+performance, including any recorded [release-tooling policy](../../../../docs/reference/full-release-validation/evidence.md#release-tooling-waivers)
+decisions. Closeout cannot grant a waiver to a failed FRV. Historical candidate-side
 skip-waiver receipt replay and repair remain unsupported. Completion requires both the closeout manifest and its matching checksum. If only the checksum is missing,
 replay an eligible strict-evidence closeout to regenerate identical bytes; do not manufacture
 new evidence. Invalid or mismatched assets remain blocking.

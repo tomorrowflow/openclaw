@@ -1,7 +1,8 @@
 /** @jsxImportSource @solidjs/web */
 import { Show } from "solid-js";
 import { t } from "../../i18n/index.ts";
-import { retryWorkboardPreview, type WorkboardCard } from "../../lib/workboard/index.ts";
+import { retryWorkboardPreview } from "../../lib/workboard/mutations.ts";
+import type { WorkboardCard } from "../../lib/workboard/types.ts";
 import { getCardActionState } from "./view-card-actions.tsx";
 import { workboardMutationContext, type WorkboardProps } from "./view-helpers.tsx";
 

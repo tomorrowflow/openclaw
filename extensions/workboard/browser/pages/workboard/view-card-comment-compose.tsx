@@ -1,11 +1,9 @@
 /** @jsxImportSource @solidjs/web */
 import { Show } from "solid-js";
 import { t } from "../../i18n/index.ts";
-import {
-  addWorkboardCardComment,
-  getWorkboardState,
-  type WorkboardCard,
-} from "../../lib/workboard/index.ts";
+import { addWorkboardCardComment } from "../../lib/workboard/mutations.ts";
+import { getWorkboardState } from "../../lib/workboard/runtime.ts";
+import type { WorkboardCard } from "../../lib/workboard/types.ts";
 import { moveCardToStatus } from "./view-card-actions.tsx";
 import {
   workboardMutationContext,

@@ -198,7 +198,7 @@ describe("startOrResumeThread — configured MCP ownership", () => {
     expect(sibling).toBeDefined();
     expect(releaseSibling).not.toHaveBeenCalled();
     await sibling?.release("thread-sibling");
-    expect(releaseSibling).toHaveBeenCalledWith("thread-sibling");
+    expect(releaseSibling).toHaveBeenCalledWith("thread-sibling", undefined, undefined);
   });
 
   it("does not report a cancelled predecessor wait as pre-write after its successor starts", async () => {

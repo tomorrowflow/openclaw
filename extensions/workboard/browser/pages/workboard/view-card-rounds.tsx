@@ -6,7 +6,7 @@ import type {
   WorkboardNodeDecision,
   WorkboardNodeRound,
   WorkboardRoundReviewTimes,
-} from "../../lib/workboard/index.ts";
+} from "../../lib/workboard/types.ts";
 
 function Decisions(props: { decisions: readonly WorkboardNodeDecision[] }) {
   return (

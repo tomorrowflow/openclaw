@@ -6,28 +6,35 @@ import { createSignal, Show } from "solid-js";
 import { AgentPicker } from "../../components/host-components.tsx";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
+import { listen } from "../../lib/listener.ts";
 import { workboardCardBoardId } from "../../lib/workboard/board-filter.ts";
 import type { WorkboardCapability } from "../../lib/workboard/capability.ts";
-import { isActiveWorkboardCard, workboardCardSessionKey } from "../../lib/workboard/card-state.ts";
+import {
+  isActiveWorkboardCard,
+  resetDraftState,
+  workboardCardSessionKey,
+} from "../../lib/workboard/card-state.ts";
 import {
   configureWorkboardLiveRefresh,
   handleWorkboardChanged,
-  loadWorkboard,
-  refreshWorkboard,
-  resetDraftState,
   resumeWorkboardLiveRefresh,
+} from "../../lib/workboard/live-refresh.ts";
+import { loadWorkboard, refreshWorkboard } from "../../lib/workboard/loading.ts";
+import {
+  invalidateWorkboardLoads,
   resetWorkboardConnectionState,
   stopWorkboardLiveRefresh,
-  type WorkboardCard,
-  type WorkboardUiState,
-  WORKBOARD_CHANGED_EVENT,
-} from "../../lib/workboard/index.ts";
-import { invalidateWorkboardLoads } from "../../lib/workboard/runtime.ts";
+} from "../../lib/workboard/runtime.ts";
 import {
   createWorkboardSessionResolver,
   createWorkboardSessionResolverPool,
 } from "../../lib/workboard/session-resolution.ts";
-import type { WorkboardBoardMetadata } from "../../lib/workboard/types.ts";
+import {
+  WORKBOARD_CHANGED_EVENT,
+  type WorkboardBoardMetadata,
+  type WorkboardCard,
+  type WorkboardUiState,
+} from "../../lib/workboard/types.ts";
 import {
   buildAgentFilterOptions,
   normalizeActiveAgentFilter,
@@ -88,6 +95,8 @@ export function createWorkboardPage(
     let context = initialContext;
     let disposed = false;
     let boardDraft: BoardDraft | null = null;
+    let focusTarget: HTMLElement | undefined;
+    let heading: HTMLElement | undefined;
     const automations = new Map<string, BoardAutomationState>();
     let trust: BoardTrustState | undefined;
     let screenshots: CardScreenshots | undefined;
@@ -121,7 +130,7 @@ export function createWorkboardPage(
     if (linkedCardId) {
       state.revealCardId = linkedCardId;
     }
-    const requestUpdate = () => {
+    const publishPresentation = () => {
       if (disposed || queued) {
         return;
       }
@@ -133,11 +142,11 @@ export function createWorkboardPage(
         }
       });
     };
-    const sessionResolver = createWorkboardSessionResolver(host, requestUpdate);
-    const runningSessionResolvers = createWorkboardSessionResolverPool(host, requestUpdate);
+    const sessionResolver = createWorkboardSessionResolver(host, publishPresentation);
+    const runningSessionResolvers = createWorkboardSessionResolverPool(host, publishPresentation);
     const sessionsBoard = createSessionsBoardController(
       host,
-      requestUpdate,
+      publishPresentation,
       () => state.scopeAgentId,
     );
     const stop = () => {
@@ -164,14 +173,14 @@ export function createWorkboardPage(
             return;
           }
           metadataError = null;
-          requestUpdate();
+          publishPresentation();
         })
         .catch((error: unknown) => {
           if (disposed || generation !== metadataGeneration) {
             return;
           }
           metadataError = formatUiError(error);
-          requestUpdate();
+          publishPresentation();
         })
         .finally(() => {
           if (metadataLoad === load) {
@@ -189,14 +198,14 @@ export function createWorkboardPage(
       connected = nextConnected;
       screenshots?.dispose();
       screenshots = connected
-        ? createCardScreenshots(client, requestUpdate, { live: false })
+        ? createCardScreenshots(client, publishPresentation, { live: false })
         : undefined;
       prototypes?.dispose();
-      prototypes = connected ? createCardPrototypes(client, requestUpdate) : undefined;
+      prototypes = connected ? createCardPrototypes(client, publishPresentation) : undefined;
       changes?.dispose();
-      changes = connected ? createCardChanges(client, requestUpdate) : undefined;
+      changes = connected ? createCardChanges(client, publishPresentation) : undefined;
       grilling?.dispose();
-      grilling = connected ? createCardGrilling(client, requestUpdate) : undefined;
+      grilling = connected ? createCardGrilling(client, publishPresentation) : undefined;
       metadataGeneration += 1;
       metadataLoad = null;
       if (connected) {
@@ -211,7 +220,7 @@ export function createWorkboardPage(
     };
     const setBoardScope = (scopeAgentId: string | null) => {
       state.scopeAgentId = scopeAgentId;
-      requestUpdate();
+      publishPresentation();
     };
     const update = () => {
       synchronizeConnection();
@@ -261,14 +270,12 @@ export function createWorkboardPage(
         const force = configureWorkboardLiveRefresh({
           host: workboard,
           client,
-          requestUpdate,
           shouldDefer: () => Boolean(boardDraft || sessionsBoard.busy || sessionsBoard.draggedKey),
           refresh: selectedBoard?.kind === "sessions" ? sessionsBoard.read : undefined,
         });
         void loadWorkboard({
           host: workboard,
           client,
-          requestUpdate,
           force,
           refreshDiagnostics: host.connection.canWrite && selectedBoard?.kind !== "sessions",
         });
@@ -315,7 +322,7 @@ export function createWorkboardPage(
             return;
           }
           automations.set(jobId, automation);
-          requestUpdate();
+          publishPresentation();
         });
       }
       const trustKey = connected && context.presented ? boardTrustKey(selectedBoard) : undefined;
@@ -334,7 +341,7 @@ export function createWorkboardPage(
             return;
           }
           trust = loaded;
-          requestUpdate();
+          publishPresentation();
         });
       }
       const focusedCard = state.draftOpen
@@ -368,7 +375,7 @@ export function createWorkboardPage(
       ];
       const onNewBoard = () => {
         boardDraft = createNewBoardDraft();
-        requestUpdate();
+        publishPresentation();
       };
       const onBoardChange = (boardFilter: string) =>
         host.navigation.openPage(workboardPageTarget(boardFilter), {
@@ -411,14 +418,13 @@ export function createWorkboardPage(
           void refreshWorkboard({
             host: workboard,
             client: connected ? client : null,
-            requestUpdate,
             source: "manual",
             refreshDiagnostics: host.connection.canWrite,
           });
         },
         onBoardFilterChange: onBoardChange,
         onNewBoard,
-        onRequestUpdate: requestUpdate,
+        onRequestUpdate: publishPresentation,
       };
       state.agentFilter = normalizeActiveAgentFilter(
         buildAgentFilterOptions(agentsList, state.cards),
@@ -437,7 +443,13 @@ export function createWorkboardPage(
     function PageHeading() {
       const board = () => presentation()?.selectedBoard;
       return (
-        <div class="workboard-heading__identity">
+        <div
+          class="workboard-heading__identity"
+          tabindex="-1"
+          ref={(element) => {
+            heading = element;
+          }}
+        >
           <BoardTitle
             board={board()}
             canWrite={presentation()?.workboardProps.canWrite}
@@ -450,11 +462,11 @@ export function createWorkboardPage(
                   ? sessionsBoard.snapshot.board
                   : {}),
               });
-              requestUpdate();
+              publishPresentation();
             }}
             onError={(message) => {
               state.error = message;
-              requestUpdate();
+              publishPresentation();
             }}
           />
           <Show when={board()?.automationJobId}>
@@ -523,6 +535,9 @@ export function createWorkboardPage(
                     revision={current().revision}
                     heading={<PageHeading />}
                     scopeControl={() => <ScopeControl />}
+                    onFocusTarget={(element) => {
+                      focusTarget = element;
+                    }}
                   />
                 }
               >
@@ -539,7 +554,7 @@ export function createWorkboardPage(
                   overlayOpen={Boolean(current().boardDraft)}
                   onNewBoard={() => {
                     boardDraft = createNewBoardDraft();
-                    requestUpdate();
+                    publishPresentation();
                   }}
                   onBoardChange={(boardFilter) =>
                     host.navigation.openPage(workboardPageTarget(boardFilter), {
@@ -558,10 +573,10 @@ export function createWorkboardPage(
                     pageError={workboardErrorMessage(state, current().workboardProps.pageError)}
                     client={liveClient()}
                     canWrite={canWrite()}
-                    requestUpdate={requestUpdate}
+                    onChange={publishPresentation}
                     onCancel={() => {
                       boardDraft = null;
-                      requestUpdate();
+                      publishPresentation();
                     }}
                     onSaved={(board) => {
                       if (disposed) {
@@ -578,7 +593,6 @@ export function createWorkboardPage(
                       void refreshWorkboard({
                         host: workboard,
                         client,
-                        requestUpdate,
                         source: "manual",
                       }).then(() => {
                         if (
@@ -600,7 +614,7 @@ export function createWorkboardPage(
                           void sessionsBoard.read();
                         }
                       });
-                      requestUpdate();
+                      publishPresentation();
                     }}
                   />
                 )}
@@ -620,9 +634,9 @@ export function createWorkboardPage(
         return;
       }
       synchronizeConnection();
-      requestUpdate();
+      publishPresentation();
     });
-    const unsubscribeState = workboard.subscribe(requestUpdate);
+    const unsubscribeState = workboard.subscribe(publishPresentation);
     const unsubscribeEvents = host.onEvent(WORKBOARD_CHANGED_EVENT, (payload) => {
       if (!disposed && connected && context.presented && !sessionsBoard.hasCurrent(payload)) {
         handleWorkboardChanged(workboard, payload);
@@ -637,13 +651,18 @@ export function createWorkboardPage(
         typeof payload.jobId === "string" &&
         automations.delete(payload.jobId)
       ) {
-        requestUpdate();
+        publishPresentation();
       }
     });
-    document.addEventListener("visibilitychange", onVisibilityChange);
+    const stopVisibility = listen(document, "visibilitychange", onVisibilityChange);
     update();
     const disposeRoot = render(() => <Page />, container);
     return {
+      focus() {
+        if (!disposed && context.presented) {
+          (focusTarget?.isConnected ? focusTarget : heading)?.focus();
+        }
+      },
       update(next) {
         if (
           context.presented !== next.presented ||
@@ -653,7 +672,7 @@ export function createWorkboardPage(
           navigationGeneration += 1;
         }
         context = next;
-        requestUpdate();
+        publishPresentation();
       },
       dispose() {
         disposed = true;
@@ -669,7 +688,7 @@ export function createWorkboardPage(
         prototypes?.dispose();
         changes?.dispose();
         grilling?.dispose();
-        document.removeEventListener("visibilitychange", onVisibilityChange);
+        stopVisibility();
         stop();
         disposeRoot();
       },

@@ -16,11 +16,7 @@ export function createLazyWorkboardPage<T = Readonly<Record<string, string>>>(
     let loadingElement: HTMLDivElement | undefined;
     const alive = () => !disposed && !context.signal.aborted;
     const focus = () => {
-      if (handle?.focus) {
-        handle.focus();
-      } else {
-        container.querySelector<HTMLElement>("textarea, input, [contenteditable=true]")?.focus();
-      }
+      handle?.focus?.();
     };
     const update = () => {
       if (!alive()) {

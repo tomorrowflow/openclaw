@@ -10,8 +10,15 @@ import {
 } from "../infra/windows-install-roots.js";
 import { readWindowsPortUsageSync } from "../infra/windows-port-pids.js";
 import { WINDOWS_POWERSHELL_COLD_SPAWN_TIMEOUT_MS } from "../infra/windows-powershell-spawn.js";
-import { hasCommandProcessCleanupError } from "../process/exec-result.js";
-import { spawnWithFallback } from "../process/spawn-utils.js";
+import {
+  hasCommandProcessCleanupError,
+  ignoreNonCleanupCommandError,
+} from "../process/exec-result.js";
+import { spawnAndWait } from "../process/spawn-utils.js";
+import {
+  buildWindowsCmdExeCommandLine,
+  isWindowsBatchCommand,
+} from "../process/windows-command.js";
 import { sleep } from "../utils.js";
 import { ABSOLUTE_DEADLINE_EXPIRED, awaitWithinDeadline } from "../utils/absolute-deadline.js";
 import { resolveGatewayServiceProbeHosts } from "./gateway-service-probe-hosts.js";
@@ -214,6 +221,17 @@ export async function launchFallbackTaskScript(
       cwd: command.workingDirectory || undefined,
       env: mergeProcessEnv([process.env, command.environment]),
     };
+    const executable = argv[0];
+    if (executable && isWindowsBatchCommand(executable)) {
+      argv = [
+        getWindowsCmdExePath(),
+        "/d",
+        "/s",
+        "/c",
+        buildWindowsCmdExeCommandLine(executable, argv.slice(1)),
+      ];
+      options = { ...options, shell: false, windowsVerbatimArguments: true };
+    }
   } else {
     // Preserve native missing-script errors before testing the actual cmd.exe access contract.
     await (await fs.open(scriptPath, "r")).close();
@@ -250,7 +268,7 @@ export async function launchFallbackTaskScript(
       windowsVerbatimArguments: true,
     };
   }
-  const { child } = await spawnWithFallback({
+  const child = await spawnAndWait({
     assertCurrent,
     argv,
     options: { detached: true, stdio: "ignore", windowsHide: true, ...options },
@@ -265,11 +283,17 @@ export async function readStartupEntryState(
 ): Promise<GatewayServiceState> {
   const deadline = args.timeoutMs === undefined ? undefined : performance.now() + args.timeoutMs;
   let command: GatewayServiceCommandConfig | null = null;
+  let effectiveExecutable: string | undefined;
   let env = args.env ?? process.env;
   let runtime: GatewayServiceRuntime;
   let loadState: GatewayServiceState["loadState"] = { status: "loaded" };
   try {
-    command = await readStartupEntryCommand(startupEntryPath, { deadline });
+    command = await readStartupEntryCommand(startupEntryPath, {
+      deadline,
+      onEffectiveExecutable: (executable) => {
+        effectiveExecutable = executable;
+      },
+    });
     env = mergeGatewayServiceEnv(env, command);
     args.validateEnvBeforeStatusRead?.(env);
     runtime = await resolveFallbackRuntime(env, command, "control", deadline).catch(
@@ -296,6 +320,9 @@ export async function readStartupEntryState(
     env,
     command,
     runtime,
+    ...(command && runtime.status !== "unknown" && effectiveExecutable
+      ? { effectiveExecutable }
+      : {}),
     ...(runtime.inspectionReason ? { inspectionReason: runtime.inspectionReason } : {}),
   };
 }
@@ -341,12 +368,7 @@ export async function resolveFallbackRuntime(
   }
   const command =
     installedCommand === undefined
-      ? await readScheduledTaskCommand(env).catch((error: unknown) => {
-          if (hasCommandProcessCleanupError(error)) {
-            throw error;
-          }
-          return null;
-        })
+      ? await readScheduledTaskCommand(env).catch(ignoreNonCleanupCommandError)
       : installedCommand;
   const port = resolveScheduledTaskCommandPort(env, command);
   if (!port) {
@@ -394,12 +416,9 @@ export async function resolveFallbackRuntime(
     }
   }
   const probeHosts = await resolveGatewayServiceProbeHosts({ env, command });
-  const diagnostics = await inspectPortUsage(port, { probeHosts }).catch((error: unknown) => {
-    if (hasCommandProcessCleanupError(error)) {
-      throw error;
-    }
-    return null;
-  });
+  const diagnostics = await inspectPortUsage(port, { probeHosts }).catch(
+    ignoreNonCleanupCommandError,
+  );
   if (!diagnostics) {
     return unknownRuntime(`could not inspect port ${port}.`);
   }
@@ -529,7 +548,6 @@ export async function terminateInstalledStartupRuntime(
   if (runtime.pid) {
     if (beforeMutation) {
       await beforeMutation();
-      assertCurrent?.();
     }
     await terminateGatewayProcessTree(runtime.pid, assertCurrent);
   }

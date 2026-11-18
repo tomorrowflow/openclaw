@@ -24,6 +24,11 @@ import type { SessionSandboxPaths } from "./session-file-read.js";
  * current configuration, which can already describe a container that has not
  * been recreated yet — deriving there can resolve a real but wrong file, since
  * both the old and new mapping can land inside this root.
+ *
+ * Sessions created with sandbox "required" (guest policy) get no table: their
+ * private workspace keeps the upstream rule that an absolute reference needs
+ * live namespace backing (prepareSessionFileReadPath), so a derived mapping
+ * never stands in for a container that is not there.
  */
 export async function resolveSessionSandboxPaths(
   cfg: OpenClawConfig,
@@ -42,24 +47,18 @@ export async function resolveSessionSandboxPaths(
     sessionKey,
     preparedSessionEntry: entry ?? null,
   });
-  if (!status.sandboxed) {
+  if (!status.sandboxed || status.sandboxRequired) {
     return undefined;
   }
   const sandbox = resolveSandboxConfigForAgent(cfg, agentId);
   const agentWorkspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
-  // A session created with sandbox "required" runs at the access the status
-  // owner downgraded it to, and that decides which mounts it received.
-  const workspaceAccess = status.sandboxRequired ? status.workspaceAccess : sandbox.workspaceAccess;
   // The layout owner names both the registry scope and the materialized skills
   // workspace; without the latter a derived mapping points the skills mount at
   // the empty scaffold inside the workspace instead of the copy it received.
   const layout = resolveSandboxWorkspaceLayoutPaths({
-    cfg: { ...sandbox, workspaceAccess },
+    cfg: sandbox,
     rawSessionKey: sessionKey,
     agentId,
-    ...(status.sandboxRequired && status.isolationSubject
-      ? { isolationSubject: status.isolationSubject }
-      : {}),
     workspaceDir: agentWorkspaceDir,
   });
   const recorded = await readRecordedSandboxMounts(sandbox.backend, layout.scopeKey);
@@ -71,7 +70,7 @@ export async function resolveSessionSandboxPaths(
       workspaceDir: root,
       agentWorkspaceDir,
       skillsWorkspaceDir: layout.skillsWorkspaceDir,
-      workspaceAccess,
+      workspaceAccess: sandbox.workspaceAccess,
       workdir: sandbox.docker.workdir,
       ...(sandbox.docker.binds ? { binds: sandbox.docker.binds } : {}),
     }),

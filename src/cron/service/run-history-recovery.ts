@@ -117,22 +117,13 @@ export function findCronRunRecoveryInDatabase(params: {
   storeKey: string;
   receiptId?: string;
 }): { taskRunId?: string; receiptId?: string; finalized?: FinalizedCronRun } {
-  // Select on bounded facts, then decode only the chosen run: retained payloads
-  // can exceed the SQLite worker heap when read for the job's whole history.
-  const candidate = findLatestCronRunForRecovery(
-    readCronRunRecordsInDatabase(params.database, params.jobId, undefined, {
-      planningOnly: true,
-    }),
+  const record = findLatestCronRunForRecovery(
+    readCronRunRecordsInDatabase(params.database, params.jobId),
     params.jobId,
     params.startedAt,
     params.storeKey,
     params.receiptId,
   );
-  const record = candidate
-    ? readCronRunRecordsInDatabase(params.database, params.jobId, undefined, {
-        taskIds: [candidate.id],
-      })[0]
-    : undefined;
   const finalized = finalizedCronRun(record, params.jobId);
   const runId =
     record?.runId ??

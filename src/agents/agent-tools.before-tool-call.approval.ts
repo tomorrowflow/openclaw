@@ -1,5 +1,4 @@
 /**
- * Approval transport for before_tool_call policy decisions.
  * Owns request/wait routing, embedded approval bridging, deferred approvals,
  * timeout classification, and owner-provided approval outcomes.
  */
@@ -27,7 +26,7 @@ import {
   type PluginApprovalResolution,
   type PluginHookBeforeToolCallResult,
 } from "../plugins/types.js";
-import { markGatewayRestartBlockedSession } from "../process/gateway-work-admission.js";
+import { monotonicNow } from "../shared/monotonic-time.js";
 import { isPlainObject } from "../utils.js";
 import { resolveToolErrorDiagnostic } from "./agent-tools.before-tool-call.diagnostics.js";
 import type {
@@ -39,7 +38,12 @@ import type {
 } from "./agent-tools.before-tool-call.types.js";
 import { registerActiveEmbeddedRunHumanInputWaitForRun } from "./embedded-agent-runner/run-state.js";
 import { beginToolCallHumanInputWait } from "./tool-call-human-input-wait.js";
-import { withGatewayToolApprovalOwner } from "./tools/gateway-caller-context.js";
+import { hasInProcessGatewayToolCaller } from "./tools/gateway-caller-availability.js";
+import {
+  getGatewayToolCallerIdentity,
+  captureGatewayToolCallerAssertion,
+  withGatewayToolApprovalOwner,
+} from "./tools/gateway-caller-context.js";
 import { callGatewayTool } from "./tools/gateway.js";
 
 type PluginApprovalRequest = NonNullable<PluginHookBeforeToolCallResult["requireApproval"]>;
@@ -218,8 +222,11 @@ type PluginToolApprovalParams = {
  * can still answer. The approval's own timeout plus the gateway grace bounds it.
  */
 async function requestPluginToolApproval(params: PluginToolApprovalParams): Promise<HookOutcome> {
-  const deadlineAtMs =
-    Date.now() +
+  // Use the monotonic clock for the local human-input-wait deadline so an
+  // NTP step or wall-clock adjustment cannot prematurely end the wait or
+  // hold the lane indefinitely while the approval is still genuinely pending.
+  const deadlineMonotonicMs =
+    monotonicNow() +
     (addTimerTimeoutGraceMs(resolvePluginToolApprovalTimeoutMs(params.approval), 10_000) ??
       DEFAULT_PLUGIN_APPROVAL_TIMEOUT_MS + 10_000);
   let pending = true;
@@ -227,7 +234,7 @@ async function requestPluginToolApproval(params: PluginToolApprovalParams): Prom
   const release = params.ctx?.runId
     ? registerActiveEmbeddedRunHumanInputWaitForRun(
         params.ctx.runId,
-        () => pending && params.signal?.aborted !== true && Date.now() < deadlineAtMs,
+        () => pending && params.signal?.aborted !== true && monotonicNow() < deadlineMonotonicMs,
       )
     : undefined;
   const endToolCallWait = beginToolCallHumanInputWait(params.toolCallId);
@@ -279,6 +286,22 @@ async function requestPluginToolApprovalDecision(
       : undefined;
   };
   let gatewayApprovalPhase: "none" | "request" | "wait" = "none";
+  const watchdogAttempt =
+    params.ctx?.watchdogAttempt ?? getGatewayToolCallerIdentity()?.watchdogAttempt;
+  const assertCurrent = captureGatewayToolCallerAssertion();
+  let watchdogWait: ReturnType<NonNullable<typeof watchdogAttempt>["beginWait"]> | undefined;
+  const beginApprovalWait = (deadlineAtMs: number) => {
+    watchdogWait?.close();
+    watchdogWait = watchdogAttempt?.beginWait({
+      kind: "approval",
+      deadlineAtMs,
+      isCurrent: () => {
+        params.signal?.throwIfAborted();
+        assertCurrent?.();
+        return true;
+      },
+    });
+  };
   try {
     const requestIdentity = {
       toolName: params.toolName,
@@ -293,6 +316,7 @@ async function requestPluginToolApprovalDecision(
     };
     const embeddedApprovalBroker = isEmbeddedMode() ? getEmbeddedPluginApprovalBroker() : null;
     if (embeddedApprovalBroker) {
+      beginApprovalWait(Date.now() + timeoutMs);
       const result = await embeddedApprovalBroker.request({
         request: {
           pluginId: approval.pluginId,
@@ -336,11 +360,14 @@ async function requestPluginToolApprovalDecision(
       );
     }
 
+    // A hosted in-process request can await its own decision without a second approval-scoped RPC.
+    const singlePhase = hasInProcessGatewayToolCaller();
     gatewayApprovalPhase = "request";
     const requestResult: {
       id?: string;
       decision?: unknown;
       deliveryRoute?: string;
+      expiresAtMs?: number;
     } = await withGatewayToolApprovalOwner(
       approval.pluginId,
       async () =>
@@ -360,9 +387,9 @@ async function requestPluginToolApprovalDecision(
               ? { approvalReviewerDeviceIds: [params.ctx.approvalReviewerDeviceId] }
               : {}),
             timeoutMs,
-            twoPhase: true,
+            twoPhase: !singlePhase,
           },
-          { expectFinal: false, signal: params.signal },
+          { expectFinal: singlePhase, signal: params.signal },
         ),
     );
     gatewayApprovalPhase = "none";
@@ -409,6 +436,9 @@ async function requestPluginToolApprovalDecision(
         }
       };
       emitApprovalLifecycle("waiting-approval");
+      if (typeof requestResult.expiresAtMs === "number") {
+        beginApprovalWait(requestResult.expiresAtMs);
+      }
       let waitResult: {
         id?: string;
         decision?: unknown;
@@ -474,24 +504,16 @@ async function requestPluginToolApprovalDecision(
         : invalidRequest && gatewayApprovalPhase === "wait"
           ? `Plugin approval no longer available: ${formatErrorMessage(err)}`
           : "Plugin approval required (gateway unavailable)";
-    const releaseRestartBlock =
-      isGatewayRestartUnavailableError(err) && params.ctx?.sessionId && signal && !signal.aborted
-        ? markGatewayRestartBlockedSession(params.ctx.sessionId)
-        : undefined;
-    if (releaseRestartBlock && signal) {
+    if (isGatewayRestartUnavailableError(err) && signal && !signal.aborted) {
       // No approval can be granted until the successor Gateway is up. Park the
-      // call instead of failing it to the model, so the run stays blocked and
-      // the restart drain hands it to restart recovery instead of waiting.
+      // call instead of failing it to the model; the restart's shutdown aborts
+      // the run and resumes it after the restart.
       log.warn(
         `plugin approval unavailable during gateway restart; parking tool call: ${String(err)}`,
       );
-      try {
-        await new Promise<void>((resolve) => {
-          signal.addEventListener("abort", () => resolve(), { once: true });
-        });
-      } finally {
-        releaseRestartBlock();
-      }
+      await new Promise<void>((resolve) => {
+        signal.addEventListener("abort", () => resolve(), { once: true });
+      });
       return {
         blocked: true,
         kind: "failure",
@@ -507,6 +529,8 @@ async function requestPluginToolApprovalDecision(
       reason,
       resolveToolErrorDiagnostic(err, signal).terminalReason,
     );
+  } finally {
+    watchdogWait?.close();
   }
 }
 

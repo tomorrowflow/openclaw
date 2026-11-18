@@ -49,12 +49,12 @@ export function resetAuthProfileFailureState(
     ...(successfulModel && existing.cooldownModel && existing.cooldownModel !== successfulModel
       ? {
           cooldownUntil: existing.cooldownUntil,
-          lastRateLimitAt: existing.lastRateLimitAt,
           cooldownReason: existing.cooldownReason,
           cooldownClassification: existing.cooldownClassification,
           cooldownModel: existing.cooldownModel,
           errorCount: existing.errorCount,
           failureCounts: existing.failureCounts,
+          lastRateLimitAt: existing.lastRateLimitAt,
         }
       : {}),
     ...overrides,

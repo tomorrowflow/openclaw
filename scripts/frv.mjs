@@ -738,16 +738,20 @@ async function artifactRecoveryProducers(plan, parentJobs, client, repository, w
       throw new Error(`Original ${stage} dispatch identity is unavailable or ambiguous`);
     }
     let preparation;
-    if (stage === "npm" && recoveryContract === "2" && plan.candidate) {
+    if (stage === "npm" && recoveryContract === "2") {
       const identities = [
         ...log.matchAll(
           /(?:^|\n)(?:\d{4}-\d\d-\d\dT\S+ )?Artifact preparation npm identity: job ([1-9][0-9]*) \(attempt ([1-9][0-9]*)\)\r?(?=\n|$)/gu,
         ),
       ];
-      if (identities.length !== 1) {
+      // Failed preparation may never emit its identity. Only consumed candidate
+      // bytes require that witness; ambiguous identities are never safe to adopt.
+      if (identities.length > 1 || (plan.candidate && identities.length === 0)) {
         throw new Error("Original npm preparation identity is unavailable or ambiguous");
       }
-      preparation = { jobId: identities[0][1], runAttempt: Number(identities[0][2]) };
+      if (identities.length === 1) {
+        preparation = { jobId: identities[0][1], runAttempt: Number(identities[0][2]) };
+      }
     }
     producers.push({
       request: {

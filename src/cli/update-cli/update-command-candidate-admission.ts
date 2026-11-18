@@ -1,12 +1,10 @@
 import os from "node:os";
 import path from "node:path";
-import { resolveStateDir } from "../../config/paths.js";
 import { tryReadJson } from "../../infra/json-files.js";
 import {
   runUpdateCandidateAdmission,
   type UpdateCandidateAdmissionResult,
 } from "../../infra/update-candidate-admission.js";
-import { resolveUpdateCandidateAdmissionTimeoutMs } from "../../infra/update-candidate-snapshot.js";
 import { canResolveRegistryVersionForPackageTarget } from "../../infra/update-global.js";
 import { resolveUpdateInstallRoot } from "../../infra/update-install-root.js";
 import { recordUpdateRunPhase, recordUpdateRunStep } from "../../infra/update-run-ledger.js";
@@ -22,6 +20,7 @@ import {
   usesCandidateUpdateAdmission,
   type UpdateCommandOptions,
 } from "./shared.js";
+import { reportPreMutationUpdateResult } from "./update-command-admission-report.js";
 import { withPrivateStagedPackageInstall } from "./update-command-artifact.js";
 import { inspectUpdateManagedServices } from "./update-command-database-context.js";
 import { handoffUpdateFromGateway } from "./update-command-handoff.js";
@@ -30,7 +29,6 @@ import type { UpdateAdmissionReportParams } from "./update-command-result.js";
 import type { prepareUpdateCommand } from "./update-command-run.js";
 import { withOwnedManagedUpdateEnv } from "./update-command-service-env.js";
 import type { resolveUpdateCommandTarget } from "./update-command-target.js";
-import { reportPreMutationUpdateResult } from "./update-command-terminal.js";
 import { UpdateCommandAbort } from "./update-command-windows-task.js";
 
 type Target = NonNullable<Awaited<ReturnType<typeof resolveUpdateCommandTarget>>>;
@@ -77,7 +75,6 @@ export async function inspectStagedUpdateCandidateAdmission(
     if (!installTarget) {
       throw new Error("Candidate admission requires the resolved package installation.");
     }
-    await target.assertPackageRuntimeCurrent?.();
     // The child cannot attest the installed supervisor's ancestry or handoff exception.
     await inspectUpdateManagedServices({
       ...target,
@@ -114,14 +111,7 @@ export async function inspectStagedUpdateCandidateAdmission(
       candidateRoot: params.candidateRoot,
       nodeRunner,
       env: process.env,
-      timeoutMs:
-        prepared.timeoutMs ??
-        (await resolveUpdateCandidateAdmissionTimeoutMs({
-          config: target.configSnapshot.config,
-          stateDir: resolveStateDir(process.env),
-          env: process.env,
-          stepTimeoutMs: params.timeoutMs,
-        })),
+      timeoutMs: prepared.timeoutMs,
       admission: opts.admission,
       context: {
         protocol: 1,
@@ -205,7 +195,7 @@ export function applyUpdateCandidateAdmission(params: {
             }
           : {}),
       },
-      { env: run.env },
+      run,
     );
     for (const warning of [
       ...(result.warning ? [result.warning] : []),
@@ -214,7 +204,7 @@ export function applyUpdateCandidateAdmission(params: {
       recordUpdateRunStep(
         run.runId,
         { step: `warning:${warning.code}`, status: "completed", detail: warning.message },
-        { env: run.env },
+        run,
       );
       defaultRuntime.error(`Warning: ${warning.message}`);
     }
@@ -251,7 +241,6 @@ export async function withUpdateCandidateAdmission<T>(
   const run = opts.run!;
   try {
     const inspect = async (stage: StagedPackageInstallUpdate): Promise<T> => {
-      await target.assertPackageRuntimeCurrent?.();
       const result = await inspectStagedUpdateCandidateAdmission({
         ...params,
         candidateRoot: stage.root,
@@ -284,7 +273,6 @@ export async function withUpdateCandidateAdmission<T>(
     if (params.stagedPackage) {
       return await inspect(params.stagedPackage);
     }
-    await target.assertPackageRuntimeCurrent?.();
     return await withPrivateStagedPackageInstall(
       {
         root: target.root,

@@ -205,7 +205,7 @@ export async function openNodeGrillSession(params: {
   let sessionKey: string;
   try {
     const existing = params.readSessions
-      ? (await params.readSessions({ includeUnknown: false, sessionKey: key })).sessions[0]
+      ? (await params.readSessions({ sessionKey: key })).sessions[0]
       : undefined;
     if (existing && sessionProvesPreparedAcceptance(existing)) {
       sessionKey = existing.key;

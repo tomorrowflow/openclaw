@@ -3,10 +3,11 @@ import { Socket } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import { readRegularFile } from "@openclaw/fs-safe/advanced";
 import { toErrorObject } from "@openclaw/normalization-core/error-coercion";
+import { throwSettledAggregate } from "../../infra/error-graph-internal.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { getProcessInstanceStartTime } from "../../shared/pid-alive.js";
-import { spawnWithInheritedOomScore } from "../linux-oom-score.js";
-import { waitForBrokerChildCompletion } from "./child-completion.js";
+import { spawnWithInheritedOomScore } from "../linux-oom-score-spawn.js";
+import { disposeFailedChild, waitForBrokerChildCompletion } from "./child-completion.js";
 import {
   drainCurrentBrokerProcessGroup,
   isBrokerChildGroupAlive,
@@ -14,7 +15,7 @@ import {
   type BrokerChildGroupIdentity,
 } from "./cleanup.js";
 import { serializeExecaError } from "./execa-protocol.js";
-import { startBrokerExeca, type BrokerExecaProcess } from "./execa-worker.js";
+import type { BrokerExecaProcess } from "./execa-worker.js";
 import { createBrokerReceiver } from "./ipc.js";
 import { holdPipeForTransfer, takePipePrefix } from "./pipe.js";
 import {
@@ -162,12 +163,7 @@ function shutdown(): void {
         ...[...owned.values()].map(stopChild),
         resources?.close(),
       ]);
-      const failures = outcomes.flatMap((outcome) =>
-        outcome.status === "rejected" ? [outcome.reason] : [],
-      );
-      if (failures.length) {
-        throw new AggregateError(failures, "Spawn broker native cleanup failed");
-      }
+      throwSettledAggregate(outcomes, "Spawn broker native cleanup failed");
       // Native owners have settled. Only abandoned members of our private group
       // remain; never signal the broker or tear down its isolate during cleanup.
       await drainCurrentBrokerProcessGroup();
@@ -181,23 +177,6 @@ function shutdown(): void {
       }
     }
   })();
-}
-
-function disposeFailedChild(child: ChildProcess | undefined): void {
-  if (!child) {
-    return;
-  }
-  // Setup can fail before Node emits its queued spawn error.
-  child.once("error", () => {});
-  if (child.pid && child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGKILL");
-  }
-  if (child.connected) {
-    child.disconnect();
-  }
-  for (const stream of child.stdio ?? []) {
-    stream?.destroy();
-  }
 }
 
 async function readFile(message: Extract<BrokerRequest, { type: "read-file" }>): Promise<void> {
@@ -308,10 +287,12 @@ async function launch(
           launchGrants.delete(message.id);
         }
       }
-      const execa =
-        message.type === "spawn-execa"
-          ? await startBrokerExeca(message.argv, message.options, assertActive)
-          : undefined;
+      let execa: BrokerExecaProcess | undefined;
+      if (message.type === "spawn-execa") {
+        const { startBrokerExeca } = await import("./execa-worker.js");
+        assertActive();
+        execa = await startBrokerExeca(message.argv, message.options, assertActive);
+      }
       const child =
         execa?.child ??
         (message.type !== "spawn-execa"
@@ -660,13 +641,21 @@ async function initialize(bootstrap: BrokerBootstrap): Promise<void> {
   }
   if (bootstrap.nativeResource) {
     const authority = bootstrap.nativeResource;
-    resources = await createBrokerNativeResourceServer({
-      endpoint: authority.endpoint,
-      secret: authority.secret,
-      generation: authority.generation,
-      reportParent: report,
-      canAdmit: () => !stopping && owned.size + starting.size + (resources?.size ?? 0) < 256,
-    });
+    try {
+      resources = await createBrokerNativeResourceServer({
+        endpoint: authority.endpoint,
+        secret: authority.secret,
+        generation: authority.generation,
+        reportParent: report,
+        canAdmit: () => !stopping && owned.size + starting.size + (resources?.size ?? 0) < 256,
+      });
+    } catch (error) {
+      await report({
+        type: "startup-failed",
+        error: serializeBrokerError(toErrorObject(error, "Native resource server startup failed")),
+      }).catch(() => {});
+      throw error;
+    }
     if (stopping) {
       resources.disconnect();
       return;

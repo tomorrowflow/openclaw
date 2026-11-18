@@ -74,6 +74,7 @@ describe("diffFeedFacts", () => {
 describe("collectFeedFacts and feedCommentEvents", () => {
   const card: WorkboardCard = {
     id: "0123456789abcdef",
+    title: "Feed card",
     status: "review",
     priority: "normal",
     labels: ["needs:user"],

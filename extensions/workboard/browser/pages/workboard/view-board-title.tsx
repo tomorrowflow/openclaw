@@ -31,7 +31,13 @@ export function BoardTitle(props: {
       <Show when={props.board}>
         {(board) => <WorkboardBoardGlyph board={board()} class="workboard-board-glyph--header" />}
       </Show>
-      <span>{props.board ? workboardBoardName(props.board) : "Workboard"}</span>
+      <span>
+        {props.board
+          ? workboardBoardName(props.board)
+          : props.board === null
+            ? t("workboard.allBoards")
+            : "Workboard"}
+      </span>
       <Show when={architecture()}>
         {(target) => (
           <button

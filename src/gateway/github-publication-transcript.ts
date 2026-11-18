@@ -6,7 +6,13 @@ import {
   captureSessionActorStorageOwner,
   readCapturedSessionActorEntry,
 } from "../config/sessions/session-actor-storage-binding.js";
-import type { GitHubPublicationCoordinator } from "./github-publication.js";
+import { attachSessionTranscriptRunId } from "../sessions/transcript-events.js";
+import type {
+  GitHubPublicationCoordinator,
+  GitHubPublicationTranscriptReport,
+} from "./github-publication.js";
+import type { resolveGatewaySessionStoreTargetInWorker } from "./session-utils-store-worker.js";
+import type { resolveCanonicalSessionEntryFromStoreKeys } from "./session-utils.js";
 
 const GITHUB_PUBLICATION_RESPONSE_PREFIX = "github-publication:";
 
@@ -23,7 +29,7 @@ function formatGitHubPublicationResult(result: SessionGitHubPublicationResult): 
     case "published":
       return `Published ${result.repository} branch ${result.branch}: ${result.url}${acting}`;
     case "failed":
-      return `GitHub publication failed: ${result.message} ${result.nextAction}${acting}`;
+      return `${result.message} ${result.nextAction}${acting}`;
     case "publishing":
     case "requested":
     case "needs_confirmation":
@@ -34,16 +40,11 @@ function formatGitHubPublicationResult(result: SessionGitHubPublicationResult): 
 
 export async function reportGitHubPublicationTranscript(
   loadSessionRuntime: () => Promise<{
-    resolveCanonicalSessionEntryFromStoreKeys: typeof import("./session-utils.js").resolveCanonicalSessionEntryFromStoreKeys;
-    resolveGatewaySessionStoreTargetInWorker: typeof import("./session-utils-store-worker.js").resolveGatewaySessionStoreTargetInWorker;
+    resolveCanonicalSessionEntryFromStoreKeys: typeof resolveCanonicalSessionEntryFromStoreKeys;
+    resolveGatewaySessionStoreTargetInWorker: typeof resolveGatewaySessionStoreTargetInWorker;
   }>,
   coordinator: Pick<GitHubPublicationCoordinator, "markReportedAsync" | "readReportLifecycleAsync">,
-  params: {
-    sessionId: string;
-    sessionKey: string;
-    agentId: string;
-    result: SessionGitHubPublicationResult;
-  },
+  params: GitHubPublicationTranscriptReport,
 ): Promise<void> {
   const lifecycleRevision = await coordinator.readReportLifecycleAsync(params);
   const memory = captureSessionActorStorageOwner(params, {
@@ -72,7 +73,7 @@ export async function reportGitHubPublicationTranscript(
         };
       })();
   const { target, entry } = selected;
-  // A reset or rotation ended that transcript; its receipt stays readable by request ID.
+  // A reset or rotation ended that transcript for good; the receipt stays readable by request id.
   if (
     entry &&
     target.canonicalKey === params.sessionKey &&
@@ -95,17 +96,20 @@ export async function reportGitHubPublicationTranscript(
     },
     {
       kind: "assistant",
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: formatGitHubPublicationResult(params.result) }],
-        api: "openai-responses",
-        provider: "openclaw",
-        model: "gateway-publication",
-        responseId: `${GITHUB_PUBLICATION_RESPONSE_PREFIX}${params.result.requestId}`,
-        usage: makeZeroUsageSnapshot(),
-        stopReason: "stop",
-        timestamp: Date.now(),
-      },
+      message: attachSessionTranscriptRunId(
+        {
+          role: "assistant",
+          content: [{ type: "text", text: formatGitHubPublicationResult(params.result) }],
+          api: "openai-responses",
+          provider: "openclaw",
+          model: "gateway-publication",
+          responseId: `${GITHUB_PUBLICATION_RESPONSE_PREFIX}${params.result.requestId}`,
+          usage: makeZeroUsageSnapshot(),
+          stopReason: "stop",
+          timestamp: Date.now(),
+        },
+        params.runId,
+      ),
     },
   );
   if (!appended.ok) {

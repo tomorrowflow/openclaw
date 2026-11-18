@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { resolveStateDir } from "../../config/paths.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { acquireGatewayLock } from "../../infra/gateway-lock.js";
@@ -7,6 +8,7 @@ import { hasActiveGatewayStateOwner } from "../../infra/gateway-state-owner.js";
 import type { PackageUpdateTransaction } from "../../infra/package-update-swap-contract.js";
 import { isSqliteLockError } from "../../infra/sqlite-error-diagnostics.js";
 import { createSqliteLifecycleAggregateError } from "../../infra/sqlite-lifecycle-errors.js";
+import { readUpdateDatabaseGenerationsIsolated } from "../../infra/update-candidate-state.js";
 import {
   createUpdateDatabaseBackup,
   type UpdateDatabaseBackup,
@@ -98,8 +100,9 @@ export async function captureUpdateDatabases(params: {
         // Database recovery outlives runtime retirement and stays outside the Git source fence.
         const artifactRoot = path.join(execution.root, ".artifacts");
         await fs.mkdir(artifactRoot, { recursive: true });
+        const physicalArtifactRoot = await fs.realpath(artifactRoot);
         params.assertCurrent();
-        backupRoot = path.join(artifactRoot, path.basename(backupRoot));
+        backupRoot = path.join(physicalArtifactRoot, path.basename(backupRoot));
       }
       const captured = await createUpdateDatabaseBackup({
         backupRoot,
@@ -110,6 +113,13 @@ export async function captureUpdateDatabases(params: {
         // source open would rebuild an exited writer's WAL index, changing the
         // recorded generation and disabling automatic restoration.
         preserveSourceArtifacts: maintenance !== null && unavailable === undefined,
+        // Confirmed custody can authorize automatic rollback, which keeps FULL validation.
+        integrityCheck:
+          maintenance !== null && unavailable === undefined
+            ? undefined
+            : execution.opts.fullIntegrityCheck
+              ? "full"
+              : "quick",
         timeoutMs: execution.updateStepTimeoutMs,
         nodeRunner: execution.packageUpdateNodeRunner,
         postgresOffline: maintenance !== null && unavailable === undefined,
@@ -159,7 +169,7 @@ export async function captureUpdateDatabases(params: {
     durationMs: Date.now() - startedAt,
     exitCode: 0,
     diagnostics: [
-      `Databases snapshotted at ${backup.directory}. ${restorable ? "Verified successful activation removes these snapshots; otherwise retain them with the update's recovery artifacts." : "These snapshots require manual recovery and remain available after successful activation."}`,
+      `Databases snapshotted at ${backup.directory}. ${restorable ? "Verified successful activation removes these snapshots only if automatic restoration remains available; otherwise retain them with the update's recovery artifacts." : "These snapshots require manual recovery and remain available after successful activation."}`,
       ...backup.databases.map(
         (entry) =>
           `${entry.path} -> ${entry.snapshotPath}; schema ${entry.userVersion}; ${entry.sizeBytes} bytes; SHA-256 ${entry.sha256}`,
@@ -170,6 +180,39 @@ export async function captureUpdateDatabases(params: {
   await reportUpdateStepCompletion(execution.progress, { ...step, index: 0, total: 0 });
   assertCurrent();
   return { backup: restorable ? backup : undefined, step };
+}
+
+/**
+ * The activated-release boot is this update's own writer: it records boot and
+ * config bookkeeping. When nothing else wrote since Doctor, attribute the boot's
+ * writes to the update so the next Doctor accepts them and failures can restore the baseline.
+ * Accepted: another writer during the boot window is attributed the same way.
+ */
+export async function adoptUpdateBootDatabaseWrites(
+  backup: UpdateDatabaseBackup,
+  env: NodeJS.ProcessEnv,
+  boot: () => Promise<UpdateRunResult>,
+): Promise<UpdateRunResult> {
+  const paths = [
+    ...new Set([...backup.databases.map((entry) => entry.path), ...backup.missingPaths]),
+  ];
+  // An unreadable generation leaves the existing refusal in place.
+  const read = () =>
+    readUpdateDatabaseGenerationsIsolated(paths, { env, pluginOwners: backup.pluginOwners }).catch(
+      () => undefined,
+    );
+  const expected = backup.migration?.to ?? backup.sourceGenerations;
+  const unchanged = isDeepStrictEqual(await read(), expected);
+  const result = await boot();
+  const booted = unchanged ? await read() : undefined;
+  if (booted) {
+    if (backup.migration) {
+      backup.migration.to = booted;
+    } else {
+      backup.sourceGenerations = booted;
+    }
+  }
+  return result;
 }
 
 /** Called only before this update admits a candidate Gateway, after its child has settled. */
@@ -187,6 +230,10 @@ export async function restoreFailedUpdateDatabases(params: {
   const refuse = async (reason: string) => {
     params.backup.restoreRefusal ??= reason;
     params.result.reason = "state-migrated-no-rollback";
+    if (params.result.recovery?.serviceRestartSafe !== false) {
+      params.result.recovery = { serviceRestartSafe: false, reason: "state-migration-started" };
+    }
+    params.result.recovery.dataAtRisk ??= "state-migrated-no-rollback";
     params.result.rollbackOutcome = { status: "not-attempted", reason };
     const step: UpdateStepResult = {
       name: "database rollback",
@@ -209,7 +256,11 @@ export async function restoreFailedUpdateDatabases(params: {
     if (hasCommandProcessCleanupError(error)) {
       throw error;
     }
-    params.result.recovery = { serviceRestartSafe: false, reason: "source-rollback-failed" };
+    if (params.result.recovery?.serviceRestartSafe === false) {
+      params.result.recovery.reason = "source-rollback-failed";
+    } else {
+      params.result.recovery = { serviceRestartSafe: false, reason: "source-rollback-failed" };
+    }
     return await refuse(formatErrorMessage(error));
   }
   params.assertCurrent();
@@ -250,8 +301,13 @@ export async function restoreFailedUpdateDatabases(params: {
   } catch (cause) {
     // A partly restored shared ledger must never be reopened by candidate
     // finalization: that would migrate the recovery image again.
+    params.result.recovery = {
+      serviceRestartSafe: false,
+      reason: "state-migration-started",
+      dataAtRisk: "rollback-state-unverified",
+    };
     throw new UpdateCommandRecoveryPendingError(
-      `Database rollback could not finish; keep the Gateway stopped. Preserve ${params.backup.directory} and <database>.migrated-${params.runId}. Run the compatible candidate's Doctor to inspect recovery before restarting.`,
+      `Database rollback could not finish (data at risk: rollback-state-unverified); keep the Gateway stopped. Preserve ${params.backup.directory} and <database>.migrated-${params.runId}. Run the compatible candidate's Doctor to inspect recovery before restarting.`,
       { cause },
     );
   }

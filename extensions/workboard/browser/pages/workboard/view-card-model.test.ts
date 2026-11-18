@@ -1,10 +1,10 @@
 import "../../test/dom.setup.ts";
 import { describe, expect, it } from "vitest";
-import type { WorkboardCard } from "../../lib/workboard/index.ts";
 import {
   createWorkboardCard,
   createWorkboardTestClient,
 } from "../../lib/workboard/test/index-helpers.ts";
+import type { WorkboardCard } from "../../lib/workboard/types.ts";
 import { waitForFast } from "../../test/wait-for.ts";
 import { createWorkboardView } from "./view.test-support.ts";
 

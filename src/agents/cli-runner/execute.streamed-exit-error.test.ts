@@ -1,13 +1,12 @@
 /** A streamed CLI run that exits in failure reports the failure, never the stream chatter before it. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { invokeNodeClaudeCliRun } from "../../gateway/node-agent-cli-runtime.js";
+import * as nodeRuntime from "../../gateway/node-agent-cli-runtime.js";
 import type { getProcessSupervisor } from "../../process/supervisor/index.js";
 import { buildPreparedCliRunContext } from "../cli-runner.test-helpers.js";
 import { executePreparedCliRun as executePreparedCliRunImpl } from "./execute.js";
 import {
   createManagedRun,
   createSuccessfulProcessExit,
-  setCliRunnerExecuteTestDeps,
   supervisorSpawnMock,
   wrapPreparedCliRunWithTestAdmission,
 } from "./execute.test-support.js";
@@ -122,13 +121,12 @@ function jsonl(records: readonly Record<string, unknown>[]): string {
 
 function mockNodeRun(
   records: readonly Record<string, unknown>[],
-  outcome: Awaited<ReturnType<typeof invokeNodeClaudeCliRun>>,
+  outcome: Awaited<ReturnType<typeof nodeRuntime.invokeNodeClaudeCliRun>>,
 ) {
-  const invokeNode = vi.fn(async (params: Parameters<typeof invokeNodeClaudeCliRun>[0]) => {
+  vi.spyOn(nodeRuntime, "invokeNodeClaudeCliRun").mockImplementation(async (params) => {
     params.onProgress(jsonl(records));
     return outcome;
   });
-  setCliRunnerExecuteTestDeps({ invokeNodeClaudeCliRun: invokeNode });
 }
 
 function nodeRunContext() {

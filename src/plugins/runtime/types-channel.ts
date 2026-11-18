@@ -5,21 +5,14 @@
  * inside the owning plugin package instead of hanging off core runtime slots
  * keyed by plugin id.
  */
-import type {
-  IsControlCommandMessage,
-  ShouldComputeCommandAuthorized,
-} from "../../auto-reply/command-detection.runtime-types.js";
-import type { ShouldHandleTextCommands } from "../../auto-reply/commands-registry.runtime-types.js";
 import type { DispatchReplyFromConfig as CoreDispatchReplyFromConfig } from "../../auto-reply/reply/dispatch-from-config.types.js";
 import type {
   BuildMentionRegexes,
   MatchesMentionPatterns,
   MatchesMentionWithExplicit,
 } from "../../auto-reply/reply/mentions.types.js";
-import type { CreateReplyDispatcherWithTyping } from "../../auto-reply/reply/reply-dispatcher.runtime-types.js";
 import type { ChannelRuntimeContextRegistry } from "../../channels/plugins/channel-runtime-surface.types.js";
 import type { KeepChannelTypingParams } from "../../channels/plugins/outbound/keep-typing.js";
-import type { LoadChannelOutboundAdapter } from "../../channels/plugins/outbound/load.types.js";
 import type { ResolveMarkdownTableMode } from "../../config/markdown-tables.types.js";
 import type {
   ReadSessionUpdatedAt,
@@ -72,7 +65,7 @@ export type PluginRuntimeChannel = {
      * `dispatchReplyWithBufferedBlockDispatcher` or channel turn helpers.
      * This is a low-level legacy dispatcher escape hatch.
      */
-    createReplyDispatcherWithTyping: CreateReplyDispatcherWithTyping;
+    createReplyDispatcherWithTyping: typeof import("../../auto-reply/reply/reply-dispatcher.js").createReplyDispatcherWithTyping;
     resolveEffectiveMessagesConfig: typeof import("../../agents/identity.js").resolveEffectiveMessagesConfig;
     /**
      * @deprecated Prefer the channel-message reply pipeline helpers. This is
@@ -114,6 +107,7 @@ export type PluginRuntimeChannel = {
     saveRemoteMedia: typeof import("../../media/fetch.js").saveRemoteMedia;
     saveResponseMedia: typeof import("../../media/fetch.js").saveResponseMedia;
     saveMediaBuffer: typeof import("../../media/store.js").saveMediaBuffer;
+    deleteMediaBuffer: typeof import("../../media/store.js").deleteMediaBuffer;
   };
   activity: {
     record: typeof import("../../infra/channel-activity.js").recordChannelActivity;
@@ -122,7 +116,7 @@ export type PluginRuntimeChannel = {
   session: {
     /** @deprecated Prefer channel turn helpers that record inbound sessions as part of dispatch. */
     resolveStorePath: typeof import("../../config/sessions/paths.js").resolveSessionStorePathCore;
-    /** @deprecated Await readSessionUpdatedAtAsync. Final compatibility day: 2026-12-31. */
+    /** @deprecated Await readSessionUpdatedAtAsync. Final compatibility day: 2026-12-31. Removal in the first January 2027 stable release. */
     readSessionUpdatedAt: ReadSessionUpdatedAt;
     readSessionUpdatedAtAsync: (
       ...params: Parameters<ReadSessionUpdatedAt>
@@ -156,12 +150,12 @@ export type PluginRuntimeChannel = {
   };
   commands: {
     resolveCommandAuthorizedFromAuthorizers: typeof import("../../channels/command-gating.js").resolveCommandAuthorizedFromAuthorizers;
-    isControlCommandMessage: IsControlCommandMessage;
-    shouldComputeCommandAuthorized: ShouldComputeCommandAuthorized;
-    shouldHandleTextCommands: ShouldHandleTextCommands;
+    isControlCommandMessage: typeof import("../../auto-reply/command-detection.js").isControlCommandMessage;
+    shouldComputeCommandAuthorized: typeof import("../../auto-reply/command-detection.js").shouldComputeCommandAuthorized;
+    shouldHandleTextCommands: typeof import("../../auto-reply/commands-text-routing.js").shouldHandleTextCommands;
   };
   outbound: {
-    loadAdapter: LoadChannelOutboundAdapter;
+    loadAdapter: typeof import("../../channels/plugins/outbound/load.js").loadChannelOutboundAdapter;
     /**
      * Shows the channel's typing indicator in `to` (and `threadId`) until
      * `signal` aborts. Resolves when the channel has no typing; rejects on the
@@ -198,14 +192,14 @@ export type PluginRuntimeChannel = {
     setMaxAgeBySessionKeyAsync: (
       params: Parameters<PluginRuntimeChannel["threadBindings"]["setMaxAgeBySessionKey"]>[0],
     ) => Promise<RuntimeThreadBindingLifecycleRecord[]>;
-    /** @deprecated Use setIdleTimeoutBySessionKeyAsync; final compatibility day: 2026-12-31. */
+    /** @deprecated Use setIdleTimeoutBySessionKeyAsync; final compatibility day: 2026-12-31. Removal in the first January 2027 stable release. */
     setIdleTimeoutBySessionKey: (params: {
       channelId: string;
       targetSessionKey: string;
       accountId?: string;
       idleTimeoutMs: number;
     }) => RuntimeThreadBindingLifecycleRecord[];
-    /** @deprecated Use setMaxAgeBySessionKeyAsync; final compatibility day: 2026-12-31. */
+    /** @deprecated Use setMaxAgeBySessionKeyAsync; final compatibility day: 2026-12-31. Removal in the first January 2027 stable release. */
     setMaxAgeBySessionKey: (params: {
       channelId: string;
       targetSessionKey: string;

@@ -10,19 +10,6 @@ import type { OpenClawStateWorkerContext } from "./openclaw-state-worker-context
 const CONTENDED_CLEANUP_RETRY_INITIAL_MS = 250;
 const CONTENDED_CLEANUP_RETRY_MAX_MS = 5_000;
 
-function isMaintenanceContention(error: unknown, depth = 0): boolean {
-  if (depth > 8) {
-    return false;
-  }
-  if (error instanceof AggregateError && error.errors.length > 0) {
-    return error.errors.every((entry) => isMaintenanceContention(entry, depth + 1));
-  }
-  return (
-    isStateDatabaseMaintenanceContention(error) ||
-    (error instanceof Error && isMaintenanceContention(error.cause, depth + 1))
-  );
-}
-
 /** Keep unfinished lease disposal with its original resource owner. */
 export function createOpenClawStateLeaseCleanup(params: {
   maintenanceScope?: OpenClawDatabaseMaintenanceScope;
@@ -66,10 +53,12 @@ export function createOpenClawStateLeaseCleanup(params: {
   // finish() is idempotent, and release still targets only this owner's lease row.
   const retryContendedCleanup = (error: unknown, retries: number) => {
     const deadline = params.retryDeadline?.();
-    if (complete || deadline === undefined || Date.now() >= deadline) {
-      return;
-    }
-    if (!isMaintenanceContention(error)) {
+    if (
+      complete ||
+      deadline === undefined ||
+      Date.now() >= deadline ||
+      !isStateDatabaseMaintenanceContention(error)
+    ) {
       return;
     }
     const delayMs = Math.min(

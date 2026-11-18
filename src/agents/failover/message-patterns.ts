@@ -59,13 +59,25 @@ const PRE_DISPATCH_TOOL_CALL_REJECTION_MESSAGES = new Set([
   "Responses stream completed tool call with invalid JSON arguments",
 ]);
 
+// Anthropic-compatible relay gateways validate tool_use input themselves and,
+// on malformed upstream arguments, fail the response with this diagnostic
+// instead of forwarding the call. Nothing was dispatched. Keep it anchored.
+const GATEWAY_INVALID_TOOL_INPUT_RE =
+  /^Upstream returned invalid tool input for '[^'\r\n]{1,128}'\.?$/;
+
 export function isPreDispatchToolCallRejectionMessage(errorMessage?: string): boolean {
-  return errorMessage !== undefined && PRE_DISPATCH_TOOL_CALL_REJECTION_MESSAGES.has(errorMessage);
+  if (errorMessage === undefined) {
+    return false;
+  }
+  return (
+    PRE_DISPATCH_TOOL_CALL_REJECTION_MESSAGES.has(errorMessage) ||
+    GATEWAY_INVALID_TOOL_INPUT_RE.test(errorMessage.trim())
+  );
 }
 // Claude reports its rolling 5-hour window as "You've hit your session limit · resets …";
 // the "hit your" anchor keeps OpenClaw's own session-count limits out.
 const PERIODIC_USAGE_LIMIT_RE =
-  /\b(?:daily|weekly|monthly)(?:\/(?:daily|weekly|monthly))* (?:usage )?limit(?:s)?(?: (?:exhausted|reached|exceeded))?\b|\bhit your session limit\b/i;
+  /\b(?:daily|weekly|monthly)(?:\/(?:daily|weekly|monthly))* (?:usage )?limit(?:s)?(?: (?:exhausted|reached|exceeded))?\b|已达到 Token Plan 用量上限|已达到每[日周月天](?:\/每[日周月天])*使用上限|(?:配额|额度)已用尽|\bhit your session limit\b/i;
 
 const HIGH_CONFIDENCE_AUTH_PERMANENT_PATTERNS = [
   /api[_ ]?key[_ ]?(?:revoked|deactivated|deleted)/i,

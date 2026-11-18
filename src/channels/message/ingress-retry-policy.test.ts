@@ -1,4 +1,3 @@
-// Retry policy: backoff, attempt floor + age gate for dead-letter.
 import { coerceErrorMessage } from "@openclaw/normalization-core/error-coercion";
 import { describe, expect, it } from "vitest";
 import { PreparedModelRuntimeRecoveryError } from "../../agents/prepared-model-runtime-admission-errors.js";
@@ -6,15 +5,29 @@ import {
   createIngressRetryPolicy,
   DEFAULT_INGRESS_RETRY_DEAD_LETTER_MIN_AGE_MS,
   DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS,
-  resolveIngressFailureDisposition,
   resolveIngressRetryDelayMs,
   shouldDeadLetterRetryableIngressEvent,
 } from "./ingress-retry-policy.js";
 
+const codedError = (message: string, code: string) => Object.assign(new Error(message), { code });
 const wrapError = (cause: Error) =>
   Object.assign(new Error("BotError in middleware"), {
     error: new Error("telegram spooled update processing failed", { cause }),
   });
+
+function disposition(
+  err: unknown,
+  attempts: number,
+  options: Partial<Parameters<ReturnType<typeof createIngressRetryPolicy>["failure"]>[0]> = {},
+) {
+  return createIngressRetryPolicy({}).failure({
+    err,
+    event: { id: "input", receivedAt: 1_000, attempts },
+    formatError: coerceErrorMessage,
+    now: 2_000,
+    ...options,
+  });
+}
 
 describe("ingress retry policy", () => {
   it("counts real recovery failures independently of other dispatch attempts", () => {
@@ -160,41 +173,17 @@ describe("ingress retry policy", () => {
     ).toBe(false);
   });
 
-  it.each([
-    { attempts: 6, ageOffset: 0, kind: "release", attempt: 7 },
-    { attempts: 7, ageOffset: -1, kind: "release", attempt: 8 },
-    { attempts: 7, ageOffset: 0, kind: "fail", attempt: 8 },
-  ])(
-    "session-start conflict with $attempts recorded attempts and age offset $ageOffset",
-    ({ attempts, ageOffset, kind, attempt }) => {
-      const receivedAt = 1_000;
-      const err = Object.assign(new Error("Session changed while starting work. Retry."), {
-        code: "SESSION_WORK_START_CHANGED",
-      });
-      const disposition = resolveIngressFailureDisposition({
-        err: wrapError(err),
-        event: { receivedAt, attempts },
-        formatError: coerceErrorMessage,
-        now: receivedAt + DEFAULT_INGRESS_RETRY_DEAD_LETTER_MIN_AGE_MS + ageOffset,
-      });
-      expect(disposition).toMatchObject({ kind, attempt });
-      if (kind === "fail") {
-        expect(disposition).toMatchObject({ reason: "retry-limit-exceeded" });
-      }
-    },
-  );
-
   it("disposition prefers non-retryable fail", () => {
-    const disposition = resolveIngressFailureDisposition({
-      err: new Error("missing harness"),
-      event: { receivedAt: Date.now() - 60_000, attempts: 0 },
-      formatError: (err) => String(err),
-      resolveNonRetryableFailure: () => ({
-        reason: "missing-agent-harness",
-        message: "missing harness",
+    expect(
+      disposition(new Error("missing harness"), 0, {
+        now: undefined,
+        formatError: (err) => String(err),
+        resolveNonRetryableFailure: () => ({
+          reason: "missing-agent-harness",
+          message: "missing harness",
+        }),
       }),
-    });
-    expect(disposition).toEqual({
+    ).toEqual({
       kind: "fail",
       reason: "missing-agent-harness",
       message: "missing harness",
@@ -203,88 +192,17 @@ describe("ingress retry policy", () => {
   });
 
   it("disposition dead-letters only when both gates pass", () => {
-    const receivedAt = 1_000;
-    // Attempt floor met, age gate not → keep retrying.
-    const young = resolveIngressFailureDisposition({
-      err: new Error("transient"),
-      event: {
-        receivedAt,
-        attempts: DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS - 1,
-      },
-      formatError: coerceErrorMessage,
-      now: receivedAt + DEFAULT_INGRESS_RETRY_DEAD_LETTER_MIN_AGE_MS - 1,
-    });
+    const attempt = DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS - 1;
+    const deadline = 1_000 + DEFAULT_INGRESS_RETRY_DEAD_LETTER_MIN_AGE_MS;
+    const young = disposition(new Error("transient"), attempt, { now: deadline - 1 });
     expect(young.kind).toBe("release");
-
-    // Both gates met → dead-letter.
-    const aged = resolveIngressFailureDisposition({
-      err: new Error("transient"),
-      event: {
-        receivedAt,
-        attempts: DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS - 1,
-      },
-      formatError: coerceErrorMessage,
-      now: receivedAt + DEFAULT_INGRESS_RETRY_DEAD_LETTER_MIN_AGE_MS,
-    });
+    const aged = disposition(new Error("transient"), attempt, { now: deadline });
     expect(aged).toMatchObject({
       kind: "fail",
       reason: "retry-limit-exceeded",
       attempt: DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS,
     });
   });
-
-  it("dead-letters a restart tombstone by structured code instead of wording", () => {
-    const message = "This generation is terminal.";
-    const wrapped = Object.assign(new Error("BotError in middleware"), {
-      error: new Error("telegram spooled update processing failed", {
-        cause: Object.assign(new Error(message), {
-          code: "SESSION_RESTART_RECOVERY_TOMBSTONE",
-        }),
-      }),
-    });
-    expect(
-      resolveIngressFailureDisposition({
-        err: wrapped,
-        event: { receivedAt: 1_000, attempts: 0 },
-        formatError: coerceErrorMessage,
-        config: { maxAttempts: 8, deadLetterMinAgeMs: 24 * 60 * 60 * 1000 },
-        now: 2_000,
-      }),
-    ).toEqual({
-      kind: "fail",
-      reason: "restart-recovery-tombstone",
-      message: wrapped.message,
-      attempt: 1,
-    });
-    expect(
-      resolveIngressFailureDisposition({
-        err: Object.assign(new Error(message), {
-          code: "SESSION_RESTART_RECOVERY_TOMBSTONE",
-        }),
-        event: { receivedAt: 1_000, attempts: 425 },
-        formatError: coerceErrorMessage,
-        now: 2_000,
-      }),
-    ).toMatchObject({ kind: "fail", reason: "restart-recovery-tombstone", attempt: 426 });
-  });
-
-  it.each([undefined, "SESSION_WORK_START_INVALIDATED"])(
-    "keeps tombstone-like text retryable without its code: %s",
-    (code) => {
-      const err = Object.assign(
-        new Error("Session ended during restart recovery. Use /new or /reset."),
-        { code },
-      );
-      expect(
-        resolveIngressFailureDisposition({
-          err,
-          event: { receivedAt: 1_000, attempts: 0 },
-          formatError: coerceErrorMessage,
-          now: 2_000,
-        }),
-      ).toEqual({ kind: "release", attempt: 1, message: err.message });
-    },
-  );
 
   it.each(["code", "cause", "errors"])(
     "releases a transient failure when its %s getter throws",
@@ -294,105 +212,41 @@ describe("ingress retry policy", () => {
           throw new Error("unavailable diagnostic field");
         },
       });
-      expect(
-        resolveIngressFailureDisposition({
-          err,
-          event: { receivedAt: 1_000, attempts: 0 },
-          formatError: coerceErrorMessage,
-          now: 2_000,
-        }),
-      ).toEqual({ kind: "release", attempt: 1, message: "temporary failure" });
+      expect(disposition(err, 0)).toEqual({
+        kind: "release",
+        attempt: 1,
+        message: "temporary failure",
+      });
     },
   );
-
-  it("finds the terminal code beside an inaccessible wrapper field", () => {
-    const err = Object.assign(new Error("reply admission refused"), {
-      error: Object.assign(new Error("terminal generation"), {
-        code: "SESSION_RESTART_RECOVERY_TOMBSTONE",
-      }),
-    });
-    Object.defineProperty(err, "cause", {
-      get() {
-        throw new Error("unavailable diagnostic field");
-      },
-    });
-    expect(
-      resolveIngressFailureDisposition({
-        err,
-        event: { receivedAt: 1_000, attempts: 0 },
-        formatError: coerceErrorMessage,
-        now: 2_000,
-      }),
-    ).toEqual({
-      kind: "fail",
-      reason: "restart-recovery-tombstone",
-      attempt: 1,
-      message: "reply admission refused",
-    });
-  });
 
   it("keeps wrapped session-start conflicts under both retry and age gates", () => {
     const maxAttempts = 3;
     const message = 'Session "agent:main:telegram:direct:1" changed while starting work. Retry.';
-    const conflict = Object.assign(new Error(message), {
-      code: "SESSION_WORK_START_CHANGED",
-    });
-    const wrapped = Object.assign(new Error("BotError in middleware"), {
-      error: new Error("telegram spooled update processing failed", { cause: conflict }),
-    });
-    const beforeLimit = resolveIngressFailureDisposition({
-      err: wrapped,
-      event: {
-        receivedAt: 1_000,
-        attempts: maxAttempts - 2,
-      },
-      formatError: coerceErrorMessage,
-      config: { maxAttempts },
-      now: 2_000,
-    });
+    const wrapped = wrapError(codedError(message, "SESSION_WORK_START_CHANGED"));
+    const config = { maxAttempts };
+    const beforeLimit = disposition(wrapped, maxAttempts - 2, { config });
     expect(beforeLimit).toMatchObject({
       kind: "release",
       attempt: maxAttempts - 1,
     });
-    expect(
-      resolveIngressFailureDisposition({
-        err: new Error(message),
-        event: { receivedAt: 1_000, attempts: maxAttempts - 1 },
-        formatError: coerceErrorMessage,
-        config: { maxAttempts },
-        now: 2_000,
-      }),
-    ).toMatchObject({ kind: "release", attempt: maxAttempts });
-    expect(
-      resolveIngressFailureDisposition({
-        err: Object.assign(new Error(message), { code: "SESSION_WORK_START_INVALIDATED" }),
-        event: { receivedAt: 1_000, attempts: maxAttempts - 1 },
-        formatError: coerceErrorMessage,
-        config: { maxAttempts },
-        now: 2_000,
-      }),
-    ).toMatchObject({ kind: "release", attempt: maxAttempts });
-
-    const atLimit = resolveIngressFailureDisposition({
-      err: wrapped,
-      event: {
-        receivedAt: 1_000,
-        attempts: maxAttempts - 1,
-      },
-      formatError: coerceErrorMessage,
-      config: { maxAttempts },
-      now: 2_000,
+    expect(disposition(new Error(message), maxAttempts - 1, { config })).toMatchObject({
+      kind: "release",
+      attempt: maxAttempts,
     });
+    expect(
+      disposition(codedError(message, "SESSION_WORK_START_INVALIDATED"), maxAttempts - 1, {
+        config,
+      }),
+    ).toMatchObject({ kind: "release", attempt: maxAttempts });
+    const atLimit = disposition(wrapped, maxAttempts - 1, { config });
     expect(atLimit).toEqual({
       kind: "release",
       message: wrapped.message,
       attempt: maxAttempts,
     });
     expect(
-      resolveIngressFailureDisposition({
-        err: wrapped,
-        event: { receivedAt: 1_000, attempts: maxAttempts - 1 },
-        formatError: coerceErrorMessage,
+      disposition(wrapped, maxAttempts - 1, {
         config: { maxAttempts },
         now: 1_000 + DEFAULT_INGRESS_RETRY_DEAD_LETTER_MIN_AGE_MS,
       }),

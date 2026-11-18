@@ -29,6 +29,7 @@ export type UpdateCommandExecutionGuards = {
   onStateHandoff: () => void;
   admitExecutor: (acquired: UpdateRecoveryFence) => void;
   assertCurrent: (phase?: "restore") => void;
+  waitForCurrent: () => Promise<void>;
   assertBoundChildCurrent: () => void;
 };
 
@@ -56,8 +57,6 @@ export type MutableUpdateExecutionParams = {
   packageTargetSchemaVersions?: OpenClawSchemaVersions;
   packageUpdateNodeRunner?: string;
   packageActivationRuntime?: PackageActivationRuntime;
-  /** Original engine-admission authority and executable snapshot, not a fresh acceptance. */
-  assertPackageRuntimeCurrent?: () => Promise<void>;
   managedServiceNodeRunner?: string;
   managedServiceRootRedirect: ManagedServiceRootRedirect | null;
   managedServiceRoot?: string;

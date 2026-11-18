@@ -41,6 +41,28 @@ Read only the references needed for the selected phase:
 - Release notes: `$openclaw-changelog-update`, including its separate approved post-release docs-mirror route. Initial release generation keeps its existing format; docs publication does not run automatically during release. Requested announcements: `$release-openclaw-announcement` for Discord, `$release-tweets` for X. Announcements never gate publication and require explicit posting authorization.
 - Published artifact verification: `$verify-release`. GHSA operations: `$openclaw-ghsa-maintainer` only with explicit security-workflow authorization.
 
+## Backports and new fixes
+
+For every release track, apply approved changes already on `main` directly to
+the canonical release branch, one commit at a time in dependency order with
+`git cherry-pick -x`. Keep each backport separate, including the initial set;
+never open individual backport PRs or a combined staging/mega PR for that work.
+Record source and destination SHAs, adaptations, and proof in the release ledger.
+
+For a new fix not yet on `main`, prefer an individual PR to `main`, then direct
+backport after it merges. When urgency requires a release-first fix, commit it
+directly to the release branch and track an individual forward-port PR to
+`main` after publication, with an owner in the handoff. Do not lose the fix at
+closeout. This applies to product, CI, and release-tooling repairs; independently
+trusted publishing tooling P must still come from `main`.
+
+CI can be repaired after backports are on the release branch; it is not a
+reason to open a backport PR or stage the initial set behind one. Backport an
+existing main fix directly; otherwise use the new-fix route above. Run focused
+proof and repair branch CI before freezing and qualifying the final candidate.
+Required release validation, intake approval, security disclosure, and exact-SHA
+evidence remain unchanged; direct backports do not authorize publication.
+
 ## Hotfix ledger management
 
 Prefer the [shared hotfix ledger](references/hotfix-ledger-management.md) for
@@ -51,24 +73,18 @@ later. This is recommended bookkeeping, not another release gate.
 
 ## Shared release boundaries
 
-This release branch predates trusted-P waiver evaluation: its Release Decision
-runs candidate-owned tooling. Changing P alone cannot retrofit waiver support
-into a frozen C/Q workflow. Follow the branch's strict
-[evidence policy](../../../docs/reference/full-release-validation/evidence.md#evidence-to-keep),
-not main's post-cutover waiver policy. A deliberate workflow cutover would need
-its own reviewed backport and newly qualified C/Q; this skill update does not
-provide one.
-
-FRV must conclude **success**, and every selected validation lane must pass,
-including live-provider and Telegram leaves. Required lanes include Windows
+FRV must conclude **success** under pinned P's
+[checked-in release-tooling policy](../../../docs/reference/full-release-validation/evidence.md#release-tooling-waivers).
+Only exact failed live-provider or Telegram leaves may be waived, without
+skipping tests or changing C/Q. All other required lanes must succeed: Windows
 and macOS Node and other normal CI jobs, install smoke, survivor
 lanes, `update-first-hop-compat*`, pack/npm qualification, package integrity,
 and Linux/Windows/macOS Gateway checks, including Windows packaged
 install/upgrade checks in Release Checks. A cancelled run still blocks. Preserve
 first failures and classify each one as below before recovery. Stable
 publication requires stable/full evidence, soak, and blocking performance.
-Beta-profile evidence cannot authorize stable publication. No selected lane,
-soak, or performance requirement can be waived on this branch. All nine Gateway install/upgrade
+Beta-profile evidence cannot authorize stable publication. None of those hard
+gates, soak, or performance can be waived. All nine Gateway install/upgrade
 combinations across Linux, Windows, and macOS are required for all-group
 qualification. Preserve identity, provenance, complete evidence, and existing
 publication approvals.
@@ -81,9 +97,9 @@ that is not a regression (for example the 2026.9.6 "Assign to…" bug). A real
 blocker is a regression in shipped bytes or behavior, or an update/install/
 publish defect; fix it on the release branch. Rerun a flake on
 the same Release SHA with at most two recorded reruns by default, and file a
-fix-in-parallel issue or PR on `main` with the evidence. Never re-cut, change
-P, or start a new FRV solely to waive a flake. A selected flake that remains red
-blocks publication.
+fix-in-parallel issue or PR on `main` with the evidence. Never re-cut for a flake.
+A deliberate tooling-code waiver requires FRV validation under the new pinned P,
+not a publisher override. An unwaived flake that remains red blocks publication.
 Main-only failures and infrastructure
 failures (runner outages, GitHub ghost jobs, hosted-runner offload) count as
 flakes for the release.
@@ -108,7 +124,9 @@ Follow the [FRV wall-time loop](../release-openclaw-ci/SKILL.md#keep-frv-off-the
 start remote validation promptly, repair failures as diagnostics drain, and
 minimize downtime between cycles. Include every known non-flake fix affecting
 the next run rather than knowingly carrying failures forward; overlap useful
-local checks with remote validation. This guides scheduling, not new gates.
+local checks with remote validation. Consider [broad CI discovery alongside initial FRV](../release-openclaw-ci/SKILL.md#optional-broad-ci-discovery-alongside-initial-frv)
+to reuse existing failures and batch repairs without delaying the initial run.
+This guides scheduling, not new gates.
 
 The operating objectives are approximately 20 minutes to seal validation and
 publication within an hour, not measured guarantees. Source-only children start
@@ -164,12 +182,19 @@ matching record, and root index may use `split-changelog-release-v1`
 to reuse product proof while qualifying new publication bytes. Any other
 source delta, rename, or deletion returns to the Code SHA loop. Historical
 root-only receipts retain `changelog-only-release-v1`.
-New qualification freezes **Q=C**: the entire qualification workflow closure,
-including the aggregate Release Decision, belongs to the candidate. Keep
-independently trusted **P** (admission, verifier, and publisher) separate.
-A qualification harness or aggregate-decision repair requires a new C/Q and
-newly bound evidence; P-only or infrastructure repairs can preserve the candidate.
-Missing qualification contracts need a deliberate backport, never future-main fallback.
+New test qualification defaults to **Q=C**. An explicit reviewed main-ancestor
+**Q** may instead be admitted through the candidate route while **C** retains
+source, package bytes, version, and baselines. Keep independently trusted **P**
+(admission, aggregate decision, verifier, and publisher) separate. A Q repair
+requires a new request, admission, and successful parent, not a new C unless
+product source changes. Missing contracts need a deliberate Q repair or candidate
+backport, never a moving-main fallback. Follow the
+[qualification-tooling recovery procedure](../../../docs/reference/full-release-validation/dispatch.md#recover-qualification-tooling-without-changing-the-candidate)
+and the CI skill's [C ≠ Q decision and command guide](../release-openclaw-ci/SKILL.md#repair-release-tooling-without-changing-the-product-c--q).
+Use new Q for workflow/harness/collector repairs, P for admission/verifier/publisher
+repairs, and new C only for changed product bytes. Reuse the explicitly qualified
+parent through the checklist's `--full-release-validation-run-id` and `--skip-dispatch`;
+its `--workflow-sha` still selects P, and its fresh qualification defaults to Q=C.
 
 Once a candidate is cut, its base is the operator's decision. Never re-cut
 (re-base the candidate on newer `main`) unless Peter explicitly asks for it in
@@ -184,12 +209,16 @@ Explicit operator-approved additions follow the
 record the changed scope and requalify the new candidate, never silently reuse
 invalidated proof. A manager's opportunity notification is not that approval.
 
-Release process improvements made during a release land on both branches.
+Release process improvements normally land on both branches, except independent
+qualification-only repairs as described below.
 Workflow, release-script, release-test, `RELEASING.md`, and release-skill changes
-merge to `main` first, then get cherry-picked (`-x`) onto `release/YYYY.M.PATCH`
-for the next candidate or patch. A qualification repair needed for this release
-must land before freezing a new C/Q; never silently swap the harness for an
-already qualified candidate. Where `main`-only CI infrastructure is missing on the branch,
+normally merge to `main` first, then get cherry-picked (`-x`) directly onto the
+canonical release branch for the next candidate or patch, without a backport PR.
+Urgent release-first repairs follow [the new-fix route](#backports-and-new-fixes).
+A qualification-only repair can instead land
+in a reviewed independent Q and be newly admitted against unchanged C; no
+release-branch cherry-pick is required solely to update tooling. Never silently
+swap the harness or relabel an already qualified candidate's evidence. Where `main`-only CI infrastructure is missing on the branch,
 keep the branch's expression form and port only the logic. Product code on the
 release branch stays blocker-only per the rule above.
 
@@ -198,7 +227,8 @@ retrospective PR described below is the required open closeout deliverable, not
 an unresolved repair. List every PR created during the release (`gh pr list --author
 @me --state open` plus any PR bound to the session) and land or explicitly close
 each repair PR with a reason; confirm its fix is on `main` and, when it is release
-tooling, on the release branch. Also remove the release's temporary worktrees,
+tooling, on the release branch when the selected Q=C route requires it. Also
+remove the release's temporary worktrees,
 abandoned local cut branches, and stale `scripts/pr` worktrees. Then write the
 [retrospective](references/retrospective.md) and open its `openclaw/maintainers`
 PR with the issue-ledger update; keep a findings notes file from the start of the

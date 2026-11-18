@@ -11,14 +11,11 @@ import {
 } from "../agents/agent-scope.js";
 import { bindAgentToolSourceExecutionGuard } from "../agents/agent-tool-source-execution-guard.js";
 import { wrapToolWithAbortSignal } from "../agents/agent-tools.abort.js";
+import { createOpenClawCodingToolsInternalAsync } from "../agents/agent-tools.async.js";
 import {
   rewrapToolWithBeforeToolCallHook,
   type HookContext,
 } from "../agents/agent-tools.before-tool-call.js";
-import {
-  createOpenClawCodingToolsInternalAsync,
-  resolveToolLoopDetectionConfig,
-} from "../agents/agent-tools.js";
 import { hasAnyAuthProfileStoreSourceAsync } from "../agents/auth-profiles/source-check.js";
 import { createHeadlessDeadlineScope } from "../agents/code-mode-headless.js";
 import type {
@@ -42,11 +39,12 @@ import {
 } from "../agents/embedded-agent-runner/run/attempt-tool-construction-plan.js";
 import { runAgentCleanupStep } from "../agents/run-cleanup-timeout.js";
 import { loadAgentRuntimePluginRegistryHandle } from "../agents/runtime-plugins.js";
-import { resolveSandboxContext } from "../agents/sandbox.js";
+import { resolveSandboxContext } from "../agents/sandbox/context.js";
 import {
   resolveScheduledToolPolicyContext,
   type ScheduledToolPolicyContext,
 } from "../agents/scheduled-tool-policy.js";
+import { resolveToolLoopDetectionConfig } from "../agents/tool-loop-detection-config.js";
 import {
   clearToolSearchCatalog,
   createToolSearchCatalogRef,
@@ -63,7 +61,6 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { GatewayContextResolver } from "../gateway/server-methods/types.js";
 import { formatErrorMessageWithCode } from "../infra/errors.js";
 import { logWarn } from "../logger.js";
-import { PluginInstanceUnavailableError } from "../plugins/plugin-instance-error.js";
 import {
   capturePluginLifecycleAuthority,
   isPluginRegistryRecordSetAdmitting,
@@ -78,7 +75,10 @@ import {
 } from "./isolated-agent/run-config.js";
 import { resolveCronAgentSessionKey } from "./isolated-agent/session-key.js";
 import { prepareCronRunAdmission } from "./run-admission.js";
-import { resolveCronScheduledToolPolicy } from "./scheduled-tool-policy.js";
+import {
+  resolveCronScheduledToolPolicy,
+  type CronScheduledToolCallerOrigin,
+} from "./scheduled-tool-policy.js";
 import {
   DEFAULT_CRON_SCRIPT_TIMEOUT_SECONDS,
   DEFAULT_CRON_SCRIPT_TOOL_BUDGET,
@@ -135,6 +135,7 @@ type PreparedTriggerRuntime = {
   ) => Promise<CronScriptMcpTools | undefined>;
   context: HookContext & { config: OpenClawConfig; agentId: string; sessionKey: string };
   pluginRegistry?: PluginRegistry;
+  scheduledToolPolicy: ScheduledToolPolicyContext | undefined;
 };
 
 type CronScriptInvocation = Parameters<NonNullable<CronServiceDeps["evaluateCronTrigger"]>>[0];
@@ -145,6 +146,7 @@ type PrepareTriggerRuntime = (params: {
   agentId?: string;
   toolsAllow?: string[];
   scheduledToolPolicy?: ScheduledToolPolicyContext;
+  callerOrigin?: CronScheduledToolCallerOrigin;
   execTarget?: CronToolsAllowExecTarget;
   signal?: AbortSignal;
 }) => Promise<PreparedTriggerRuntime>;
@@ -173,6 +175,7 @@ type TriggerRuntimeCacheEntry = {
 
 type CachedTriggerRuntime = PreparedTriggerRuntime & {
   isCurrent: () => boolean;
+  /** Fork: retires this cached preparation so the next tick prepares cold. */
   invalidate: () => void;
 };
 
@@ -244,6 +247,7 @@ async function prepareTriggerRuntime(
       const scheduledToolPolicy = resolveScheduledToolPolicyContext({
         toolsAllow: params.toolsAllow,
         scheduledToolPolicy: params.scheduledToolPolicy,
+        callerOrigin: params.callerOrigin,
         execTarget: params.execTarget,
       });
       // Core and MCP tools of one evaluation share one policy owner, like embedded runs.
@@ -339,6 +343,7 @@ async function prepareTriggerRuntime(
         acquireMcpTools,
         context,
         ...(pluginRegistry ? { pluginRegistry } : {}),
+        scheduledToolPolicy,
         [Symbol.dispose]: () => sandbox?.[Symbol.dispose]?.(),
       };
     } catch (error) {
@@ -402,6 +407,7 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
     const toolsAllowKey = JSON.stringify([
       request.toolsAllow ?? null,
       request.scheduledToolPolicy ?? null,
+      request.callerOrigin ?? null,
       request.execTarget ?? null,
     ]);
     const cached = runtimeCache.get(request.jobId);
@@ -413,20 +419,12 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
     ) {
       runtimeCache.delete(request.jobId);
       runtimeCache.set(request.jobId, cached);
-      try {
-        return await retainRuntime(cached, scope);
-      } catch (error) {
-        const ownerCanceled =
-          error instanceof CodeModeHeadlessAbortError ||
-          error instanceof CodeModeHeadlessTimeoutError;
-        if (ownerCanceled && !scope.signal.aborted) {
-          // A different caller owned and ended the shared cold preparation.
-          // Retry under this still-live caller instead of inheriting its abort.
-          retireRuntime(request.jobId, cached);
-          return await resolveCachedRuntime(request, scope);
-        }
-        throw error;
+      // Shared preparation follows its first caller's deadline; later invocations retry cold.
+      const retained = await retainRuntime(cached, scope);
+      if (retained.runtime.isCurrent()) {
+        return retained;
       }
+      retained.release();
     }
     if (cached) {
       retireRuntime(request.jobId, cached);
@@ -462,7 +460,12 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
     void promise.catch(() => {
       retireRuntime(request.jobId, entry);
     });
-    return await retainRuntime(entry, scope);
+    try {
+      return await retainRuntime(entry, scope);
+    } catch (error) {
+      retireRuntime(request.jobId, entry);
+      throw error;
+    }
   };
 
   return async function runCronCodeModeScript(
@@ -497,12 +500,34 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
           owner: params.job.owner,
         }),
         execTarget: params.job.toolsAllowExecTarget,
+        callerOrigin: params.job.toolsAllowProvenance?.callerOrigin,
       };
-      let runtime: CachedTriggerRuntime | undefined;
-      let tools: AnyAgentTool[];
-      let admitted: AdmittedRunContext | undefined;
-      let assertAdmitted: ReturnType<typeof resolveAdmittedRunActiveAssertion>;
-      let caller: ReturnType<typeof createAdmittedGatewayToolCallerIdentity>;
+      const retained = await resolveCachedRuntime(request, evaluationScope);
+      const runtime = retained.runtime;
+      releaseRuntime = retained.release;
+      admission = prepareCronRunAdmission({
+        scheduledExecution: params.occurrence.mint({
+          cfg: runtime.context.config,
+          agentId: runtime.context.agentId,
+          runId,
+          runSessionKey: runtime.context.sessionKey,
+          toolsAllow: request.toolsAllow,
+        }),
+        cfg: runtime.context.config,
+        runId,
+        agentId: runtime.context.agentId,
+        sessionKey: runtime.context.sessionKey,
+        jobId: params.job.id,
+        deliveryAttemptFence: params.deliveryAttemptFence,
+        toolsAllow: request.toolsAllow,
+        scheduledToolPolicy: runtime.scheduledToolPolicy,
+        channelRequester: resolveCronAuthenticatedChannelRequester(params.job),
+        executionIdentity: params.executionIdentity,
+        ingressBoundary: "cron.script",
+        resolveGatewayContext: deps.resolveGatewayContext,
+      });
+      const admitted = await admission.preparedRunAdmission.admit("gateway");
+      const assertAdmitted = resolveAdmittedRunActiveAssertion(admitted, evaluationScope.signal);
       function assertActive() {
         if (
           !assertAdmitted ||
@@ -513,87 +538,29 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
         }
         assertAdmitted();
       }
-      for (let refresh = 0; ; refresh += 1) {
-        try {
-          const retainedRuntime = await resolveCachedRuntime(request, evaluationScope);
-          runtime = retainedRuntime.runtime;
-          releaseRuntime = retainedRuntime.release;
-          if (!runtime.isCurrent()) {
-            throw new PluginInstanceUnavailableError();
-          }
-          if (!admitted) {
-            admission = prepareCronRunAdmission({
-              cfg: runtime.context.config,
-              runId,
-              agentId: runtime.context.agentId,
-              sessionKey: runtime.context.sessionKey,
-              jobId: params.job.id,
-              deliveryAttemptFence: params.deliveryAttemptFence,
-              toolsAllow: request.toolsAllow,
-              scheduledToolPolicy: request.scheduledToolPolicy,
-              channelRequester: resolveCronAuthenticatedChannelRequester(params.job),
-              executionIdentity: params.executionIdentity,
-              ingressBoundary: "cron.script",
-              resolveGatewayContext: deps.resolveGatewayContext,
-            });
-            admitted = await admission.preparedRunAdmission.admit("gateway");
-            assertAdmitted = resolveAdmittedRunActiveAssertion(admitted, evaluationScope.signal);
-            caller = createAdmittedGatewayToolCallerIdentity({
-              admittedRunContext: admitted,
-              agentId: runtime.context.agentId,
-              sessionKey: runtime.context.sessionKey,
-              receiptAuthority: assertActive,
-              approvalSignals: [evaluationScope.signal],
-            });
-          }
-          assertActive();
-          if (!runtime.isCurrent()) {
-            throw new PluginInstanceUnavailableError();
-          }
-          const selected = runtime;
-          const authority = admitted;
-          tools = await withPluginRuntimeRegistryScope(selected.pluginRegistry, () =>
-            selected.createTools(
-              authority,
-              evaluationScope.signal,
-              admission?.messageActionTurnCapability,
-            ),
-          );
-          assertActive();
-          if (!runtime.isCurrent()) {
-            throw new PluginInstanceUnavailableError();
-          }
-          // A script that never names MCP cannot reach it, so it starts no server.
-          if (/\bMCP\b/.test(params.script)) {
-            const reservedToolNames = tools.map((tool) => tool.name);
-            mcp = await withPluginRuntimeRegistryScope(selected.pluginRegistry, () =>
-              selected.acquireMcpTools?.(authority, reservedToolNames),
-            );
-          }
-          break;
-        } catch (error) {
-          if (
-            error instanceof CodeModeHeadlessAbortError ||
-            error instanceof CodeModeHeadlessTimeoutError ||
-            evaluationScope.signal.aborted
-          ) {
-            throw error;
-          }
-          if (refresh > 0) {
-            runtime?.invalidate();
-            return scriptFailure(
-              `Plugin tool refresh failed before the script started: ${formatErrorMessageWithCode(error)}`,
-              "plugin_reload_failed",
-            );
-          }
-          if (!(error instanceof PluginInstanceUnavailableError)) {
-            throw error;
-          }
-          runtime?.invalidate();
-          releaseRuntime();
-          releaseRuntime = () => {};
-          // Retry setup once with the same admission and deadline, never script execution.
-        }
+      const caller = createAdmittedGatewayToolCallerIdentity({
+        admittedRunContext: admitted,
+        agentId: runtime.context.agentId,
+        sessionKey: runtime.context.sessionKey,
+        receiptAuthority: assertActive,
+        approvalSignals: [evaluationScope.signal],
+      });
+      assertActive();
+      // Reload during setup is best effort; the next invocation refreshes its cache.
+      let tools = await withPluginRuntimeRegistryScope(runtime.pluginRegistry, () =>
+        runtime.createTools(
+          admitted,
+          evaluationScope.signal,
+          admission?.messageActionTurnCapability,
+        ),
+      );
+      assertActive();
+      // A script that never names MCP cannot reach it, so it starts no server.
+      if (/\bMCP\b/.test(params.script)) {
+        const reservedToolNames = tools.map((tool) => tool.name);
+        mcp = await withPluginRuntimeRegistryScope(runtime.pluginRegistry, () =>
+          runtime.acquireMcpTools?.(admitted, reservedToolNames),
+        );
       }
       let mcpUnavailable: string | undefined;
       if (mcp) {

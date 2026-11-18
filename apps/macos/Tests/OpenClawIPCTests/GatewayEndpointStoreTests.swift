@@ -400,12 +400,10 @@ struct GatewayEndpointStoreTests {
         isRemote: Bool) throws
     {
         let kind = try #require(GatewayEndpointStore.Credential(rawValue: credential))
-        var configuredAuth = [credential: "  configured-secret  "]
-        if !isRemote {
-            configuredAuth["mode"] = credential
-        }
+        var configured = [credential: "  configured-secret  "]
+        if !isRemote { configured["mode"] = credential }
         let root: [String: Any] = [
-            "gateway": [isRemote ? "remote" : "auth": configuredAuth],
+            "gateway": [isRemote ? "remote" : "auth": configured],
         ]
         let resolved = GatewayEndpointStore.resolveGatewayCredential(
             kind,
@@ -413,8 +411,8 @@ struct GatewayEndpointStoreTests {
             root: root,
             env: ["OPENCLAW_GATEWAY_\(credential.uppercased())": "stale-environment-secret"],
             launchdSnapshot: self.makeLaunchAgentSnapshot(
-                token: credential == "token" ? "service-token" : nil,
-                password: credential == "password" ? "service-password" : nil))
+                token: "service-token",
+                password: "service-password"))
 
         #expect(resolved == (isRemote ? "stale-environment-secret" : "configured-secret"))
     }

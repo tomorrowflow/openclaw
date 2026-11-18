@@ -25,7 +25,6 @@ const CONFIG_SET_VALUE_OPTIONS = new Set([
   "--batch-file",
   "--batch-json",
   "--container",
-  "--expect-current-json",
   "--log-level",
   "--profile",
   "--provider-allowlist",
@@ -111,12 +110,14 @@ function redactConfigAuditArgv(argv: readonly string[]): string[] {
       redacted[index] = "--batch-json=***";
     }
   }
-  const [pathIndex, valueIndex] = findConfigPositionals(redacted, setIndex + 1, 2);
-  if (pathIndex === undefined || valueIndex === undefined) {
+  const positionals = findConfigPositionals(redacted, setIndex + 1, 2);
+  if (positionals.length < 2) {
     return redacted;
   }
+  const pathIndex = positionals[0]!;
+  const valueIndex = positionals[1]!;
   const configPath = redacted[pathIndex];
-  if (configPath !== undefined && isSensitiveConfigPath(configPath)) {
+  if (typeof configPath === "string" && isSensitiveConfigPath(configPath)) {
     redacted[valueIndex] = "***";
   }
   return redacted;
@@ -385,16 +386,9 @@ type ConfigAuditAppendParams = {
   record: ConfigAuditRecord;
 };
 
-export type ConfigAuditScrubResult = {
-  scanned: number;
-  rewritten: number;
-  skipped: number;
-  // True when the scrub detected concurrent appends mid-rewrite and refused
-  // to swap the file. Caller should re-run `openclaw doctor --fix` once the
-  // gateway is idle. No on-disk content was modified on abort.
-  aborted: boolean;
-};
-
+// aborted is true when the scrub detected concurrent appends mid-rewrite and refused
+// to swap the file. Caller should re-run `openclaw doctor --fix` once the
+// gateway is idle. No on-disk content was modified on abort.
 // Apply the current argv redactor to historical logs, preserving malformed lines
 // verbatim for forensic recovery. Stage changed bytes at mode 0o600 before replacing
 // the log, and leave already-redacted files untouched.
@@ -402,7 +396,7 @@ export async function scrubConfigAuditLog(params: {
   env: NodeJS.ProcessEnv;
   homedir: () => string;
   dryRun?: boolean;
-}): Promise<ConfigAuditScrubResult> {
+}) {
   const auditPath = resolveLegacyConfigAuditLogPath(params.env, params.homedir);
   let raw: string;
   try {
@@ -525,7 +519,7 @@ function configAuditEntryKey(record: ConfigAuditRecord): string {
 }
 
 export function sanitizeConfigAuditRecord(record: ConfigAuditRecord): ConfigAuditRecord {
-  const sanitized = structuredClone(record);
+  const sanitized = { ...record };
   if (sanitized.event !== "config.external") {
     sanitized.argv = redactConfigAuditArgv(capArgv(sanitized.argv));
     sanitized.execArgv = redactConfigAuditArgv(capArgv(sanitized.execArgv));

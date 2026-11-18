@@ -2,7 +2,7 @@ import type { WorkboardNodeFileListResult } from "@openclaw/workboard-contract";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { formatUiError } from "../../lib/format-error.ts";
 import { isWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
-import type { WorkboardCard } from "../../lib/workboard/index.ts";
+import type { WorkboardCard } from "../../lib/workboard/types.ts";
 
 type ListState =
   | { status: "loading" }

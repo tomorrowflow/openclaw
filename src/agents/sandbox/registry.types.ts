@@ -13,6 +13,8 @@ export type SandboxRegistryEntry = {
   configHash?: string;
   /** Original provider workspace, retained so pending cleanup can replay the same request. */
   workspaceDir?: string;
+  /** Allocation-owned classification used when recovering managed projection writes. */
+  workspaceSource?: "managed-worktree";
   /**
    * Gateway-local container->host mounts this container was created with.
    * Readers outside the container (Control UI file browsing) resolve container

@@ -13,6 +13,7 @@ import type {
 import { isWorkboardSlotFull } from "./store-constants.js";
 
 export class WorkboardStoreRuntime {
+  protected boardList: Promise<{ boards: WorkboardBoardSummary[] }> | undefined;
   protected readonly cardLists = new Map<
     string | undefined,
     Promise<
@@ -31,7 +32,10 @@ export class WorkboardStoreRuntime {
   private sessionBoardRevision: WorkboardChange = { epoch: this.cardsRevision.epoch, revision: 1 };
   private writeToken: string | undefined;
   private revision = 0;
-  private readonly listeners = new Set<(change: WorkboardChange) => void>();
+  onChange: ((change: WorkboardChange) => void) | undefined;
+  // Fork: the Discord feed and node-handoff lifecycle observe changes in process while
+  // upstream's single onChange slot stays owned by the Gateway change-event service.
+  private readonly changeObservers = new Set<(change: WorkboardChange) => void>();
   private readonly initialization: Promise<void>;
 
   constructor(
@@ -95,6 +99,7 @@ export class WorkboardStoreRuntime {
           await Promise.allSettled(this.operations);
         }
         this.cardLists.clear();
+        this.boardList = undefined;
         this.operationScope.disable();
         await this.closePersistence?.();
       })
@@ -178,9 +183,9 @@ export class WorkboardStoreRuntime {
     });
   }
 
-  subscribeChanges(listener: (change: WorkboardChange) => void): () => void {
-    this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+  subscribeChanges(observer: (change: WorkboardChange) => void): () => void {
+    this.changeObservers.add(observer);
+    return () => this.changeObservers.delete(observer);
   }
 
   invalidateSessionBoards(): void {
@@ -238,6 +243,7 @@ export class WorkboardStoreRuntime {
     // Every list includes all board summaries, so even a board-scoped payload
     // depends on the whole store revision published by the owning writer.
     this.cardLists.clear();
+    this.boardList = undefined;
     this.cardsRevision = { ...this.cardsRevision, revision: this.cardsRevision.revision + 1 };
   }
 
@@ -249,11 +255,11 @@ export class WorkboardStoreRuntime {
       cardsRevision: this.cardsRevision.revision,
       sessionsRevision: this.sessionBoardRevision.revision,
     };
-    for (const listener of this.listeners) {
+    for (const notify of [this.onChange, ...this.changeObservers]) {
       try {
-        listener(change);
+        notify?.(change);
       } catch {
-        // Persistence already succeeded. Observers cannot turn it into a reported failure.
+        // Persistence already succeeded. Notification cannot turn it into a reported failure.
       }
     }
   }

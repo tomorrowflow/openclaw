@@ -3,6 +3,7 @@ import { performance } from "node:perf_hooks";
 import { isMainThread, threadId } from "node:worker_threads";
 import { racePromiseWithAbortSignal } from "../../packages/retry/src/index.js";
 import { runWithSqliteDatabaseAdmissionTurn } from "../infra/sqlite-database-admission-turn.js";
+import { getSqliteDatabaseAdmissionIdentityForPath } from "../infra/sqlite-database-admission.js";
 import {
   assertExistingDatabaseIdentity,
   readDatabasePathIdentitySync,
@@ -19,6 +20,8 @@ import {
   runQueuedStoreWrite,
   type StoreWriterTiming,
 } from "../shared/store-writer-queue.js";
+import { shortenHomePath } from "../utils.js";
+import { isAgentDatabaseStartupReadReady } from "./agent-database-admission.js";
 import type { OpenClawAgentDatabaseOptions } from "./openclaw-agent-db-contract.js";
 import { resolveOpenClawAgentSqlitePath } from "./openclaw-agent-db.paths.js";
 import { agentDatabaseWriteAdmissionState as admission } from "./openclaw-agent-write-admission-state.js";
@@ -37,7 +40,6 @@ type DirectReservationCaller =
   | "session-manager.write"
   | "session-manager.note"
   | "session-actor.command"
-  | "history.cold-read"
   | "history.model-context"
   | "history.hydration";
 
@@ -128,6 +130,7 @@ export function runOpenClawAgentWriteAdmission<T>(
   timing?: StoreWriterTiming,
   signal?: AbortSignal,
   caller?: DirectReservationCaller,
+  concurrentBoardReads?: "transcript-only",
 ): Promise<T> {
   return runOpenClawAgentPathWriteAdmission(
     resolveOpenClawAgentSqlitePath(options),
@@ -136,6 +139,7 @@ export function runOpenClawAgentWriteAdmission<T>(
     timing,
     signal,
     caller,
+    concurrentBoardReads,
   );
 }
 
@@ -147,6 +151,7 @@ export function runOpenClawAgentPathWriteAdmission<T>(
   timing?: StoreWriterTiming,
   signal?: AbortSignal,
   caller?: DirectReservationCaller,
+  concurrentBoardReads?: "transcript-only",
 ): Promise<T> {
   const identity = readDatabasePathIdentitySync(pathname);
   const storePath = identity.canonicalPath;
@@ -178,6 +183,7 @@ export function runOpenClawAgentPathWriteAdmission<T>(
             queues: admission.queues,
             storePath,
             label: "agent database write admission",
+            keys: concurrentBoardReads ? ["transcript"] : undefined,
             // Worker callbacks inherit their parent's async context, but not its native
             // writer lock. Their foreground writes must queue, never reenter that owner.
             reentrant: reentrant && !admission.queues.get(storePath)?.holder?.worker,
@@ -211,6 +217,7 @@ export async function runOpenClawAgentWorkerWrite<T>(
   signal?: AbortSignal,
   priority?: "background",
   caller?: WorkerReservationCaller,
+  concurrentBoardReads?: "transcript-only",
 ): Promise<T> {
   if (priority === "background") {
     const storePath = readDatabasePathIdentitySync(
@@ -234,17 +241,43 @@ export async function runOpenClawAgentWorkerWrite<T>(
         true,
         observed,
         signal,
+        undefined,
+        concurrentBoardReads,
       ),
     caller,
     worker,
   );
 }
 
+/** Board authority remains exclusive with mutations, but not certified transcript appends. */
+export function runOpenClawAgentBoardReadAdmission<T>(
+  options: OpenClawAgentDatabaseOptions,
+  run: () => Promise<T>,
+  snapshotOnly = false,
+): Promise<T> {
+  const pathname = resolveOpenClawAgentSqlitePath(options);
+  // Display snapshots need no write ordering while startup refuses all board mutations.
+  // Authority-consumer callbacks retain the FIFO even during startup.
+  if (snapshotOnly && isAgentDatabaseStartupReadReady(pathname, { env: options.env })) {
+    return run();
+  }
+  const storePath = readDatabasePathIdentitySync(pathname).canonicalPath;
+  return runWithSqliteDatabaseAdmissionTurn([pathname], () =>
+    runQueuedStoreWrite({
+      queues: admission.queues,
+      storePath,
+      label: "agent database board read admission",
+      keys: ["board"],
+      reentrant: !admission.queues.get(storePath)?.holder?.worker,
+      fn: run,
+    }),
+  );
+}
+
 /** Compose the existing foreground queues without inverting inherited acquisition order. */
 export async function runOpenClawAgentWriteAdmissions<T>(
-  options: readonly OpenClawAgentDatabaseOptions[],
+  options: readonly (OpenClawAgentDatabaseOptions & { readIdentity?: DatabasePathIdentity })[],
   run: () => Promise<T> | T,
-  reentrant = false,
   signal?: AbortSignal,
 ): Promise<T> {
   signal?.throwIfAborted();
@@ -254,12 +287,18 @@ export async function runOpenClawAgentWriteAdmissions<T>(
   );
   if (selected.size > 1) {
     const physicalKey = (pathname: string) => {
-      const identity = readDatabasePathIdentitySync(pathname);
+      const identity =
+        selected.get(pathname)?.readIdentity ??
+        getSqliteDatabaseAdmissionIdentityForPath(pathname) ??
+        readDatabasePathIdentitySync(pathname);
       return `${identity.key}:${identity.birthtime ?? ""}`;
     };
     // Borrow the held queue's spelling when multiple locators name the same file.
     const representatives = new Map(inherited.map((pathname) => [physicalKey(pathname), pathname]));
-    const physical = new Map<string, OpenClawAgentDatabaseOptions>();
+    const physical = new Map<
+      string,
+      OpenClawAgentDatabaseOptions & { readIdentity?: DatabasePathIdentity }
+    >();
     for (const [pathname, option] of selected) {
       const identity = physicalKey(pathname);
       const representative = representatives.get(identity) ?? pathname;
@@ -270,14 +309,29 @@ export async function runOpenClawAgentWriteAdmissions<T>(
   }
   const paths = [...selected.keys()].toSorted();
   // A nested reader may share one foreground FIFO, never a reserved worker transaction.
-  if (
-    paths.some(
-      (pathname) =>
-        inherited.includes(pathname) &&
-        (!reentrant || paths.length !== 1 || admission.queues.get(pathname)?.holder?.worker),
-    )
-  ) {
-    throw new Error("Session read batch cannot reenter an active SQLite writer admission");
+  const conflicting = paths.find(
+    (pathname) =>
+      inherited.includes(pathname) &&
+      (paths.length !== 1 || admission.queues.get(pathname)?.holder?.worker),
+  );
+  if (conflicting !== undefined) {
+    const holder = admission.queues.get(conflicting)?.holder;
+    const database = shortenHomePath(conflicting);
+    // Keep the refusing admission self-identifying even when the RPC drops its stack.
+    const facts = {
+      database: database.length > 160 ? `...${database.slice(-157)}` : database,
+      operation: holder?.operation ?? "unknown",
+      ...(holder?.caller ? { caller: holder.caller } : {}),
+      ...(holder?.worker ? { workerOperations: [...holder.worker.operations] } : {}),
+      threadId,
+      isMainThread,
+      ...(holder?.startedAt !== undefined
+        ? { ageMs: Math.max(0, Math.round(performance.now() - holder.startedAt)) }
+        : {}),
+    };
+    throw new Error(
+      `Session read batch cannot reenter an active SQLite writer admission: ${JSON.stringify(facts)}`,
+    );
   }
   if (paths.some((pathname) => inherited.some((held) => held > pathname))) {
     throw new Error("Session read batch would invert inherited SQLite writer admission order");
@@ -289,11 +343,33 @@ export async function runOpenClawAgentWriteAdmissions<T>(
         const pathname = paths[index];
         return pathname === undefined
           ? Promise.resolve().then(run)
-          : observeWriteAdmission("ordered-read", undefined, (timing) =>
-              runOpenClawAgentWriteAdmission(selected.get(pathname)!, next, true, timing, signal),
-            );
+          : observeWriteAdmission("ordered-read", undefined, (timing) => {
+              const option = selected.get(pathname)!;
+              if (!option.readIdentity) {
+                return runOpenClawAgentWriteAdmission(option, next, true, timing, signal);
+              }
+              if (option.readIdentity.canonicalPath !== pathname) {
+                throw new Error("Prepared session read lost its physical FIFO target");
+              }
+              return runQueuedStoreWrite({
+                queues: admission.queues,
+                storePath: pathname,
+                label: "agent database ordered read admission",
+                reentrant: true,
+                fn: next,
+                timing,
+                signal,
+              });
+            });
       }),
     [],
     signal,
+    {
+      readIdentities: new Map(
+        [...selected].flatMap(([pathname, option]) =>
+          option.readIdentity ? [[pathname, option.readIdentity] as const] : [],
+        ),
+      ),
+    },
   );
 }

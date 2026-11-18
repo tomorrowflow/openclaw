@@ -1,11 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { useMockHttp } from "../test-utils/mock-http.js";
 import { fetchClawHubPromotion, fetchClawHubPromotions } from "./clawhub-promotions.js";
 
 const CLAWHUB_URL = "https://clawhub.ai";
-afterEach(() => vi.restoreAllMocks());
-function captureJson(value: unknown) {
-  return vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json(value));
-}
+const mockHttp = useMockHttp();
 
 const validPromotion = {
   slug: "spring-models",
@@ -26,9 +24,11 @@ describe("promotion payload validation", () => {
     overrides: Record<string, unknown>,
     expected: RegExp,
   ): Promise<void> {
-    const request = captureJson({ ...validPromotion, ...overrides });
+    mockHttp.intercept({
+      url: `${CLAWHUB_URL}/api/v1/promotions/spring-models`,
+      reply: { json: { ...validPromotion, ...overrides } },
+    });
     await expect(fetchClawHubPromotion({ slug: "spring-models" })).rejects.toThrow(expected);
-    expect(request.mock.calls[0]?.[0]).toBe(CLAWHUB_URL + "/api/v1/promotions/spring-models");
   }
 
   it("rejects payloads without models", async () => {
@@ -68,14 +68,19 @@ describe("promotion payload validation", () => {
 
 describe("promotion fetches", () => {
   it("fetches and validates the active promotions list", async () => {
-    const request = captureJson({ promotions: [validPromotion] });
+    mockHttp.intercept({
+      url: `${CLAWHUB_URL}/api/v1/promotions`,
+      reply: { json: { promotions: [validPromotion] } },
+    });
     const promotions = await fetchClawHubPromotions();
     expect(promotions).toHaveLength(1);
-    expect(request.mock.calls[0]?.[0]).toBe(CLAWHUB_URL + "/api/v1/promotions");
   });
 
   it("rejects a list response without a promotions array", async () => {
-    captureJson({ nope: true });
+    mockHttp.intercept({
+      url: `${CLAWHUB_URL}/api/v1/promotions`,
+      reply: { json: { nope: true } },
+    });
     await expect(fetchClawHubPromotions()).rejects.toThrow(/promotions array/);
   });
 });

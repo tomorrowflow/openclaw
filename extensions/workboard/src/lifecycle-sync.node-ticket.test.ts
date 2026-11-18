@@ -762,11 +762,13 @@ describe("Workboard node ticket lifecycle", () => {
     });
     expect((await store.get(card.id))?.metadata?.attempts?.at(-1)?.status).toBe("blocked");
 
+    // Settled (blocked) cards are not sweep candidates, so the ended session is never read.
     await runSessionSweep({
       store,
       sessions: [
         { key: sessionKey, status: "done", hasActiveRun: false, updatedAt: Date.now() + 20_000 },
       ],
+      expectSessionRead: false,
     });
 
     const swept = await store.get(card.id);

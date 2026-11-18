@@ -1,7 +1,6 @@
 import { AsyncResource } from "node:async_hooks";
 import type { WorkboardCard } from "@openclaw/workboard-contract";
 import { resolveGlobalSingleton } from "openclaw/plugin-sdk/global-singleton";
-import { isIncognitoSessionKey, parseAgentSessionKey } from "openclaw/plugin-sdk/routing";
 import type { OpenClawPluginService } from "../api.js";
 import { turnEndContextTokens } from "./agent-end-context.js";
 import {
@@ -14,6 +13,7 @@ import type {
   WorkboardLifecycleSessionReadOptions,
   WorkboardLifecycleSessionReader,
   WorkboardLifecycleSessionSnapshot,
+  WorkboardLifecycleSweep,
 } from "./lifecycle-sessions.js";
 import type { WorkboardNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import { applyNodeTicketReport, nodeTicketIdleVerdict, nodeTicketTarget } from "./node-ticket.js";
@@ -23,8 +23,7 @@ import {
   workboardCardSessionLookupKey,
   workboardCardTakesEndedRunReport,
 } from "./session-link.js";
-import { cardRunId, cardSessionKey } from "./store-card-helpers.js";
-import { DEFAULT_WORKBOARD_DISPATCH_OWNER } from "./store-constants.js";
+import { cardRunId, cardSessionKey, latestRunningAttempt } from "./store-card-helpers.js";
 import type { WorkboardStore } from "./store.js";
 
 const WORKBOARD_LIFECYCLE_SWEEP_MS = 60_000;
@@ -82,18 +81,21 @@ type WorkboardLifecycleService = OpenClawPluginService & {
   onAgentEnd: (event: WorkboardAgentEndEvent, context: WorkboardAgentEndContext) => Promise<void>;
 };
 
-function needsWorkboardLifecycleReconciliation(card: WorkboardCard): boolean {
+function needsWorkboardLifecycleReconciliation(card: WorkboardCard, now: number): boolean {
   if (card.metadata?.archivedAt) {
     return false;
   }
   // A running claim can own an accepted session even when persisting its link failed.
   // Keep those cards, and stale cleanup, in the missed-event recovery sweep.
+  const claim = card.metadata?.claim;
+  const settled = card.status === "review" || card.status === "blocked" || card.status === "done";
   return Boolean(
-    card.sessionKey ||
-    card.runId ||
-    card.execution ||
+    (!settled && (card.sessionKey || card.runId || card.execution)) ||
     card.status === "running" ||
-    card.metadata?.claim ||
+    card.execution?.status === "running" ||
+    latestRunningAttempt(card) ||
+    card.metadata?.automation?.launch?.phase === "prepared" ||
+    (claim && (!claim.expiresAt || claim.expiresAt > now)) ||
     card.metadata?.stale,
   );
 }
@@ -212,13 +214,9 @@ export async function syncWorkboardAgentEnded(params: {
   };
   // An attempt can finish before fallback settles, even with success=true.
   // Only the session owner can establish the run's terminal outcome.
-  const snapshot = await params.readSessions({
-    includeUnknown: params.context.sessionKey === "unknown",
-    ...(params.context.sessionKey && parseAgentSessionKey(params.context.sessionKey)
-      ? { sessionKey: params.context.sessionKey }
-      : {}),
-  });
-  const session = snapshot.sessions.find((entry) => entry.key === params.context.sessionKey);
+  const sessionKey = params.context.sessionKey;
+  const snapshot = sessionKey ? await params.readSessions({ sessionKey }) : undefined;
+  const session = snapshot?.sessions.find((entry) => entry.key === sessionKey);
   const linked = (await params.store.list()).filter(
     (card) => !card.metadata?.archivedAt && workboardCardTakesEndedRunReport(card, source),
   );
@@ -347,131 +345,6 @@ function lifecycleFromSession(
   return { state: "idle", sourceUpdatedAt };
 }
 
-async function syncWorkboardLifecycleSessions(params: {
-  store: WorkboardStore;
-  cards?: readonly WorkboardCard[];
-  sessions: readonly WorkboardLifecycleSession[];
-  complete?: boolean;
-  now?: number;
-  recoverPreparedBefore?: number;
-  onMatched?: WorkboardLifecycleMatchHandler;
-}): Promise<number> {
-  const now = params.now ?? Date.now();
-  const sessionsByKey = new Map<string, WorkboardLifecycleSession>();
-  const sessionsByWorkboardSuffix = new Map<string, WorkboardLifecycleSession>();
-  const ambiguousWorkboardSuffixes = new Set<string>();
-  for (const session of params.sessions) {
-    sessionsByKey.set(session.key, session);
-    const suffixIndex = session.key.lastIndexOf(":subagent:workboard-");
-    if (suffixIndex >= 0) {
-      const suffix = session.key.slice(suffixIndex + 1);
-      const existing = sessionsByWorkboardSuffix.get(suffix);
-      if (existing && existing.key !== session.key) {
-        sessionsByWorkboardSuffix.delete(suffix);
-        ambiguousWorkboardSuffixes.add(suffix);
-      } else if (!ambiguousWorkboardSuffixes.has(suffix)) {
-        sessionsByWorkboardSuffix.set(suffix, session);
-      }
-    }
-  }
-  let count = 0;
-  for (const card of params.cards ?? (await params.store.list())) {
-    if (card.metadata?.archivedAt) {
-      continue;
-    }
-    const lookupKey = workboardCardSessionLookupKey(card);
-    const suffixIndex = lookupKey.lastIndexOf("subagent:workboard-");
-    const linkedSessionKey = cardSessionKey(card);
-    const canUseAgentlessFallback =
-      linkedSessionKey?.startsWith("subagent:workboard-") === true ||
-      (!linkedSessionKey &&
-        (!card.agentId ||
-          (card.agentId === DEFAULT_WORKBOARD_DISPATCH_OWNER &&
-            card.metadata?.claim?.ownerId === DEFAULT_WORKBOARD_DISPATCH_OWNER)));
-    // Persisted links and explicit agent targets stay authoritative. The unique
-    // suffix fallback recovers a run accepted before its link could be persisted.
-    const session =
-      sessionsByKey.get(lookupKey) ??
-      (canUseAgentlessFallback && suffixIndex >= 0
-        ? sessionsByWorkboardSuffix.get(lookupKey.slice(suffixIndex))
-        : undefined);
-    const launch = card.metadata?.automation?.launch;
-    const preparedAcceptanceAt =
-      launch?.phase === "prepared" && session && sessionProvesPreparedAcceptance(session)
-        ? session.hasActiveRun === true
-          ? Math.max(now, launch.preparedAt)
-          : session.updatedAt
-        : undefined;
-    if (
-      launch?.phase === "prepared" &&
-      (preparedAcceptanceAt === undefined || preparedAcceptanceAt < launch.preparedAt)
-    ) {
-      // A launch prepared since the service started may still be inside its
-      // session create, before the session shows in the snapshot (IOS-A45,
-      // failed 3 seconds after its prepare during back-to-back starts).
-      const orphaned =
-        params.recoverPreparedBefore === undefined ||
-        launch.preparedAt < params.recoverPreparedBefore ||
-        now - launch.preparedAt >= WORKBOARD_PREPARED_LAUNCH_GRACE_MS;
-      if (
-        params.complete &&
-        orphaned &&
-        (await params.store.failPreparedLaunch(card.id, {
-          expectedLaunch: launch,
-          reason: "Gateway did not accept the prepared Workboard session before restart.",
-          failedAt: now,
-        }))
-      ) {
-        count += 1;
-      }
-      continue;
-    }
-    if (!session) {
-      continue;
-    }
-    const sessionObservation = lifecycleFromSession(session, now);
-    // Only the bundle import may move a node ticket to review; a sweep that
-    // missed the agent_end report leaves the card running so stale detection
-    // surfaces it.
-    const observation: WorkboardLifecycleObservation =
-      sessionObservation.state === "succeeded" && nodeTicketTarget(card)
-        ? { state: "idle", sourceUpdatedAt: sessionObservation.sourceUpdatedAt }
-        : sessionObservation;
-    // A second settled observation with no report and no session activity
-    // since blocks the card. The block is terminal, so the card skips this
-    // sweep's idle write.
-    if (
-      observation.state === "idle" &&
-      nodeTicketIdleVerdict(card, observation.sourceUpdatedAt) !== undefined &&
-      (await params.store.settleIdleNodeTicket(card.id, observation.sourceUpdatedAt))
-    ) {
-      count += 1;
-      await params.onMatched?.({ cards: [card], sessionKey: session.key });
-      continue;
-    }
-    if (
-      await params.store.syncLifecycle(card.id, {
-        ...LIFECYCLE_TARGETS[observation.state],
-        sourceUpdatedAt: observation.sourceUpdatedAt,
-        stale: observation.stale,
-        now,
-        association: {
-          ...(cardSessionKey(card) ? { expectedSessionKey: cardSessionKey(card) } : {}),
-          ...(cardRunId(card) ? { expectedRunId: cardRunId(card) } : {}),
-          sessionKey: session.key,
-          ...(preparedAcceptanceAt === undefined ? {} : { acceptedAt: preparedAcceptanceAt }),
-        },
-      })
-    ) {
-      count += 1;
-      if (observation.state === "succeeded" || observation.state === "failed") {
-        await params.onMatched?.({ cards: [card], sessionKey: session.key });
-      }
-    }
-  }
-  return count;
-}
-
 export function createWorkboardLifecycleService(params: {
   store: WorkboardStore;
   worktrees?: WorkboardWorktreeCleanupRuntime;
@@ -479,7 +352,6 @@ export function createWorkboardLifecycleService(params: {
   readSessions: (
     options: WorkboardLifecycleSessionReadOptions,
   ) => Promise<WorkboardLifecycleSessionSnapshot>;
-  now?: () => number;
   onMatched?: WorkboardLifecycleMatchHandler;
 }): WorkboardLifecycleService {
   let generation = 0;
@@ -573,7 +445,7 @@ export function createWorkboardLifecycleService(params: {
     },
     start(ctx) {
       const owner = ++generation;
-      const recoverPreparedBefore = params.now?.() ?? Date.now();
+      const recoverPreparedBefore = Date.now();
       serviceReader = AsyncResource.bind(params.readSessions);
       const readSessions = serviceReader;
       workboardLifecycleGatewayState.readSessions = serviceReader;
@@ -617,44 +489,120 @@ export function createWorkboardLifecycleService(params: {
             if (generation !== owner) {
               return;
             }
-            if (cards.some((card) => needsWorkboardLifecycleReconciliation(card))) {
+            const cardsByKey = new Map<string, WorkboardCard[]>();
+            const now = Date.now();
+            const sweep: WorkboardLifecycleSweep = {};
+            for (const card of cards.filter((candidate) =>
+              needsWorkboardLifecycleReconciliation(candidate, now),
+            )) {
+              const key = workboardCardSessionLookupKey(card);
+              const group = cardsByKey.get(key) ?? [];
+              group.push(card);
+              cardsByKey.set(key, group);
+            }
+            for (const [sessionKey, linkedCards] of cardsByKey) {
               try {
-                const snapshot = await readSessions({
-                  includeUnknown: cards.some(
-                    (card) => !card.metadata?.archivedAt && cardSessionKey(card) === "unknown",
-                  ),
-                });
-                // Incognito sessions are absent from discovery. Read only identities
-                // already linked to cards, without requesting private preview content.
-                let describedIncognitoKeys: Set<string> | undefined;
-                for (const card of cards) {
-                  const sessionKey = cardSessionKey(card);
-                  if (
-                    card.metadata?.archivedAt ||
-                    !sessionKey ||
-                    !isIncognitoSessionKey(sessionKey) ||
-                    describedIncognitoKeys?.has(sessionKey)
-                  ) {
+                const snapshot = await readSessions({ sessionKey, sweep });
+                // A partial suffix search cannot establish a unique owner or absence.
+                if (!snapshot.complete) {
+                  continue;
+                }
+                const store = params.store;
+                const sessions = snapshot.sessions;
+                for (const card of linkedCards) {
+                  const lookupKey = workboardCardSessionLookupKey(card);
+                  const candidates = lookupKey.startsWith("subagent:workboard-")
+                    ? sessions.filter((entry) => entry.key.endsWith(`:${lookupKey}`))
+                    : [];
+                  // Persisted links win; an unlinked dispatcher claim needs one configured owner.
+                  const session =
+                    sessions.find((entry) => entry.key === lookupKey) ??
+                    (candidates.length === 1 ? candidates[0] : undefined);
+                  if (!session && candidates.length > 1) {
                     continue;
                   }
-                  (describedIncognitoKeys ??= new Set()).add(sessionKey);
-                  const exact = await readSessions({ includeUnknown: false, sessionKey });
-                  snapshot.sessions.push(...exact.sessions);
+                  const launch = card.metadata?.automation?.launch;
+                  const preparedAcceptanceAt =
+                    launch?.phase === "prepared" &&
+                    session &&
+                    sessionProvesPreparedAcceptance(session)
+                      ? session.hasActiveRun === true
+                        ? Math.max(now, launch.preparedAt)
+                        : session.updatedAt
+                      : undefined;
+                  if (
+                    launch?.phase === "prepared" &&
+                    (preparedAcceptanceAt === undefined || preparedAcceptanceAt < launch.preparedAt)
+                  ) {
+                    // A launch prepared since the service started may still be inside its
+                    // session create, before the session shows in the snapshot (IOS-A45,
+                    // failed 3 seconds after its prepare during back-to-back starts).
+                    if (
+                      launch.preparedAt < recoverPreparedBefore ||
+                      now - launch.preparedAt >= WORKBOARD_PREPARED_LAUNCH_GRACE_MS
+                    ) {
+                      await store.failPreparedLaunch(card.id, {
+                        expectedLaunch: launch,
+                        reason:
+                          "Gateway did not accept the prepared Workboard session before restart.",
+                        failedAt: now,
+                      });
+                    }
+                    continue;
+                  }
+                  if (!session) {
+                    continue;
+                  }
+                  const sessionObservation = lifecycleFromSession(session, now);
+                  // Only the bundle import may move a node ticket to review; a sweep that
+                  // missed the agent_end report leaves the card running so stale detection
+                  // surfaces it.
+                  const observation: WorkboardLifecycleObservation =
+                    sessionObservation.state === "succeeded" && nodeTicketTarget(card)
+                      ? { state: "idle", sourceUpdatedAt: sessionObservation.sourceUpdatedAt }
+                      : sessionObservation;
+                  // A second settled observation with no report and no session activity
+                  // since blocks the card. The block is terminal, so the card skips this
+                  // sweep's idle write.
+                  if (
+                    observation.state === "idle" &&
+                    nodeTicketIdleVerdict(card, observation.sourceUpdatedAt) !== undefined &&
+                    (await store.settleIdleNodeTicket(card.id, observation.sourceUpdatedAt))
+                  ) {
+                    await onMatched({ cards: [card], sessionKey: session.key });
+                    continue;
+                  }
+                  if (
+                    await store.syncLifecycle(card.id, {
+                      ...LIFECYCLE_TARGETS[observation.state],
+                      sourceUpdatedAt: observation.sourceUpdatedAt,
+                      stale: observation.stale,
+                      now,
+                      association: {
+                        ...(cardSessionKey(card)
+                          ? { expectedSessionKey: cardSessionKey(card) }
+                          : {}),
+                        ...(cardRunId(card) ? { expectedRunId: cardRunId(card) } : {}),
+                        sessionKey: session.key,
+                        ...(preparedAcceptanceAt === undefined
+                          ? {}
+                          : { acceptedAt: preparedAcceptanceAt }),
+                      },
+                    })
+                  ) {
+                    if (observation.state === "succeeded" || observation.state === "failed") {
+                      await onMatched({ cards: [card], sessionKey: session.key });
+                    }
+                  }
                 }
-                await syncWorkboardLifecycleSessions({
-                  store: params.store,
-                  cards,
-                  ...snapshot,
-                  now: params.now?.() ?? Date.now(),
-                  recoverPreparedBefore,
-                  onMatched,
-                });
-                cards = await params.store.list();
               } catch (error) {
                 if (generation === owner) {
                   ctx.logger.warn(`workboard lifecycle sync failed: ${String(error)}`);
                 }
               }
+            }
+            if (cardsByKey.size > 0) {
+              cards = await params.store.list();
             }
             if (generation === owner) {
               await cleanupWorktrees(cards, warn);

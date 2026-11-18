@@ -14,18 +14,20 @@ import { workboardPageTarget } from "./pages/workboard/page-target.ts";
 import { createWorkboardSessionAccessory } from "./session-accessory.tsx";
 import { createViewerPage } from "./viewer-page.ts";
 import { createWorkboardWidget } from "./widgets.tsx";
+import "./components/toast.css";
 import "./styles/workboard.css";
 import "./styles/office.css";
 import "./styles/overview.css";
 import "./styles/widgets.css";
 import "./styles/session-chip.css";
+import "./styles/sessions-board.css";
 
 type NavigationBoard = Pick<WorkboardBoardSummary, "id" | "name" | "kind" | "icon" | "color">;
 
 export default defineControlUiPlugin({
   id: "workboard",
   activate(host) {
-    const unbind = bindWorkboardHost(host);
+    const unbind = bindWorkboardHost(host, () => syncBoardNavigation(workboard.state.boards));
     const workboard = createWorkboardCapability();
     const client = host;
     let pendingDeletion: Promise<void> | undefined;
@@ -108,7 +110,7 @@ export default defineControlUiPlugin({
         });
       }
     };
-    const catalog = new WorkboardCatalog(({ boards }) => syncBoardNavigation(boards), workboard);
+    const catalog = new WorkboardCatalog(syncBoardNavigation, workboard);
     const transcripts = createViewerPage(host, {
       id: "transcripts",
       label: () => t("workboard.transcriptsTitle"),

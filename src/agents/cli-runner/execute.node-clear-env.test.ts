@@ -1,16 +1,13 @@
 /** The clearEnv a paired node receives must pass that node's own request decoder. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { invokeNodeClaudeCliRun } from "../../gateway/node-agent-cli-runtime.js";
+import * as nodeRuntime from "../../gateway/node-agent-cli-runtime.js";
 import {
   decodeClaudeCliNodeRunParams,
-  NODE_CLAUDE_CLEAR_ENV_KEYS,
+  CLAUDE_NODE_CLEAR_ENV,
 } from "../../node-host/invoke-agent-cli-claude-params.js";
 import { buildPreparedCliRunContext } from "../cli-runner.test-helpers.js";
 import { executePreparedCliRun as executePreparedCliRunImpl } from "./execute.js";
-import {
-  setCliRunnerExecuteTestDeps,
-  wrapPreparedCliRunWithTestAdmission,
-} from "./execute.test-support.js";
+import { wrapPreparedCliRunWithTestAdmission } from "./execute.test-support.js";
 
 const executePreparedCliRun = wrapPreparedCliRunWithTestAdmission(executePreparedCliRunImpl);
 
@@ -20,17 +17,17 @@ afterEach(() => {
 
 describe("paired-node Claude clearEnv", () => {
   it("bounds selected-auth clearEnv to what the node accepts", async () => {
-    const invokeNode = vi.fn(async (params: Parameters<typeof invokeNodeClaudeCliRun>[0]) => {
+    const invokeNode = vi.fn<typeof nodeRuntime.invokeNodeClaudeCliRun>(async (params) => {
       params.onProgress(`${JSON.stringify({ type: "result", result: "ok" })}\n`);
       return {
         ok: true,
         payloadJSON: JSON.stringify({ exitCode: 0, stderrTail: "", truncated: false }),
       };
     });
-    setCliRunnerExecuteTestDeps({ invokeNodeClaudeCliRun: invokeNode });
+    vi.spyOn(nodeRuntime, "invokeNodeClaudeCliRun").mockImplementation(invokeNode);
     // The Claude backend also clears thinking keys the node protocol does not list.
     const context = buildPreparedCliRunContext({
-      backend: { clearEnv: [...NODE_CLAUDE_CLEAR_ENV_KEYS, "MAX_THINKING_TOKENS"] },
+      backend: { clearEnv: [...CLAUDE_NODE_CLEAR_ENV, "MAX_THINKING_TOKENS"] },
       sessionEntry: {
         sessionId: "openclaw-session",
         updatedAt: 1,
@@ -47,7 +44,7 @@ describe("paired-node Claude clearEnv", () => {
     await expect(executePreparedCliRun(context)).resolves.toMatchObject({ text: "ok" });
 
     const sent = invokeNode.mock.calls[0]?.[0];
-    expect(sent?.clearEnv).toEqual([...NODE_CLAUDE_CLEAR_ENV_KEYS]);
+    expect(sent?.clearEnv).toEqual([...CLAUDE_NODE_CLEAR_ENV]);
     await expect(
       decodeClaudeCliNodeRunParams(
         JSON.stringify({
@@ -58,6 +55,6 @@ describe("paired-node Claude clearEnv", () => {
           timeoutMs: sent?.timeoutMs,
         }),
       ),
-    ).resolves.toMatchObject({ clearEnv: [...NODE_CLAUDE_CLEAR_ENV_KEYS] });
+    ).resolves.toMatchObject({ clearEnv: [...CLAUDE_NODE_CLEAR_ENV] });
   });
 });

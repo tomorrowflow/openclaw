@@ -9,7 +9,7 @@ import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { icons } from "../../components/icons.tsx";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
-import type { WorkboardCard } from "../../lib/workboard/index.ts";
+import type { WorkboardCard } from "../../lib/workboard/types.ts";
 
 type DiffState =
   | { status: "loading" }

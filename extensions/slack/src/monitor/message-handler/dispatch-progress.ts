@@ -66,7 +66,6 @@ export function createSlackProgressRuntime(runtimeParams: {
         cfg,
         token: ctx.botToken,
         accountId: account.accountId,
-        conversationChannelId: message.channel,
         eventScope: prepared.eventScope,
         // Impersonated Slack messages cannot be deleted. Keep the temporary
         // preview app-authored and apply custom identity only to final delivery.
@@ -80,7 +79,6 @@ export function createSlackProgressRuntime(runtimeParams: {
           }
           return ts;
         },
-        log: logVerbose,
         warn: logVerbose,
       })
     : undefined;
@@ -590,6 +588,11 @@ export function createSlackProgressRuntime(runtimeParams: {
       return false;
     }
     if (!isProgressMode) {
+      // Each merge reprocesses the accumulated reasoning, so a long stream with
+      // no preview to show it would block the event loop for nothing.
+      if (!previewToolProgressEnabled) {
+        return false;
+      }
       const normalized = progressDraft
         .mergeReasoningProgress(payload.text, {
           snapshot: payload.isReasoningSnapshot === true,
@@ -717,7 +720,6 @@ export function createSlackProgressRuntime(runtimeParams: {
   return {
     draftStream,
     previewLifecycle,
-    isProgressMode,
     useDraftProgressCard,
     useNativeProgressStreaming,
     progressDraftActive,

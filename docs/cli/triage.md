@@ -39,11 +39,13 @@ openclaw triage --json
 openclaw triage --non-interactive
 ```
 
-The prompt includes the OpenClaw version, platform, Node.js version, prioritized Doctor findings with repair hints, and the diagnostics archive path. The archive contains sanitized config, best-effort Gateway status and health snapshots, operational log summaries, and available stability diagnostics. For a custom state directory or config path that does not select a native Gateway service, triage skips the native service status snapshot. If the Gateway is unreachable, triage still writes the archive with available local diagnostics and records snapshot failures inside it. Doctor or export failures are recorded in the prompt so the agent can still investigate.
+The prompt includes the OpenClaw version, platform, Node.js version, prioritized Doctor findings with repair hints, and the diagnostics archive path. The archive contains sanitized config, best-effort Gateway status and health snapshots, operational log summaries, and available stability diagnostics. If the Gateway is unreachable, triage still writes the archive with available local diagnostics and records snapshot failures inside it. Doctor or export failures are recorded in the prompt so the agent can still investigate.
 
 The diagnostics archive excludes secrets, tokens, raw chat payloads, and raw logs. Failed-update prompts include bounded, sanitized diagnostic excerpts, with secrets and local paths redacted before truncation. Paths inside the prompt are shown relative to `~` or `$OPENCLAW_STATE_DIR`. The saved prompt path, archive path, and printed handoff commands retain the real absolute paths needed by your shell. Diagnostic collection is read-only. A launched agent is asked to repair autonomously within its existing permissions and preserve configuration, history, and databases.
 
 The archive's config summary counts agent, plugin, and channel entries declared in the saved file. Shared channel settings and `$include` directives are excluded from those counts. Diagnostics do not expand included files.
+
+In sanitized config and snapshots, map keys recognized as private identifiers (such as phone numbers, email addresses, user/chat IDs, and tokens) become opaque numbered placeholders. Known private config maps, including per-DM overrides (`dms`), also hide identifiers without a recognizable text pattern. Repeated identifier keys share a placeholder within the archive; ordinary field names remain intact. Placeholders contain no hash or recoverable portion of the identifier.
 
 ## Failed update recovery
 

@@ -2,8 +2,9 @@ import type {
   WorkboardBoardMetadata,
   WorkboardBoardSummary,
   WorkboardCard,
-  WorkboardClassRung,
+  WorkboardCardCursor,
   WorkboardChange,
+  WorkboardClassRung,
   WorkboardListResult,
   WorkboardMergeDigestResult,
   WorkboardMetadata,
@@ -32,6 +33,7 @@ import type {
   WorkboardWriteAuthority,
 } from "./persistence-types.js";
 import { changesPreviewSecrets, normalizeBoardMetadata } from "./store-board-normalizers.js";
+import { compareCards } from "./store-card-helpers.js";
 import { normalizeCardKind } from "./store-card-number.js";
 import {
   findWorkboardTargetRoute,
@@ -100,6 +102,7 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
   listCards(
     board: unknown,
     sessionKey?: string,
+    after?: WorkboardCardCursor,
   ): Promise<
     WorkboardListResult & {
       cards: WorkboardOperatorCard[];
@@ -111,19 +114,23 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
       const boardId = normalizeBoardId(board);
       const writeToken = this.refreshWriteReceipt();
       const revision = this.cardsRevision;
-      const cached = sessionKey === undefined ? this.cardLists.get(boardId) : undefined;
+      const cacheable = sessionKey === undefined && after === undefined;
+      const cached = cacheable ? this.cardLists.get(boardId) : undefined;
       if (cached) {
         return cached;
       }
       const pending: ReturnType<WorkboardBoardStore["listCards"]> = Promise.all([
-        sessionKey === undefined
-          ? this.list({ boardId })
-          : readCards(this.store, { kind: "session-links", sessionKey, boardId }),
+        this.store.entries({ kind: "page", boardId, sessionKey, after, limit: 101 }),
         this.listBoards(),
       ])
-        .then(([cards, { boards }]) => {
+        .then(([entries, { boards }]) => {
+          const cards = entries.slice(0, 100).map(({ value }) => value.card);
+          const last = cards.at(-1);
           const result = {
-            cards: cards.map(redactOperatorCard),
+            cards: cards.toSorted(compareCards).map(redactOperatorCard),
+            ...(entries.length > 100 && last
+              ? { nextCursor: { position: last.position, createdAt: last.createdAt, id: last.id } }
+              : {}),
             boards,
             statuses: WORKBOARD_STATUSES,
             revision: {
@@ -137,19 +144,38 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
           return result;
         })
         .catch((error: unknown) => {
-          if (sessionKey === undefined) {
+          if (cacheable) {
             this.cardLists.delete(boardId);
           }
           throw error;
         });
-      if (writeToken !== undefined && sessionKey === undefined) {
+      if (writeToken !== undefined && cacheable) {
         this.cardLists.set(boardId, pending);
       }
       return pending;
     });
   }
 
-  async listBoards(): Promise<{ boards: WorkboardBoardSummary[] }> {
+  listBoards(): Promise<{ boards: WorkboardBoardSummary[] }> {
+    return this.runOperation(() => {
+      const writeToken = this.refreshWriteReceipt();
+      if (this.boardList) {
+        return this.boardList;
+      }
+      const pending = this.readBoardSummaries().catch((error: unknown) => {
+        if (this.boardList === pending) {
+          this.boardList = undefined;
+        }
+        throw error;
+      });
+      if (writeToken !== undefined) {
+        this.boardList = pending;
+      }
+      return pending;
+    });
+  }
+
+  private async readBoardSummaries(): Promise<{ boards: WorkboardBoardSummary[] }> {
     const boards = new Map<string, WorkboardBoardSummary>();
     for (const entry of await this.boardStore.entries()) {
       const { createdAt: _createdAt, archivedAt, ...board } = entry.value.board;
@@ -246,10 +272,19 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
     );
   }
 
-  /** The Factory overview, from the same cached operator read as `listCards`. */
+  /**
+   * The Factory overview reads every card in scope: `listCards` pages at 100
+   * cards, which would silently drop work from the overview.
+   */
   async overview(board: unknown, now = Date.now()): Promise<WorkboardOverviewResult> {
-    const { cards, boards } = await this.listCards(board);
-    return projectWorkboardOverview(cards, boards, normalizeBoardId(board) ?? "all", now);
+    const boardId = normalizeBoardId(board);
+    const [cards, { boards }] = await Promise.all([this.list({ boardId }), this.listBoards()]);
+    return projectWorkboardOverview(
+      cards.toSorted(compareCards).map(redactOperatorCard),
+      boards,
+      boardId ?? "all",
+      now,
+    );
   }
 
   /**

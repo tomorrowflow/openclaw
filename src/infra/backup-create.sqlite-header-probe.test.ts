@@ -3,10 +3,30 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
+import { shortenHomePath } from "../utils.js";
 import { createBackupArchive } from "./backup-create.js";
 import { probeSqliteDatabaseHeaders } from "./sqlite-header-probe.js";
+import { injectHeaderReadFailure } from "./sqlite-header-probe.test-support.js";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
+
+it("refuses capture with the busy path and errno before publishing or changing the source", async () => {
+  await withOpenClawTestState({ layout: "state-only", scenario: "minimal" }, async (state) => {
+    const candidate = state.statePath("unreadable-candidate.db");
+    await fs.writeFile(candidate, "retained source bytes");
+    await injectHeaderReadFailure(state.root, candidate, "EBUSY", 100);
+    const output = state.path("backups");
+    await fs.mkdir(output);
+    await expect(createBackupArchive({ output, includeWorkspace: false })).rejects.toThrow(
+      new RegExp(`${shortenHomePath(candidate).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*EBUSY`),
+    );
+    expect(await fs.readdir(output)).toEqual([]);
+    expect(await fs.readFile(candidate, "utf8")).toBe("retained source bytes");
+  });
+});
 
 it("probes a batch through a declared worker using the current runtime without eval", async () => {
   await withOpenClawTestState({ layout: "state-only", scenario: "minimal" }, async (state) => {
@@ -15,14 +35,13 @@ it("probes a batch through a declared worker using the current runtime without e
     await fs.writeFile(sqlitePath, "SQLite format 3\0");
     await fs.writeFile(plainPath, "plain bytes");
     const spawn = vi.spyOn(childProcess, "spawnSync");
-
-    expect(probeSqliteDatabaseHeaders([sqlitePath, plainPath, sqlitePath])).toEqual(
-      new Map([
-        [sqlitePath, true],
-        [plainPath, false],
-      ]),
-    );
-    expect(spawn).toHaveBeenCalledOnce();
+    const missing = Array.from({ length: 8192 }, (_, index) => state.path(String(index)));
+    const answers = probeSqliteDatabaseHeaders([...missing, sqlitePath, plainPath, sqlitePath]);
+    expect(answers.get(sqlitePath)).toBe(true);
+    expect(answers.get(plainPath)).toBe(false);
+    expect(answers.get(missing[0]!)).toBe(false);
+    expect(answers.size).toBe(missing.length + 2);
+    expect(spawn.mock.calls.length).toBeGreaterThan(1);
     const [executable, argv] = spawn.mock.calls[0]!;
     expect(executable).toBe(process.execPath);
     expect(argv).not.toContain("-e");
@@ -66,57 +85,4 @@ describe("createBackupArchive SQLite header probe failure", () => {
       );
     },
   );
-});
-
-it("does not follow symlinks or probe non-files and tolerates vanished files", async () => {
-  await withOpenClawTestState({ layout: "state-only", scenario: "minimal" }, async (state) => {
-    const target = state.path("header.db");
-    const link = state.path("header-link.db");
-    const directory = state.path("directory.db");
-    const missing = state.path("missing.db");
-    await fs.writeFile(target, "SQLite format 3\0");
-    await fs.symlink(target, link);
-    await fs.mkdir(directory);
-    expect(probeSqliteDatabaseHeaders([target, link, directory, missing])).toEqual(
-      new Map([
-        [target, true],
-        [link, false],
-        [directory, false],
-        [missing, false],
-      ]),
-    );
-  });
-});
-
-it.each(["invalid-json", "[]", '["yes"]', "{}"])(
-  "fails closed for invalid worker reply %s",
-  (stdout) => {
-    vi.spyOn(childProcess, "spawnSync").mockReturnValue({
-      pid: 1,
-      output: [],
-      status: 0,
-      signal: null,
-      stdout,
-      stderr: "",
-    });
-    expect(() => probeSqliteDatabaseHeaders(["candidate.db"])).toThrow(
-      "Could not determine whether backup files are SQLite databases",
-    );
-  },
-);
-
-it("bounds worker time/output and fails closed on timeout", () => {
-  const spawn = vi.spyOn(childProcess, "spawnSync").mockReturnValue({
-    pid: 1,
-    output: [],
-    status: null,
-    signal: "SIGTERM",
-    stdout: "",
-    stderr: "",
-    error: Object.assign(new Error("timed out"), { code: "ETIMEDOUT" }),
-  });
-  expect(() => probeSqliteDatabaseHeaders(["candidate.db"])).toThrow(
-    "Could not determine whether backup files are SQLite databases",
-  );
-  expect(spawn.mock.calls[0]?.[2]).toMatchObject({ timeout: 10_000, maxBuffer: 64 * 1024 * 1024 });
 });

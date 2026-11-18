@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 
 export const deferredPluginMigrationSchema = z.object({
@@ -12,11 +11,3 @@ export const deferredPluginMigrationSchema = z.object({
 });
 
 export type DeferredPluginMigration = z.infer<typeof deferredPluginMigrationSchema>;
-export function sameDeferredPluginMigrationInputs(
-  current: readonly DeferredPluginMigration[],
-  expected: readonly DeferredPluginMigration[],
-) {
-  const inputs = (pending: readonly DeferredPluginMigration[]) =>
-    pending.map(({ reason: _reason, command: _command, ...fields }) => fields);
-  return isDeepStrictEqual(inputs(current), inputs(expected));
-}

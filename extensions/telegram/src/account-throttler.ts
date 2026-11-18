@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ApiError } from "grammy/types";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import { captureEffectAuthority } from "openclaw/plugin-sdk/fetch-runtime";
 import { resolveGlobalMap } from "openclaw/plugin-sdk/global-singleton";
 import { parseStrictInteger } from "openclaw/plugin-sdk/number-runtime";
 import {
@@ -10,7 +11,6 @@ import {
   waitForAbortSignal,
 } from "openclaw/plugin-sdk/runtime-env";
 import { apiThrottler } from "./bot.runtime.js";
-import { TELEGRAM_CHAT_ACTION_INTERVAL_MS } from "./chat-action-timing.js";
 import {
   createOwnedGrammyApiThrottler,
   type OwnedGrammyApiThrottler,
@@ -96,18 +96,14 @@ function admitAtNetwork(
   scope: TelegramRequestScope | undefined,
   prev: TelegramApiCall,
 ): TelegramApiCall {
-  // Shared limiter queues inherit their first caller's context. Restore this
-  // request's owner before checking authority or starting transport work.
-  const runInContext = AsyncLocalStorage.snapshot();
-  return (method, payload, signal) =>
-    runInContext(async () => {
-      const waitMs = method === "getUpdates" ? 0 : gate.remainingMs();
-      if (waitMs > 0) {
-        return skippedFloodResponse(waitMs, "flood wait active");
-      }
-      scope?.assertCurrent?.();
-      return prev(method, payload, signal);
-    });
+  return async (method, payload, signal) => {
+    const waitMs = method === "getUpdates" ? 0 : gate.remainingMs();
+    if (waitMs > 0) {
+      return skippedFloodResponse(waitMs, "flood wait active");
+    }
+    scope?.assertCurrent?.();
+    return prev(method, payload, signal);
+  };
 }
 
 class TelegramFloodGate {
@@ -140,26 +136,11 @@ function bridgeTelegramAbortSignal(signal: TelegramApiSignal) {
   return { controller, detach: () => signal?.removeEventListener("abort", abort) };
 }
 
-async function sleepForFloodGate(
-  waitMs: number,
-  signal: TelegramApiSignal,
-  retirementSignal: AbortSignal,
-): Promise<void> {
+async function sleepForFloodGate(waitMs: number, signal: TelegramApiSignal): Promise<void> {
   const { controller, detach } = bridgeTelegramAbortSignal(signal);
-  const retire = () => controller.abort();
-  retirementSignal.addEventListener("abort", retire, { once: true });
-  if (retirementSignal.aborted) {
-    retire();
-  }
   try {
     await sleepWithAbort(waitMs, controller.signal);
-  } catch (error) {
-    if (retirementSignal.aborted) {
-      throw telegramThrottlerReleasedError;
-    }
-    throw error;
   } finally {
-    retirementSignal.removeEventListener("abort", retire);
     detach();
   }
 }
@@ -167,7 +148,6 @@ async function sleepForFloodGate(
 function callThroughFloodGate(
   gate: TelegramFloodGate,
   replaceable: boolean,
-  retirementSignal: AbortSignal,
   prev: TelegramApiCall,
 ): TelegramApiCall {
   return async (method, payload, signal) => {
@@ -178,9 +158,6 @@ function callThroughFloodGate(
     let waitedMs = 0;
     let flooded: ApiError | undefined;
     for (;;) {
-      if (retirementSignal.aborted) {
-        throw telegramThrottlerReleasedError;
-      }
       const waitMs = gate.remainingMs();
       if (waitMs > 0) {
         if (replaceable) {
@@ -189,7 +166,7 @@ function callThroughFloodGate(
         if (waitedMs + waitMs > TELEGRAM_OUTBOUND_FLOOD_BUDGET_MS) {
           return flooded ?? skippedFloodResponse(waitMs, "flood wait exceeds delivery budget");
         }
-        await sleepForFloodGate(waitMs, signal, retirementSignal);
+        await sleepForFloodGate(waitMs, signal);
         waitedMs += waitMs;
         continue;
       }
@@ -458,32 +435,27 @@ function createTelegramAccountThrottler(
   const retireController = new AbortController();
   const chatActions = createTelegramSendChatActionHandler({
     logger: (message) => logVerbose(`telegram: ${message}`),
-    minIntervalMs: TELEGRAM_CHAT_ACTION_INTERVAL_MS,
     retirementSignal: retireController.signal,
     retiredError: telegramThrottlerReleasedError,
   });
   const schedulersByChat = new Map<string, GroupRequestScheduler>();
   let retired = false;
-  let disposePromise: Promise<void> | undefined;
-  const dispose = (): Promise<void> => {
-    if (disposePromise) {
-      return disposePromise;
+  const dispose = async () => {
+    // Retirement is owner-level admission: a retired token configures no
+    // account, so new and queued work rejects and in-flight sends settle.
+    if (retired) {
+      return;
     }
-    disposePromise = (async () => {
-      // Retirement is owner-level admission: a retired token configures no
-      // account, so new and queued work rejects and in-flight sends settle.
-      retired = true;
-      for (const scheduler of schedulersByChat.values()) {
-        scheduler.settleForRetirement(telegramThrottlerReleasedError);
-      }
-      // Terminate pre-I/O chat-action backoffs before stopping the shared
-      // limiters, whose shutdown waits for executing callbacks to finish.
-      retireController.abort();
-      if (typeof created !== "function") {
-        await created.dispose();
-      }
-    })();
-    return disposePromise;
+    retired = true;
+    for (const scheduler of schedulersByChat.values()) {
+      scheduler.settleForRetirement(telegramThrottlerReleasedError);
+    }
+    // Terminate pre-I/O chat-action backoffs before stopping the shared
+    // limiters, whose shutdown waits for executing callbacks to finish.
+    retireController.abort();
+    if (typeof created !== "function") {
+      await created.dispose();
+    }
   };
   const floodGate = new TelegramFloodGate();
   // The shared final dispatch boundary: retirement lands during limiter queue
@@ -545,7 +517,7 @@ function createTelegramAccountThrottler(
       const laneKey = resolveForumLaneKey(apiPayload);
       return scheduler.enqueue(
         laneKey,
-        () => baseThrottler(finalDispatch(prev), method, payload, signal),
+        () => baseThrottler(prev, method, payload, signal),
         replaceable
           ? { skip: () => skippedFloodResponse(1_000, "yielded to a pending reply") }
           : undefined,
@@ -558,14 +530,14 @@ function createTelegramAccountThrottler(
     }
     // Classify at the call site: queued work later runs in the drain's async context.
     const callerScope = requestScopes.getStore();
+    const effect = captureEffectAuthority();
     const replaceable = method === "sendChatAction" || callerScope?.replaceable === true;
     const scope = replaceable ? { ...callerScope, replaceable: true as const } : callerScope;
     // Waiting and retry policy runs outside the queues; admission runs at the network edge.
-    const admitted = admitAtNetwork(floodGate, scope, prev);
+    const admitted = admitAtNetwork(floodGate, scope, (...args) => effect.run(() => prev(...args)));
     const send = callThroughFloodGate(
       floodGate,
       replaceable,
-      retireController.signal,
       (queuedMethod, queuedPayload, queuedSignal) =>
         scheduleRequest(replaceable)(admitted, queuedMethod, queuedPayload, queuedSignal),
     );

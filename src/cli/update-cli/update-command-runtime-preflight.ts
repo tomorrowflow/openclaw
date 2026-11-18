@@ -24,7 +24,6 @@ import {
   type UpdateFailureFact,
 } from "../../infra/update-failure-facts.js";
 import { UPDATE_RUNNER_TIMEOUT_MS } from "../../infra/update-run-timeouts.js";
-import type { UpdateStepResult } from "../../infra/update-step-result.js";
 import { withCommandProcessScope } from "../../process/exec-spawn.js";
 import {
   createRuntimeUpdateRecoverySteps,
@@ -41,27 +40,8 @@ import type { PreManagedServiceStop } from "./update-command-service-context-typ
 import { resolveServiceRecoveryContext } from "./update-command-service-env.js";
 import {
   gatewayServiceCommandUsesRoot,
-  isGatewayServiceManagementAllowedForUpdate,
   tryRealpathOrResolve,
 } from "./update-command-service-plan.js";
-
-/** Records a nonblocking Node security recommendation as a passing preflight step. */
-export function recordNodeSecurityWarning(
-  record: (step: UpdateStepResult) => void,
-  cwd: string,
-  warning: string | undefined,
-): void {
-  if (warning) {
-    record({
-      name: "node-security-patch",
-      command: "inspect Node.js security patch level",
-      cwd,
-      durationMs: 0,
-      exitCode: 0,
-      warnings: [warning],
-    });
-  }
-}
 
 export type PackageRuntimePreflight = {
   nodeSecurityWarning?: string;
@@ -156,7 +136,7 @@ export async function resolvePackageRuntimePreflight(params: {
           throw captureError;
         }
         activationRuntime = { ...activationRuntime, kind: "bun", env: runtimeEnv };
-        const runtime = await resolveBunRuntimeInfo(activationRuntime.path, undefined, runtimeEnv);
+        const runtime = await resolveBunRuntimeInfo(activationRuntime.path, runtimeEnv);
         if (runtime.status === "probe-failed") {
           throw runtime.error;
         }
@@ -206,24 +186,8 @@ export async function resolvePackageRuntimePreflight(params: {
     }
     const canRefreshCurrentService =
       params.service?.running && verdict?.kind === "owned" && verdict.refreshDefinition;
-    // Engine admission may select an existing executable, never provision one.
-    // A path match alone is not permission to rewrite a managed service.
-    const canRefreshAtAdmission =
-      !process.versions.bun &&
-      params.shouldRestart &&
-      params.service?.inspected === true &&
-      params.service.runtimeInspected &&
-      params.service.serviceMutationAllowed !== false &&
-      isGatewayServiceManagementAllowedForUpdate(params.service.serviceEnv ?? process.env) &&
-      canRefreshCurrentService &&
-      !verdict.requiresInstallRootRefresh &&
-      params.root !== undefined &&
-      (await tryRealpathOrResolve(verdict.root)) === (await tryRealpathOrResolve(params.root)) &&
-      params.service.serviceNodeRunner === nodeRunner;
     const fallbackNodeRunner = params.engineOnly
-      ? canRefreshAtAdmission
-        ? resolveNodeRunner()
-        : undefined
+      ? undefined
       : (params.fallbackNodeRunner ??
         (params.shouldRestart &&
         !process.versions.bun &&
@@ -242,56 +206,34 @@ export async function resolvePackageRuntimePreflight(params: {
       const fallbackSatisfies = fallbackRuntime.failure
         ? false
         : nodeVersionSatisfiesEngine(fallbackRuntime.version, target.nodeEngine);
-      if (fallbackSatisfies === true && fallbackActivationRuntime) {
-        // A successful probe does not authorize a replaced executable.
-        const current = captureRuntime(fallbackNodeRunner);
-        if (
-          current?.path === fallbackActivationRuntime.path &&
-          current.identity === fallbackActivationRuntime.identity
-        ) {
-          nodeSecurityWarning = formatNodeSecurityWarning(fallbackRuntime.version);
-          return runtimeResult(fallbackActivationRuntime, fallbackNodeRunner, nodeRunner);
-        }
-        return resultError("Selected Node changed during target compatibility probing.");
+      if (fallbackSatisfies === true) {
+        nodeSecurityWarning = formatNodeSecurityWarning(fallbackRuntime.version);
+        return runtimeResult(fallbackActivationRuntime, fallbackNodeRunner, nodeRunner);
       }
     }
     if (satisfies !== false) {
       return params.engineOnly ? ok(unchanged()) : runtimeResult(activationRuntime);
     }
-    // Admission may discover an existing runtime, but never supplies install authority.
-    const recovery = params.engineOnly
-      ? canRefreshAtAdmission
-        ? { env: params.service?.serviceEnv ?? process.env }
-        : undefined
-      : params.runtimeRecovery;
-    if (recovery && target.nodeEngine) {
+    if (!params.engineOnly && params.runtimeRecovery && target.nodeEngine) {
       const { resolveTargetNodeRuntime } =
         await import("./update-command-node-runtime-resolution.js");
       const recovered = await resolveTargetNodeRuntime({
         engine: target.nodeEngine,
-        recovery,
+        recovery: params.runtimeRecovery,
         timeoutMs: params.timeoutMs,
       });
       if (recovered) {
+        // Runtime recovery already admitted this executable; a best-effort warning probe must not block it.
+        const recoveredInfo = await resolvePackageRuntimeForPreflight({
+          nodeRunner: recovered,
+          timeoutMs: params.timeoutMs,
+        }).catch(() => null);
+        nodeSecurityWarning = formatNodeSecurityWarning(recoveredInfo?.version);
         const recoveredRuntime = captureRuntime(recovered);
         if (!recoveredRuntime) {
           return runtimeResult(recoveredRuntime);
         }
-        const probe = await resolvePackageRuntimeForPreflight({
-          nodeRunner: recoveredRuntime.path,
-          timeoutMs: params.timeoutMs,
-        });
-        const current = captureRuntime(recovered);
-        if (
-          !probe.failure &&
-          nodeVersionSatisfiesEngine(probe.version, target.nodeEngine) === true &&
-          current?.path === recoveredRuntime.path &&
-          current.identity === recoveredRuntime.identity
-        ) {
-          // Reuse the admission probe; the security recommendation never blocks recovery.
-          nodeSecurityWarning = formatNodeSecurityWarning(probe.version);
-          return runtimeResult(recoveredRuntime, recovered, nodeRunner ?? resolveNodeRunner());
-        }
+        return runtimeResult(recoveredRuntime, recovered, nodeRunner ?? resolveNodeRunner());
       }
     }
     const runtimePath = runtime.nodeRunner ?? process.execPath;

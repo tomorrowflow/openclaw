@@ -10,7 +10,6 @@ type ReleasePrepushCommand = {
   bin: "git" | "node";
   args: string[];
   cwd: string;
-  env?: NodeJS.ProcessEnv;
 };
 
 type ReleasePrepushDependencies = {
@@ -123,7 +122,6 @@ export function buildReleasePrepushPlan(
   baseSha: string,
   headSha: string,
   cwd: string,
-  env: NodeJS.ProcessEnv = process.env,
 ): ReleasePrepushCommand[] {
   return [
     {
@@ -131,14 +129,12 @@ export function buildReleasePrepushPlan(
       bin: "git",
       args: ["diff", "--check", baseSha, headSha],
       cwd,
-      env,
     },
     {
       name: "release changelog layout",
       bin: "node",
       args: ["scripts/release-changelog.mjs", "check", "--ref", headSha],
       cwd,
-      env,
     },
   ];
 }
@@ -149,7 +145,6 @@ async function defaultRunCommand(command: ReleasePrepushCommand): Promise<number
     bin: command.bin,
     args: command.args,
     cwd: command.cwd,
-    env: command.env,
   });
 }
 
@@ -207,10 +202,7 @@ export async function runReleasePrepush(
     return 0;
   }
 
-  for (const command of buildReleasePrepushPlan(comparisonBaseSha, headSha, process.cwd(), {
-    ...process.env,
-    OPENCLAW_RELEASE_CONTEXT_REF: branch,
-  })) {
+  for (const command of buildReleasePrepushPlan(comparisonBaseSha, headSha, process.cwd())) {
     const status = await dependencies.runCommand(command);
     if (status !== 0) {
       console.error(`[release:prepush] failed: ${command.name}`);

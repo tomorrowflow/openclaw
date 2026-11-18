@@ -47,19 +47,18 @@ export async function runSessionSweep(params: {
     abortedLastRun?: boolean;
   }>;
   complete?: boolean;
-  now?: number;
   onMatched?: Parameters<typeof createWorkboardLifecycleService>[0]["onMatched"];
+  /** False when no card is a sweep candidate, so the sweep must not read sessions. */
+  expectSessionRead?: boolean;
 }) {
   const readSessions = vi.fn().mockResolvedValue({
     sessions: params.sessions,
     complete: params.complete ?? true,
   });
-  const now = params.now;
   const service = createWorkboardLifecycleService({
     store: params.store,
     readSessions,
     ...(params.onMatched ? { onMatched: params.onMatched } : {}),
-    ...(now === undefined ? {} : { now: () => now }),
   });
   const runOperation = vi.spyOn(params.store, "runOperation");
   try {
@@ -68,7 +67,11 @@ export async function runSessionSweep(params: {
     // The admitted operation spans the full sweep, including SQLite worker writes.
     expect(runOperation).toHaveBeenCalled();
     await runOperation.mock.results[0]?.value;
-    expect(readSessions).toHaveBeenCalledOnce();
+    if (params.expectSessionRead === false) {
+      expect(readSessions).not.toHaveBeenCalled();
+    } else {
+      expect(readSessions).toHaveBeenCalled();
+    }
   } finally {
     service.onGatewayStop();
     await service.stop?.({ logger: { warn: vi.fn() } } as never);

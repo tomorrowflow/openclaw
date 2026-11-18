@@ -1,5 +1,8 @@
 import type { InspectionNativeEsmRetention, PluginModuleLoader } from "./plugin-cache-artifacts.js";
-import type { capturePluginGenerationArtifact } from "./plugin-generation-artifact.js";
+import type {
+  capturePluginGenerationArtifact,
+  PluginGenerationArtifact,
+} from "./plugin-generation-artifact.js";
 import type { PluginRecoverySource } from "./plugin-generation-source-lookup.js";
 import type {
   PluginModuleLoaderOwner,
@@ -27,6 +30,15 @@ export type PluginInstanceModuleLoaderParams = {
    */
   inspectionSourceIdentity?: string;
   inspectionRetention?: InspectionNativeEsmRetention;
+  /**
+   * False when no caller can run plugin state operations through this instance, so bundled
+   * operation modules are never captured for it.
+   */
+  stateOperations?: false;
+  preparedArtifact?: {
+    artifact: PluginGenerationArtifact;
+    attachModuleSource: (resolve: (filename: string) => string) => void;
+  };
 };
 
 type RecoveryLoadFacts = Pick<

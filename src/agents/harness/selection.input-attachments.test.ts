@@ -37,6 +37,7 @@ import { registerAgentWorkspaceAccess } from "../workspace-access.js";
 import * as builtinOpenClaw from "./builtin-openclaw.js";
 import { runAgentHarnessBeforeMessageWriteHook } from "./hook-helpers.js";
 import { createAgentHarnessHostCapabilities } from "./host-capability.js";
+import * as harnessLifecycle from "./lifecycle.js";
 import { clearAgentHarnesses, registerAgentHarness } from "./registry.js";
 import { runAgentHarnessAttempt } from "./selection.js";
 import { createHarnessAttemptParams } from "./selection.test-support.js";
@@ -74,6 +75,56 @@ afterEach(async () => {
   trajectoryTempDirs.cleanup();
   clearRuntimeConfigSnapshot();
 });
+// Owner turn, unset chat modes, remembered setup consent.
+async function prepareRememberedOwnerConsent() {
+  const storePath = path.join(trajectoryTempDirs.make("harness-native-consent-"), "sessions.json");
+  const config: OpenClawConfig = {
+    session: { store: storePath },
+    agents: { entries: { main: { nativeRuntimeConsent: ["codex"] } } },
+    tools: { fs: { workspaceOnly: true } },
+  };
+  const attempt = createAttemptParams(config);
+  attempt.agentId = "main";
+  attempt.sessionKey = "agent:main:remembered-owner";
+  attempt.senderIsOwner = true;
+  await replaceSessionEntry(
+    { agentId: "main", sessionKey: attempt.sessionKey, storePath },
+    { sessionId: attempt.sessionId, updatedAt: 1 },
+  );
+  const nativeStart = vi.fn<AgentHarness["runAttempt"]>(async () =>
+    makeEmbeddedRunnerAttempt({ agentHarnessId: "codex" }),
+  );
+  const supports = () => ({ supported: true, priority: 100 });
+  const harness = { id: "codex", label: "Codex", executionEnvironment: "host-only" as const };
+  registerAgentHarness(
+    { ...harness, supports, runAttempt: nativeStart },
+    { ownerPluginId: "codex" },
+  );
+  const revoked = { ...config, agents: { entries: { main: { nativeRuntimeConsent: [] } } } };
+  return { revoked, attempt, nativeStart };
+}
+
+it("runs a native harness in full mode under remembered owner consent", async () => {
+  const { attempt, nativeStart } = await prepareRememberedOwnerConsent();
+  await runAgentHarnessAttempt(attempt);
+  // Native harnesses choose their own approval mode from this field.
+  expect(nativeStart.mock.calls[0]?.[0].permissionMode).toBe("full");
+});
+
+it("refuses remembered consent revoked after admission before native dispatch", async () => {
+  const { revoked, attempt, nativeStart } = await prepareRememberedOwnerConsent();
+  const original = harnessLifecycle.runAgentHarnessLifecycleAttempt;
+  using dispatch = vi
+    .spyOn(harnessLifecycle, "runAgentHarnessLifecycleAttempt")
+    .mockImplementation(async (harness, prepared, execute) => {
+      setRuntimeConfigSnapshot(revoked);
+      return original(harness, prepared, execute);
+    });
+
+  await expect(runAgentHarnessAttempt(attempt)).rejects.toThrow(/workspace-only|revoked/);
+  expect(dispatch).toHaveBeenCalledOnce();
+  expect(nativeStart).not.toHaveBeenCalled();
+});
 
 function createAttributionRecorder(registered = true) {
   const beforeWrite = vi.fn(() => undefined);
@@ -104,7 +155,6 @@ describe("registered harness input attachment preparation", () => {
         "tool_result_persist",
         "before_compaction",
         "after_compaction",
-        "heartbeat_prompt_contribution",
       ] as const
     ).map((hook) => ({ name: hook, hook, waits: true })),
     { name: "internal bootstrap", bootstrap: true, waits: true },
@@ -134,8 +184,7 @@ describe("registered harness input attachment preparation", () => {
     const pending = runAgentHarnessAttempt({
       ...createAttemptParams(),
       agentHarnessId: "openclaw",
-      trigger:
-        scenario.hook === "heartbeat_prompt_contribution" && scenario.waits ? "heartbeat" : "user",
+      trigger: "user",
       awaitSessionDiffBaseline: awaitBaseline,
     });
     try {
@@ -600,90 +649,4 @@ describe("registered harness input attachment preparation", () => {
       openSpy?.mockRestore();
     }
   });
-});
-
-it.each([
-  {
-    label: "valid owner consent",
-    owner: true,
-    consent: "codex",
-    storedSessionId: undefined,
-    hostOnly: true,
-    expected: "full",
-  },
-  {
-    label: "revoked consent",
-    owner: true,
-    consent: undefined,
-    storedSessionId: undefined,
-    hostOnly: true,
-    expected: undefined,
-  },
-  {
-    label: "another harness consent",
-    owner: true,
-    consent: "another-runtime",
-    storedSessionId: undefined,
-    hostOnly: true,
-    expected: undefined,
-  },
-  {
-    label: "another incarnation consent",
-    owner: true,
-    consent: "codex",
-    storedSessionId: "retired-session",
-    hostOnly: true,
-    expected: undefined,
-  },
-  {
-    label: "nonowner without consent",
-    owner: false,
-    consent: undefined,
-    storedSessionId: undefined,
-    hostOnly: true,
-    expected: undefined,
-  },
-  {
-    label: "sandbox-capable runtime",
-    owner: true,
-    consent: "codex",
-    storedSessionId: undefined,
-    hostOnly: false,
-    expected: undefined,
-  },
-])("passes only the admitted per-turn permission mode: $label", async (scenario) => {
-  const storePath = path.join(trajectoryTempDirs.make("native-consent-"), "sessions.json");
-  const config: OpenClawConfig = { session: { store: storePath } };
-  const attempt = createAttemptParams(config);
-  attempt.agentId = "main";
-  attempt.sessionKey = "agent:main:consented-native";
-  attempt.senderIsOwner = scenario.owner;
-  await replaceSessionEntry(
-    { agentId: "main", sessionKey: attempt.sessionKey, storePath },
-    {
-      sessionId: scenario.storedSessionId ?? attempt.sessionId,
-      updatedAt: 1,
-      agentRuntimeOverride: "codex",
-      permissionMode: "full",
-      sandboxMode: "off",
-      nativeRuntimeConsent: scenario.consent,
-    },
-  );
-  const nativeStart = vi.fn<AgentHarness["runAttempt"]>(async () =>
-    makeEmbeddedRunnerAttempt({ agentHarnessId: "codex" }),
-  );
-  registerAgentHarness(
-    {
-      id: "codex",
-      label: "Codex",
-      ...(scenario.hostOnly ? { executionEnvironment: "host-only" as const } : {}),
-      supports: () => ({ supported: true, priority: 100 }),
-      runAttempt: nativeStart,
-    },
-    { ownerPluginId: "codex" },
-  );
-  await runAgentHarnessAttempt(attempt);
-  expect(nativeStart).toHaveBeenCalledOnce();
-  expect(nativeStart.mock.calls[0]?.[0].permissionMode).toBe(scenario.expected);
-  expect(attempt.permissionMode).toBeUndefined();
 });

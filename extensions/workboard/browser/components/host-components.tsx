@@ -1,7 +1,7 @@
 /** @jsxImportSource @solidjs/web */
 import { Portal, type JSX } from "@solidjs/web";
 import type { ControlUiComponentHandle, ControlUiHost } from "openclaw/plugin-sdk/control-ui";
-import { createEffect, onCleanup } from "solid-js";
+import { createEffect, createMemo, onCleanup } from "solid-js";
 import { workboardHost } from "../host.ts";
 
 type Components = ControlUiHost["components"];
@@ -14,7 +14,7 @@ type AppearanceGlyphProps = Parameters<Components["mountAppearanceGlyph"]>[1];
 type SessionSummaryProps = Parameters<Components["mountSessionSummary"]>[1];
 type MarkdownProps = Parameters<Components["mountMarkdown"]>[1];
 type HtmlPreviewProps = Parameters<Components["mountHtmlPreview"]>[1];
-type Styled = { class?: string; className?: string };
+type Styled = { class?: JSX.HTMLAttributes<HTMLElement>["class"]; className?: string };
 
 function hostMount<Props extends object>(
   read: () => Props,
@@ -73,9 +73,11 @@ export function AgentPicker(props: PickerProps & Styled) {
 }
 
 export function AgentAvatar(props: AvatarProps) {
-  const mount = hostMount(
-    () => ({ ...props }),
-    (container, value) => workboardHost().components.mountAgentAvatar(container, value),
+  const readAvatar = createMemo(() => ({ agentId: props.agentId, label: props.label }), {
+    equals: (previous, next) => previous.agentId === next.agentId && previous.label === next.label,
+  });
+  const mount = hostMount(readAvatar, (container, value) =>
+    workboardHost().components.mountAgentAvatar(container, value),
   );
   return <span aria-hidden="true" ref={mount} />;
 }

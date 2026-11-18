@@ -1,364 +1,235 @@
 // Sandboxed agents name files by container path, so the Gateway file surface
 // must translate them through the sandbox mount table before serving them.
+// The session row, transcript, sandbox registry and mount selection are real;
+// only the container engine stays untouched (these paths never need one).
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import { resolveSandboxConfigForAgent } from "../../agents/sandbox/config.js";
+import * as engine from "../../agents/sandbox/container-engine.js";
+import { removeRegistryEntry, updateRegistry } from "../../agents/sandbox/registry.js";
 import { resolveSandboxWorkspaceLayoutPaths } from "../../agents/sandbox/shared.js";
-import type { withSessionTranscriptDeltaReader } from "../../config/sessions/session-transcript-delta-read.js";
+import { setRuntimeConfigSnapshot } from "../../config/runtime-snapshot.js";
+import { createSessionEntryWithTranscript } from "../../config/sessions/session-accessor.entry-mutation.js";
+import { appendTranscriptMessage } from "../../config/sessions/session-accessor.sqlite-transcript-write.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { resolveOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.paths.js";
+import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+import { createDirectChatContext } from "../server-chat.agent-events.test-helpers.js";
+import { handleGatewayRequest } from "../server-methods.js";
 import { sessionsFilesHandlers } from "./sessions-files.js";
 import {
   assistantToolCall,
-  createSessionFilesHandlerInvoker,
-  createVisibleMessagesMock,
+  createSessionFileDownloadClient,
   expectError,
   expectOkPayload,
   hashContent,
-  prepareSessionFilesTest,
-  removeWorkspaceFixture,
   writeWorkspaceFile,
 } from "./sessions-files.test-support.js";
 
-const hoisted = vi.hoisted(() => ({
-  execOpenPath: vi.fn(),
-  loadSessionEntry: vi.fn(),
-  resolveAgentWorkspaceDir: vi.fn(),
-  resolveDefaultAgentId: vi.fn(),
-  readDelta: vi.fn(),
-  readRegisteredSandboxRuntimeIds: vi.fn(),
-  readRegistryEntry: vi.fn(),
-}));
+type SandboxOptions = { mode?: "all" | "non-main"; binds?: string[] };
 
-vi.mock("../../agents/sandbox/registry.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../agents/sandbox/registry.js")>()),
-  readRegisteredSandboxRuntimeIds: hoisted.readRegisteredSandboxRuntimeIds,
-  readRegistryEntry: hoisted.readRegistryEntry,
-}));
-
-vi.mock("./open-path.js", async () => {
-  const actual = await vi.importActual<typeof import("./open-path.js")>("./open-path.js");
-  return { ...actual, execOpenPath: hoisted.execOpenPath };
-});
-
-vi.mock("../../agents/agent-scope.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../agents/agent-scope.js")>()),
-  resolveAgentWorkspaceDir: hoisted.resolveAgentWorkspaceDir,
-  resolveDefaultAgentId: hoisted.resolveDefaultAgentId,
-}));
-
-vi.mock("../session-utils.js", async (original) => ({
-  ...(await original<typeof import("../session-utils.js")>()),
-  loadIncognitoGatewaySessionEntryReadOnly: hoisted.loadSessionEntry,
-}));
-
-vi.mock("../session-utils-store-worker.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../session-utils-store-worker.js")>()),
-  loadGatewaySessionEntryReadOnlyInWorker: async (params: { key: string; agentId?: string }) =>
-    hoisted.loadSessionEntry(params.key, { agentId: params.agentId }),
-}));
-
-// mock-isolation: file browsing reads only the visible transcript pages the test supplies.
-vi.mock("../../config/sessions/session-transcript-delta-read.js", () => ({
-  withSessionTranscriptDeltaReader: ((scope, consume) =>
-    consume({
-      visible: async (limits) => hoisted.readDelta(scope, limits),
-      raw: async () => {
-        throw new Error("File browsing must consume visible transcript pages");
-      },
-    })) satisfies typeof withSessionTranscriptDeltaReader,
-}));
-
-const invokeSessionFilesHandler = createSessionFilesHandlerInvoker(sessionsFilesHandlers);
-const mockVisibleMessages = createVisibleMessagesMock(hoisted.readDelta);
-
-/** Re-points the session entry at a sandboxed agent; binds are operator mounts. */
-function useSandboxedSession(
-  workspaceRoot: string,
-  opts: { binds?: string[]; mode?: string; canonicalKey?: string } = {},
-): void {
-  const { binds, mode = "all", canonicalKey = "agent:main:main" } = opts;
-  hoisted.loadSessionEntry.mockReturnValue({
-    agentId: "main",
-    canonicalKey,
-    cfg: {
-      agents: {
-        defaults: {
-          sandbox: {
-            mode,
-            workspaceAccess: "rw",
-            ...(binds ? { docker: { binds } } : {}),
-          },
+it("serves sandbox container paths through the recorded mount table", async () => {
+  await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+    const root = state.workspaceDir;
+    writeWorkspaceFile(root, "src/readme.md", "# Read me\n");
+    writeWorkspaceFile(root, "ui/chat.ts", "export const chat = true;\n");
+    writeWorkspaceFile(root, "ui/vite.config.ts", "export default {};\n");
+    let cfg: OpenClawConfig = {};
+    const configure = (sandbox?: SandboxOptions) => {
+      cfg = {
+        agents: {
+          defaults: sandbox
+            ? {
+                sandbox: {
+                  mode: sandbox.mode ?? "all",
+                  workspaceAccess: "rw",
+                  workspaceRoot: state.path("sandboxes"),
+                  ...(sandbox.binds ? { docker: { binds: sandbox.binds } } : {}),
+                },
+              }
+            : {},
+          entries: { main: { workspace: root } },
         },
-      },
-    },
-    storePath: path.join(workspaceRoot, ".sessions.json"),
-    entry: {
-      sessionId: "sess-main",
-      sessionFile: "sess-main.jsonl",
-      spawnedCwd: workspaceRoot,
-    },
-  });
-}
+      };
+      setRuntimeConfigSnapshot(cfg);
+    };
+    // No container engine answers: previews must not depend on a live container.
+    vi.spyOn(engine, "execContainer").mockRejectedValue(new Error("No container engine"));
+    let sessionCount = 0;
+    const createSession = async (
+      sessionKey: string,
+      touched: Array<ReturnType<typeof assistantToolCall>> = [],
+    ) => {
+      const sessionId = `sandbox-paths-${String(++sessionCount)}`;
+      const scope = { agentId: "main", sessionKey, sessionId };
+      await createSessionEntryWithTranscript(scope, () => ({
+        ok: true,
+        entry: { sessionId, updatedAt: 1, spawnedCwd: root },
+      }));
+      const storePath = resolveOpenClawAgentSqlitePath({ agentId: "main" });
+      for (const message of touched) {
+        await appendTranscriptMessage({ ...scope, storePath }, { message });
+      }
+      return sessionKey;
+    };
+    using download = createSessionFileDownloadClient();
+    const context = createDirectChatContext({ getRuntimeConfig: () => cfg });
+    const request = async (operation: "list" | "get" | "set", params: Record<string, unknown>) => {
+      const method = `sessions.files.${operation}`;
+      const respond = vi.fn();
+      await handleGatewayRequest({
+        req: { type: "req", id: method, method, params },
+        client: download.client,
+        context,
+        respond,
+        isWebchatConnect: () => false,
+        extraHandlers: sessionsFilesHandlers,
+      });
+      return respond.mock.calls.map(([ok, payload, error]) => ({ ok, payload, error }));
+    };
+    const get = async (sessionKey: string, file: string) => {
+      const calls = await request("get", { sessionKey, path: file });
+      expect(calls[0]?.error).toBeUndefined();
+      return expectOkPayload(calls).file;
+    };
+    const notFound = async (sessionKey: string, file: string) =>
+      expect(expectError(await request("get", { sessionKey, path: file }))).toMatchObject({
+        details: { type: "session_file_not_found" },
+      });
 
-describe("sessions.files container paths", () => {
-  let workspaceRoot: string;
+    configure({});
+    const main = await createSession("agent:main:main");
 
-  beforeEach(() => {
-    workspaceRoot = prepareSessionFilesTest(hoisted, mockVisibleMessages);
-    // No registered container by default: the derived mapping serves these.
-    hoisted.readRegisteredSandboxRuntimeIds.mockResolvedValue([]);
-    hoisted.readRegistryEntry.mockResolvedValue(null);
-  });
-
-  afterEach(() => {
-    removeWorkspaceFixture(workspaceRoot);
-  });
-
-  it("previews a workspace file the agent named by its container path", async () => {
-    useSandboxedSession(workspaceRoot);
-
-    const payload = expectOkPayload(
-      await invokeSessionFilesHandler("sessions.files.get", {
-        sessionKey: "agent:main:main",
-        path: "/workspace/src/readme.md",
-      }),
-    );
-
-    expect(payload.file.content).toBe("# Read me\n");
-    expect(payload.file.workspacePath).toBe("src/readme.md");
-  });
-
-  it("follows a nested mount to its own host root instead of the workspace root", async () => {
-    // Both directories exist, so resolving the container prefix by string alone
-    // would serve the wrong file rather than fail.
-    writeWorkspaceFile(workspaceRoot, "exchange/note.md", "# Exchanged\n");
-    writeWorkspaceFile(workspaceRoot, "shared/note.md", "# Not the mount source\n");
-    useSandboxedSession(workspaceRoot, {
-      binds: [`${path.join(workspaceRoot, "exchange")}:/workspace/shared`],
+    // A workspace file the agent named by its container path, with no container
+    // registered (as right after a deploy recreates sandboxes).
+    expect(await get(main, "/workspace/src/readme.md")).toMatchObject({
+      content: "# Read me\n",
+      workspacePath: "src/readme.md",
     });
 
-    const payload = expectOkPayload(
-      await invokeSessionFilesHandler("sessions.files.get", {
-        sessionKey: "agent:main:main",
-        path: "/workspace/shared/note.md",
-      }),
-    );
-
-    expect(payload.file.content).toBe("# Exchanged\n");
-    expect(payload.file.workspacePath).toBe("exchange/note.md");
-  });
-
-  it("previews a file the agent recorded in the transcript by container path", async () => {
-    // The touched entry keeps the container spelling, so serving it needs the
-    // same translation an untouched path already gets.
-    mockVisibleMessages([assistantToolCall("read", { path: "/workspace/src/readme.md" })]);
-    useSandboxedSession(workspaceRoot);
-
-    const payload = expectOkPayload(
-      await invokeSessionFilesHandler("sessions.files.get", {
-        sessionKey: "agent:main:main",
-        path: "/workspace/src/readme.md",
-      }),
-    );
-
-    expect(payload.file.content).toBe("# Read me\n");
-    expect(payload.file.workspacePath).toBe("src/readme.md");
-  });
-
-  it("lists the container-path files the agent touched and marks them in the tree", async () => {
-    mockVisibleMessages([assistantToolCall("edit", { path: "/workspace/ui/chat.ts" })]);
-    useSandboxedSession(workspaceRoot);
-
-    const payload = expectOkPayload(
-      await invokeSessionFilesHandler("sessions.files.list", {
-        sessionKey: "agent:main:main",
-      }),
-    );
-
+    // A file the transcript recorded by container path previews and lists.
+    const touched = await createSession("agent:main:touched", [
+      assistantToolCall("read", { path: "/workspace/src/readme.md" }),
+      assistantToolCall("edit", { path: "/workspace/ui/chat.ts" }),
+    ]);
+    expect(await get(touched, "/workspace/src/readme.md")).toMatchObject({
+      content: "# Read me\n",
+      workspacePath: "src/readme.md",
+    });
+    const listed = expectOkPayload(await request("list", { sessionKey: touched }));
     expect(
-      payload.files.map((file: { workspacePath?: string; missing?: boolean }) => [
+      listed.files.map((file: { workspacePath?: string; missing?: boolean }) => [
         file.workspacePath,
         file.missing,
       ]),
-    ).toEqual([["ui/chat.ts", false]]);
+    ).toEqual([
+      ["ui/chat.ts", false],
+      ["src/readme.md", false],
+    ]);
     expect(
-      payload.browser?.entries.find((entry: { path: string }) => entry.path === "ui"),
+      listed.browser?.entries.find((entry: { path: string }) => entry.path === "ui"),
     ).toMatchObject({ sessionKind: "modified" });
-  });
 
-  it("browses the directory a revealed container path points at", async () => {
-    useSandboxedSession(workspaceRoot);
-
-    const payload = expectOkPayload(
-      await invokeSessionFilesHandler("sessions.files.list", {
-        sessionKey: "agent:main:main",
-        path: "/workspace/src",
-      }),
+    // Browsing the directory a revealed container path points at.
+    const browsed = expectOkPayload(
+      await request("list", { sessionKey: main, path: "/workspace/src" }),
     );
-
-    expect(payload.browser?.path).toBe("src");
-    expect(payload.browser?.entries.map((entry: { path: string }) => entry.path)).toContain(
+    expect(browsed.browser?.path).toBe("src");
+    expect(browsed.browser?.entries.map((entry: { path: string }) => entry.path)).toContain(
       "src/readme.md",
     );
-  });
 
-  it("saves a file opened by container path back to the same host file", async () => {
-    useSandboxedSession(workspaceRoot);
-
-    const payload = expectOkPayload(
-      await invokeSessionFilesHandler("sessions.files.set", {
-        sessionKey: "agent:main:main",
+    // Saving a file opened by container path writes the same host file.
+    const saved = expectOkPayload(
+      await request("set", {
+        sessionKey: main,
         path: "/workspace/ui/vite.config.ts",
         content: "export default { sandbox: true };\n",
         expectedHash: hashContent("export default {};\n"),
       }),
     );
-
-    expect(fs.readFileSync(path.join(workspaceRoot, "ui/vite.config.ts"), "utf8")).toBe(
+    expect(saved.file.workspacePath).toBe("ui/vite.config.ts");
+    expect(fs.readFileSync(path.join(root, "ui/vite.config.ts"), "utf8")).toBe(
       "export default { sandbox: true };\n",
     );
-    expect(payload.file.workspacePath).toBe("ui/vite.config.ts");
-  });
 
-  it("refuses a container path that no mount maps into this workspace", async () => {
-    useSandboxedSession(workspaceRoot);
+    // A container path no mount maps into this workspace stays refused.
+    await notFound(main, "/etc/hostname");
 
-    const error = expectError(
-      await invokeSessionFilesHandler("sessions.files.get", {
-        sessionKey: "agent:main:main",
-        path: "/etc/hostname",
-      }),
-    );
-
-    expect(error).toMatchObject({ details: { type: "session_file_not_found" } });
-  });
-
-  it("leaves container paths unresolved for a non-main session that runs on the host", async () => {
-    // "non-main" sandboxes every session except the agent's own main one, where
-    // /workspace/... is a literal host path rather than a container path.
-    useSandboxedSession(workspaceRoot, { mode: "non-main" });
-
-    const error = expectError(
-      await invokeSessionFilesHandler("sessions.files.get", {
-        sessionKey: "agent:main:main",
-        path: "/workspace/src/readme.md",
-      }),
-    );
-
-    expect(error).toMatchObject({ details: { type: "session_file_not_found" } });
-  });
-
-  it("still translates for a non-main session that is sandboxed", async () => {
-    useSandboxedSession(workspaceRoot, {
-      mode: "non-main",
-      canonicalKey: "agent:main:sidequest",
+    // A nested mount resolves to its own host root, not the workspace prefix.
+    // Both directories exist, so a string strip would serve the wrong file.
+    writeWorkspaceFile(root, "exchange/note.md", "# Exchanged\n");
+    writeWorkspaceFile(root, "shared/note.md", "# Not the mount source\n");
+    configure({ binds: [`${path.join(root, "exchange")}:/workspace/shared`] });
+    expect(await get(main, "/workspace/shared/note.md")).toMatchObject({
+      content: "# Exchanged\n",
+      workspacePath: "exchange/note.md",
     });
 
-    const payload = expectOkPayload(
-      await invokeSessionFilesHandler("sessions.files.get", {
-        sessionKey: "agent:main:sidequest",
-        path: "/workspace/src/readme.md",
-      }),
-    );
-
-    expect(payload.file.workspacePath).toBe("src/readme.md");
-  });
-
-  it("prefers the container's recorded mapping over one derived from config", async () => {
-    // The container still mounts `old` at /workspace/shared while config now
-    // names `new`. Both resolve inside the root, so deriving would serve a real
-    // but wrong file rather than fail.
-    writeWorkspaceFile(workspaceRoot, "old/note.md", "# From the live container\n");
-    writeWorkspaceFile(workspaceRoot, "new/note.md", "# From stale config\n");
-    useSandboxedSession(workspaceRoot, {
-      binds: [`${path.join(workspaceRoot, "new")}:/workspace/shared`],
+    // The registered container's recorded mounts win over config that has
+    // moved on: config now names `exchange`, the container still mounts `shared`.
+    // Its engine cannot be inspected, so live backing proof is unavailable.
+    const layout = resolveSandboxWorkspaceLayoutPaths({
+      cfg: resolveSandboxConfigForAgent(cfg, "main"),
+      rawSessionKey: main,
+      agentId: "main",
+      workspaceDir: root,
     });
-    hoisted.readRegisteredSandboxRuntimeIds.mockResolvedValue(["openclaw-sbx-workspace-live"]);
-    hoisted.readRegistryEntry.mockResolvedValue({
-      containerName: "openclaw-sbx-workspace-live",
+    await updateRegistry({
+      containerName: "openclaw-sbx-recorded",
+      backendId: "docker",
+      sessionKey: layout.scopeKey,
+      workspaceDir: root,
+      image: "fixture",
+      createdAtMs: 1,
+      lastUsedAtMs: 1,
       mounts: [
-        { hostPath: workspaceRoot, containerPath: "/workspace" },
-        { hostPath: path.join(workspaceRoot, "old"), containerPath: "/workspace/shared" },
+        { hostPath: root, containerPath: "/workspace" },
+        { hostPath: path.join(root, "shared"), containerPath: "/workspace/shared" },
       ],
     });
+    expect(await get(main, "/workspace/shared/note.md")).toMatchObject({
+      content: "# Not the mount source\n",
+      workspacePath: "shared/note.md",
+    });
+    // A deploy removes the container; the mapping derives from config again.
+    await removeRegistryEntry("openclaw-sbx-recorded");
 
-    const payload = expectOkPayload(
-      await invokeSessionFilesHandler("sessions.files.get", {
-        sessionKey: "agent:main:main",
-        path: "/workspace/shared/note.md",
-      }),
-    );
+    // Custom bind sources are daemon-host paths and are never served.
+    const bindRoot = state.path("bind-source");
+    writeWorkspaceFile(bindRoot, "note.md", "# Daemon host\n");
+    configure({ binds: [`${bindRoot}:/data:ro`] });
+    const unregistered = await createSession("agent:main:unregistered");
+    await notFound(unregistered, "/data/note.md");
 
-    expect(payload.file.content).toBe("# From the live container\n");
-    expect(payload.file.workspacePath).toBe("old/note.md");
-  });
-
-  it("serves materialized skills mounted from outside the session root read-only", async () => {
-    // Materialized skills live under the sandbox state dir and are mounted over
-    // an empty scaffold inside the workspace, so the session root alone only
-    // finds the empty mountpoint. No container is registered (as right after a
-    // deploy recreates sandboxes), so the derived mapping must name the same
-    // skills workspace the runtime would mount.
-    useSandboxedSession(workspaceRoot);
-    const cfg = hoisted.loadSessionEntry().cfg;
+    // Materialized skills live under the sandbox state dir, outside the session
+    // root; the derived mapping names the skills workspace the runtime mounts.
+    configure({});
+    const skillsKey = await createSession("agent:main:skills");
     const { skillsWorkspaceDir } = resolveSandboxWorkspaceLayoutPaths({
       cfg: resolveSandboxConfigForAgent(cfg, "main"),
-      rawSessionKey: "agent:main:main",
+      rawSessionKey: skillsKey,
       agentId: "main",
-      workspaceDir: workspaceRoot,
+      workspaceDir: root,
     });
-    try {
-      writeWorkspaceFile(skillsWorkspaceDir, "skills/publish/SKILL.md", "# Publish\n");
-      fs.mkdirSync(path.join(workspaceRoot, ".openclaw/sandbox-skills/skills"), {
-        recursive: true,
-      });
-      const skillPath = "/workspace/.openclaw/sandbox-skills/skills/publish/SKILL.md";
-      mockVisibleMessages([assistantToolCall("read", { path: skillPath })]);
+    writeWorkspaceFile(skillsWorkspaceDir, "skills/publish/SKILL.md", "# Publish\n");
+    fs.mkdirSync(path.join(root, ".openclaw/sandbox-skills/skills"), { recursive: true });
+    const skillPath = "/workspace/.openclaw/sandbox-skills/skills/publish/SKILL.md";
+    const skill = await get(skillsKey, skillPath);
+    expect(skill).toMatchObject({ path: skillPath, content: "# Publish\n" });
+    expect(skill.hash).toBeUndefined();
+    expect(skill.workspacePath).toBeUndefined();
 
-      const payload = expectOkPayload(
-        await invokeSessionFilesHandler("sessions.files.get", {
-          sessionKey: "agent:main:main",
-          path: skillPath,
-        }),
-      );
+    // "non-main" runs the agent's own main session on the host, where
+    // /workspace/... is a literal host path; other sessions stay sandboxed.
+    configure({ mode: "non-main" });
+    await notFound(main, "/workspace/src/readme.md");
+    const sidequest = await createSession("agent:main:sidequest");
+    expect((await get(sidequest, "/workspace/src/readme.md")).workspacePath).toBe("src/readme.md");
 
-      expect(payload.file).toMatchObject({ path: skillPath, content: "# Publish\n" });
-      expect(payload.file.hash).toBeUndefined();
-      expect(payload.file.workspacePath).toBeUndefined();
-    } finally {
-      fs.rmSync(path.dirname(path.dirname(skillsWorkspaceDir)), { recursive: true, force: true });
-    }
-  });
-
-  it("does not serve a custom bind outside the session root", async () => {
-    // Custom bind sources are daemon-host paths; a same-named Gateway-local
-    // directory is not guaranteed to be what the container sees.
-    const bindRoot = fs.mkdtempSync(path.join(path.dirname(workspaceRoot), "openclaw-bind-"));
-    try {
-      writeWorkspaceFile(bindRoot, "note.md", "# Daemon host\n");
-      useSandboxedSession(workspaceRoot, { binds: [`${bindRoot}:/data:ro`] });
-
-      const error = expectError(
-        await invokeSessionFilesHandler("sessions.files.get", {
-          sessionKey: "agent:main:main",
-          path: "/data/note.md",
-        }),
-      );
-
-      expect(error).toMatchObject({ details: { type: "session_file_not_found" } });
-    } finally {
-      fs.rmSync(bindRoot, { recursive: true, force: true });
-    }
-  });
-
-  it("leaves container paths unresolved for an unsandboxed agent", async () => {
-    const error = expectError(
-      await invokeSessionFilesHandler("sessions.files.get", {
-        sessionKey: "agent:main:main",
-        path: "/workspace/src/readme.md",
-      }),
-    );
-
-    expect(error).toMatchObject({ details: { type: "session_file_not_found" } });
+    // An unsandboxed agent never translates.
+    configure();
+    await notFound(main, "/workspace/src/readme.md");
   });
 });

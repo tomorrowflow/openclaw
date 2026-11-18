@@ -6,7 +6,7 @@
 import { STREAM_ERROR_FALLBACK_TEXT } from "@openclaw/ai/internal/shared";
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
 import { stripHeartbeatToken } from "../auto-reply/heartbeat.js";
-import { isSilentReplyPayloadText, stripSilentToken } from "../auto-reply/tokens.js";
+import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import type { ReplyPayload } from "../auto-reply/types.js";
 import { escapeRegExp } from "../utils.js";
 
@@ -44,6 +44,18 @@ function isStreamErrorFallbackPlaceholderOnly(text: string): boolean {
   return remaining.length === 0;
 }
 
+// Token-only tails after whitespace or Markdown emphasis; a token glued to a
+// word stays visible text. 2026.11.5 dropped the shared trailing-token helper.
+const TRAILING_SILENT_TOKEN_RE = new RegExp(
+  `(?:^|\\s+|\\*+)${SILENT_REPLY_TOKEN}(?:\\s+${SILENT_REPLY_TOKEN})*\\s*$`,
+  "i",
+);
+
+function stripSilentToken(text: string): string {
+  const match = TRAILING_SILENT_TOKEN_RE.exec(text);
+  return (match ? text.slice(0, match.index) : text).trim();
+}
+
 const TRAILING_HEARTBEAT_NOTIFY_FALSE_RE = /(?:^|[\r\n])[ \t]*notify=false[ \t]*(?:\r?\n[ \t]*)*$/i;
 
 function stripTrailingHeartbeatNotifyFalse(text: string): {
@@ -64,7 +76,7 @@ export function normalizeHeartbeatReply(
 ): NormalizedHeartbeatDelivery {
   const rawText = typeof payload.text === "string" ? payload.text : "";
   const textForStrip = stripLeadingHeartbeatResponsePrefix(rawText, responsePrefix);
-  const isSilentReply = isSilentReplyPayloadText(textForStrip);
+  const isSilentReply = isSilentReplyText(textForStrip);
   // A silent token appended to prose is still the model's acknowledgement: the
   // token itself is never user-visible text, and the remainder is judged by the
   // same ack threshold as a trailing HEARTBEAT_OK.

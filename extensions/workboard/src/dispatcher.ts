@@ -3,12 +3,14 @@ import type {
   WorkboardExecution,
   WorkboardLaunchState,
 } from "@openclaw/workboard-contract";
+import { resolveSessionAgentId } from "openclaw/plugin-sdk/agent-scope-runtime";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import {
   isFutureDateTimestampMs,
   resolveNonNegativeIntegerOption,
 } from "openclaw/plugin-sdk/number-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
+import { captureRuntimeConfigAsyncReader } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import {
   assertRestrictedWorkboardTarget,
   cleanupWorkboardCardWorktree,
@@ -432,6 +434,23 @@ async function runWorkboardDispatch(
             await assertRestrictedTarget(canonicalSourcePath);
           }
         }
+      }
+      const { getSessionEntryAsync, resolveStorePath } =
+        await import("openclaw/plugin-sdk/session-store-runtime");
+      const config = await captureRuntimeConfigAsyncReader({ assertCurrent: assertOwnerCurrent })();
+      const agentId = resolveSessionAgentId({ config, sessionKey });
+      const worker = await getSessionEntryAsync({
+        sessionKey,
+        agentId,
+        storePath: resolveStorePath(config.session?.store, { agentId }),
+      });
+      assertOwnerCurrent?.();
+      if (worker?.archivedAt !== undefined) {
+        const message = `Worker session "${sessionKey}" is archived. Run openclaw sessions delete ${sessionKey} so the next dispatch starts a fresh worker, or restore the session.`;
+        await params.store
+          .addWorkerLog(card.id, { level: "warning", message, sessionKey })
+          .catch(() => undefined);
+        throw new Error(message);
       }
     } catch (error) {
       // A broader caller may retry a host-authorized card; it must never

@@ -1,12 +1,10 @@
 /** @jsxImportSource @solidjs/web */
 import { For, Show } from "solid-js";
 import { t } from "../../i18n/index.ts";
-import {
-  getWorkboardState,
-  recordWorkboardVisualCheck,
-  type WorkboardCard,
-  type WorkboardUiState,
-} from "../../lib/workboard/index.ts";
+import { createElementRefs } from "../../lib/element-refs.ts";
+import { recordWorkboardVisualCheck } from "../../lib/workboard/mutations.ts";
+import { getWorkboardState } from "../../lib/workboard/runtime.ts";
+import type { WorkboardCard, WorkboardUiState } from "../../lib/workboard/types.ts";
 import { ChangesPanel, hasCardChanges } from "./view-card-changes.tsx";
 import { GrillingPanel } from "./view-card-grilling.tsx";
 import { PreviewPanel } from "./view-card-preview.tsx";
@@ -22,6 +20,7 @@ export function DetailTabs(props: {
   activeTab: DetailTabId;
   onSelect: (tab: DetailTabId, target: EventTarget | null) => void;
 }) {
+  const tabButtons = createElementRefs<HTMLButtonElement>();
   return (
     <div
       class="workboard-detail__tabs"
@@ -47,8 +46,7 @@ export function DetailTabs(props: {
         }
         event.preventDefault();
         props.onSelect(nextTab.id, event.currentTarget);
-        const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=tab]");
-        buttons[next]?.focus();
+        tabButtons.get(nextTab.id)?.focus();
       }}
     >
       <For each={props.tabs} keyed={(tab) => tab.id}>
@@ -56,6 +54,7 @@ export function DetailTabs(props: {
           <button
             type="button"
             role="tab"
+            ref={tabButtons.ref(() => tab().id)}
             id={`workboard-detail-tab-${tab().id}`}
             aria-controls={`workboard-detail-panel-${tab().id}`}
             aria-selected={props.activeTab === tab().id ? "true" : "false"}

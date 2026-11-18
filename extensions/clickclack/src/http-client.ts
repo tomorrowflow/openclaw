@@ -5,10 +5,7 @@ import {
   readProviderJsonResponse,
   readResponseTextLimited,
 } from "openclaw/plugin-sdk/provider-http";
-import {
-  fetchWithSsrFGuard,
-  ssrfPolicyFromHttpBaseUrlAllowedOrigin,
-} from "openclaw/plugin-sdk/ssrf-runtime";
+import { WebSocket } from "openclaw/plugin-sdk/websocket-runtime";
 import type {
   ClickClackBotCommand,
   ClickClackChannel,
@@ -18,7 +15,6 @@ import type {
   ClickClackUser,
   ClickClackWorkspace,
 } from "./types.js";
-import { WebSocket } from "./ws-runtime.js";
 
 type ClickClackUpload = {
   id: string;
@@ -52,14 +48,6 @@ function provenanceFields(provenance?: ClickClackMessageProvenance): Record<stri
   }
   return fields;
 }
-
-type ClientOptions = {
-  baseUrl: string;
-  token: string;
-  correlationId?: string;
-  fetch?: typeof fetch;
-  beforeRequest?: () => void;
-};
 
 type MessageCreateOptions = {
   provenance?: ClickClackMessageProvenance;
@@ -98,12 +86,6 @@ const CLICKCLACK_EPHEMERAL_REQUEST_TIMEOUT_MS = 15_000;
 const CLICKCLACK_MESSAGE_PAGE_LIMIT = 200;
 const CLICKCLACK_DISCUSSION_ROOT_PAGE_LIMIT = 8;
 const CLICKCLACK_DISCUSSION_THREAD_REQUEST_LIMIT = 24;
-
-type ClickClackMessagePage = {
-  messages: ClickClackMessage[];
-  oldest_seq: number;
-  has_older: boolean;
-};
 
 function compareMessages(left: ClickClackMessage, right: ClickClackMessage): number {
   return left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id);
@@ -152,9 +134,15 @@ export function normalizeClickClackCorrelationId(value: unknown): string | undef
   return normalized;
 }
 
-export function createClickClackClient(options: ClientOptions) {
+export function createClickClackClient(options: {
+  baseUrl: string;
+  token: string;
+  correlationId?: string;
+  fetch?: typeof fetch;
+  beforeRequest?: () => void;
+}) {
   const baseUrl = options.baseUrl.replace(/\/$/, "");
-  const ssrfPolicy = ssrfPolicyFromHttpBaseUrlAllowedOrigin(baseUrl);
+  const fetcher = options.fetch ?? fetch;
   const correlationId = normalizeClickClackCorrelationId(options.correlationId);
   const headers = {
     Authorization: `Bearer ${options.token}`,
@@ -176,56 +164,37 @@ export function createClickClackClient(options: ClientOptions) {
     if (init.body && !(init.body instanceof FormData)) {
       requestHeaders.set("Content-Type", "application/json");
     }
-    const controller =
-      requestOptions.timeoutMs !== undefined && !init.signal ? new AbortController() : undefined;
-    const timeout = controller
-      ? setTimeout(() => controller.abort(), requestOptions.timeoutMs)
-      : undefined;
-    try {
-      const { response, release } = await captureEffectAuthority().initiate(() =>
-        fetchWithSsrFGuard({
-          url: `${baseUrl}${path}`,
-          fetchImpl: options.fetch,
-          beforeRequest: options.beforeRequest,
-          init: {
-            ...init,
-            ...(controller ? { signal: controller.signal } : {}),
-            headers: requestHeaders,
-          },
-          policy: ssrfPolicy,
-          auditContext: "clickclack-api",
-        }),
+    const response = await captureEffectAuthority().initiate(() => {
+      options.beforeRequest?.();
+      return fetcher(`${baseUrl}${path}`, {
+        ...init,
+        ...(requestOptions.timeoutMs !== undefined && !init.signal
+          ? { signal: AbortSignal.timeout(requestOptions.timeoutMs) }
+          : {}),
+        headers: requestHeaders,
+      });
+    });
+    if (!response.ok) {
+      const detail = await readResponseTextLimited(response, CLICKCLACK_ERROR_BODY_LIMIT_BYTES);
+      // Remote error bodies are untrusted output; redact them even when the
+      // operator disables log redaction or overrides log-only patterns.
+      throw new ClickClackHttpError(
+        response.status,
+        redactToolPayloadText(detail),
+        response.headers,
       );
-      try {
-        if (!response.ok) {
-          const detail = await readResponseTextLimited(response, CLICKCLACK_ERROR_BODY_LIMIT_BYTES);
-          // Remote error bodies are untrusted output; redact them even when the
-          // operator disables log redaction or overrides log-only patterns.
-          throw new ClickClackHttpError(
-            response.status,
-            redactToolPayloadText(detail),
-            new Headers(response.headers),
-          );
-        }
-        if (requestOptions.responseMode === "none") {
-          try {
-            await response.body?.cancel();
-          } catch {
-            // A successful write does not depend on an optional response body.
-          }
-          return undefined as T;
-        }
-        return await readProviderJsonResponse<T>(response, "ClickClack response", {
-          maxBytes: CLICKCLACK_INBOUND_JSON_LIMIT_BYTES,
-        });
-      } finally {
-        await release();
-      }
-    } finally {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
     }
+    if (requestOptions.responseMode === "none") {
+      try {
+        await response.body?.cancel();
+      } catch {
+        // A successful write does not depend on an optional response body.
+      }
+      return undefined as T;
+    }
+    return await readProviderJsonResponse<T>(response, "ClickClack response", {
+      maxBytes: CLICKCLACK_INBOUND_JSON_LIMIT_BYTES,
+    });
   }
 
   async function requestObject<K extends keyof ResponseObjects>(
@@ -268,11 +237,13 @@ export function createClickClackClient(options: ClientOptions) {
     path: string,
     body: string,
     opts?: MessageCreateOptions,
+    activity?: { kind: "agent_commentary" | "agent_tool"; turnId?: string },
   ): Promise<ClickClackMessage> {
     return requestObject("message", path, {
       method: "POST",
       body: JSON.stringify({
         body,
+        ...(activity ? { kind: activity.kind, turn_id: activity.turnId } : {}),
         ...(opts?.quotedMessageId ? { quoted_message_id: opts.quotedMessageId } : {}),
         ...(opts?.nonce ? { nonce: opts.nonce } : {}),
         ...provenanceFields(opts?.provenance),
@@ -312,7 +283,7 @@ export function createClickClackClient(options: ClientOptions) {
   }
 
   return {
-    me: async (): Promise<ClickClackUser> => requestObject("user", "/api/me"),
+    me: (): Promise<ClickClackUser> => requestObject("user", "/api/me"),
     setBotCommands: async (
       commands: { command: string; description: string; args_hint?: string }[],
     ): Promise<ClickClackBotCommand[]> =>
@@ -320,7 +291,7 @@ export function createClickClackClient(options: ClientOptions) {
         method: "PUT",
         body: JSON.stringify({ commands }),
       }),
-    workspaces: async (): Promise<ClickClackWorkspace[]> =>
+    workspaces: (): Promise<ClickClackWorkspace[]> =>
       requestObject("workspaces", "/api/workspaces"),
     channels: async (workspaceId: string): Promise<ClickClackChannel[]> =>
       requestObject("channels", `/api/workspaces/${encodeURIComponent(workspaceId)}/channels`),
@@ -378,9 +349,11 @@ export function createClickClackClient(options: ClientOptions) {
         if (beforeSeq !== undefined) {
           query.set("before_seq", String(beforeSeq));
         }
-        const page = await request<ClickClackMessagePage>(
-          `/api/channels/${encodeURIComponent(channelId)}/messages?${query.toString()}`,
-        );
+        const page = await request<{
+          messages: ClickClackMessage[];
+          oldest_seq: number;
+          has_older: boolean;
+        }>(`/api/channels/${encodeURIComponent(channelId)}/messages?${query.toString()}`);
 
         for (const root of page.messages) {
           latest = keepLatestMessages([...latest, root], boundedLimit);
@@ -438,7 +411,7 @@ export function createClickClackClient(options: ClientOptions) {
       ),
     message: async (messageId: string): Promise<NonceObjects["message"]> =>
       requestObject("message", `/api/messages/${encodeURIComponent(messageId)}`),
-    findMessageByNonce: async (params: {
+    findMessageByNonce: (params: {
       workspaceId: string;
       nonce: string;
     }): Promise<NonceObjects["message"] | undefined> => findByNonce("message", params),
@@ -513,15 +486,7 @@ export function createClickClackClient(options: ClientOptions) {
       const path = params.channelId
         ? `/api/channels/${encodeURIComponent(params.channelId)}/messages`
         : `/api/dms/${encodeURIComponent(params.conversationId ?? "")}/messages`;
-      return requestObject("message", path, {
-        method: "POST",
-        body: JSON.stringify({
-          body: params.body,
-          kind: params.kind,
-          turn_id: params.turnId,
-          ...provenanceFields(params.provenance),
-        }),
-      });
+      return createMessage(path, params.body, { provenance: params.provenance }, params);
     },
     updateMessageBody: async (messageId: string, body: string): Promise<ClickClackMessage> =>
       requestObject("message", `/api/messages/${encodeURIComponent(messageId)}`, {

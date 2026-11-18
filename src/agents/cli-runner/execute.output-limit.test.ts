@@ -15,6 +15,7 @@ import { buildContext } from "./execute-events.tool-result-args.test-support.js"
 import { executePreparedCliRun as executePreparedCliRunImpl } from "./execute.js";
 import {
   createManagedRun,
+  createSuccessfulProcessExit,
   supervisorSpawnMock,
   wrapPreparedCliRunWithTestAdmission,
 } from "./execute.test-support.js";
@@ -66,14 +67,10 @@ describe("CLI stream-json output limit", () => {
       const waiting = createDeferred();
       const exited = createDeferred();
       const cancelledExit = {
+        ...createSuccessfulProcessExit(),
         reason: "manual-cancel" as const,
         exitCode: null,
         exitSignal: "SIGKILL" as const,
-        durationMs: 50,
-        stdout: "",
-        stderr: "",
-        timedOut: false,
-        noOutputTimedOut: false,
       };
       const managedRun = createManagedRun(cancelledExit);
       managedRun.wait.mockImplementation(async () => {
@@ -84,8 +81,8 @@ describe("CLI stream-json output limit", () => {
       managedRun.cancel.mockImplementation(() => exited.resolve());
       let spawnInput: SupervisorSpawnInput | undefined;
       const oversizedLine = "x".repeat(maxPendingLineChars + 1);
-      supervisorSpawnMock.mockImplementationOnce(async (...args: unknown[]) => {
-        spawnInput = args[0] as SupervisorSpawnInput;
+      supervisorSpawnMock.mockImplementationOnce(async (input) => {
+        spawnInput = input;
         if (when === "before") {
           spawnInput.onStdout?.(oversizedLine);
         }
