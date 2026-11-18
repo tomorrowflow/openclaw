@@ -130,7 +130,9 @@ const binding = await api.runtime.channel.bindings.bindOwned({
   thread archives; a reply reopens the thread and still reaches the plugin.
 - `idleTimeoutMs` sets the binding's inactivity window through the channel's
   lifecycle setter; `0` never expires. Absent keeps the channel's default,
-  after which the channel may post its expiry notice.
+  after which the channel may post its expiry notice. Discord never expires a
+  plugin-owned thread: its owner decides when the thread ends.
+- The binding is stored, so it survives a Gateway restart.
 - `data` comes back as `ctx.pluginBinding.data` in `inbound_claim`. Return
   `{ handled: true }` for every message in the thread: an unhandled message gets
   the channel's "did not handle" notice instead of normal routing.
