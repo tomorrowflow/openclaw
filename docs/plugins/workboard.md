@@ -2076,7 +2076,9 @@ board stays the record; the chat is a copy.
 - With `agentId`, that agent answers each of your replies in the thread. Workboard
   runs it in one session per card (`agent:<agentId>:workboard-thread:<cardId>`)
   with a short card summary and your unanswered messages, and shows the channel's
-  typing indicator meanwhile. Workboard records the agent's final reply as its
+  typing indicator meanwhile: through the bot account a route binding gives the
+  agent on that channel (`bindings[].match.accountId`), which needs to see the
+  channel, else through the feed's account. Workboard records the agent's final reply as its
   card comment, which the feed posts under its name; this works on a card
   another agent has claimed for its round. The agent acts on clear instructions
   with its own Workboard tools, moves a card to done only after an accept or

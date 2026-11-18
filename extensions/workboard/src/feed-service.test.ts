@@ -236,7 +236,10 @@ describe("workboard board feed", () => {
       openState: () => fakeState(),
       channel: fake.channel,
       subagent,
-      config: () => ({}),
+      // The agent's own bot account types; a webhook persona cannot.
+      config: () => ({
+        bindings: [{ agentId: "chef", match: { channel: "discord", accountId: "andri" } }],
+      }),
       now: () => clock.at,
     });
     await feed.start({ ...nudgeContext(vi.fn()), scheduler });
@@ -270,6 +273,10 @@ describe("workboard board feed", () => {
       expect(second?.message).not.toContain(
         "## The operator's messages to answer\n- operator: production",
       );
+      expect(fake.keepTyping.mock.calls.map(([call]) => call.accountId)).toEqual([
+        "andri",
+        "andri",
+      ]);
       expect(fake.keepTyping).toHaveBeenCalledWith(
         expect.objectContaining({ channel: "discord", to: "chan-1", threadId: "thread-1" }),
       );
@@ -279,12 +286,19 @@ describe("workboard board feed", () => {
         "thread-1 chef: Yes, I recorded the backup host too.",
       ]);
 
+      // The agent's bot cannot see the thread: the feed's bot types instead.
+      fake.keepTyping.mockClear();
+      fake.keepTyping.mockRejectedValueOnce(new Error("Missing Access"));
       subagent.waitForRun.mockResolvedValueOnce({ status: "timeout" });
       await reply("still there?");
       await runJob(answerJob);
       expect(fake.posts().at(-1)).toBe(
         "thread-1 Workboard: chef couldn't answer (no answer within 5 minutes). Your comment is saved on the card.",
       );
+      expect(fake.keepTyping.mock.calls.map(([call]) => call.accountId)).toEqual([
+        "andri",
+        undefined,
+      ]);
       expect(feed.health()).toMatchObject({ failures: 1 });
 
       await store.archive(card.id, true);

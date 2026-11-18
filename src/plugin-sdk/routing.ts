@@ -32,6 +32,7 @@ export {
 } from "../routing/session-key.js";
 export { resolveAccountEntry } from "../routing/account-lookup.js";
 export { listBoundAccountIds, resolveDefaultAgentBoundAccountId } from "../routing/bindings.js";
+export { resolveFirstBoundAccountId } from "../routing/bound-account-read.js";
 export {
   formatSetExplicitDefaultInstruction,
   formatSetExplicitDefaultToConfiguredInstruction,
