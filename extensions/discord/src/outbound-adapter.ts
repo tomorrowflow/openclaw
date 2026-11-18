@@ -79,11 +79,14 @@ async function maybeSendDiscordWebhookText(params: DiscordOutboundMessageContext
   if (!binding?.webhookId || !binding?.webhookToken) {
     return null;
   }
-  const username =
+  const name =
     normalizeOptionalString(params.identity?.name) ||
     normalizeOptionalString(binding.label) ||
     binding.agentId ||
     "";
+  // Webhooks have no per-message icon besides the avatar, so the agent emoji leads the name.
+  const emoji = normalizeOptionalString(params.identity?.emoji);
+  const username = name && emoji ? `${emoji} ${name}` : name;
   const { sendWebhookMessageDiscord } = await loadDiscordSendRuntime();
   return await sendWebhookMessageDiscord(params.text, {
     webhookId: binding.webhookId,
