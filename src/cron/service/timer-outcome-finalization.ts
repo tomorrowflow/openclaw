@@ -131,6 +131,12 @@ export async function finalizeCompletedCronRunOutcomes(
           if (quietTrigger) {
             eventContext = { ...eventContext, quietTrigger: true };
           }
+          if (outcome.admissionDeferredReason) {
+            eventContext = {
+              ...eventContext,
+              admissionDeferredReason: outcome.admissionDeferredReason,
+            };
+          }
           emit(
             state,
             cronRunResultEvent(plan.job, outcome),
