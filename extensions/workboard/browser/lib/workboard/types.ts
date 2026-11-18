@@ -1,5 +1,6 @@
 import type {
   WorkboardBoardSummary,
+  WorkboardCardKind,
   WorkboardOperatorCard,
   WorkboardPriority,
   WorkboardStatus,
@@ -81,6 +82,7 @@ export type WorkboardUiState = {
   query: string;
   searchOpen: boolean;
   priorityFilter: Set<WorkboardPriority>;
+  kindFilter: Set<WorkboardCardKind>;
   statusFilter: Set<WorkboardStatus>;
   attentionFilter: Set<WorkboardHealthKey>;
   donePeriod: "all" | "week";

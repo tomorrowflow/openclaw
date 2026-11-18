@@ -96,6 +96,17 @@ export function normalizeBoardMetadata(
   };
 }
 
+/** `null` or `""` clears the key; cards keep the IDs they were given. */
+function normalizeBoardKey(value: unknown): string | undefined {
+  if (value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value !== "string" || !/^[A-Z][A-Z0-9]{1,7}$/.test(value)) {
+    throw new Error("board key must be 2-8 capital letters or digits, starting with a letter.");
+  }
+  return value;
+}
+
 function normalizeOrchestration(
   value: unknown,
   fallback: WorkboardOrchestrationSettings | undefined,
@@ -122,6 +133,7 @@ function normalizeOrchestration(
     120,
     "orchestrator profile",
   );
+  const key = Object.hasOwn(record, "key") ? normalizeBoardKey(record.key) : fallback?.key;
   // Without a fallback the normalizer drops dispatcher-owned worktree state.
   const defaultTarget = Object.hasOwn(record, "defaultTarget")
     ? normalizeExecutionTarget(record.defaultTarget)
@@ -155,6 +167,7 @@ function normalizeOrchestration(
     ...(autoDecomposePerDispatch ? { autoDecomposePerDispatch } : {}),
     ...(defaultAssignee ? { defaultAssignee } : {}),
     ...(orchestratorProfile ? { orchestratorProfile } : {}),
+    ...(key ? { key } : {}),
     ...(defaultTarget ? { defaultTarget } : {}),
     ...(targetRoutes?.length ? { targetRoutes } : {}),
     ...(classRungs && Object.keys(classRungs).length ? { classRungs } : {}),

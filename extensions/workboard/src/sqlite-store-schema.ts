@@ -48,6 +48,27 @@ function ensureColumn(db: DatabaseSync, tableName: string, columnName: string, d
   db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
 }
 
+// Before card kinds, spec and prototype cards were told apart only by their
+// `class:spec` / `class:prototype` label. The labels stay; the kind is read
+// from them once.
+function migrateCardKindsFromClassLabels(db: DatabaseSync): void {
+  const migrationId = "card-kinds-from-class-labels";
+  if (
+    db.prepare("SELECT 1 AS found FROM workboard_schema_migrations WHERE id = ?").get(migrationId)
+  ) {
+    return;
+  }
+  const setKind = db.prepare(
+    `UPDATE workboard_cards SET kind = ? WHERE kind IS NULL AND id IN
+       (SELECT card_id FROM workboard_card_labels WHERE label = ?)`,
+  );
+  setKind.run("spec", "class:spec");
+  setKind.run("prototype", "class:prototype");
+  db.prepare(
+    "INSERT OR IGNORE INTO workboard_schema_migrations (id, applied_at) VALUES (?, ?)",
+  ).run(migrationId, Date.now());
+}
+
 function ensureWorkboardSchema(db: DatabaseSync): void {
   if (getSqliteDatabaseAdmission(db, schemaAdmission)) {
     return;
@@ -58,6 +79,10 @@ function ensureWorkboardSchema(db: DatabaseSync): void {
   ensureColumn(db, "workboard_boards", "sessions_spec", "sessions_spec TEXT");
   ensureColumn(db, "workboard_card_comments", "source", "source TEXT");
   ensureColumn(db, "workboard_card_attempts", "context_tokens", "context_tokens INTEGER");
+  ensureColumn(db, "workboard_cards", "kind", "kind TEXT");
+  ensureColumn(db, "workboard_cards", "release", "release INTEGER");
+  ensureColumn(db, "workboard_cards", "seq", "seq INTEGER");
+  migrateCardKindsFromClassLabels(db);
   const migrationId = `schema-${SCHEMA_VERSION}`;
   const current = db
     .prepare("SELECT 1 AS found FROM workboard_schema_migrations WHERE id = ?")

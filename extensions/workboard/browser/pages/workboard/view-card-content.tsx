@@ -235,6 +235,19 @@ export function CardUpdatedTime(input: { updatedAt: number | undefined; now: num
     </Show>
   );
 }
+/** Tasks are the default and carry no badge; every other kind is named in its color. */
+export function CardKind(input: { card: WorkboardCard }) {
+  return (
+    <>
+      {input.card.kind ? (
+        <span class="workboard-card__kind" data-kind={input.card.kind}>
+          {t(`workboard.kind.${input.card.kind}`)}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 export function CardPriority(input: { card: WorkboardCard }) {
   return (
     <>
