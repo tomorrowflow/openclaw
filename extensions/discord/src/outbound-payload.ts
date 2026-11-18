@@ -367,11 +367,14 @@ export const discordOutbound: ChannelOutboundAdapter = {
               threadId,
             );
             if (binding?.webhookId && binding.webhookToken) {
-              const username =
+              const name =
                 normalizeOptionalString(ctx.identity?.name) ||
                 normalizeOptionalString(binding.label) ||
                 binding.agentId ||
                 "";
+              // Webhooks have no per-message icon besides the avatar, so the agent emoji leads the name.
+              const emoji = normalizeOptionalString(ctx.identity?.emoji);
+              const username = name && emoji ? `${emoji} ${name}` : name;
               const { sendWebhookMessageDiscord } = await loadDiscordSendRuntime();
               const webhookResult = await sendWebhookMessageDiscord(ctx.text, {
                 webhookId: binding.webhookId,

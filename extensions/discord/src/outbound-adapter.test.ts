@@ -200,6 +200,20 @@ it("uses allowFrom to disambiguate bare numeric DM delivery targets", () => {
   });
 });
 
+it("leads the webhook persona name with the agent emoji", async () => {
+  mockDiscordBoundThreadManager(hoisted);
+
+  await outbound.sendText?.({
+    ...sendContext("channel:parent-1"),
+    cfg: { channels: { discord: { token: "resolved-token" } } },
+    text: "hello",
+    threadId: "thread-1",
+    identity: { name: "Andri", emoji: "🍲" },
+  });
+
+  expect(mockObjectArg(sendWebhook, 0, 1).username).toBe("🍲 Andri");
+});
+
 it("uses webhook persona delivery for bound thread text without a native reply", async () => {
   mockDiscordBoundThreadManager(hoisted);
   const cfg = { channels: { discord: { token: "resolved-token" } } };

@@ -1,6 +1,11 @@
 import { observeDiagnosticsTimelinePhases } from "../../infra/diagnostics-timeline.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { AdmittedRunOperatorAuthority } from "../admitted-run-context.js";
-import { computeSandboxConfigHash } from "./config-hash.js";
+import {
+  computeSandboxConfigHash,
+  computeSandboxConfigHashParts,
+  diffSandboxConfigHashParts,
+} from "./config-hash.js";
 import { SANDBOX_DOCKER_CREATE_ARGS_EPOCH } from "./constants.js";
 import { allocateSandboxContainer } from "./container-allocation.js";
 import {
@@ -12,7 +17,11 @@ import {
   type SandboxContainerEngine,
   type SandboxContainerEngineTarget,
 } from "./container-engine.js";
-import { containerState, recordedPodmanContainerState } from "./container-inspect.js";
+import {
+  containerState,
+  readContainerLabel,
+  recordedPodmanContainerState,
+} from "./container-inspect.js";
 import {
   admitSandboxContainerSource,
   bindSandboxContainerSource,
@@ -80,7 +89,25 @@ export async function execDockerRaw(
   return await execContainerRaw(DOCKER_SANDBOX_ENGINE, args, opts);
 }
 
+const log = createSubsystemLogger("docker");
+
 const HOT_CONTAINER_WINDOW_MS = 5 * 60 * 1000;
+const CONFIG_HASH_PARTS_LABEL = "openclaw.configHashParts";
+
+function parseSandboxConfigHashParts(raw: string | null | undefined) {
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? // SAFETY: the label is written only by this module as a JSON string map.
+        (parsed as Record<string, string>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export async function execDocker(args: string[], opts?: ExecContainerRawOptions) {
   return await execContainer(DOCKER_SANDBOX_ENGINE, args, opts);
@@ -209,7 +236,7 @@ async function ensureSandboxContainerLifecycle(
     readOnlyResourceMounts: params.readOnlyResourceMounts,
   });
   phases.mark("attempt.setup.sandbox.backend.config_hash");
-  const genericConfigHash = computeSandboxConfigHash({
+  const hashInput = {
     docker: params.cfg.docker,
     dockerEnvPolicyEpoch: resolveDockerEnvPolicyEpoch(params.cfg.docker.env),
     workspaceAccess: params.cfg.workspaceAccess,
@@ -218,7 +245,9 @@ async function ensureSandboxContainerLifecycle(
     mountFormatVersion: SANDBOX_MOUNT_FORMAT_VERSION,
     createArgsEpoch: SANDBOX_DOCKER_CREATE_ARGS_EPOCH,
     managedMounts: mountPlan.binds,
-  });
+  };
+  const genericConfigHash = computeSandboxConfigHash(hashInput);
+  const configHashParts = computeSandboxConfigHashParts(hashInput);
   const expectedHash =
     engine.id === "podman"
       ? resolvePodmanSandboxConfigHash({
@@ -260,6 +289,12 @@ async function ensureSandboxContainerLifecycle(
         persistent ||
         (running &&
           (typeof lastUsedAtMs !== "number" || now - lastUsedAtMs < HOT_CONTAINER_WINDOW_MS));
+      const changed = diffSandboxConfigHashParts(
+        parseSandboxConfigHashParts(
+          await readContainerLabel(engine, containerName, CONFIG_HASH_PARTS_LABEL),
+        ),
+        configHashParts,
+      );
       if (isHot) {
         phases.mark("attempt.setup.sandbox.backend.mount_compare");
         const mounts = params.requireCurrentConfig
@@ -287,6 +322,9 @@ async function ensureSandboxContainerLifecycle(
           });
         }
       }
+      log.info(
+        `Sandbox config hash changed for ${containerName} (${isHot ? "recently used, kept" : "idle, replacing"}); changed inputs: ${changed ? changed.join(", ") || "none recorded" : "unknown (container predates hash parts)"}`,
+      );
       if (!isHot) {
         params.assertCurrent?.();
         phases.mark("attempt.setup.sandbox.backend.container_replace");
@@ -346,6 +384,7 @@ async function ensureSandboxContainerLifecycle(
         agentWorkspaceDir: params.agentWorkspaceDir,
         scopeKey: params.scopeKey,
         configHash: expectedHash,
+        labels: { [CONFIG_HASH_PARTS_LABEL]: JSON.stringify(configHashParts) },
         mountPlan,
         podmanRuntimeInfo,
         assertCurrent: params.assertCurrent,

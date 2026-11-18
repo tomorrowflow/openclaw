@@ -58,6 +58,48 @@ export function computeSandboxConfigHash(input: SandboxHashInput): string {
   return hashTextSha256(JSON.stringify(normalizeForHash(input)));
 }
 
+const CONFIG_HASH_PART_LENGTH = 12;
+
+/**
+ * Short per-input digests recorded beside the config hash, so a replacement can name
+ * which inputs changed. Docker settings and env split per key; values stay hashed.
+ */
+export function computeSandboxConfigHashParts(input: SandboxHashInput): Record<string, string> {
+  const normalized = normalizeForHash(input) as Record<string, unknown>;
+  const parts: Record<string, string> = {};
+  const add = (key: string, value: unknown) => {
+    parts[key] = hashTextSha256(JSON.stringify(value)).slice(0, CONFIG_HASH_PART_LENGTH);
+  };
+  for (const [key, value] of Object.entries(normalized)) {
+    if (key !== "docker" || !value || typeof value !== "object") {
+      add(key, value);
+      continue;
+    }
+    for (const [dockerKey, dockerValue] of Object.entries(value)) {
+      if (dockerKey === "env" && dockerValue && typeof dockerValue === "object") {
+        for (const [name, envValue] of Object.entries(dockerValue)) {
+          add(`docker.env.${name}`, envValue);
+        }
+      } else {
+        add(`docker.${dockerKey}`, dockerValue);
+      }
+    }
+  }
+  return parts;
+}
+
+/** Names the inputs whose digests differ; undefined when the previous parts are unknown. */
+export function diffSandboxConfigHashParts(
+  previous: Record<string, string> | undefined,
+  next: Record<string, string>,
+): string[] | undefined {
+  if (!previous) {
+    return undefined;
+  }
+  const keys = new Set([...Object.keys(previous), ...Object.keys(next)]);
+  return [...keys].filter((key) => previous[key] !== next[key]).toSorted();
+}
+
 /** Computes the browser-enabled sandbox container config hash. */
 export function computeSandboxBrowserConfigHash(input: SandboxBrowserHashInput): string {
   return computeSandboxConfigHash(input);

@@ -38,7 +38,7 @@ export async function readDockerContainerLabel(
   return await readContainerLabel(DOCKER_SANDBOX_ENGINE, containerName, label);
 }
 
-async function readContainerLabel(
+export async function readContainerLabel(
   engine: SandboxContainerEngine,
   containerName: string,
   label: string,
