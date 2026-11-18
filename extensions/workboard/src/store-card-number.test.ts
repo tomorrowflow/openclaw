@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { resolveRuntimeWorkerUrl } from "openclaw/plugin-sdk/process-runtime";
 import { describe, expect, it } from "vitest";
+import { NODE_TARGET } from "./node-ticket.test-support.js";
 import { workboardSqliteBackendEntrypoint } from "./sqlite-backend-entrypoint.test-support.js";
 import { WorkboardStore } from "./store.js";
 import { createWorkboardSqliteStores } from "./test/database-config.js";
@@ -78,6 +79,22 @@ describe("card numbers", () => {
     await expect(store.update(running.id, { kind: "task" })).rejects.toThrow(
       "fixed once it has started",
     );
+  });
+
+  it("routes a card by its kind as the label kind:<kind>", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const fable = { ...NODE_TARGET, model: "anthropic/claude-fable-5-2" };
+    await store.upsertBoard({
+      id: "lindra",
+      orchestration: {
+        defaultTarget: NODE_TARGET,
+        targetRoutes: [{ labels: ["kind:spec"], target: fable }],
+      },
+    });
+    const spec = await store.create({ title: "Spec", boardId: "lindra", kind: "spec" });
+    const task = await store.create({ title: "Task", boardId: "lindra" });
+    expect(spec.metadata?.automation?.target).toEqual(fable);
+    expect(task.metadata?.automation?.target).toEqual(NODE_TARGET);
   });
 
   it("refuses a malformed board key", async () => {

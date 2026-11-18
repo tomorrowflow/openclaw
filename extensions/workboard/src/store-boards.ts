@@ -32,7 +32,12 @@ import type {
   WorkboardWriteAuthority,
 } from "./persistence-types.js";
 import { changesPreviewSecrets, normalizeBoardMetadata } from "./store-board-normalizers.js";
-import { findWorkboardTargetRoute, workboardRouteTargets } from "./store-constants.js";
+import { normalizeCardKind } from "./store-card-number.js";
+import {
+  findWorkboardTargetRoute,
+  workboardRouteLabels,
+  workboardRouteTargets,
+} from "./store-constants.js";
 import type {
   WorkboardBoardInput,
   WorkboardLinkedCreateInput,
@@ -262,7 +267,10 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
     const agentId = requestedAgentId ?? orchestration?.defaultAssignee;
     const requestedAutomation = isRecord(input.metadata) ? input.metadata.automation : undefined;
     const workspace = automation?.workspace;
-    const labels = normalizeCappedStringList(input.labels, "labels");
+    const labels = workboardRouteLabels({
+      labels: normalizeCappedStringList(input.labels, "labels"),
+      kind: normalizeCardKind(input.kind),
+    });
     const target =
       (isRecord(requestedAutomation) && Object.hasOwn(requestedAutomation, "target")) ||
       (workspace && workspace.kind !== "scratch")

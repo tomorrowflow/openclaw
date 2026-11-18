@@ -61,7 +61,7 @@ export const DEFAULT_NODE_TICKET_CONCURRENCY = 2;
 /** The smart zone (draft D16): ~20% of a frontier context window. */
 export const SMART_ZONE_TOKENS = 150_000;
 
-type WorkboardOwnerSlotCard = Pick<WorkboardCard, "status" | "agentId"> & {
+type WorkboardOwnerSlotCard = Pick<WorkboardCard, "status" | "agentId" | "kind"> & {
   labels?: readonly string[];
   execution?: Pick<WorkboardExecution, "status">;
   metadata?: Pick<WorkboardMetadata, "claim" | "archivedAt"> & {
@@ -95,6 +95,14 @@ export type WorkboardNodeTicketRouteSlot = {
  * The route a card's labels select: the first one sharing any of them. Card
  * creation takes its target from it and a capped route counts its tickets by it.
  */
+/** A route matches a card's labels and its kind as `kind:<kind>`, so `kind:spec` routes specs. */
+export function workboardRouteLabels(card: {
+  labels?: readonly string[];
+  kind?: WorkboardCard["kind"];
+}): readonly string[] {
+  return card.kind ? [...(card.labels ?? []), `kind:${card.kind}`] : (card.labels ?? []);
+}
+
 export function findWorkboardTargetRoute(
   routes: readonly Pick<WorkboardTargetRoute, "labels">[] | undefined,
   labels: readonly string[],
@@ -239,7 +247,7 @@ export function workboardNodeTicketRoute(
 ): WorkboardNodeTicketRouteSlot | undefined {
   const target = card.metadata?.automation?.target;
   const routes = orchestration?.targetRoutes ?? [];
-  const index = findWorkboardTargetRoute(routes, card.labels ?? []);
+  const index = findWorkboardTargetRoute(routes, workboardRouteLabels(card));
   const route = routes[index];
   const pool = route ? workboardRouteTargets(route) : [];
   const own = target && pool.find((candidate) => candidate.nodeId === target.nodeId);
@@ -298,7 +306,7 @@ export function workboardSlotPlacement(
       route &&
       nodeId &&
       (card.metadata?.automation?.boardId ?? "default") === route.boardId &&
-      findWorkboardTargetRoute(route.routes, card.labels ?? []) === route.index
+      findWorkboardTargetRoute(route.routes, workboardRouteLabels(card)) === route.index
     ) {
       perNode.set(nodeId, (perNode.get(nodeId) ?? 0) + 1);
     }
