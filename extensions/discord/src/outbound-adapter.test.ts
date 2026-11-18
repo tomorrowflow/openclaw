@@ -122,6 +122,21 @@ describe("discordOutbound", () => {
     });
   });
 
+  it("leads the webhook persona name with the agent emoji", async () => {
+    mockDiscordBoundThreadManager(hoisted);
+
+    await discordOutbound.sendText?.({
+      cfg: { channels: { discord: { token: "resolved-token" } } },
+      to: "channel:parent-1",
+      text: "hello",
+      accountId: "default",
+      threadId: "thread-1",
+      identity: { name: "Andri", emoji: "🍲" },
+    });
+
+    expect(mockObjectArg(hoisted.sendWebhookMessageDiscordMock, 0, 1).username).toBe("🍲 Andri");
+  });
+
   it("falls back to bot send when Discord rejects the webhook send", async () => {
     mockDiscordBoundThreadManager(hoisted);
     hoisted.sendWebhookMessageDiscordMock.mockRejectedValueOnce(
