@@ -34,6 +34,7 @@ export function mockAgentPayloads(
       agentMeta: { sessionId: "s", provider: "p", model: "m" },
       terminalReply: prepared.terminalReply,
       finalAssistantVisibleText: prepared.text || undefined,
+      finalAssistantRawText: typeof last?.text === "string" ? last.text : undefined,
     },
     ...extra,
   });
