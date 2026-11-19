@@ -11,7 +11,7 @@ import { createWorkboardChangeEventService } from "./src/change-events.js";
 import { registerWorkboardCommand } from "./src/command.js";
 import { dispatchAndStartWorkboardCards } from "./src/dispatcher.js";
 import { createWorkboardFeedService } from "./src/feed-service.js";
-import type { WorkboardCardFeed } from "./src/feed.js";
+import { HELD_MERGE_NAMESPACE, type WorkboardCardFeed } from "./src/feed.js";
 import { createWorkboardHealthService } from "./src/health.js";
 import {
   readWorkboardLifecycleSessions,
@@ -140,6 +140,11 @@ export default definePluginEntry({
       gateway: api.runtime.gateway,
     });
     resourceServices.push(sessionsBoard);
+    const github = {
+      token: (repo: string) =>
+        getPreparedPluginSecretInput("workboard", `github.repos[${JSON.stringify(repo)}].token`)
+          .value,
+    };
     const readSessions: WorkboardLifecycleSessionReader = async (options) =>
       await readWorkboardLifecycleSessions(api.runtime.gateway, options);
     const nodeHandoffs = createNodeTicketHandoffs({
@@ -148,11 +153,7 @@ export default definePluginEntry({
       // Secret resolution only reads the snapshot; its SDK type predates DeepReadonly.
       config: () => api.runtime.config.current() as OpenClawConfig,
       readSessions,
-      github: {
-        token: (repo) =>
-          getPreparedPluginSecretInput("workboard", `github.repos[${JSON.stringify(repo)}].token`)
-            .value,
-      },
+      github,
       // Rework rounds (D56) and queued starts take the same exact start as
       // workboard.cards.start; node tickets need no Gateway workspace, so no
       // caller authority applies.
@@ -187,6 +188,7 @@ export default definePluginEntry({
       subagent: api.runtime.subagent,
       // Identity and send reads only read the snapshot; their SDK types predate DeepReadonly.
       config: () => api.runtime.config.current() as OpenClawConfig,
+      github,
       onOperatorComment: automationNudge.nudge,
     });
     resourceServices.push(feed);
@@ -232,6 +234,11 @@ export default definePluginEntry({
       api.registerService(service);
     }
     api.on("inbound_claim", (event, context) => feed.claim(event, context));
+    api.registerInteractiveHandler({
+      channel: "discord",
+      namespace: HELD_MERGE_NAMESPACE,
+      handler: (context) => feed.press(context),
+    });
     api.on("gateway_start", (_event, context) => lifecycleSync.onGatewayStart(context.abortSignal));
     api.on("gateway_stop", () => lifecycleSync.onGatewayStop());
     api.on("subagent_ended", (event) =>

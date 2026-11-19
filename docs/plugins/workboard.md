@@ -1431,7 +1431,8 @@ head's combined checks. Then:
 **Held paths (FAC-09):** a board's `orchestration.heldPaths`, set only through
 `workboard.boards.upsert`, names the one-way-door paths of its repository: a
 PR whose diff touches one is never auto-merged, whatever its class, and waits
-for you to merge it on GitHub. Before merging a candidate on such a board,
+for you to merge it on GitHub or approve it from the [board feed](#board-feed).
+Before merging a candidate on such a board,
 Workboard reads the PR's changed files (`GET /repos/{repo}/pulls/{number}/files`,
 paged; both sides of a rename and a deleted file count) and compares them
 with the list. Entries are repo-relative files or directories, stored with
@@ -1448,6 +1449,21 @@ meanwhile. A file list GitHub did not give whole (a failed read, more than
 and the next pass reads it again. A verifier pass, green checks, or a label
 change never clears a hold; only your own merge does, once the PR state sync
 sees the PR merged, and a rework round's new accepted head is read again.
+
+On a board with a Discord feed, the hold's post in the card's thread carries
+two buttons that only the feed's `operatorId` may press; anyone else gets a
+reply only they see, and nothing is recorded. **Approve merge** has Workboard
+merge the PR the way the auto-merge does, with `sha` set to the held
+`headCommit`. Right before merging it reads the card again: the PR must still
+be open and held at the head the button names. The merge records `state:
+"merged"`, `mergedAt`, and `mergeCommit` with a notice, without `autoMerged`:
+it is your merge, like one on GitHub, so the merge digest lists it as merged
+by hand and the regression watch follows it. **Keep holding** merges nothing.
+Either press records an operator comment on the card and replies in the
+thread with the outcome. A refused merge (the head moved, the PR is no longer
+open or held, or GitHub refused it) replies with the reason and leaves the
+hold in place; merge it on GitHub instead, or press again once the cause is
+fixed.
 
 ```json5
 {
@@ -1513,7 +1529,7 @@ built the round:
    grant the microphone and camera only to HTTPS pages), and reads the node's
    MagicDNS name from `tailscale status --self --json`. The card records
    `preview: {state: "up", url: "https://<node>.<tailnet>.ts.net:{port}", port,
-headCommit, nodeId}` on its node worktree, and operator reads carry it as
+   headCommit, nodeId}` on its node worktree, and operator reads carry it as
    `preview`; the card drawer's **Preview** tab links it. Node setup:
    [Review previews](/plugins/workboard-node-setup#review-previews).
 2. **Teardown:** when the card leaves review (done, todo, a rework round,
@@ -2097,7 +2113,8 @@ board stays the record; the chat is a copy.
 - From then on it posts each step from fixed templates, with no model calls:
   a start on a node, the round handed to the verifier, each verification
   verdict with its one-line summary, review verdicts, rework rounds, the PR
-  opened, held for held paths, and merged, the card blocked or labeled
+  opened, held for [held paths](#node-tickets) (again for each new held head),
+  and merged, the card blocked or labeled
   `needs:user`, done, and archived. Card comments are posted under their
   author: the agent, `operator`, or `Workboard` for its own notices. Tool
   output, logs, diffs, and transcripts are never posted.
@@ -2121,6 +2138,14 @@ board stays the record; the chat is a copy.
   time; replies sent meanwhile are answered together by the next turn. A turn that
   fails, or ends without a comment within 5 minutes, posts one line saying why and
   counts as a feed failure. The session is deleted when the card is archived.
+- On Discord a hold is posted with **Approve merge** and **Keep holding**
+  buttons for `operatorId` (see held paths under [Node tickets](#node-tickets)).
+  Discord takes buttons only from the bot or an application-owned webhook, so
+  this one post comes from the feed's bot account, not the `Workboard` persona.
+  The buttons stay usable for the account's
+  `channels.discord.agentComponents.ttlMs` (default 30 minutes, at most 24
+  hours); after that Discord says the component expired, and the PR is merged
+  on GitHub. Other channels get the hold as text.
 - Posting is best effort: a failed post is retried once, then counted in
   `workboard.health` `feed`, and never replayed.
 - On Discord the thread is a conversation binding owned by Workboard, which

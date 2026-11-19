@@ -34,6 +34,8 @@ export type WorkboardFeedFacts = {
     state?: WorkboardPullRequestState;
     autoMerged?: true;
     heldPaths?: string[];
+    /** The head the held-path wait was read at; the hold post's buttons name it. */
+    heldAt?: string;
   };
   verification?: FeedVerdict;
   crossVerification?: FeedVerdict;
@@ -72,7 +74,7 @@ type FeedEventFields = {
   };
   review: { round: number; verdict: WorkboardNodeReviewVerdict["verdict"] };
   pr_opened: { url: string };
-  pr_held: { paths: string[] };
+  pr_held: { paths: string[]; headCommit: string };
   pr_merged: { url: string; auto: boolean };
   rework: { round: number };
   needs_user: Record<never, never>;
@@ -93,14 +95,46 @@ export type FeedPersona =
   | { kind: "workboard" }
   | { kind: "operator" };
 
-export type FeedPost = { text: string; persona: FeedPersona; mentionOperator: boolean };
+/** A button under a post; `value` is the callback data the press hands back. */
+export type FeedButton = { label: string; value: string; style: "success" | "secondary" };
+
+export type FeedPost = {
+  text: string;
+  persona: FeedPersona;
+  mentionOperator: boolean;
+  buttons?: FeedButton[];
+};
 
 /** What a template needs beyond its event: the card and the board's verifiers. */
 export type FeedRenderContext = {
+  cardId: string;
   ref: string;
   agentId?: string;
   orchestration?: Pick<WorkboardOrchestrationSettings, "verifier" | "crossVerifier">;
 };
+
+/** The interactive namespace of the hold post's buttons. */
+export const HELD_MERGE_NAMESPACE = "workboard-held";
+
+type HeldMergeAction = "approve" | "hold";
+
+/**
+ * A button's callback data: the card and the head the hold was read at.
+ * It names what was pressed, never who may press it.
+ */
+function heldMergeCallback(action: HeldMergeAction, cardId: string, headCommit: string): string {
+  return `${HELD_MERGE_NAMESPACE}:${action}:${cardId}:${headCommit}`;
+}
+
+/** Reads a press's payload, the callback data after the namespace. */
+export function parseHeldMergePayload(
+  payload: string,
+): { action: HeldMergeAction; cardId: string; headCommit: string } | undefined {
+  const [action, cardId, headCommit, ...rest] = payload.split(":");
+  return (action === "approve" || action === "hold") && cardId && headCommit && !rest.length
+    ? { action, cardId, headCommit }
+    : undefined;
+}
 
 function oneLine(text: string, max: number): string {
   const line = text.replace(/\s+/gu, " ").trim();
@@ -137,6 +171,7 @@ export function collectFeedFacts(card: WorkboardCard): WorkboardFeedFacts {
           state: published.pullRequest?.state,
           autoMerged: published.pullRequest?.autoMerged,
           heldPaths: wait?.reason === "held_path" ? wait.paths : undefined,
+          heldAt: wait?.reason === "held_path" ? wait.headCommit : undefined,
         })
       : undefined,
     verification: feedVerdict(worktree?.verification),
@@ -180,8 +215,9 @@ export function diffFeedFacts(prev: WorkboardFeedFacts, next: WorkboardFeedFacts
   if (pr && pr.url !== prev.pullRequest?.url) {
     events.push({ kind: "pr_opened", url: pr.url });
   }
-  if (pr?.heldPaths && pr.heldPaths.join("\n") !== prev.pullRequest?.heldPaths?.join("\n")) {
-    events.push({ kind: "pr_held", paths: pr.heldPaths });
+  // A hold at a new head is a new hold: the buttons of the old post name the old head.
+  if (pr?.heldPaths && pr.heldAt && pr.heldAt !== prev.pullRequest?.heldAt) {
+    events.push({ kind: "pr_held", paths: pr.heldPaths, headCommit: pr.heldAt });
   }
   if (pr?.state === "merged" && prev.pullRequest?.state !== "merged") {
     events.push({ kind: "pr_merged", url: pr.url, auto: pr.autoMerged === true });
@@ -270,11 +306,24 @@ const TEMPLATES: Templates = {
   },
   review: (e) => post(WORKBOARD, `Round ${e.round} review: ${e.verdict}.`),
   pr_opened: (e) => post(WORKBOARD, `PR opened: ${quiet(e.url)}`),
-  pr_held: (e) =>
-    post(
+  pr_held: (e, ctx) => ({
+    ...post(
       WORKBOARD,
       `The PR waits for the operator's merge: it touches ${quiet(e.paths.join(", "))}`,
     ),
+    buttons: [
+      {
+        label: "Approve merge",
+        value: heldMergeCallback("approve", ctx.cardId, e.headCommit),
+        style: "success",
+      },
+      {
+        label: "Keep holding",
+        value: heldMergeCallback("hold", ctx.cardId, e.headCommit),
+        style: "secondary",
+      },
+    ],
+  }),
   pr_merged: (e) => post(WORKBOARD, `PR merged${e.auto ? " by Workboard" : ""}: ${quiet(e.url)}`),
   rework: (e, ctx) => post(WORKBOARD, `Rework round ${e.round} -> @${ctx.agentId ?? "dev"}`),
   needs_user: (_e, ctx) => post(WORKBOARD, `${ctx.ref} needs you.`, true),

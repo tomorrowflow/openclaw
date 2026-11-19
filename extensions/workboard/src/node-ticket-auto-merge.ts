@@ -254,7 +254,7 @@ function waitNotice(wait: WorkboardAutoMergeWaitCause): string {
  * next pass retries.
  */
 export async function runAutoMergeQueue(params: {
-  store: Pick<WorkboardStore, "recordAutoMerge" | "setAutoMergeWait">;
+  store: Pick<WorkboardStore, "recordMerge" | "setAutoMergeWait">;
   github: WorkboardGitHubAccess;
   cards: readonly WorkboardCard[];
   boards: ReadonlyArray<Pick<WorkboardBoardSummary, "id" | "orchestration">>;
@@ -377,11 +377,12 @@ export async function runAutoMergeQueue(params: {
           throw new Error(`GitHub merged #${candidate.number} without naming its merge commit`);
         }
         const mergedAt = params.now();
-        await params.store.recordAutoMerge(candidate.card.id, {
+        await params.store.recordMerge(candidate.card.id, {
           pullRequestUrl: candidate.url,
           mergedAt,
           mergeCommit,
           notice: `**Auto-merged** at rung c as ${mergeCommit.slice(0, 7)}: the agent accepted the round and the PR's checks passed. The regression watch follows it for 7 days.`,
+          autoMerged: true,
         });
         break;
       }
@@ -389,4 +390,89 @@ export async function runAutoMergeQueue(params: {
       params.warn(`workboard auto-merge failed for ${repo}: ${formatErrorMessage(error)}`);
     }
   }
+}
+
+/** The outcome of the operator's approval of a held PR; a refusal leaves the hold in place. */
+export type HeldMergeResult =
+  | { merged: true; mergeCommit?: string }
+  | { merged: false; reason: string };
+
+/**
+ * Merges a PR the auto-merge held for touching a held path, on the operator's
+ * approval, the way the auto-merge merges: the merge names the head the hold
+ * was read at, so a push since makes GitHub refuse it. The card is read
+ * again here, at the point of effect: it must still hold this PR open at
+ * that head. The merge is recorded as the operator's, like one on GitHub.
+ */
+export async function mergeHeldPullRequest(params: {
+  store: Pick<WorkboardStore, "get" | "recordMerge">;
+  github: WorkboardGitHubAccess;
+  cardId: string;
+  headCommit: string;
+  now: () => number;
+}): Promise<HeldMergeResult> {
+  const card = await params.store.get(params.cardId);
+  const target = card ? nodeTicketTarget(card) : undefined;
+  const handoff = target?.worktree?.handoff;
+  if (!target || handoff?.phase !== "published" || !handoff.pullRequest) {
+    return { merged: false, reason: "the card has no published PR." };
+  }
+  const { pullRequest } = handoff;
+  if (pullRequest.state !== "open") {
+    return {
+      merged: false,
+      reason: `the PR is ${pullRequest.state}, so there is nothing to merge.`,
+    };
+  }
+  const wait = pullRequest.autoMergeWait;
+  if (wait?.reason !== "held_path") {
+    return { merged: false, reason: "Workboard no longer holds this PR for a held path." };
+  }
+  if (wait.headCommit !== params.headCommit || handoff.headCommit !== params.headCommit) {
+    return {
+      merged: false,
+      reason:
+        "the PR's head changed since this post. The hold stays in place: use the newest hold post in this thread, or merge it on GitHub.",
+    };
+  }
+  const match = GITHUB_PULL_URL_PATTERN.exec(handoff.pullRequestUrl);
+  if (!match?.[1] || !match[2]) {
+    return { merged: false, reason: `${handoff.pullRequestUrl} is not a GitHub PR.` };
+  }
+  let mergeCommit: unknown;
+  try {
+    const { repo, token } = await githubRepo(params.github, target.hostRepoPath);
+    // A re-pointed origin must not merge in another repository.
+    if (match[1].toLowerCase() !== repo.toLowerCase()) {
+      return {
+        merged: false,
+        reason: `the host clone's origin is ${repo} now, not the PR's repository. The hold stays in place; merge it on GitHub.`,
+      };
+    }
+    const merged = await githubApi(
+      params.github,
+      token,
+      "PUT",
+      `/repos/${repo}/pulls/${match[2]}/merge`,
+      { merge_method: "merge", sha: params.headCommit },
+    );
+    mergeCommit = isRecord(merged) ? merged.sha : undefined;
+  } catch (error) {
+    return {
+      merged: false,
+      reason: `the merge failed (${formatErrorMessage(error)}). The hold stays in place; check the PR on GitHub, then press again or merge it there.`,
+    };
+  }
+  if (typeof mergeCommit !== "string" || !mergeCommit) {
+    // The PR state sync records this merge from GitHub's side on its next read.
+    return { merged: true };
+  }
+  await params.store.recordMerge(params.cardId, {
+    pullRequestUrl: handoff.pullRequestUrl,
+    mergedAt: params.now(),
+    mergeCommit,
+    notice: `**Merged** the held PR as ${mergeCommit.slice(0, 7)} on the operator's approval. The regression watch follows it for 7 days.`,
+    autoMerged: false,
+  });
+  return { merged: true, mergeCommit };
 }

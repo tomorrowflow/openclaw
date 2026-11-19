@@ -15,6 +15,7 @@ import type {
 } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginStateKeyedStore } from "openclaw/plugin-sdk/plugin-state-runtime";
 import { resolveFirstBoundAccountId } from "openclaw/plugin-sdk/routing";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawPluginService } from "../api.js";
 import {
   buildFeedAnswerMessage,
@@ -29,11 +30,15 @@ import {
   feedCardRef,
   feedCommentEvents,
   feedThreadName,
+  parseHeldMergePayload,
   renderFeedEvent,
+  type FeedButton,
   type FeedEvent,
   type FeedPersona,
   type WorkboardCardFeed,
 } from "./feed.js";
+import { mergeHeldPullRequest } from "./node-ticket-auto-merge.js";
+import type { WorkboardGitHubAccess } from "./node-ticket-publish.js";
 import { cardBoardId } from "./store-card-helpers.js";
 import type { WorkboardStore } from "./store.js";
 
@@ -43,7 +48,14 @@ const FEED_OPEN_RETRY_MS = 10 * 60_000;
 
 type FeedStore = Pick<
   WorkboardStore,
-  "ready" | "runOperation" | "subscribeChanges" | "list" | "listBoards" | "addComment" | "get"
+  | "ready"
+  | "runOperation"
+  | "subscribeChanges"
+  | "list"
+  | "listBoards"
+  | "addComment"
+  | "get"
+  | "recordMerge"
 >;
 
 type Scheduler = NonNullable<Parameters<OpenClawPluginService["start"]>[0]["scheduler"]>;
@@ -61,7 +73,34 @@ export type WorkboardFeedService = OpenClawPluginService & {
     ctx: PluginHookInboundClaimContext,
   ) => Promise<PluginHookInboundClaimResult | undefined>;
   health: () => WorkboardHealthFeed | undefined;
+  /** The Discord interactive handler for the hold post's buttons. */
+  press: (ctx: unknown) => Promise<{ handled: boolean }>;
 };
+
+/** What the feed reads from a Discord button press; the rest stays Discord's. */
+type HeldMergePress = {
+  senderId?: string;
+  payload: string;
+  reply: (params: { text: string; ephemeral?: boolean }) => Promise<void>;
+};
+
+function readPress(ctx: unknown): HeldMergePress | undefined {
+  if (!isRecord(ctx) || !isRecord(ctx.interaction) || !isRecord(ctx.respond)) {
+    return undefined;
+  }
+  const { payload } = ctx.interaction;
+  const { reply } = ctx.respond;
+  if (typeof payload !== "string" || typeof reply !== "function") {
+    return undefined;
+  }
+  return {
+    ...(typeof ctx.senderId === "string" ? { senderId: ctx.senderId } : {}),
+    payload,
+    reply: async (params) => {
+      await reply(params);
+    },
+  };
+}
 
 /**
  * Projects card steps into each feed board's chat channel, one thread per
@@ -92,6 +131,8 @@ export function createWorkboardFeedService(params: {
     "run" | "waitForRun" | "getSessionMessages" | "deleteSession"
   >;
   config: () => OpenClawConfig;
+  /** Merges a held PR on the operator's approval. */
+  github: WorkboardGitHubAccess;
   /** The nudge an operator comment from the Control UI gets. */
   onOperatorComment?: (input: { cards: readonly WorkboardCard[] }) => Promise<void>;
   now?: () => number;
@@ -185,12 +226,19 @@ export function createWorkboardFeedService(params: {
     board: FeedBoard,
   ) => {
     const rendered = renderFeedEvent(event, {
+      cardId: card.id,
       ref: feedCardRef(card),
       agentId: card.agentId,
       orchestration: board.orchestration,
     });
     const mention = rendered.mentionOperator && feed.operatorId ? `<@${feed.operatorId}> ` : "";
-    await postText(feed, threadId, `${mention}${rendered.text}`, rendered.persona);
+    await postText(
+      feed,
+      threadId,
+      `${mention}${rendered.text}`,
+      rendered.persona,
+      rendered.buttons,
+    );
   };
 
   const postText = async (
@@ -198,21 +246,52 @@ export function createWorkboardFeedService(params: {
     threadId: string,
     text: string,
     persona: FeedPersona,
+    buttons?: FeedButton[],
   ) => {
     const cfg = params.config();
     const attempt = async () => {
       const adapter = await channel.outbound.loadAdapter(feed.channel);
-      if (!adapter?.sendText) {
-        throw new Error(`Channel ${feed.channel} has no text sender for the Workboard feed.`);
-      }
-      await adapter.sendText({
+      const message = {
         cfg,
         to: feed.to,
         text,
         threadId,
         ...(feed.accountId ? { accountId: feed.accountId } : {}),
         identity: identity(cfg, persona),
-      });
+      };
+      // Only Discord presses reach the feed's handler. A message with buttons
+      // goes out as the feed's bot, not the webhook persona: Discord takes
+      // interactive components only from a bot or an application-owned webhook.
+      if (buttons && feed.channel === "discord" && adapter?.sendPayload) {
+        const payload = { text };
+        const presentation = {
+          blocks: [
+            {
+              type: "buttons" as const,
+              buttons: buttons.map((button) => ({
+                label: button.label,
+                style: button.style,
+                action: { type: "callback" as const, value: button.value },
+                // A refused or kept hold leaves the buttons for a later press.
+                reusable: true,
+              })),
+            },
+          ],
+        };
+        const rendered = await adapter.renderPresentation?.({
+          payload,
+          presentation,
+          ctx: { ...message, payload },
+        });
+        if (rendered) {
+          await adapter.sendPayload({ ...message, payload: rendered });
+          return;
+        }
+      }
+      if (!adapter?.sendText) {
+        throw new Error(`Channel ${feed.channel} has no text sender for the Workboard feed.`);
+      }
+      await adapter.sendText(message);
     };
     try {
       await attempt().catch(attempt);
@@ -448,6 +527,56 @@ export function createWorkboardFeedService(params: {
 
   const sync = () => serialize(pass);
 
+  /** Records the operator's comment as taken from the thread, so the feed does not post it back. */
+  const operatorComment = async (cardId: string, body: string) => {
+    const card = await store.addComment(cardId, { body }, undefined, "operator");
+    const comment = card.metadata?.comments?.at(-1);
+    const feed = (await loadFeeds()).get(cardId);
+    if (feed && comment) {
+      await record(cardId, {
+        ...feed,
+        claimedCommentIds: [...(feed.claimedCommentIds ?? []), comment.id],
+      });
+    }
+    await params.onOperatorComment?.({ cards: [card] });
+  };
+
+  /** The board feed's operator for the card, the only one who may press its buttons. */
+  const cardOperator = async (cardId: string) => {
+    const card = await store.get(cardId);
+    const board = card
+      ? (await store.listBoards()).boards.find((entry) => entry.id === cardBoardId(card))
+      : undefined;
+    return board?.orchestration?.feed?.operatorId;
+  };
+
+  /**
+   * The operator's press on a hold post. Keep holding records a comment; an
+   * approval merges, and the merge reads the card again right before it
+   * merges. Returns the outcome the thread sees.
+   */
+  const pressHeld = async (
+    held: NonNullable<ReturnType<typeof parseHeldMergePayload>>,
+  ): Promise<string> => {
+    const head = held.headCommit.slice(0, 7);
+    if (held.action === "hold") {
+      await operatorComment(held.cardId, `Kept holding the PR at ${head} from Discord.`);
+      return "Kept holding: the PR stays open. Merge it on GitHub, or press Approve merge, when it is ready.";
+    }
+    const result = await mergeHeldPullRequest({
+      store,
+      github: params.github,
+      cardId: held.cardId,
+      headCommit: held.headCommit,
+      now,
+    });
+    if (!result.merged) {
+      return `Not merged: ${result.reason}`;
+    }
+    await operatorComment(held.cardId, `Approved the held PR merge at ${head} from Discord.`);
+    return `Merged${result.mergeCommit ? ` as ${result.mergeCommit.slice(0, 7)}` : ""}. The regression watch follows it for 7 days.`;
+  };
+
   return {
     id: "workboard-feed",
     async start(ctx) {
@@ -496,6 +625,29 @@ export function createWorkboardFeedService(params: {
     },
     sync,
     health: () => health,
+    async press(ctx) {
+      const press = readPress(ctx);
+      const held = press ? parseHeldMergePayload(press.payload) : undefined;
+      if (!press || !held) {
+        return { handled: false };
+      }
+      const operatorId = await cardOperator(held.cardId);
+      if (!operatorId || press.senderId !== operatorId) {
+        await press.reply({
+          text: "Only this board's operator can approve or keep holding its PRs.",
+          ephemeral: true,
+        });
+        return { handled: true };
+      }
+      // Serialized with passes so the claimed comment lands before the next
+      // pass reads the card, and so two presses cannot both merge.
+      const outcome = await serialize(() => pressHeld(held)).catch(
+        (error: unknown) =>
+          `Workboard could not finish this (${formatErrorMessage(error)}). Check the card and the PR before pressing again.`,
+      );
+      await press.reply({ text: outcome, ephemeral: false });
+      return { handled: true };
+    },
     async claim(event, ctx) {
       const data = ctx.pluginBinding?.data;
       const cardId = data?.cardId;
@@ -523,16 +675,7 @@ export function createWorkboardFeedService(params: {
         if (event.senderId !== operatorId || !event.content.trim()) {
           return;
         }
-        const card = await store.addComment(cardId, { body: event.content }, undefined, "operator");
-        const comment = card.metadata?.comments?.at(-1);
-        const feed = (await loadFeeds()).get(cardId);
-        if (feed && comment) {
-          await record(cardId, {
-            ...feed,
-            claimedCommentIds: [...(feed.claimedCommentIds ?? []), comment.id],
-          });
-        }
-        await params.onOperatorComment?.({ cards: [card] });
+        await operatorComment(cardId, event.content);
         requestAnswer(cardId, boardFeed);
       });
       // Replies from anyone else stay in the thread; the card is the record.
