@@ -40,7 +40,7 @@ import {
   OPENAI_GPT_55_PRO_MODEL_ID as OPENAI_CODEX_GPT_55_PRO_MODEL_ID,
   OPENAI_GPT_56_VARIANT_MODEL_IDS as OPENAI_CODEX_GPT_56_MODEL_IDS,
   OPENAI_GPT_6_MODEL_IDS,
-  OPENAI_GPT_61_SOL_MODEL_ID,
+  OPENAI_CODEX_500K_CONTEXT_MODEL_IDS,
 } from "./model-route-contract.js";
 import manifest from "./openclaw.plugin.json" with { type: "json" };
 import { fetchOpenAIUsage, resolveOpenAIUsageAuth } from "./usage.js";
@@ -194,7 +194,7 @@ function resolveCodexForwardCompatModel(
       ...registeredModel,
       // Startup borrows Platform manifest rows; their API budget is not a subscription limit.
       // Same-route registry rows retain authored and account-reported budgets, including 272k.
-      ...(lower === OPENAI_GPT_61_SOL_MODEL_ID
+      ...(OPENAI_CODEX_500K_CONTEXT_MODEL_IDS.has(lower)
         ? {
             contextTokens:
               registeredModel &&
