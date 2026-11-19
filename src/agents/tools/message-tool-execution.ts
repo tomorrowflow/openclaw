@@ -81,6 +81,7 @@ import {
   hasSanitizedSendPayloadContent,
   sanitizeMessageToolVisiblePayload,
   type VisibleTextSuppressionReason,
+  VISIBLE_TEXT_SUPPRESSION_MESSAGES,
 } from "./message-tool-visible-content.js";
 import {
   recordPollVote,
@@ -333,10 +334,7 @@ function* createMessageToolSteps(
         return jsonResult({
           status: "suppressed",
           reason: suppressedVisiblePayloadReason,
-          message:
-            suppressedVisiblePayloadReason === "inbound_metadata_echo"
-              ? "Suppressed outbound message text because it matched inbound runtime metadata."
-              : "Suppressed outbound message text because it matched internal runtime context.",
+          message: VISIBLE_TEXT_SUPPRESSION_MESSAGES[suppressedVisiblePayloadReason],
         });
       }
       if (explicitTargetGuard) {
@@ -502,7 +500,7 @@ function* createMessageToolSteps(
         return jsonResult({
           status: "suppressed",
           reason: "poll_vote_echo" satisfies VisibleTextSuppressionReason,
-          message: "Suppressed outbound text because it only restated the poll vote just cast.",
+          message: VISIBLE_TEXT_SUPPRESSION_MESSAGES.poll_vote_echo,
         });
       }
 
