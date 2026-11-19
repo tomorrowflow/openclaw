@@ -4,8 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import type { WorkboardAutoMergeWaitRecord, WorkboardCard } from "@openclaw/workboard-contract";
+import type { PluginRuntime } from "openclaw/plugin-sdk/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { redactOperatorCard } from "./card-redaction.js";
+import { createWorkboardFeedService } from "./feed-service.js";
+import { collectFeedFacts, type WorkboardCardFeed } from "./feed.js";
 import { runAutoMergeQueue } from "./node-ticket-auto-merge.js";
 import { PULL_REQUEST_SYNC_INTERVAL_MS } from "./node-ticket-pr-state.js";
 import {
@@ -28,6 +31,11 @@ afterEach(() => {
 });
 
 const PR = "https://github.com/acme/app/pull/7";
+
+type LoadAdapter = PluginRuntime["channel"]["outbound"]["loadAdapter"];
+type Adapter = NonNullable<Awaited<ReturnType<LoadAdapter>>>;
+type SendText = NonNullable<Adapter["sendText"]>;
+type SendPayload = NonNullable<Adapter["sendPayload"]>;
 
 /** A docs ticket at `rung` an agent accepted, with its ready PR open on GitHub. */
 async function acceptedTicket(rung: "b" | "c") {
@@ -168,7 +176,7 @@ function acmeQueue() {
   roots.push(hostRepoPath);
   git(hostRepoPath, "init", "-q");
   git(hostRepoPath, "remote", "add", "origin", "git@github.com:acme/app.git");
-  const store = { recordAutoMerge: vi.fn(async () => undefined), setAutoMergeWait: vi.fn() };
+  const store = { recordMerge: vi.fn(async () => undefined), setAutoMergeWait: vi.fn() };
   const warn = vi.fn();
   /** An agent-accepted rung c card whose open PR `number` is on GitHub with green checks. */
   const candidate = (
@@ -446,5 +454,163 @@ describe("rung c auto-merge held paths", () => {
     expect(pullRequest).not.toHaveProperty("autoMerged");
     expect(pullRequest).not.toHaveProperty("autoMergeWait");
     expect(ticket.github.merges).toEqual([]);
+  });
+});
+
+describe("held PR buttons in the board feed", () => {
+  it("merges a held PR on the operator's Discord approval and refuses anyone else or a stale head", async () => {
+    const ticket = await acceptedTicket("c");
+    await ticket.store.upsertBoard({
+      id: "default",
+      orchestration: {
+        heldPaths: ["docs/"],
+        feed: { channel: "discord", to: "chan-1", operatorId: "op-1" },
+      },
+    });
+    // The card's thread was opened while the card was active.
+    const rows = new Map<string, WorkboardCardFeed>([
+      [
+        ticket.card.id,
+        {
+          threadId: "thread-1",
+          seen: collectFeedFacts(expectDefined(await ticket.store.get(ticket.card.id), "card")),
+        },
+      ],
+    ]);
+    const sendText = vi.fn<SendText>(async () => ({ channel: "discord", messageId: "m" }));
+    const sendPayload = vi.fn<SendPayload>(async () => ({ channel: "discord", messageId: "m" }));
+    const feed = createWorkboardFeedService({
+      store: ticket.store,
+      openState: () => ({
+        entries: async () =>
+          [...rows].map(([key, value]) => ({ key, value: structuredClone(value), createdAt: 0 })),
+        register: async (key, value) => {
+          rows.set(key, structuredClone(value));
+        },
+      }),
+      channel: {
+        outbound: {
+          loadAdapter: vi.fn<LoadAdapter>(async () => ({
+            deliveryMode: "direct",
+            sendText,
+            sendPayload,
+            renderPresentation: ({ payload, presentation }) => ({
+              ...payload,
+              channelData: { discord: { presentation } },
+            }),
+          })),
+          keepTyping: vi.fn(async () => {}),
+        },
+        bindings: { bindOwned: vi.fn() },
+      },
+      github: ticket.github.access,
+      config: () => ({}),
+      now: ticket.now,
+    });
+    ticket.github.queue.pullChecks.set(PR, "SUCCESS");
+    ticket.github.queue.pullFiles.set(PR, [{ filename: "docs/guide.md" }]);
+    await ticket.syncPass();
+    await feed.sync();
+
+    const [held] = sendPayload.mock.calls.map(([ctx]) => ctx);
+    expect(held).toMatchObject({
+      to: "chan-1",
+      threadId: "thread-1",
+      payload: { text: "The PR waits for the operator's merge: it touches docs/guide.md" },
+    });
+    const rendered = held?.payload.channelData?.discord as {
+      presentation: {
+        blocks: Array<{ buttons: Array<{ label: string; action: { value: string } }> }>;
+      };
+    };
+    const value = (label: string) =>
+      expectDefined(
+        rendered.presentation.blocks[0]?.buttons.find((button) => button.label === label),
+        label,
+      ).action.value;
+    expect(value("Approve merge")).toBe(
+      `workboard-held:approve:${ticket.card.id}:${ticket.accepted}`,
+    );
+    const press = async (senderId: string, data: string) => {
+      const reply = vi.fn(async (_params: { text: string; ephemeral?: boolean }) => {});
+      const result = await feed.press({
+        senderId,
+        interaction: { payload: data.slice("workboard-held:".length) },
+        respond: { reply },
+      });
+      expect(result).toEqual({ handled: true });
+      return reply.mock.calls.map(([params]) => params);
+    };
+    const comments = async () =>
+      (await ticket.store.get(ticket.card.id))?.metadata?.comments?.map((c) => [c.source, c.body]);
+    const before = await comments();
+
+    expect(await press("someone", value("Approve merge"))).toEqual([
+      { text: "Only this board's operator can approve or keep holding its PRs.", ephemeral: true },
+    ]);
+    expect(await comments()).toEqual(before);
+
+    expect(await press("op-1", value("Keep holding"))).toEqual([
+      {
+        text: "Kept holding: the PR stays open. Merge it on GitHub, or press Approve merge, when it is ready.",
+        ephemeral: false,
+      },
+    ]);
+    expect((await comments())?.at(-1)).toEqual([
+      "operator",
+      `Kept holding the PR at ${ticket.accepted.slice(0, 7)} from Discord.`,
+    ]);
+
+    // A button for another head, and a push GitHub sees before the card does.
+    const stale = `workboard-held:approve:${ticket.card.id}:${"e".repeat(40)}`;
+    expect((await press("op-1", stale))[0]?.text).toBe(
+      "Not merged: the PR's head changed since this post. The hold stays in place: use the newest hold post in this thread, or merge it on GitHub.",
+    );
+    ticket.github.queue.pullHeads.set(PR, "f".repeat(40));
+    expect((await press("op-1", value("Approve merge")))[0]?.text).toBe(
+      "Not merged: the merge failed (GitHub PUT /repos/acme/app/pulls/7/merge returned 409: Head branch was modified). The hold stays in place; check the PR on GitHub, then press again or merge it there.",
+    );
+    expect(ticket.github.merges).toEqual([]);
+    expect((await ticket.handoff())?.pullRequest?.autoMergeWait?.reason).toBe("held_path");
+
+    ticket.github.queue.pullHeads.set(PR, ticket.accepted);
+    const merged = await press("op-1", value("Approve merge"));
+    const merge = expectDefined(ticket.github.merges[0], "merge");
+    expect(merged).toEqual([
+      {
+        text: `Merged as ${merge.sha.slice(0, 7)}. The regression watch follows it for 7 days.`,
+        ephemeral: false,
+      },
+    ]);
+    expect(
+      ticket.github.requests.findLast((request) => request.url.endsWith("/pulls/7/merge")),
+    ).toMatchObject({
+      method: "PUT",
+      auth: "Bearer token-app",
+      body: { merge_method: "merge", sha: ticket.accepted },
+    });
+    // An operator merge, like one on GitHub: no auto-merge marker.
+    expect((await ticket.handoff())?.pullRequest).toEqual({
+      state: "merged",
+      checkedAt: expect.any(Number),
+      mergedAt: expect.any(Number),
+      mergeCommit: merge.sha,
+    });
+    const notice = `**Merged** the held PR as ${merge.sha.slice(0, 7)} on the operator's approval. The regression watch follows it for 7 days.`;
+    expect((await comments())?.slice(-2)).toEqual([
+      [undefined, notice],
+      ["operator", `Approved the held PR merge at ${ticket.accepted.slice(0, 7)} from Discord.`],
+    ]);
+
+    expect((await press("op-1", value("Approve merge")))[0]?.text).toBe(
+      "Not merged: the PR is merged, so there is nothing to merge.",
+    );
+    expect(ticket.github.merges).toHaveLength(1);
+
+    // The thread gets the merge and the notice; the operator's own comments are not echoed.
+    sendText.mockClear();
+    await feed.sync();
+    expect(sendText.mock.calls.map(([ctx]) => ctx.text)).toEqual([`PR merged: ${PR}`, notice]);
+    await feed.stop();
   });
 });

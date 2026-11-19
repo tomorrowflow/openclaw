@@ -176,13 +176,21 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
   }
 
   /**
-   * Records the rung c auto-merge of the published PR with its notice. The
-   * merge facts are the ones the PR state sync records for any merge, so the
-   * regression watch starts on it at once.
+   * Records Workboard's own merge of the published PR with its notice: the
+   * rung c auto-merge (`autoMerged`), or the operator's approval of a held PR,
+   * which stays an operator merge like one made on GitHub. The merge facts are
+   * the ones the PR state sync records for any merge, so the regression watch
+   * starts on it at once.
    */
-  async recordAutoMerge(
+  async recordMerge(
     id: string,
-    input: { pullRequestUrl: string; mergedAt: number; mergeCommit: string; notice: string },
+    input: {
+      pullRequestUrl: string;
+      mergedAt: number;
+      mergeCommit: string;
+      notice: string;
+      autoMerged: boolean;
+    },
   ): Promise<WorkboardCard | undefined> {
     const { card, updated } = await this.updatePullRequestFacts(
       id,
@@ -197,7 +205,7 @@ export class WorkboardNodeWorktreeStore extends WorkboardNotificationStore {
           checkedAt: input.mergedAt,
           mergedAt: input.mergedAt,
           mergeCommit: input.mergeCommit,
-          autoMerged: true,
+          ...(input.autoMerged ? { autoMerged: true as const } : {}),
         };
       },
       input.notice,

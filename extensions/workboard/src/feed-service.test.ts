@@ -97,6 +97,7 @@ describe("workboard board feed", () => {
         store,
         openState: () => state,
         channel: fake.channel,
+        github: { token: () => undefined },
         config: () => ({}),
         onOperatorComment: nudge.nudge,
       });
@@ -179,6 +180,7 @@ describe("workboard board feed", () => {
       store,
       openState: () => fakeState(),
       channel: fake.channel,
+      github: { token: () => undefined },
       config: () => ({}),
       now: () => clock.at,
     });
@@ -235,6 +237,7 @@ describe("workboard board feed", () => {
       store,
       openState: () => fakeState(),
       channel: fake.channel,
+      github: { token: () => undefined },
       subagent,
       // The agent's own bot account types; a webhook persona cannot.
       config: () => ({

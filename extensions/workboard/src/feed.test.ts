@@ -6,6 +6,8 @@ import {
   feedCommentEvents,
   feedCardRef,
   feedThreadName,
+  HELD_MERGE_NAMESPACE,
+  parseHeldMergePayload,
   renderFeedEvent,
   type FeedEvent,
   type WorkboardFeedFacts,
@@ -49,12 +51,32 @@ describe("diffFeedFacts", () => {
     [
       "PR published, held, and merged in one pass",
       {},
-      { pullRequest: { url: "u", state: "merged", autoMerged: true, heldPaths: ["infra/"] } },
+      {
+        pullRequest: {
+          url: "u",
+          state: "merged",
+          autoMerged: true,
+          heldPaths: ["infra/"],
+          heldAt: "h1",
+        },
+      },
       [
         { kind: "pr_opened", url: "u" },
-        { kind: "pr_held", paths: ["infra/"] },
+        { kind: "pr_held", paths: ["infra/"], headCommit: "h1" },
         { kind: "pr_merged", url: "u", auto: true },
       ],
+    ],
+    [
+      "held again at a new head",
+      { pullRequest: { url: "u", heldPaths: ["infra/"], heldAt: "h1" } },
+      { pullRequest: { url: "u", heldPaths: ["infra/"], heldAt: "h2" } },
+      [{ kind: "pr_held", paths: ["infra/"], headCommit: "h2" }],
+    ],
+    [
+      "still held at the same head",
+      { pullRequest: { url: "u", heldPaths: ["infra/"], heldAt: "h1" } },
+      { pullRequest: { url: "u", heldPaths: ["infra/"], heldAt: "h1" } },
+      [],
     ],
     ["rework round", { reworkRound: 1 }, { reworkRound: 2 }, [{ kind: "rework", round: 2 }]],
     ["needs:user added", {}, { needsUser: true }, [{ kind: "needs_user" }]],
@@ -141,6 +163,7 @@ describe("collectFeedFacts and feedCommentEvents", () => {
 
 describe("renderFeedEvent", () => {
   const ctx = {
+    cardId: "card-1",
     ref: "abc12345",
     agentId: "dev",
     orchestration: {
@@ -191,5 +214,21 @@ describe("renderFeedEvent", () => {
       text,
       mentionOperator,
     });
+    expect(post.buttons).toBeUndefined();
+  });
+
+  it("puts the operator's two choices under a hold, naming the card and the held head", () => {
+    const post = renderFeedEvent({ kind: "pr_held", paths: ["infra/"], headCommit: "f00d" }, ctx);
+    expect(post.text).toBe("The PR waits for the operator's merge: it touches infra/");
+    expect(post.buttons?.map((button) => button.label)).toEqual(["Approve merge", "Keep holding"]);
+    const pressed = post.buttons?.map((button) => {
+      const [namespace, ...payload] = button.value.split(":");
+      return [namespace, parseHeldMergePayload(payload.join(":"))];
+    });
+    expect(pressed).toEqual([
+      [HELD_MERGE_NAMESPACE, { action: "approve", cardId: "card-1", headCommit: "f00d" }],
+      [HELD_MERGE_NAMESPACE, { action: "hold", cardId: "card-1", headCommit: "f00d" }],
+    ]);
+    expect(parseHeldMergePayload("merge:card-1:f00d")).toBeUndefined();
   });
 });
