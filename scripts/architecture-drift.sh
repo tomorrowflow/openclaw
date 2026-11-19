@@ -10,6 +10,8 @@
 # also keeps the report for its /board/<id>/drift.json and header badge. The
 # report holds only paths and spec ids, but the copies follow the digest's 0640.
 # One board failing does not stop the others; the script then exits non-zero.
+# A board onboarded before its first map merges has no rendered commit: it is
+# logged as "no map yet" and is not a failure.
 #
 # Overrides (for fixtures): SEECODE_BOARDS_FILE, ARCHITECTURE_DRIFT_CMD,
 # ARCHITECTURE_DRIFT_DEST, ARCHITECTURE_DRIFT_INSTALL. Output is appended to
@@ -40,7 +42,12 @@ status=0
 while read -r board; do
   # Word splitting of the command string is intended: it is a command line.
   # shellcheck disable=SC2086
-  if ! $DRIFT_CMD --board "$board" >"$tmp/$board.json"; then
+  if ! $DRIFT_CMD --board "$board" >"$tmp/$board.json" 2>"$tmp/$board.err"; then
+    if grep -q 'has no rendered commit yet' "$tmp/$board.err"; then
+      echo "$board: no map yet"
+      continue
+    fi
+    cat "$tmp/$board.err"
     echo "$board: drift failed"
     status=1
     continue
