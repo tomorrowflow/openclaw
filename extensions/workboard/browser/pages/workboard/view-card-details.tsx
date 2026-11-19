@@ -208,7 +208,7 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
     getWorkboardLifecycle(card(), props.sessions, props.sessionResolution),
   );
   const formatted = createMemo(() => formatLifecycle(lifecycle(), card()));
-  const comments = createMemo(() => [...(card().metadata?.comments ?? [])]);
+  const comments = createMemo(() => (card().metadata?.comments ?? []).toReversed());
   const automation = () => card().metadata?.automation;
   const boardId = () => workboardCardBoardId(card());
   const board = () => state().boards.find((entry) => entry.id === boardId());
@@ -598,6 +598,14 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                 tabindex="0"
                 hidden={activeTab() !== "activity"}
               >
+                {action().writable ? (
+                  <CardCommentCompose
+                    {...props}
+                    card={card()}
+                    busy={action().busy}
+                    archived={action().archived}
+                  />
+                ) : undefined}
                 <NodeRounds rounds={card().rounds} times={card().reviewTimes} />
                 <section class="workboard-detail__section workboard-detail__activity">
                   {events().length ? (
@@ -631,14 +639,6 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                     </>
                   ) : !events().length ? (
                     <p class="workboard-detail__empty">{t("workboard.detailNoNotes")}</p>
-                  ) : undefined}
-                  {action().writable ? (
-                    <CardCommentCompose
-                      {...props}
-                      card={card()}
-                      busy={action().busy}
-                      archived={action().archived}
-                    />
                   ) : undefined}
                 </section>
               </section>
