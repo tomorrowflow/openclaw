@@ -964,3 +964,14 @@ it("captures the board opener before the host dialog can defer mounting", async 
     expect(props?.returnFocusTarget).toBe(opener);
   });
 });
+
+it("lists only the selected board's cards and reloads them when the board changes", async () => {
+  const page = mountPage({ boardId: "planning", connected: true });
+  const listCalls = () =>
+    page.request.mock.calls.filter(([method]) => method === "workboard.cards.list");
+  await afterWorkboardUpdate(() => expect(page.workboard.state.loaded).toBe(true));
+  expect(listCalls()[0]?.[1]).toEqual({ boardId: "planning" });
+
+  page.navigate("ops");
+  await afterWorkboardUpdate(() => expect(listCalls().at(-1)?.[1]).toEqual({ boardId: "ops" }));
+});

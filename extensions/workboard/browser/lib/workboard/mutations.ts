@@ -1,5 +1,6 @@
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { isGatewayRequestError, type GatewayBrowserClient } from "../../api/gateway.ts";
+import { workboardListScope } from "./board-filter.ts";
 import {
   changedDraftPayload,
   draftPayload,
@@ -420,7 +421,10 @@ export async function dispatchWorkboard(params: WorkboardClientContext) {
       "workboard.cards.dispatch",
       selectedWorkboardBoardParams(state),
     );
-    const payload = await params.client.request("workboard.cards.list", {});
+    const payload = await params.client.request(
+      "workboard.cards.list",
+      workboardListScope(state.boardFilter),
+    );
     const normalized = normalizeCardsPayload(payload);
     setWorkboardCards(state, normalized.cards);
     state.statuses = normalized.statuses;

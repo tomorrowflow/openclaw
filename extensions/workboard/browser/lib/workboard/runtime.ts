@@ -21,6 +21,8 @@ type WorkboardRuntime = {
   listeners?: Set<() => void>;
   state?: WorkboardUiState;
   cardsRevision?: WorkboardChange | null;
+  /** The board the held cards and their revision were listed for; undefined = all boards. */
+  cardsBoardId?: string;
   loadPromise?: Promise<boolean>;
   loadClient?: GatewayBrowserClient;
   loadError?: string;
@@ -59,6 +61,7 @@ export function invalidateWorkboardLoads(host: WorkboardHost) {
     }
   }
   delete runtime.cardsRevision;
+  delete runtime.cardsBoardId;
   delete runtime.loadPromise;
   delete runtime.loadClient;
 }

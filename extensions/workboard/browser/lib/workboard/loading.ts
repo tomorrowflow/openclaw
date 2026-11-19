@@ -1,4 +1,5 @@
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { workboardListScope } from "./board-filter.ts";
 import { setWorkboardCards } from "./card-state.ts";
 import { normalizeWorkboardChange } from "./change-payload.ts";
 import { formatError } from "./normalization-utils.ts";
@@ -64,13 +65,14 @@ export async function loadWorkboard(params: LoadWorkboardParams): Promise<boolea
           }
         }
       }
+      const scope = workboardListScope(state.boardFilter);
       const payload = await client.request(
         "workboard.cards.list",
         params.more
-          ? { after: state.nextCursor }
-          : runtime.cardsRevision
-            ? { sinceRevision: runtime.cardsRevision }
-            : {},
+          ? { ...scope, after: state.nextCursor }
+          : runtime.cardsRevision && runtime.cardsBoardId === scope.boardId
+            ? { ...scope, sinceRevision: { ...runtime.cardsRevision, ...scope } }
+            : scope,
       );
       if (runtime.loadPromise !== loadPromise) {
         return false;
@@ -82,7 +84,10 @@ export async function loadWorkboard(params: LoadWorkboardParams): Promise<boolea
         // back to the first page after every live write.
         while (normalized.nextCursor && normalized.cards.length < state.cards.length) {
           const page = normalizeCardsPayload(
-            await client.request("workboard.cards.list", { after: normalized.nextCursor }),
+            await client.request("workboard.cards.list", {
+              ...scope,
+              after: normalized.nextCursor,
+            }),
           );
           if (runtime.loadPromise !== loadPromise) {
             return false;
@@ -95,9 +100,12 @@ export async function loadWorkboard(params: LoadWorkboardParams): Promise<boolea
         return false;
       }
       if (!params.more) {
-        runtime.cardsRevision = normalizeWorkboardChange(
-          isRecord(payload) ? payload.revision : null,
-        );
+        // A board-scoped revision echoes its boardId; the held change keeps the
+        // store revision and remembers the scope it belongs to.
+        const { boardId: _boardId, ...revision } =
+          isRecord(payload) && isRecord(payload.revision) ? payload.revision : {};
+        runtime.cardsRevision = normalizeWorkboardChange(revision);
+        runtime.cardsBoardId = scope.boardId;
       }
       setWorkboardCards(
         state,

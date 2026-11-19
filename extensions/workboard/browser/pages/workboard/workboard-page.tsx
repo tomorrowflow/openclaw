@@ -236,7 +236,9 @@ export function createWorkboardPage(
         state.agentFilter = "all";
         reconcileCardOverlays(state, (card) => matchesAgentScope(card, defaultAgentId, scope));
       }
-      if (state.boardFilter !== boardId) {
+      // Cards are listed per board, so another board needs its own list.
+      const boardChanged = state.boardFilter !== boardId;
+      if (boardChanged) {
         if (state.boards.find((board) => board.id === state.boardFilter)?.kind === "sessions") {
           state.loaded = false;
           state.loadAttempted = false;
@@ -276,7 +278,7 @@ export function createWorkboardPage(
         void loadWorkboard({
           host: workboard,
           client,
-          force,
+          force: force || boardChanged,
           refreshDiagnostics: host.connection.canWrite && selectedBoard?.kind !== "sessions",
         });
         resumeWorkboardLiveRefresh(workboard);
