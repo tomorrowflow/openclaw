@@ -137,6 +137,13 @@ describe("OpenAI dynamic model capabilities", () => {
       },
       {
         api,
+        id: "gpt-6.2-sol",
+        off: null,
+        efforts: ["low", "medium", "high", "xhigh", "max"],
+        cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },
+      },
+      {
+        api,
         id: "gpt-6-sol",
         off: "none",
         efforts: ["none", "low", "medium", "high", "xhigh", "max"],
@@ -182,7 +189,7 @@ describe("OpenAI dynamic model capabilities", () => {
       contextTokens:
         id === "gpt-6.1-terra"
           ? 922_000
-          : api === "openai-chatgpt-responses" && id === "gpt-6.1-sol"
+          : api === "openai-chatgpt-responses" && (id === "gpt-6.1-sol" || id === "gpt-6.2-sol")
             ? 500_000
             : 272_000,
       maxTokens: 128_000,

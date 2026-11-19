@@ -11,6 +11,12 @@ export const OPENAI_DAYBREAK_MODEL_IDS = [
 ] as const;
 export const OPENAI_GPT_6_ASTRA_MODEL_ID = "gpt-6-astra";
 export const OPENAI_GPT_61_SOL_MODEL_ID = "gpt-6.1-sol";
+export const OPENAI_GPT_62_SOL_MODEL_ID = "gpt-6.2-sol";
+// ChatGPT subscription budgets above the 272k default, matching the account catalog.
+export const OPENAI_CODEX_500K_CONTEXT_MODEL_IDS: ReadonlySet<string> = new Set([
+  OPENAI_GPT_61_SOL_MODEL_ID,
+  OPENAI_GPT_62_SOL_MODEL_ID,
+]);
 // Curated GPT-6 catalog rows share Platform and ChatGPT routes. New releases
 // acquire metadata and route membership from the same manifest, not another ID list.
 export const OPENAI_GPT_6_MODEL_IDS = manifest.modelCatalog.providers.openai.models

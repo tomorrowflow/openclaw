@@ -47,7 +47,7 @@ import {
   OPENAI_GPT_56_MODEL_ID,
   OPENAI_GPT_56_SOL_MODEL_ID,
   OPENAI_GPT_6_MODEL_IDS,
-  OPENAI_GPT_61_SOL_MODEL_ID,
+  OPENAI_CODEX_500K_CONTEXT_MODEL_IDS,
   isOpenAIPlatformOnlyRouteModelId,
   OPENAI_DEFAULT_RUNTIME_CONTEXT_TOKENS,
   OPENAI_CODEX_GPT_61_SOL_CONTEXT_TOKENS,
@@ -98,7 +98,7 @@ function resolveCodexModelFallback(modelId: string): ModelDefinitionConfig | und
     (candidate) =>
       normalizeLowercaseStringOrEmpty(candidate.id) === normalizeLowercaseStringOrEmpty(modelId),
   );
-  if (fallbackModel?.id === OPENAI_GPT_61_SOL_MODEL_ID) {
+  if (fallbackModel && OPENAI_CODEX_500K_CONTEXT_MODEL_IDS.has(fallbackModel.id)) {
     return { ...fallbackModel, contextTokens: OPENAI_CODEX_GPT_61_SOL_CONTEXT_TOKENS };
   }
   return fallbackModel ? normalizeOpenAICodexCatalogModel(fallbackModel) : undefined;

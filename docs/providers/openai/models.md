@@ -20,7 +20,8 @@ Both accept text and images, with a 1,050,000-token physical context window,
 922,000 maximum input tokens, and 128,000 maximum output tokens. OpenClaw keeps
 the conservative 272,000-token default budget; opt into longer context as
 described in [setup](/providers/openai/setup#context-window-defaults-and-long-context-opt-in).
-Account-reported subscription budgets remain authoritative.
+With ChatGPT/Codex subscription auth, Sol starts at 500,000 tokens like GPT-6.1
+Sol. Account-reported subscription budgets remain authoritative.
 
 Reasoning cannot be disabled. Use `low`, `medium` (the starting default),
 `high`, `xhigh`, or `max`; `minimal` maps to `low`. Tool-bearing turns require
