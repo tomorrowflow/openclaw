@@ -1,5 +1,7 @@
 /** Deprecated v4 controls. Ordinary automation receipts are the only ownership source. */
 import { listAgentIds } from "../agents/agent-scope.js";
+import { stripHeartbeatToken } from "../auto-reply/heartbeat.js";
+import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { readDefaultProactiveJobReceiptsAsync } from "../cron/proactive-job-receipt.js";
 import type { CronServiceContract } from "../cron/service-contract.js";
@@ -13,6 +15,34 @@ async function getLegacyHeartbeatJobIds(cfg: OpenClawConfig): Promise<string[]> 
     }
   }
   return ids;
+}
+
+export async function isLegacyHeartbeatJob(cfg: OpenClawConfig, jobId: string): Promise<boolean> {
+  return (await getLegacyHeartbeatJobIds(cfg)).includes(jobId);
+}
+
+// pre-2026.11.5 ack threshold (heartbeat.ackMaxChars default)
+const HEARTBEAT_ACK_MAX_CHARS = 300;
+
+// Token-only tails after whitespace or Markdown emphasis; a token glued to a
+// word stays visible text.
+const TRAILING_SILENT_TOKEN_RE = new RegExp(
+  `(?:^|\\s+|\\*+)${SILENT_REPLY_TOKEN}(?:\\s+${SILENT_REPLY_TOKEN})*\\s*$`,
+  "i",
+);
+
+/** Short prose ending in NO_REPLY (or HEARTBEAT_OK then NO_REPLY): an ack, not news. */
+export function isHeartbeatAckByTrailingSilent(rawText: string): boolean {
+  const match = TRAILING_SILENT_TOKEN_RE.exec(rawText);
+  const prose = match ? rawText.slice(0, match.index).trim() : "";
+  if (!prose) {
+    return false;
+  }
+  const stripped = stripHeartbeatToken(prose, {
+    mode: "heartbeat",
+    maxAckChars: HEARTBEAT_ACK_MAX_CHARS,
+  });
+  return stripped.shouldSkip || stripped.text.trim().length <= HEARTBEAT_ACK_MAX_CHARS;
 }
 
 export async function setLegacyHeartbeatsEnabled(

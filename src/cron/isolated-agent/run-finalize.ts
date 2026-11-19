@@ -13,6 +13,10 @@ import {
   resolveTrustedSessionContextTokens,
 } from "../../config/sessions/context-token-provenance.js";
 import type { AutomationResult } from "../../infra/agent-run-registry.types.js";
+import {
+  isHeartbeatAckByTrailingSilent,
+  isLegacyHeartbeatJob,
+} from "../../infra/heartbeat-compat.js";
 import { resolveSourceDeliveryOutcome } from "../../infra/outbound/source-delivery-plan.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import { hasPendingAutomationContinuation } from "../automation-result.js";
@@ -55,7 +59,18 @@ export async function finalizeCronRun(params: {
 }): Promise<RunCronAgentTurnResult> {
   const { prepared, execution } = params;
   const finalRunResult = execution.runResult;
-  const replyDisposition = finalRunResult.meta?.terminalReply?.disposition ?? "empty";
+  let replyDisposition = finalRunResult.meta?.terminalReply?.disposition ?? "empty";
+  const rawFinalText = finalRunResult.meta?.finalAssistantRawText;
+  if (
+    replyDisposition === "visible" &&
+    rawFinalText &&
+    isHeartbeatAckByTrailingSilent(rawFinalText) &&
+    (await isLegacyHeartbeatJob(prepared.input.cfg, prepared.input.job.id))
+  ) {
+    // Fork-only: migrated heartbeats keep the pre-2026.11.5 rule that short prose
+    // plus a trailing NO_REPLY is an acknowledgement. Structured payloads stay visible.
+    replyDisposition = "silent";
+  }
   const pendingContinuation = hasPendingAutomationContinuation(finalRunResult.meta);
   const includeReasoning = prepared.agentPayload?.includeReasoning === true;
   const payloads = (finalRunResult.payloads ?? []).filter(
