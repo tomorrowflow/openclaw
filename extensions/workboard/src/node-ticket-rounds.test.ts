@@ -209,7 +209,7 @@ function trimRounds(rounds: WorkboardNodeRound[], comments: WorkboardComment[]) 
   });
 }
 
-it("sheds an older round's decisions, then its findings, then the round, before comments", () => {
+it("sheds an older round's decisions, then its findings, then its file list, before comments", () => {
   // The comments take the budget above 24 KiB, so the rounds see the
   // pressure they would in a 24 KiB budget.
   const padding = (MAX_CARD_METADATA_BYTES - 24 * 1024) / 5;
@@ -237,10 +237,37 @@ it("sheds an older round's decisions, then its findings, then the round, before 
 
   const threeRounds = trimRounds([round0, round1, round2], comments);
   expect(threeRounds.automation?.target?.worktree?.rounds).toEqual([
+    {
+      round: 0,
+      changes: { ...round0.changes, files: [] },
+      review: { findings: 12, fixed: 0 },
+    },
     withoutDecisions(round1),
     round2,
   ]);
   expect(threeRounds.comments).toEqual(comments);
+});
+
+it("keeps every round's commit range and trims comments when the rounds cannot shrink further", () => {
+  // Comments alone nearly fill the budget, as on a card with long verdicts.
+  const comments = Array.from({ length: 12 }, (_, index) => ({
+    id: `comment-${index}`,
+    body: `note ${index} ${"c".repeat(MAX_CARD_METADATA_BYTES / 12)}`,
+    createdAt: index,
+  }));
+  const rounds = [fullRound(0), fullRound(1), fullRound(2)];
+
+  const trimmed = trimRounds(rounds, comments);
+
+  expect(
+    trimmed.automation?.target?.worktree?.rounds?.map((round) => [
+      round.round,
+      round.changes?.from,
+      round.changes?.to,
+    ]),
+  ).toEqual(rounds.map((round) => [round.round, "a".repeat(40), "b".repeat(40)]));
+  expect(trimmed.comments?.length).toBeLessThan(comments.length);
+  expect(trimmed.comments?.at(-1)).toEqual(comments.at(-1));
 });
 
 describe("node ticket import diffstat", () => {
