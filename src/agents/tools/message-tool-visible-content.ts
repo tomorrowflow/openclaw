@@ -4,12 +4,14 @@ import {
   hasInboundMetadataSentinel,
   stripInboundMetadata,
 } from "../../auto-reply/reply/strip-inbound-meta.js";
+import { isSilentReplyText } from "../../auto-reply/tokens.js";
 import {
   getBootEchoContextForSession,
   stripBootEchoFromOutboundText,
 } from "../../gateway/boot-echo-guard.js";
 import { parseJsonMessageParam } from "../../infra/outbound/message-action-params.js";
 import { hasReplyPayloadContent } from "../../interactive/payload.js";
+import { isCronSessionKey } from "../../sessions/session-key-utils.js";
 import { stripFormattedReasoningMessage } from "../../shared/text/formatted-reasoning-message.js";
 import { stripInternalRuntimeContext } from "../internal-runtime-context.js";
 import { readStringArrayParam, readToolStringParam } from "./common.js";
@@ -25,7 +27,19 @@ export function normalizeEscapedLineBreaksForVisibleText(text: string): string {
 export type VisibleTextSuppressionReason =
   | "internal_runtime_context_echo"
   | "inbound_metadata_echo"
-  | "poll_vote_echo";
+  | "poll_vote_echo"
+  | "silent_reply_token";
+
+/** What the model is told when a send is dropped for having no visible text left. */
+export const VISIBLE_TEXT_SUPPRESSION_MESSAGES: Record<VisibleTextSuppressionReason, string> = {
+  internal_runtime_context_echo:
+    "Suppressed outbound message text because it matched internal runtime context.",
+  inbound_metadata_echo:
+    "Suppressed outbound message text because it matched inbound runtime metadata.",
+  poll_vote_echo: "Suppressed outbound text because it only restated the poll vote just cast.",
+  silent_reply_token:
+    "Nothing was sent: NO_REPLY is a final-answer token, not message text. To stay silent, end your turn with NO_REPLY instead.",
+};
 
 function sanitizeUserVisibleToolTextResult(
   text: string,
@@ -235,8 +249,15 @@ export function sanitizeMessageToolVisiblePayload(
   agentSessionKey?: string,
 ): VisibleTextSuppressionReason | undefined {
   const bootPromptForSession = getBootEchoContextForSession(agentSessionKey);
+  // Scheduled runs may end silently, so a sent NO_REPLY means "stay quiet"; upstream
+  // delivers it verbatim (#170534), which reached the owner on Signal from a heartbeat.
+  const dropsSilentToken = isCronSessionKey(agentSessionKey);
   let suppressedVisiblePayloadReason: VisibleTextSuppressionReason | undefined;
   const sanitizeText = (text: string, trim = false) => {
+    if (dropsSilentToken && isSilentReplyText(text)) {
+      suppressedVisiblePayloadReason ??= "silent_reply_token";
+      return "";
+    }
     const sanitized = sanitizeUserVisibleToolTextResult(text, bootPromptForSession);
     // Keep sanitizing after suppression; the first reason only labels the outcome.
     suppressedVisiblePayloadReason ??= sanitized.suppressionReason;
