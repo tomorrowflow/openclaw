@@ -46,7 +46,6 @@ import { CardModelControl } from "./view-card-model.tsx";
 import { NodeRounds } from "./view-card-rounds.tsx";
 import { CardSessionHeading } from "./view-card-session-heading.tsx";
 import {
-  formatEventLabel,
   formatLifecycle,
   formatPriorityLabel,
   engineBlockedByRuntime,
@@ -212,7 +211,6 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
   const automation = () => card().metadata?.automation;
   const boardId = () => workboardCardBoardId(card());
   const board = () => state().boards.find((entry) => entry.id === boardId());
-  const events = createMemo(() => (card().events ?? []).toReversed());
   const dependencies = createMemo(() =>
     getWorkboardDependencyState(card(), state().cards, !state().nextCursor),
   );
@@ -606,23 +604,8 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                     archived={action().archived}
                   />
                 ) : undefined}
-                <NodeRounds rounds={card().rounds} times={card().reviewTimes} />
+                <NodeRounds rounds={card().rounds} />
                 <section class="workboard-detail__section workboard-detail__activity">
-                  {events().length ? (
-                    <>
-                      <h3>{t("workboard.eventsLabel")}</h3>
-                      <ol class="workboard-detail__list workboard-detail__events">
-                        <For each={events()} keyed={(event) => event.id}>
-                          {(event) => (
-                            <li>
-                              <span>{formatEventLabel(event())}</span>
-                              <time>{formatUpdatedTime(event().at)}</time>
-                            </li>
-                          )}
-                        </For>
-                      </ol>
-                    </>
-                  ) : undefined}
                   {comments().length ? (
                     <>
                       <h3>{t("workboard.detailOperatorNotes")}</h3>
@@ -637,9 +620,9 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
                         </For>
                       </ol>
                     </>
-                  ) : !events().length ? (
+                  ) : (
                     <p class="workboard-detail__empty">{t("workboard.detailNoNotes")}</p>
-                  ) : undefined}
+                  )}
                 </section>
               </section>
               <NodeTicketTabPanels workboard={props} card={card()} activeTab={activeTab()} />

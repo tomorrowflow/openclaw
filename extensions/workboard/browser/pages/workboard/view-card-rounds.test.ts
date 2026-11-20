@@ -75,3 +75,65 @@ it("shows each round's decisions in the activity tab, newest round first, withou
   );
   expect(text(rework?.querySelector(".workboard-round__decisions code"))).toBe("flags.py:1");
 });
+
+it("shows review times with their round's sessions and the event log in Details, not Activity", () => {
+  const { state, container, renderView } = createWorkboardView();
+  state.cards = [
+    createWorkboardCard({
+      status: "review",
+      metadata: {
+        automation: {
+          target: {
+            kind: "node-claude",
+            nodeId: "mac-factory",
+            repoPath: "/repos/app",
+            worktreesRoot: "/worktrees",
+            hostRepoPath: "/host/app",
+          },
+        },
+      },
+      sessions: [{ role: "implementer", round: 1, state: "finished", sessionKey: "agent:dev:a" }],
+      reviewTimes: [
+        { round: 0, importedAt: 0, verification: { startedAt: 0, endedAt: 190_000 } },
+        {
+          round: 1,
+          importedAt: 300_000,
+          verification: { startedAt: 300_000, endedAt: 360_000 },
+          verdictAt: 420_000,
+        },
+      ],
+      events: [
+        { id: "e1", kind: "created", at: 1 },
+        { id: "e2", kind: "comment_added", at: 2 },
+      ],
+    }),
+  ];
+  state.detailCardId = "card-1";
+  state.detailTab = "activity";
+  renderView();
+  const activity = container.querySelector("#workboard-detail-panel-activity")!;
+  expect(activity.querySelector(".workboard-review-times")).toBeNull();
+  expect(activity.querySelector(".workboard-detail__events")).toBeNull();
+
+  state.detailTab = "details";
+  renderView();
+  const details = container.querySelector("#workboard-detail-panel-details")!;
+  const text = (element: Element) => element.textContent?.replace(/\s+/g, " ").trim();
+  const rounds = [...details.querySelectorAll(".workboard-detail__sessions details")];
+  expect(rounds.map((round) => text(round.querySelector("summary")!))).toEqual([
+    "Rework round 1",
+    "First run",
+  ]);
+  expect([...rounds[0]!.querySelectorAll(".workboard-review-times li")].map(text)).toEqual([
+    "Verification took 1m",
+    "Agent verdict 1m after the verification",
+  ]);
+  expect([...rounds[1]!.querySelectorAll(".workboard-review-times li")].map(text)).toEqual([
+    "Verification took 3m 10s",
+  ]);
+  expect(rounds[1]!.querySelectorAll(".workboard-detail__session-list li")).toHaveLength(0);
+  expect([...details.querySelectorAll(".workboard-detail__events li span")].map(text)).toEqual([
+    "Comment added",
+    "Created",
+  ]);
+});

@@ -9,9 +9,14 @@ import { icons } from "../../components/icons.tsx";
 import { t } from "../../i18n/index.ts";
 import { formatUiExternalText } from "../../lib/format-error.ts";
 import { isWorkboardNodeTicket } from "../../lib/workboard/execution.ts";
-import type { WorkboardCard, WorkboardDependencyState } from "../../lib/workboard/types.ts";
-import { roundName } from "./view-card-rounds.tsx";
-import { formatStatusLabel, formatUpdatedTime } from "./view-helpers.tsx";
+import type {
+  WorkboardCard,
+  WorkboardDependencyState,
+  WorkboardEvent,
+  WorkboardRoundReviewTimes,
+} from "../../lib/workboard/types.ts";
+import { roundName, roundReviewLines } from "./view-card-rounds.tsx";
+import { formatEventLabel, formatStatusLabel, formatUpdatedTime } from "./view-helpers.tsx";
 
 /** Opens a card or one of the card's sessions from the technical details. */
 export type DetailNavigation = {
@@ -182,24 +187,36 @@ function SessionEntries(props: {
 }
 
 /**
- * The card's sessions. A node ticket's are grouped by round, newest round
- * first and open, earlier rounds collapsed; a plain card has no rounds.
+ * The card's sessions. A node ticket's are grouped by round with that round's
+ * verification and verdict times, newest round first and open, earlier rounds
+ * collapsed; a plain card has no rounds.
  */
 function SessionList(props: {
   sessions: readonly WorkboardCardSession[];
+  reviewTimes: readonly WorkboardRoundReviewTimes[];
   byRound: boolean;
   navigation: DetailNavigation;
 }) {
-  const rounds = createMemo(() =>
-    [...new Set(props.sessions.map((entry) => entry.round))]
+  const rounds = createMemo(() => {
+    const now = Date.now();
+    return [
+      ...new Set([
+        ...props.sessions.map((entry) => entry.round),
+        ...props.reviewTimes.map((entry) => entry.round),
+      ]),
+    ]
       .toSorted((left, right) => right - left)
-      .map((round) => ({
-        round,
-        sessions: props.sessions.filter((entry) => entry.round === round),
-      })),
-  );
+      .map((round) => {
+        const times = props.reviewTimes.find((entry) => entry.round === round);
+        return {
+          round,
+          reviewLines: times ? roundReviewLines(times, now) : [],
+          sessions: props.sessions.filter((entry) => entry.round === round),
+        };
+      });
+  });
   return (
-    <Show when={props.sessions.length}>
+    <Show when={props.sessions.length || (props.byRound && props.reviewTimes.length)}>
       <section class="workboard-detail__section workboard-detail__sessions">
         <h3>{t("workboard.detailSessions")}</h3>
         <Show
@@ -215,11 +232,46 @@ function SessionList(props: {
                   </span>
                   {roundName(entry().round)}
                 </summary>
+                <Show when={entry().reviewLines.length}>
+                  <ul class="workboard-detail__list workboard-review-times">
+                    <For each={entry().reviewLines} keyed={false}>
+                      {(line) => <li>{line()}</li>}
+                    </For>
+                  </ul>
+                </Show>
                 <SessionEntries sessions={entry().sessions} navigation={props.navigation} />
               </details>
             )}
           </For>
         </Show>
+      </section>
+    </Show>
+  );
+}
+
+/** The card's raw event log, newest first; the sections above summarize most of it. */
+function EventLog(props: { events: readonly WorkboardEvent[] }) {
+  return (
+    <Show when={props.events.length}>
+      <section class="workboard-detail__section">
+        <details class="workboard-detail__disclosure">
+          <summary>
+            <span class="workboard-detail__disclosure-chevron" aria-hidden="true">
+              {icons.chevronDown}
+            </span>
+            {t("workboard.eventsLabel")}
+          </summary>
+          <ol class="workboard-detail__list workboard-detail__events">
+            <For each={props.events} keyed={(event) => event.id}>
+              {(event) => (
+                <li>
+                  <span>{formatEventLabel(event())}</span>
+                  <time>{formatUpdatedTime(event().at)}</time>
+                </li>
+              )}
+            </For>
+          </ol>
+        </details>
       </section>
     </Show>
   );
@@ -473,6 +525,9 @@ export function technicalDetailsData(card: WorkboardCard, linkedSessionKey: stri
   const metadata = card.metadata;
   const notifications = [...(metadata?.notifications ?? [])];
   const sessions = [...(card.sessions ?? [])];
+  const reviewTimes = [...(card.reviewTimes ?? [])];
+  const events = (card.events ?? []).toReversed();
+  const sessionsByRound = isWorkboardNodeTicket(card);
   const metadataFields: Array<readonly [string, string | number | undefined]> = [
     [t("workboard.detailTenant"), automation?.tenant],
     [
@@ -499,6 +554,8 @@ export function technicalDetailsData(card: WorkboardCard, linkedSessionKey: stri
   const hasTechnicalDetails = Boolean(
     linkedSessionKey ||
     sessions.length ||
+    (sessionsByRound && reviewTimes.length) ||
+    events.length ||
     automation?.tenant ||
     metadataFields.some(([, value]) => value !== undefined && value !== "") ||
     notifications.length ||
@@ -509,7 +566,9 @@ export function technicalDetailsData(card: WorkboardCard, linkedSessionKey: stri
   );
   return {
     sessions,
-    sessionsByRound: isWorkboardNodeTicket(card),
+    reviewTimes,
+    sessionsByRound,
+    events,
     links,
     attempts,
     proof,
@@ -545,6 +604,7 @@ export function TechnicalDetails(props: {
         </div>
         <SessionList
           sessions={props.data.sessions}
+          reviewTimes={props.data.reviewTimes}
           byRound={props.data.sessionsByRound}
           navigation={props.navigation}
         />
@@ -564,6 +624,7 @@ export function TechnicalDetails(props: {
         <For each={props.data.detailSections} keyed={(section) => section[0]}>
           {(section) => <DetailList title={section()[0]} values={section()[1]} />}
         </For>
+        <EventLog events={props.data.events} />
       </section>
     </Show>
   );

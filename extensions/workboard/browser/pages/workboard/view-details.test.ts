@@ -857,7 +857,9 @@ describe("WorkboardView", () => {
       ["First run", false],
     ]);
     const rows = (round: HTMLElement) =>
-      [...round.querySelectorAll("li")].map((row) => row.textContent?.replace(/\s+/g, " ").trim());
+      [...round.querySelectorAll(".workboard-detail__session-list li")].map((row) =>
+        row.textContent?.replace(/\s+/g, " ").trim(),
+      );
     expect(rows(rounds[0]!)).toEqual([
       "ImplementerFinishedOpen session",
       "GrillRunningOpen session",

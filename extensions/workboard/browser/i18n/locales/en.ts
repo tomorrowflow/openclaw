@@ -464,7 +464,6 @@ export default {
     stageVerifying: "Verifying",
     stageReviewing: "Awaiting agent verdict",
     stageAwaitingReview: "Ready for your decision",
-    reviewTimesLabel: "Verification and verdict",
     reviewTimesVerification: "Verification took {duration}",
     reviewTimesVerifying: "Verification running for {duration}",
     reviewTimesVerdictAfterVerification: "Agent verdict {duration} after the verification",

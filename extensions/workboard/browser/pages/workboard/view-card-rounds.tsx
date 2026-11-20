@@ -45,27 +45,21 @@ function Decisions(props: { decisions: readonly WorkboardNodeDecision[] }) {
 }
 
 /**
- * Each node ticket round's review times, then what each round decided, newest
- * round first; its changes have their own tab.
+ * What each node ticket round decided, newest round first; its changes have
+ * their own tab, its review times sit with its sessions in Details.
  */
-export function NodeRounds(props: {
-  rounds: readonly WorkboardNodeRound[] | undefined;
-  times: readonly WorkboardRoundReviewTimes[] | undefined;
-}) {
+export function NodeRounds(props: { rounds: readonly WorkboardNodeRound[] | undefined }) {
   const decided = () =>
     (props.rounds?.filter((entry) => entry.decisions?.length) ?? []).toReversed();
   return (
-    <>
-      <NodeReviewTimes times={props.times} now={Date.now()} />
-      <For each={decided()} keyed={(entry) => entry.round}>
-        {(entry) => (
-          <section class="workboard-detail__section workboard-round">
-            <h3>{roundName(entry().round)}</h3>
-            <Decisions decisions={entry().decisions ?? []} />
-          </section>
-        )}
-      </For>
-    </>
+    <For each={decided()} keyed={(entry) => entry.round}>
+      {(entry) => (
+        <section class="workboard-detail__section workboard-round">
+          <h3>{roundName(entry().round)}</h3>
+          <Decisions decisions={entry().decisions ?? []} />
+        </section>
+      )}
+    </For>
   );
 }
 
@@ -75,51 +69,23 @@ export function roundName(round: number): string {
     : t("workboard.roundRework", { number: String(round) });
 }
 
-/** How long each round's verification ran and when the agent's verdict followed, newest first. */
-function NodeReviewTimes(props: {
-  times: readonly WorkboardRoundReviewTimes[] | undefined;
-  now: number;
-}) {
-  const rows = () =>
-    (props.times ?? []).toReversed().flatMap((entry) => {
-      const verification = entry.verification;
-      const lines = [
-        ...(verification
-          ? [
-              verification.endedAt === undefined
-                ? t("workboard.reviewTimesVerifying", {
-                    duration: duration(props.now - verification.startedAt),
-                  })
-                : t("workboard.reviewTimesVerification", {
-                    duration: duration(verification.endedAt - verification.startedAt),
-                  }),
-            ]
-          : []),
-        ...(entry.verdictAt === undefined ? [] : [verdictLine(entry.verdictAt, entry)]),
-      ];
-      return lines.map((line, index) => ({
-        key: `${entry.round}:${index}`,
-        round: entry.round,
-        line,
-      }));
-    });
-  return (
-    <Show when={rows().length}>
-      <section class="workboard-detail__section workboard-review-times">
-        <h3>{t("workboard.reviewTimesLabel")}</h3>
-        <ol class="workboard-detail__list workboard-detail__events">
-          <For each={rows()} keyed={(row) => row.key}>
-            {(row) => (
-              <li>
-                <span>{row().line}</span>
-                <span>{roundName(row().round)}</span>
-              </li>
-            )}
-          </For>
-        </ol>
-      </section>
-    </Show>
-  );
+/** How long a round's verification ran and when the agent's verdict followed it. */
+export function roundReviewLines(entry: WorkboardRoundReviewTimes, now: number): string[] {
+  const verification = entry.verification;
+  return [
+    ...(verification
+      ? [
+          verification.endedAt === undefined
+            ? t("workboard.reviewTimesVerifying", {
+                duration: duration(now - verification.startedAt),
+              })
+            : t("workboard.reviewTimesVerification", {
+                duration: duration(verification.endedAt - verification.startedAt),
+              }),
+        ]
+      : []),
+    ...(entry.verdictAt === undefined ? [] : [verdictLine(entry.verdictAt, entry)]),
+  ];
 }
 
 /** The verdict's wait from the verification's end, or from the import when it came first. */
