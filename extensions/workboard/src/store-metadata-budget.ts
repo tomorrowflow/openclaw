@@ -41,7 +41,11 @@ function metadataByteSize(metadata: WorkboardMetadata): number {
   return Buffer.byteLength(JSON.stringify(metadata), "utf8");
 }
 
-/** Sheds a round's decisions, then its review items; the counts and changes stay. */
+/**
+ * Sheds a round's decisions, then its review items, then its changed-file list.
+ * Its commit range and totals stay: the Screenshots and Prototype tabs and the
+ * verifier read the round's files from git through that range.
+ */
 function degradedNodeRound(round: WorkboardNodeRound): WorkboardNodeRound | undefined {
   if (round.decisions) {
     const { decisions: _decisions, ...rest } = round;
@@ -51,22 +55,31 @@ function degradedNodeRound(round: WorkboardNodeRound): WorkboardNodeRound | unde
     const { items: _items, ...review } = round.review;
     return { ...round, review };
   }
+  if (round.changes?.files.length) {
+    return { ...round, changes: { ...round.changes, files: [] } };
+  }
   return undefined;
 }
 
 /**
- * A node ticket's round facts go before anything else, oldest round first; they only inform.
- * The oldest round degrades before it goes, so its review findings outlast its decision trail.
+ * A node ticket's round facts shrink before anything else, oldest round first;
+ * they only inform. A round degrades to its commit range and is never dropped
+ * here; MAX_NODE_ROUNDS bounds how many there are.
  */
 function withOldestNodeRoundTrimmed(metadata: WorkboardMetadata): WorkboardMetadata | undefined {
   const target = metadata.automation?.target;
-  const [oldest, ...newer] = target?.worktree?.rounds ?? [];
-  if (!target?.worktree || !oldest) {
-    return undefined;
+  const rounds = target?.worktree?.rounds ?? [];
+  for (const [index, round] of rounds.entries()) {
+    const degraded = degradedNodeRound(round);
+    if (target?.worktree && degraded) {
+      const worktree = { ...target.worktree, rounds: rounds.with(index, degraded) };
+      return {
+        ...metadata,
+        automation: { ...metadata.automation, target: { ...target, worktree } },
+      };
+    }
   }
-  const degraded = degradedNodeRound(oldest);
-  const worktree = { ...target.worktree, rounds: degraded ? [degraded, ...newer] : newer };
-  return { ...metadata, automation: { ...metadata.automation, target: { ...target, worktree } } };
+  return undefined;
 }
 
 export function trimMetadataToBudget(
