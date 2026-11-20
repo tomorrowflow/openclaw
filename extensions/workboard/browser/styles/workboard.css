@@ -2982,9 +2982,15 @@
   gap: 20px;
   margin: -8px 0 20px;
   border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
 }
 
 .workboard-detail__tabs button {
+  flex: none;
+  white-space: nowrap;
   padding: 10px 0;
   border: 0;
   border-bottom: 2px solid transparent;

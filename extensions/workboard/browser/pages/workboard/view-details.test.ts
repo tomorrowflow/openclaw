@@ -483,6 +483,38 @@ describe("WorkboardView", () => {
     expect(container.querySelector(".workboard-detail")?.textContent).toContain("Moved to Backlog");
   });
 
+  it("puts the note box first and lists operator notes newest first", () => {
+    const { state, container, renderView } = createWorkboardView({
+      onRequestUpdate: () => undefined,
+    });
+    state.cards = [
+      createWorkboardCard({
+        metadata: {
+          comments: [
+            { id: "note-1", body: "Older note", createdAt: 1 },
+            { id: "note-2", body: "Newer note", createdAt: 2 },
+          ],
+        },
+      }),
+    ];
+    renderView();
+    requireButton(openCardMenu(container), "View details").click();
+    state.detailTab = "activity";
+    renderView();
+    const notes = [...container.querySelectorAll(".workboard-detail__comments > li")];
+    expect(notes.map((note) => note.textContent)).toEqual([
+      expect.stringContaining("Newer note"),
+      expect.stringContaining("Older note"),
+    ]);
+    const panel = expectDefined(
+      container.querySelector("#workboard-detail-panel-activity"),
+      "#workboard-detail-panel-activity",
+    );
+    expect(panel.firstElementChild?.classList.contains("workboard-detail__comment-compose")).toBe(
+      true,
+    );
+  });
+
   it("renders card metadata badges and hides archived cards", () => {
     const { state, container, renderView } = createWorkboardView();
     state.cards = [
