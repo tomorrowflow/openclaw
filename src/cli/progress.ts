@@ -124,8 +124,10 @@ export function createCliProgress(options: ProgressOptions): ProgressReporter {
   const wantsSpinner = fallback === undefined || fallback === "spinner";
   const allowSpinner = wantsSpinner && isTty && !stdinIsRaw;
   const allowLine = isTty && fallback === "line";
-  if (isTty && stdinIsRaw && wantsSpinner) {
-    // Raw stdin usually means an interactive prompt owns cursor movement.
+  // Raw stdin usually means an interactive prompt owns cursor movement. Piped
+  // stdin belongs to the command: the clack spinner reads process.stdin and
+  // would swallow it (e.g. a heredoc for `approvals set --stdin`).
+  if (isTty && wantsSpinner && (stdinIsRaw || !process.stdin.isTTY)) {
     return noopReporter;
   }
 
