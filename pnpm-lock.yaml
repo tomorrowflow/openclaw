@@ -4304,6 +4304,7 @@ packages:
   '@github/copilot-sdk@1.0.23':
     resolution: {integrity: sha512-T//av0beD/GMMpugDvjCq9Rc9hC1wbN+O8j0fR/i+bF2v+TpeF3Ecz4phAamg8FLSeyiwfgFAxHNNsYiKJmbZQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
+    deprecated: 'Deprecated: migrate to @microsoft/copilot-sdk. Migration docs: https://github.com/microsoft/copilot-sdk/blob/main/docs/v2-breaking-changes.md'
 
   '@google/genai@2.30.0':
     resolution: {integrity: sha512-Gkv1ix8iZey/V3WF4lHaRS8C71P533jenDT/lA+fdPTCfXYfmCVHvo+0H5jTgzonqsmROQG7QpzLJkpoP/x7bg==}

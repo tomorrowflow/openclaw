@@ -94,6 +94,7 @@ const NON_REUSABLE_RISKS = new Set<CommandRisk["kind"]>(["inline-eval"]);
 const UNANALYZABLE_RISKS = new Set<CommandRisk["kind"]>([
   "command-substitution",
   "dynamic-executable",
+  "dynamic-assignment",
   "line-continuation",
   "heredoc",
   "here-string",
@@ -196,10 +197,12 @@ function stepReasons(
   return uniqueStrings(reasons);
 }
 
+// `$[...]` is legacy Bash arithmetic: like `$((...))`, it re-evaluates its decoded text, so
+// array subscripts built from ANSI-C escapes can run command substitution.
 function isShellExpansionDynamicArgument(risk: CommandRisk): boolean {
   return (
     risk.kind === "dynamic-argument" &&
-    /(?:\$[A-Za-z0-9_@*?#$!-]|\$\{|`|\$\(|[<>]\()/u.test(risk.text)
+    /(?:\$[A-Za-z0-9_@*?#$!-]|\$\{|`|\$\(|\$\[|[<>]\()/u.test(risk.text)
   );
 }
 
@@ -298,7 +301,7 @@ function wrapperPrefixForStep(step: CommandStep): string {
 }
 
 function hasCommandPrelude(step: CommandStep): boolean {
-  return /^[A-Za-z_][A-Za-z0-9_]*=/u.test(wrapperPrefixForStep(step).trimStart());
+  return /^[A-Za-z_][A-Za-z0-9_]*\+?=/u.test(wrapperPrefixForStep(step).trimStart());
 }
 
 function positionalCarrierSteps(params: {

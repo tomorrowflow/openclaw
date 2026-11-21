@@ -98,8 +98,7 @@ function stripTokenAtEdges(raw: string): { text: string; didStrip: boolean } {
     break;
   }
 
-  const collapsed = text.replace(/\s+/g, " ").trim();
-  return { text: collapsed, didStrip };
+  return { text, didStrip };
 }
 
 /** Strips HEARTBEAT_OK acknowledgements and decides whether visible notification is needed. */

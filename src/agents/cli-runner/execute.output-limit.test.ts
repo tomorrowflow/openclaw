@@ -11,8 +11,10 @@ import {
   CLI_STREAM_JSON_OUTPUT_LIMITS,
   streamJsonOutputLimitErrorText,
 } from "../cli-output-stream-limits.js";
+import { runPreparedCliAgent as runPreparedCliAgentImpl } from "../cli-runner.js";
+import * as cliTranscript from "../command/attempt-execution.helpers.js";
+import { hasModelFallbackStop } from "../failover-error.js";
 import { buildContext } from "./execute-events.tool-result-args.test-support.js";
-import { executePreparedCliRun as executePreparedCliRunImpl } from "./execute.js";
 import {
   createManagedRun,
   createSuccessfulProcessExit,
@@ -21,7 +23,7 @@ import {
 } from "./execute.test-support.js";
 import type { PreparedCliRunContext } from "./types.js";
 
-const executePreparedCliRun = wrapPreparedCliRunWithTestAdmission(executePreparedCliRunImpl);
+const runPreparedCliAgent = wrapPreparedCliRunWithTestAdmission(runPreparedCliAgentImpl);
 
 // mock-isolation: The supervisor fixture owns execution; never spawn host CLI processes.
 vi.mock("../../process/supervisor/adapters/child.js", () => ({
@@ -89,7 +91,7 @@ describe("CLI stream-json output limit", () => {
         return managedRun;
       });
 
-      const run = executePreparedCliRun(buildClaudeStreamJsonRunContext(`run-limit-${when}`));
+      const run = runPreparedCliAgent(buildClaudeStreamJsonRunContext(`run-limit-${when}`));
       if (when === "after") {
         await waiting.promise;
         spawnInput?.onStdout?.(oversizedLine);
@@ -114,6 +116,8 @@ describe("CLI stream-json output limit", () => {
   // System records are handed off and dropped, so only the per-line limit meets them.
   it("ends a plugin-owned turn with the output limit error once a line trips it", async () => {
     const context = buildClaudeStreamJsonRunContext("run-limit-plugin");
+    context.params.persistStoppedFirstCliSession = vi.fn();
+    vi.spyOn(cliTranscript, "claudeCliSessionTranscriptHasContent").mockResolvedValue(true);
     const record = {
       type: "system",
       subtype: "fixture_padding",
@@ -131,6 +135,7 @@ describe("CLI stream-json output limit", () => {
           aborted = true;
         });
         try {
+          yield { type: "system", subtype: "init", session_id: "native-first-turn" };
           // The baseline keeps pulling these records after the turn is already lost.
           while (yielded < 12) {
             yielded += 1;
@@ -143,14 +148,51 @@ describe("CLI stream-json output limit", () => {
       },
     };
 
-    await expect(executePreparedCliRun(context)).rejects.toMatchObject({
+    const failure = await runPreparedCliAgent(context).catch((error: unknown) => error);
+    expect(failure).toMatchObject({
       name: "FailoverError",
       reason: "format",
       message: streamJsonOutputLimitErrorText("line", maxPendingLineChars),
     });
+    // No tool ran, so model fallback may replay the prompt.
+    expect(hasModelFallbackStop(failure)).toBe(false);
+    // The fallback retry resumes this refused first turn's native session.
+    expect(context.params.persistStoppedFirstCliSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "native-first-turn" }),
+    );
     // The record that crosses the limit is the last one pulled from the CLI.
     expect(yielded).toBe(1);
     expect(aborted).toBe(true);
     expect(closed).toBe(true);
+  });
+
+  it("stops model fallback when a turn that already ran a tool exceeds the output limit", async () => {
+    const context = buildClaudeStreamJsonRunContext("run-limit-after-tool");
+    const tool = { type: "tool_use", id: "toolu-1", name: "exec", input: { command: "true" } };
+    const result = { type: "tool_result", tool_use_id: "toolu-1", content: "ok" };
+    // System records are dropped, so only the per-line limit meets them.
+    const padding = {
+      type: "system",
+      subtype: "fixture_padding",
+      padding: "x".repeat(maxPendingLineChars),
+    };
+    context.preparedBackend.backend.command = process.execPath;
+    context.executionTarget = {
+      kind: "plugin",
+      async *execute() {
+        yield { type: "assistant", message: { id: "msg-1", role: "assistant", content: [tool] } };
+        yield { type: "user", message: { role: "user", content: [result] } };
+        for (let i = 0; i < 12; i += 1) {
+          yield padding;
+        }
+      },
+    };
+
+    const failure = await runPreparedCliAgent(context).catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      message: streamJsonOutputLimitErrorText("line", maxPendingLineChars),
+    });
+    // Another model replaying the prompt would run the completed tool again (#200744).
+    expect(hasModelFallbackStop(failure)).toBe(true);
   });
 });
