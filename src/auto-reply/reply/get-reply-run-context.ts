@@ -466,6 +466,7 @@ export async function prepareReplyRunContext(params: RunPreparedReplyParams) {
             inboundUserContextSessionCtx,
             envelopeOptions,
             inboundContextSessionEntry,
+            { senderIsOwner: command.senderIsOwner },
           ),
         ]
           .filter(Boolean)
