@@ -301,9 +301,8 @@ export function mergeAlsoAllowPolicy<TPolicy extends { allow?: string[] }>(
   policy: TPolicy | undefined,
   alsoAllow?: string[],
 ): TPolicy | undefined {
-  // An empty allow list already allows everything not denied; appending names
-  // would turn it into an allowlist of only those names.
-  if (!policy?.allow || policy.allow.length === 0 || !alsoAllow?.length) {
+  // An empty allowlist already permits every tool; extras would turn it into a restriction.
+  if (!policy?.allow?.length || !alsoAllow?.length) {
     return policy;
   }
   return { ...policy, allow: uniqueStrings([...policy.allow, ...alsoAllow]) };

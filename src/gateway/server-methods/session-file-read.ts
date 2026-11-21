@@ -21,6 +21,8 @@ export type SessionSandboxPaths = { mounts: readonly SandboxContainerMount[] };
 export type SessionFileReadBoundary = {
   root?: string;
   fileRoot?: string;
+  /** Physical live backing; root/fileRoot retain the public workspace namespace. */
+  readRoot?: string;
   authorizeHostRead?: () => Promise<boolean>;
   sandbox?: SessionSandboxPaths;
 };
@@ -85,7 +87,7 @@ export async function prepareSessionFileReadPath(
     assertCurrent: () => void;
     assertReadCurrent: () => void;
   },
-): Promise<{ path: string | null | undefined; assertCurrent?: () => void }> {
+): Promise<{ path: string | null | undefined; readRoot?: string; assertCurrent?: () => void }> {
   const sandbox = params.sandboxWorkspace;
   const absolute =
     params.filePath && params.root
@@ -95,7 +97,9 @@ export async function prepareSessionFileReadPath(
     absolute && params.root && sandbox && !isPathInside(params.root, absolute)
       ? resolveSandboxPathMapping([sandbox], absolute)
       : null;
+  let assertWorkspaceCurrent: (() => void) | undefined;
   const assertCurrent = () => {
+    assertWorkspaceCurrent?.();
     params.assertReadCurrent();
     if (mapped && params.root && getAgentWorkspaceAccess(params.root)) {
       throw sessionMutationForbiddenError("Sandbox file backing is not on this Gateway");
@@ -106,22 +110,25 @@ export async function prepareSessionFileReadPath(
   }
   let runtimeWorkspaceDir: string | undefined = sandbox?.runtimeWorkspaceDir;
   let backingRoot = sandbox?.hostRoot;
-  if (params.worktreeId && params.root && !params.historical) {
-    const { checkpointLocalWorkspacePath, withSettledLocalWorkspacePath } =
-      await import("../worker-environments/local-workspace-projection.js");
-    const request = { cwd: params.root, assertCurrent: params.assertCurrent };
-    if (mapped) {
-      runtimeWorkspaceDir = await withSettledLocalWorkspacePath(request, async (custody) =>
-        custody && custody.worktreeId === params.worktreeId ? custody.projectionPath : undefined,
-      );
-      backingRoot = runtimeWorkspaceDir;
-    } else {
-      await checkpointLocalWorkspacePath(request);
+  let readRoot: string | undefined;
+  if (sandbox && params.worktreeId && params.root && !params.historical) {
+    const { readLocalWorkspacePath } =
+      await import("../worker-environments/local-workspace-read.js");
+    const backing = await readLocalWorkspacePath({
+      cwd: params.root,
+      worktreeId: params.worktreeId,
+      assertCurrent: params.assertCurrent,
+    });
+    if (mapped && backing.worktreeId !== params.worktreeId) {
+      return { path: null };
     }
-    params.assertCurrent();
+    assertWorkspaceCurrent = backing.assertCurrent;
+    readRoot = backing.root;
+    runtimeWorkspaceDir = backingRoot = readRoot;
+    assertCurrent();
   }
   if (!mapped || !sandbox || !absolute) {
-    return { path: params.filePath };
+    return { path: params.filePath, readRoot, assertCurrent };
   }
   // Without live backing proof (no registered container, as after every deploy,
   // or a nested mount such as /workspace/shared or the skills mount, which the
@@ -154,7 +161,7 @@ export async function prepareSessionFileReadPath(
       assertCurrent,
     });
     assertBackingCurrent();
-    return { path: mapped.hostPath, assertCurrent: assertBackingCurrent };
+    return { path: mapped.hostPath, readRoot, assertCurrent: assertBackingCurrent };
   } catch {
     params.assertReadCurrent();
     // Without a session mount table (guest sessions), an unavailable or shadowed
@@ -178,7 +185,7 @@ export async function resolveSessionFileReadTarget(
   const inRootPath = resolveSessionRootFilePath(boundary, filePath);
   if (inRootPath) {
     return {
-      root: boundary.root,
+      root: boundary.readRoot ?? boundary.root,
       path: path.relative(boundary.root, inRootPath),
       absolutePath: inRootPath,
       outside: false,
