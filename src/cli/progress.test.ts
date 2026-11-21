@@ -28,19 +28,24 @@ function createOutput(
   return output as NodeJS.WriteStream;
 }
 
-function withStdinIsRaw<T>(isRaw: boolean, run: () => T): T {
-  const original = Object.getOwnPropertyDescriptor(process.stdin, "isRaw");
-  Object.defineProperty(process.stdin, "isRaw", {
-    configurable: true,
-    value: isRaw,
-  });
+function withStdin<T>(state: { isRaw: boolean; isTTY: boolean }, run: () => T): T {
+  const originals = {
+    isRaw: Object.getOwnPropertyDescriptor(process.stdin, "isRaw"),
+    isTTY: Object.getOwnPropertyDescriptor(process.stdin, "isTTY"),
+  };
+  for (const key of ["isRaw", "isTTY"] as const) {
+    Object.defineProperty(process.stdin, key, { configurable: true, value: state[key] });
+  }
   try {
     return run();
   } finally {
-    if (original) {
-      Object.defineProperty(process.stdin, "isRaw", original);
-    } else {
-      Reflect.deleteProperty(process.stdin, "isRaw");
+    for (const key of ["isRaw", "isTTY"] as const) {
+      const original = originals[key];
+      if (original) {
+        Object.defineProperty(process.stdin, key, original);
+      } else {
+        Reflect.deleteProperty(process.stdin, key);
+      }
     }
   }
 }
@@ -74,13 +79,15 @@ describe("cli progress", () => {
     "bounds spinner output at %i columns and removes its resize listener",
     (columns, label, expected) => {
       const stream = createOutput(true, undefined, columns);
-      const reporter = progress({ label, stream });
-      if (expected === undefined) {
-        expect(spinnerInstance.start).not.toHaveBeenCalled();
-      } else {
-        expect(spinnerInstance.start).toHaveBeenCalledWith(theme.accent(expected));
-      }
-      reporter.done();
+      withStdin({ isRaw: false, isTTY: true }, () => {
+        const reporter = progress({ label, stream });
+        if (expected === undefined) {
+          expect(spinnerInstance.start).not.toHaveBeenCalled();
+        } else {
+          expect(spinnerInstance.start).toHaveBeenCalledWith(theme.accent(expected));
+        }
+        reporter.done();
+      });
       expect(stream.listenerCount("resize")).toBe(0);
     },
   );
@@ -125,7 +132,7 @@ describe("cli progress", () => {
   it("routes clack spinner output through the progress stream", () => {
     const stream = createOutput(true, vi.fn());
 
-    withStdinIsRaw(false, () => {
+    withStdin({ isRaw: false, isTTY: true }, () => {
       const reporter = progress({ label: "Loading", stream, fallback: "spinner" });
       expect(spinner).toHaveBeenCalledWith({ output: stream });
       expect(spinnerInstance.start).toHaveBeenCalledWith(expect.stringContaining("Loading"));
@@ -135,13 +142,26 @@ describe("cli progress", () => {
 
   it("does not write terminal controls when raw TUI input suppresses the default spinner", () => {
     const { writes, stream } = captureOutput();
-    withStdinIsRaw(true, () => {
+    withStdin({ isRaw: true, isTTY: true }, () => {
       const reporter = progress({ label: "Scanning", total: 2, stream });
       reporter.setLabel("Still scanning");
       reporter.tick();
       reporter.done();
     });
 
+    expect(writes).toStrictEqual([]);
+  });
+
+  it("leaves piped stdin to the command instead of starting the clack spinner", () => {
+    const { writes, stream } = captureOutput();
+    withStdin({ isRaw: false, isTTY: false }, () => {
+      const reporter = progress({ label: "Loading", stream, fallback: "spinner" });
+      reporter.done();
+    });
+
+    // The clack spinner opens a readline on process.stdin and would swallow a
+    // heredoc meant for `approvals set --stdin`.
+    expect(spinner).not.toHaveBeenCalled();
     expect(writes).toStrictEqual([]);
   });
 
