@@ -194,6 +194,38 @@ describe("buildInboundUserContextPrefix", () => {
     );
   });
 
+  // A WebChat owner whose profile name differs from the workspace's human was refused owner data.
+  it.each([true, false])(
+    "tells the model whether the WebChat sender is the owner (%s)",
+    async (senderIsOwner) => {
+      const sessionCtx = finalizeInboundContext({
+        Body: "Summarize my latest mails",
+        Provider: "webchat",
+        Surface: "webchat",
+        ChatType: "direct",
+      });
+      const params = baseParams({ ctx: sessionCtx, sessionCtx, isNewSession: false });
+      const prepared = await prepareReplyRunContext({
+        ...params,
+        command: { ...params.command, senderIsOwner },
+      });
+      if (prepared.kind !== "ready") {
+        throw new Error("Expected prepared reply context");
+      }
+      const { currentInboundContext } = prepared.buildPromptBodies({
+        prefixedBody: prepared.prefixedBodyBase,
+      });
+
+      if (senderIsOwner) {
+        expect(parseConversationInfoPayload(currentInboundContext?.text ?? "")).toMatchObject({
+          sender_is_owner: true,
+        });
+      } else {
+        expect(currentInboundContext?.text ?? "").not.toContain("sender_is_owner");
+      }
+    },
+  );
+
   it.each([
     {
       provider: "discord",

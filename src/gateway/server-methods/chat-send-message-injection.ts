@@ -271,14 +271,22 @@ export function createChatSendMessageInjectionStarter(params: {
         input: params.sourceRef.input,
         target,
         text: p.replyToId
-          ? buildChatSendReplyInjectionText({ body: text, cfg, ctx, sessionEntry: entry })
+          ? buildChatSendReplyInjectionText({
+              body: text,
+              cfg,
+              ctx,
+              sessionEntry: entry,
+              senderIsOwner: authorization.senderIsOwner,
+            })
           : text,
         options: {
           // Reply-target injection already includes this prefix in its text.
           currentInboundContext: p.replyToId
             ? undefined
             : {
-                text: buildInboundUserContextPrefix(ctx, resolveEnvelopeFormatOptions(cfg), entry),
+                text: buildInboundUserContextPrefix(ctx, resolveEnvelopeFormatOptions(cfg), entry, {
+                  senderIsOwner: authorization.senderIsOwner,
+                }),
               },
           canAdmit: () => {
             admissionRefused = !canAdmit();

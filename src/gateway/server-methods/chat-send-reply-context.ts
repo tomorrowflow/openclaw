@@ -37,11 +37,13 @@ export function buildChatSendReplyInjectionText(params: {
   cfg: OpenClawConfig;
   ctx: MsgContext;
   sessionEntry?: Parameters<typeof buildInboundUserContextPrefix>[2];
+  senderIsOwner: boolean;
 }): string {
   const prefix = buildInboundUserContextPrefix(
     params.ctx,
     resolveEnvelopeFormatOptions(params.cfg),
     params.sessionEntry,
+    { senderIsOwner: params.senderIsOwner },
   );
   return prefix ? `${prefix}\n\n${params.body}` : params.body;
 }
