@@ -285,7 +285,7 @@ it.each([
       command: "echo ok",
       node,
       host,
-      ...(route === "node" ? { workdir: "/Users/vv", background: true } : {}),
+      ...(route === "node" ? { workdir: "/Users/vv", yieldMs: 1000 } : {}),
     });
   if (route === "conflict") {
     await expect(run()).rejects.toThrow(
@@ -312,6 +312,17 @@ it.each([
       expect(gatewayParams("node.invoke")).toEqual([]);
     }
   }
+});
+
+it("refuses background services on host=node before approval or invoke", async () => {
+  const fixture = nodeFixture("node-ok");
+  mockGateway({ "node.invoke": fixture.handle });
+  const tool = createExecTool({ host: "node", security: "full", ask: "off" });
+  await expect(
+    tool.execute("node-background", { command: "python3 -m http.server", background: true }),
+  ).rejects.toThrow("setsid nohup <command> > <log> 2>&1 < /dev/null &");
+  expect(fixture.runs).toHaveLength(0);
+  expect(callGatewayTool).not.toHaveBeenCalled();
 });
 
 it("reuses approval id as the node runId for an explicit agent follow-up", async () => {
