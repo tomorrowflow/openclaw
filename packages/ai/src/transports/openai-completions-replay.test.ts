@@ -108,8 +108,9 @@ describe("Chat Completions historical tools", () => {
           },
           { role: "tool", tool_call_id: "call:0|fc_item", content: "sunny" },
           { role: "tool", tool_call_id: "call_2", content: "sunny" },
+          { role: "assistant", content: "I have processed the tool results." },
           {
-            role: "assistant",
+            role: "user",
             content: `[tool result id=call_bad name=stale_metadata] Tool ${unavailable} not found`,
           },
           { role: "user", content: "Continue" },
@@ -176,7 +177,7 @@ describe("Chat Completions historical tools", () => {
     expect(buildOpenAICompletionsParams(openAIModel, context, undefined).messages).toEqual([
       { role: "tool", tool_call_id: "call_0", content: "sunny" },
       {
-        role: "assistant",
+        role: "user",
         content: "[tool result id=call_bad name=session_status] Tool session_status not found",
       },
     ]);

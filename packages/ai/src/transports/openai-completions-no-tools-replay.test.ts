@@ -52,24 +52,33 @@ describe("no-tools Chat Completions replay", () => {
     expect(payload).not.toHaveProperty("tools");
     expect(payload).not.toHaveProperty("tool_choice");
     const messages = payload.messages as ChatCompletionMessageParam[];
-    expect(messages.map((message) => message.role)).toEqual(["system", "assistant", "user"]);
+    expect(messages.map((message) => message.role)).toEqual([
+      "system",
+      "assistant",
+      "user",
+      "user",
+    ]);
     for (const message of messages) {
       expect(message).not.toHaveProperty("tool_calls");
       expect(message).not.toHaveProperty("tool_call_id");
       expect(message).not.toHaveProperty("function_call");
     }
-    const content = messages[1]?.content;
-    const text = Array.isArray(content)
-      ? content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
-      : content;
-    expect(text).toContain("Reading the files.");
-    expect(text).toContain('[tool call id=call_notes name=read] {"path":"notes.txt"}');
-    expect(text).toContain('[tool call id=call_readme name=read] {"path":"readme.md"}');
-    expect(text).toContain("[tool result id=call_notes name=read]   amber-17\n");
-    expect(text).toContain("[tool result id=call_readme name=read] violet-29");
+    const textAt = (index: number) => {
+      const content = messages[index]?.content;
+      return Array.isArray(content)
+        ? content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
+        : content;
+    };
+    const calls = textAt(1);
+    expect(calls).toContain("Reading the files.");
+    expect(calls).toContain('[tool call id=call_notes name=read] {"path":"notes.txt"}');
+    expect(calls).toContain('[tool call id=call_readme name=read] {"path":"readme.md"}');
     if (compat.requiresThinkingAsText) {
-      expect(text).toContain("Check both files.");
+      expect(calls).toContain("Check both files.");
     }
+    expect(textAt(2)).toBe(
+      "[tool result id=call_notes name=read]   amber-17\n\n[tool result id=call_readme name=read] violet-29",
+    );
     expect(context).toEqual(before);
   });
 
@@ -117,11 +126,13 @@ describe("no-tools Chat Completions replay", () => {
       { role: "system" },
       {
         role: "assistant",
-        content: expect.stringContaining("[tool result id=call_readme name=read]"),
+        content: expect.stringContaining("[tool call id=call_readme name=read]"),
       },
       {
         role: "user",
         content: [
+          { type: "text", text: "[tool result id=call_notes name=read]   amber-17\n" },
+          { type: "text", text: "[tool result id=call_readme name=read] violet-29" },
           { type: "text", text: "Image(s) from tool result #1 (read):" },
           { type: "image_url", image_url: { url: "data:image/png;base64,call_notes" } },
           { type: "text", text: "Image(s) from tool result #2 (read):" },

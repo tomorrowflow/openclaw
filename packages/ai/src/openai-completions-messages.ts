@@ -322,36 +322,29 @@ export function convertMessages(
       }
 
       i = j - 1;
-      if (textResults.length > 0) {
-        // Native results must stay contiguous; collapse text before later cache indexes are recorded.
-        const previous = params.at(-1);
-        const text = textResults.join("\n");
-        if (previous?.role !== "assistant") {
-          params.push({ role: "assistant", content: text });
-        } else if (Array.isArray(previous.content)) {
-          previous.content.push(
-            ...textResults.map((result): ChatCompletionContentPartText => ({
-              type: "text",
-              text: result,
-            })),
-          );
-        } else {
-          previous.content = previous.content ? `${previous.content}\n${text}` : text;
-        }
+      if (textResults.length === 0 && imageContentParts.length === 0) {
+        lastRole = "toolResult";
+        continue;
       }
-
-      if (imageContentParts.length > 0) {
-        if (supportsTools && textResults.length === 0 && compat.requiresAssistantAfterToolResult) {
-          params.push({ role: "assistant", content: "I have processed the tool results." });
-        }
-        params.push({
-          role: "user",
-          content: imageContentParts,
-        });
-        lastRole = "user";
-      } else {
-        lastRole = supportsTools && textResults.length === 0 ? "toolResult" : "assistant";
+      if (params.at(-1)?.role === "tool" && compat.requiresAssistantAfterToolResult) {
+        params.push({ role: "assistant", content: "I have processed the tool results." });
       }
+      // Projected results are tool input, not model output: as user content the
+      // request never ends on an assistant turn, which strict servers reject.
+      params.push({
+        role: "user",
+        content:
+          imageContentParts.length === 0
+            ? textResults.join("\n")
+            : [
+                ...textResults.map((text): ChatCompletionContentPartText => ({
+                  type: "text",
+                  text,
+                })),
+                ...imageContentParts,
+              ],
+      });
+      lastRole = "user";
       continue;
     }
 
