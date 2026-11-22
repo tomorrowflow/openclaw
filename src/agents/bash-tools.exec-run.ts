@@ -287,6 +287,14 @@ export function createExecTool(defaults?: ExecToolDefaults) {
         );
       }
       const host = resolveExecHost(params, defaults);
+      // Remote system.run has no process session: a service started with background:true
+      // would hold the call until the exec timeout (30 min by default) and then be killed.
+      // yieldMs stays a warning because ordinary commands still finish synchronously.
+      if (host === "node" && params.background === true) {
+        throw new Error(
+          "exec background:true is unavailable for host=node: remote system.run has no process session, so the call would block until the command exits or times out. Run commands that finish without background. To leave a service running on the node, detach it in the command: setsid nohup <command> > <log> 2>&1 < /dev/null & — then stop it when you are done.",
+        );
+      }
       const foregroundFallbackWarning =
         (host === "node" || !backgroundAvailable) &&
         (params.background === true || typeof params.yieldMs === "number")
