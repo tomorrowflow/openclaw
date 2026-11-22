@@ -129,6 +129,41 @@ describe("Chat Completions historical tools", () => {
     },
   );
 
+  it("ends the request on the result when the newest call targets an unavailable tool", () => {
+    // Mistral rejects a request whose last message is an assistant turn (code 3230).
+    const model = makeCompletionsModel({
+      provider: "mistral",
+      id: "mistral-large-latest",
+      baseUrl: "https://api.mistral.ai/v1",
+      reasoning: false,
+    });
+    const context: Context = {
+      tools: [replayTool],
+      messages: [
+        { role: "user", content: "Check prices", timestamp: 1 },
+        {
+          role: "assistant",
+          api: model.api,
+          provider: model.provider,
+          model: model.id,
+          content: [{ type: "toolCall", id: "call_ws", name: "web_search", arguments: {} }],
+          usage: createZeroUsage(),
+          stopReason: "toolUse",
+          timestamp: 2,
+        },
+        makeTextToolResult("call_ws", "web_search", "Tool web_search not found", true, 3),
+      ],
+    };
+    const params = buildOpenAICompletionsRequest(model, context, undefined, { mode: "managed" });
+    expect(params.messages.slice(-2)).toEqual([
+      { role: "assistant", content: "[tool call id=call_ws name=web_search] {}" },
+      {
+        role: "user",
+        content: "[tool result id=call_ws name=web_search] Tool web_search not found",
+      },
+    ]);
+  });
+
   it("keeps captured-prefix native result IDs and projects unavailable suffix results as text", () => {
     const context: Context = {
       tools: [replayTool],
