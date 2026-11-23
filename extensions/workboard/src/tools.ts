@@ -176,7 +176,7 @@ const toolSchemas = {
         WORKBOARD_CARD_KINDS.map((kind) => Type.Literal(kind)),
         {
           description:
-            "What the card is for; default task. A spec on a board with a key opens the next release.",
+            "What the card is for; default task. A spec on a board with a key opens the next release. A retro is numbered RETRO-<n> on any board and never starts.",
         },
       ),
     ),

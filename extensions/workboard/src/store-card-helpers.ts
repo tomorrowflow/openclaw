@@ -354,6 +354,9 @@ export function workboardClaimRefusal(
   claimed: boolean,
   parentsDone?: boolean,
 ): string | undefined {
+  if (card.kind === "retro") {
+    return "a retro card is held by the operator; it never starts. Record the decisions as a comment and move it to done.";
+  }
   if (cardParentIds(card).length > 0 && card.status !== "ready" && !claimed) {
     if (card.status === "blocked") {
       return "card is blocked; use workboard_unblock before claiming.";

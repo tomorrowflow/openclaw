@@ -33,6 +33,11 @@ export function normalizeCardKind(
 }
 
 export type WorkboardCardNumber = { release: number; seq: number };
+/**
+ * A card's number with the ID it shows. A retro has no release; a numbered
+ * card whose board lost its key keeps its number without an ID.
+ */
+type BoardCardNumber = { ref?: string; release?: number; seq: number };
 
 export function cardRef(key: string, number: WorkboardCardNumber): string {
   return `${key}-${number.release}.${String(number.seq).padStart(2, "0")}`;
@@ -101,6 +106,37 @@ export function assignCardNumber(params: {
   return { release, seq };
 }
 
+function retroRef(seq: number): string {
+  return `RETRO-${seq}`;
+}
+
+/** Retros count on their own on every board, keyed or not, outside any release. */
+function retroCardNumber(params: {
+  cards: readonly WorkboardCard[];
+  boardId: string;
+  release?: unknown;
+  seq?: unknown;
+  cardId?: string;
+}): BoardCardNumber {
+  if (params.release !== undefined || params.seq !== undefined) {
+    throw new Error("a retro card is numbered RETRO-<n> by its board; it takes no release or seq.");
+  }
+  const seq =
+    1 +
+    Math.max(
+      0,
+      ...params.cards
+        .filter(
+          (card) =>
+            card.id !== params.cardId &&
+            card.kind === "retro" &&
+            cardBoardId(card) === params.boardId,
+        )
+        .map((card) => card.seq ?? 0),
+    );
+  return { ref: retroRef(seq), seq };
+}
+
 /** Cards on a board without a key stay unnumbered, and cannot be given a number. */
 async function boardCardNumber(params: {
   cards: readonly WorkboardCard[];
@@ -110,7 +146,10 @@ async function boardCardNumber(params: {
   release?: unknown;
   seq?: unknown;
   cardId?: string;
-}): Promise<(WorkboardCardNumber & { key: string }) | undefined> {
+}): Promise<BoardCardNumber | undefined> {
+  if (params.kind === "retro") {
+    return retroCardNumber(params);
+  }
   const key = await params.reader.boardKey(params.boardId);
   if (!key) {
     if (params.release !== undefined || params.seq !== undefined) {
@@ -118,16 +157,36 @@ async function boardCardNumber(params: {
     }
     return undefined;
   }
-  return { key, ...assignCardNumber(params) };
+  const number = assignCardNumber(params);
+  return { ref: cardRef(key, number), ...number };
+}
+
+async function keptCardNumber(
+  reader: CardNumberReader,
+  card: WorkboardCard,
+  boardId: string,
+): Promise<BoardCardNumber | undefined> {
+  if (card.seq === undefined) {
+    return undefined;
+  }
+  if (card.kind === "retro") {
+    return { ref: retroRef(card.seq), seq: card.seq };
+  }
+  if (card.release === undefined) {
+    return undefined;
+  }
+  const number = { release: card.release, seq: card.seq };
+  const key = await reader.boardKey(boardId);
+  return key ? { ref: cardRef(key, number), ...number } : number;
 }
 
 function identityOf(
   title: unknown,
   kind: WorkboardCardKind | undefined,
-  number: (WorkboardCardNumber & { key?: string }) | undefined,
+  number: BoardCardNumber | undefined,
 ): CardIdentity {
   return {
-    title: number?.key ? withRefTitle(title, cardRef(number.key, number)) : normalizeTitle(title),
+    title: number?.ref ? withRefTitle(title, number.ref) : normalizeTitle(title),
     ...(kind ? { kind } : {}),
     ...(number ? { release: number.release, seq: number.seq } : {}),
   };
@@ -169,16 +228,14 @@ export async function updatedCardIdentity(
   patch: WorkboardCardPatch,
 ): Promise<CardIdentity> {
   const kind = normalizeCardKind(patch.kind, existing.kind);
-  const renumber = patch.release !== undefined || patch.seq !== undefined;
+  // A retro and a release ticket are numbered apart, so crossing between them renumbers.
+  const crossesRetro = (kind === "retro") !== (existing.kind === "retro");
+  const renumber = patch.release !== undefined || patch.seq !== undefined || crossesRetro;
   if ((kind !== existing.kind || renumber) && existing.startedAt) {
     throw new Error("a card's kind and number are fixed once it has started.");
   }
-  const kept =
-    existing.release !== undefined && existing.seq !== undefined
-      ? { release: existing.release, seq: existing.seq }
-      : undefined;
   if (patch.title === undefined && !renumber) {
-    return { title: existing.title, kind, release: kept?.release, seq: kept?.seq };
+    return { title: existing.title, kind, release: existing.release, seq: existing.seq };
   }
   const boardId = cardBoardId(existing);
   const number = renumber
@@ -187,11 +244,11 @@ export async function updatedCardIdentity(
         boardId,
         reader,
         kind,
-        release: patch.release ?? existing.release,
-        seq: patch.seq ?? existing.seq,
+        release: patch.release ?? (crossesRetro ? undefined : existing.release),
+        seq: patch.seq ?? (crossesRetro ? undefined : existing.seq),
         cardId: existing.id,
       })
-    : kept && { ...kept, key: await reader.boardKey(boardId) };
+    : await keptCardNumber(reader, existing, boardId);
   // Every field explicit: the patch spreads over the existing card, so an absent kind must clear it.
   return {
     ...identityOf(patch.title ?? existing.title, kind, number),
