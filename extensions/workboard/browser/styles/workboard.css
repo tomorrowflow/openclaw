@@ -5470,13 +5470,19 @@ workboard-inline-text {
   --workboard-kind-color: var(--session-color-purple);
 }
 
+/* A left border on a card-shaped overlay follows the card's rounded corners. */
 .workboard-card[data-kind]::before {
   content: "";
   position: absolute;
-  inset: 10px auto 10px 0;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--workboard-kind-color);
+  inset: -1px;
+  border-left: 3px solid var(--workboard-kind-color);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* List rows have no side border to cover. */
+.workboard-card--list[data-kind]::before {
+  inset: 0;
 }
 
 .workboard-card__kind {
