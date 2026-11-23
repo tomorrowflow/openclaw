@@ -994,6 +994,42 @@ openclaw gateway call workboard.boards.upsert --params \
   '{"id":"lindra","orchestration":{"env":{"LINDRA_TEXT_URL":"http://192.0.2.17:11434"}}}'
 ```
 
+A board's `orchestration.links` and `orchestration.secrets`, operator-set the
+same way, fill the board header's project-info popover in the Control UI. The
+popover opens from the button beside the Architecture button and shows, for
+that board only, its `links`, its plain `env` (read-only), the names of its
+`preview.env` secrets, and its revealable `secrets`. It appears when the board
+has any of them. Both lists are navigation for the operator: they never reach a
+ticket brief or a verification brief, and agent board tools cannot set them.
+
+- `links` is a list of up to 20 `{ label, url, group? }` entries. `label` is 1
+  to 60 characters, `group` 1 to 40, and `url` an `http` or `https` URL of at
+  most 2000 characters; `javascript:` and other schemes are refused. Changing
+  `links` needs `operator.write`.
+- `secrets` is a list of up to 20 `{ label, name, group? }` entries, with the
+  same `label` and `group` limits and no repeated `name`. `name` is a
+  secrets-store entry name, the same rule as a store SecretRef `id`; the board
+  holds only the name. Changing the list needs `operator.admin`, like
+  `preview.env`.
+
+Entries of `links` and `secrets` that share a `group` render under one heading
+in the order listed, and entries without one under **General**. `links: null`
+or `secrets: null` (or an empty list) removes them.
+
+```bash
+openclaw gateway call workboard.boards.upsert --params \
+  '{"id":"lindra","orchestration":{"links":[{"label":"Test","url":"https://test.example.ts.net:8780","group":"Test"}],"secrets":[{"label":"Test token","name":"LINDRA_TEST_TOKEN","group":"Test"}]}}'
+```
+
+A listed secret shows masked. A client with `operator.admin` sees a **Reveal**
+button that calls `workboard.boards.revealSecret` with `{ boardId, name }` and
+gets `{ value }`. The method needs `operator.admin`, refuses a `name` the board
+does not list, resolves the value from the secrets store with the Gateway's own
+providers, and logs the board, the secret name, and the connection (never the
+value). The Control UI hides the value again after 30 seconds or when the
+popover closes. A secret missing from the store fails with the fix: store it
+with `openclaw secrets store set <NAME>`.
+
 The plugin passes the session no tool restriction: the agent's own tools are
 the boundary. `agentId` must name a dedicated agent that has only `exec` and
 `process`, runs its commands on the node, and never falls back to another

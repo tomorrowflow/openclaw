@@ -151,6 +151,8 @@ isRuntimeOwnedSessionKey\(event.sessionKey\) | src/hooks/bundled/session-memory/
 # --- Workboard viewers ---
 register\("workboard.architectureViewer" | extensions/workboard/src/gateway.ts | The architecture viewer port (plugins.entries.workboard.config.architectureViewer.port) served to the Control UI. Asserts the registration, not the contract type: without it the board header never shows the Architecture button, and the SeeCode viewer (tomorrowflow/SeeCode viewer/) is unreachable from the board.
 openPortalTab\(client, \{ | extensions/workboard/browser/pages/workboard/view-board-title.tsx | The board header opens /board/<boardId>/ of the architecture viewer through an OpenClaw Portal. Matches the call, not the import.
+register\("workboard.boards.revealSecret" | extensions/workboard/src/gateway-boards.ts | The operator.admin method behind the board info popover's Reveal button: resolves only a secret name the board lists from the secrets store, re-checks admin after the board lookup, and logs board, name, and connection (never the value). Without it a board's listed secrets cannot be revealed.
+BoardInfo | extensions/workboard/browser/pages/workboard/view-board-title.tsx | The board header shows a project-info popover (links, env, preview secret names, revealable secrets) beside the Architecture button; Reveal needs operator.admin. Without it the operator has no per-board project links or secret reveal in the Control UI.
 
 # --- Restart recovery ---
 !isHeartbeatSessionKey\(sessionKey\) | src/gateway/session-restart-resume.ts | Restart resume never replays isolated heartbeat sessions (they re-answered old turns in the user's chat). Moved here from restart-recovery-state.ts in the 2026.11.5 sync.
