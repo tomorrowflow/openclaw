@@ -1025,7 +1025,8 @@ A listed secret shows masked. A client with `operator.admin` sees a **Reveal**
 button that calls `workboard.boards.revealSecret` with `{ boardId, name }` and
 gets `{ value }`. The method needs `operator.admin`, refuses a `name` the board
 does not list, resolves the value from the secrets store with the Gateway's own
-providers, and logs the board, the secret name, and the connection (never the
+providers (the default `store` alias), refuses when the connection closed during
+the lookup, and logs the board, the secret name, and the connection (never the
 value). The Control UI hides the value again after 30 seconds or when the
 popover closes. A secret missing from the store fails with the fix: store it
 with `openclaw secrets store set <NAME>`.

@@ -1,28 +1,58 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {
+  closeOpenClawStateDatabaseAsync,
+  writeSecretStoreEntryForTest,
+} from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerWorkboardGatewayMethods } from "./gateway.js";
 import { createGatewayMethodCapture } from "./test/gateway-method-capture.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 
-const resolveSecret = vi.hoisted(() => vi.fn());
-vi.mock("openclaw/plugin-sdk/secret-input-runtime", () => ({
-  resolveConfiguredSecretInputString: resolveSecret,
-}));
+const stateDirs: string[] = [];
+
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await closeOpenClawStateDatabaseAsync();
+  for (const dir of stateDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** Points the Gateway's state at a fresh directory and returns a writer for its secrets store. */
+function isolatedSecretStore() {
+  const stateDir = mkdtempSync(path.join(os.tmpdir(), "workboard-board-links-state-"));
+  stateDirs.push(stateDir);
+  vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
+  return (name: string, value: string) =>
+    writeSecretStoreEntryForTest({
+      scope: { kind: "team" },
+      name,
+      value,
+      kind: "secret",
+      updatedBy: "workboard-board-links-test",
+      database: { env: { OPENCLAW_STATE_DIR: stateDir } },
+    });
+}
 
 const links = [{ label: "Test", url: "https://test.example.ts.net:8780", group: "Test" }];
 const secrets = [{ label: "Test token", name: "LINDRA_TEST_TOKEN", group: "Test" }];
 
-function setup() {
+function setup(options: { connectionActive?: boolean } = {}) {
   const store = createWorkboardSqliteTestStore();
-  const { api, methods } = createGatewayMethodCapture();
   const info = vi.fn();
-  (api as unknown as { logger: { info: typeof info } }).logger = { info };
+  const { api, methods } = createGatewayMethodCapture(undefined, { info });
   registerWorkboardGatewayMethods({ api, store });
   const call = async (method: string, params: Record<string, unknown>, scope: string) => {
     const respond = vi.fn();
     await methods.get(method)!.handler({
       params,
       client: { connId: "conn-1", connect: { scopes: [scope] } },
-      context: { getRuntimeConfig: () => ({}) },
+      context: {
+        getRuntimeConfig: () => ({}),
+        isConnectionActive: () => options.connectionActive ?? true,
+      },
       respond,
     } as never);
     const [ok, data, error] = respond.mock.calls[0] as [boolean, any, { message?: string }?];
@@ -33,8 +63,6 @@ function setup() {
 }
 
 describe("board links and revealable secrets", () => {
-  beforeEach(() => resolveSecret.mockReset());
-
   it("lets a writer change links, refuses a non-http URL, and removes both lists with null", async () => {
     const { call, board } = setup();
     const upsert = (orchestration: Record<string, unknown>, scope = "operator.write") =>
@@ -78,33 +106,49 @@ describe("board links and revealable secrets", () => {
       { id: "lindra", orchestration: { secrets } },
       "operator.admin",
     );
-    const reveal = (name: string, scope = "operator.admin") =>
-      call("workboard.boards.revealSecret", { boardId: "lindra", name }, scope);
+    const reveal = (name: string) =>
+      call("workboard.boards.revealSecret", { boardId: "lindra", name }, "operator.admin");
 
-    resolveSecret.mockResolvedValue({ value: "s3cret" });
+    const store = isolatedSecretStore();
+    await store("LINDRA_TEST_TOKEN", "s3cret");
+    await store("OTHER_TOKEN", "other");
     const revealed = await reveal("LINDRA_TEST_TOKEN");
     expect(revealed).toMatchObject({ ok: true, data: { value: "s3cret" } });
-    expect(resolveSecret).toHaveBeenCalledWith(
-      expect.objectContaining({
-        value: { source: "store", provider: "default", id: "LINDRA_TEST_TOKEN" },
-      }),
-    );
     expect(info).toHaveBeenCalledTimes(1);
     expect(info.mock.calls[0]?.[0]).toContain("LINDRA_TEST_TOKEN");
     expect(info.mock.calls[0]?.[0]).toContain("conn-1");
     expect(info.mock.calls[0]?.[0]).not.toContain("s3cret");
 
-    resolveSecret.mockClear();
     const unlisted = await reveal("OTHER_TOKEN");
     expect(unlisted.ok).toBe(false);
-    expect(resolveSecret).not.toHaveBeenCalled();
+    expect(JSON.stringify(unlisted)).not.toContain("other");
 
-    const writer = await reveal("LINDRA_TEST_TOKEN", "operator.write");
-    expect(writer.ok).toBe(false);
-    expect(resolveSecret).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledTimes(1);
 
-    resolveSecret.mockResolvedValue({ value: undefined, unresolvedRefReason: "not found." });
-    const missing = await reveal("LINDRA_TEST_TOKEN");
-    expect(missing.message).toContain("openclaw secrets store set LINDRA_TEST_TOKEN");
+    await call(
+      "workboard.boards.upsert",
+      { id: "lindra", orchestration: { secrets: [{ label: "Gone", name: "MISSING_TOKEN" }] } },
+      "operator.admin",
+    );
+    const missing = await reveal("MISSING_TOKEN");
+    expect(missing.ok).toBe(false);
+    expect(missing.message).toContain("openclaw secrets store set MISSING_TOKEN");
+  });
+
+  it("gives nothing to a connection that closed during the lookup", async () => {
+    const { call } = setup({ connectionActive: false });
+    await call(
+      "workboard.boards.upsert",
+      { id: "lindra", orchestration: { secrets } },
+      "operator.admin",
+    );
+    await isolatedSecretStore()("LINDRA_TEST_TOKEN", "s3cret");
+    const revealed = await call(
+      "workboard.boards.revealSecret",
+      { boardId: "lindra", name: "LINDRA_TEST_TOKEN" },
+      "operator.admin",
+    );
+    expect(revealed.ok).toBe(false);
+    expect(JSON.stringify(revealed)).not.toContain("s3cret");
   });
 });

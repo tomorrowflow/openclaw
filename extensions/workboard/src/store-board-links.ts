@@ -58,6 +58,7 @@ export function normalizeBoardSecrets(value: unknown): WorkboardBoardSecret[] | 
   const names = new Set<string>();
   return readEntries(value, "secrets")?.map((entry) => {
     const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    // The entry-name rule does not depend on the provider alias; "default" only satisfies the alias grammar.
     if (!isValidSecretRef({ source: "store", provider: "default", id: name })) {
       throw new Error(
         `secret name ${JSON.stringify(name.slice(0, 64))} must be a secrets-store entry name such as LINDRA_TEST_TOKEN.`,

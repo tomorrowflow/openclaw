@@ -1,5 +1,6 @@
 import { readStringParam } from "openclaw/plugin-sdk/core";
 import { resolveConfiguredSecretInputString } from "openclaw/plugin-sdk/secret-input-runtime";
+import { resolveDefaultSecretProviderAlias } from "openclaw/plugin-sdk/secret-provider-alias";
 import type { OpenClawPluginApi } from "../api.js";
 import { normalizeBoardIdRequired } from "./store-normalizers.js";
 import type { WorkboardStore } from "./store.js";
@@ -44,14 +45,15 @@ export function registerWorkboardBoardMethods(options: {
     if (!listed) {
       throw new Error(`Board ${boardId} does not list a secret named ${name}.`);
     }
-    // The scope check ran before the awaited lookup; a connected client must still hold admin.
-    if (!hasAdmin(request.client)) {
-      throw new Error("Revealing a board secret needs operator.admin.");
-    }
+    const config = request.context.getRuntimeConfig();
     const result = await resolveConfiguredSecretInputString({
-      config: request.context.getRuntimeConfig(),
+      config,
       env: process.env,
-      value: { source: "store", provider: "default", id: name },
+      value: {
+        source: "store",
+        provider: resolveDefaultSecretProviderAlias(config, "store"),
+        id: name,
+      },
       path: `secrets.${name}`,
       unresolvedReasonStyle: "detailed",
     });
@@ -59,6 +61,11 @@ export function registerWorkboardBoardMethods(options: {
       throw new Error(
         `Secret ${name} could not be resolved: ${result.unresolvedRefReason ?? "no value"} Store it with \`openclaw secrets store set ${name}\`.`,
       );
+    }
+    // The scope was checked at dispatch; a connection that closed during the awaited work gets nothing.
+    const connId = request.client?.connId;
+    if (connId && request.context.isConnectionActive?.(connId) === false) {
+      throw new Error("The connection closed before the secret could be revealed.");
     }
     logger.info(
       `workboard board ${boardId} revealed secret ${name} to connection ${request.client?.connId ?? "in-process"}`,
