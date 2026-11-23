@@ -20,15 +20,9 @@ import { z } from "zod";
 import type { OpenClawPluginApi } from "../api.js";
 import { redactDispatchResult, redactOperatorCard } from "./card-redaction.js";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
+import { registerNodeTicketReadMethods } from "./gateway-node-ticket-reads.js";
 import type { WorkboardHealthReader } from "./health.js";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sessions.js";
-import {
-  listNodeTicketArtifacts,
-  type NodeTicketArtifactKind,
-  readNodeTicketArtifact,
-  relatedCardIds,
-} from "./node-ticket-artifacts.js";
-import { readNodeTicketChangeDiff } from "./node-ticket-changes.js";
 import { readNodeGrillResult } from "./node-ticket-grill-session.js";
 import type { WorkboardSessionsBoardService } from "./sessions-board.js";
 import { resolveWorkboardSqliteWorkerModuleUrl } from "./sqlite-store-paths.js";
@@ -827,63 +821,20 @@ export function registerWorkboardGatewayMethods(params: {
     }
     return attachment;
   });
-  const requireCard = async (id: string) => {
-    const card = await store.get(id);
-    if (!card) {
-      throw new Error(`card not found: ${id}`);
-    }
-    return card;
-  };
-  // operator.read suffices for the node walk: live paths stay inside the dispatcher-owned
-  // worktree.path and normalized screenshotDirs or docs/prototypes, and the node's
-  // allowReadPaths bound them again. The walk also runs git on the node through
-  // system.run, but with a fixed argv (checked commit id, normalized dirs after `--`)
-  // in the worktree the ticket's agent already runs in, so a reader chooses nothing.
-  const listArtifacts = async (kind: NodeTicketArtifactKind, input: Record<string, unknown>) => {
-    const card = await requireCard(readId(input));
-    const linked = (await Promise.all(relatedCardIds(card).map((id) => store.get(id)))).filter(
-      (entry) => entry !== undefined,
-    );
-    return listNodeTicketArtifacts(api.runtime.gateway, card, kind, {
-      live: input.live === true,
-      linked,
-    });
-  };
-  const readArtifact = async (kind: NodeTicketArtifactKind, input: Record<string, unknown>) => {
-    const { round, live, path } = input;
-    const source =
-      live === true ? { live: true as const } : typeof round === "number" ? { round } : undefined;
-    if (!source || typeof path !== "string" || !path) {
-      throw new Error("path and either round or live: true are required.");
-    }
-    return readNodeTicketArtifact(
-      api.runtime.gateway,
-      await requireCard(readId(input)),
-      kind,
-      source,
-      path,
-    );
-  };
-  register("workboard.cards.screenshots.list", READ_SCOPE, ({ params: input }) =>
-    listArtifacts("screenshot", input),
-  );
-  register("workboard.cards.changes.diff", READ_SCOPE, async ({ params: input }) => {
-    const { round, path } = input;
-    if (typeof round !== "number" || typeof path !== "string" || !path) {
-      throw new Error("round and path are required.");
-    }
-    return readNodeTicketChangeDiff(await requireCard(readId(input)), round, path);
+  registerNodeTicketReadMethods({
+    register: (method, handler) =>
+      register(method, READ_SCOPE, ({ params: input }) => handler(input)),
+    requireCard: async (input) => {
+      const id = readId(input);
+      const card = await store.get(id);
+      if (!card) {
+        throw new Error(`card not found: ${id}`);
+      }
+      return card;
+    },
+    store,
+    runtime: api.runtime.gateway,
   });
-  register("workboard.cards.screenshots.get", READ_SCOPE, async ({ params: input }) => {
-    const { mimeType, bytes } = await readArtifact("screenshot", input);
-    return { mimeType, contentBase64: bytes.toString("base64") };
-  });
-  register("workboard.cards.prototypes.list", READ_SCOPE, ({ params: input }) =>
-    listArtifacts("prototype", input),
-  );
-  register("workboard.cards.prototypes.get", READ_SCOPE, async ({ params: input }) => ({
-    html: (await readArtifact("prototype", input)).bytes.toString("utf8"),
-  }));
   register("workboard.cards.attachments.add", WRITE_SCOPE, ({ params: input, client }) =>
     redactCardResult(
       store.addAttachment(readId(input), input, undefined, () => assertUploadsAllowed(client)),

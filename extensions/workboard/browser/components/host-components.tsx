@@ -135,8 +135,14 @@ export function Markdown(props: MarkdownProps) {
 
 /** A full HTML document with its scripts, on the host's sandbox origin rather than in the Control UI. */
 export function HtmlPreview(props: HtmlPreviewProps & Styled) {
+  // One function for the frame's lifetime; it reads the current handler on each click.
+  const onLink = (href: string) => props.onLink?.(href);
   const mount = hostMount(
-    () => ({ html: props.html, title: props.title }),
+    (): HtmlPreviewProps => ({
+      html: props.html,
+      title: props.title,
+      ...(props.onLink ? { onLink } : {}),
+    }),
     (container, value) => workboardHost().components.mountHtmlPreview(container, value),
   );
   return <div class={props.class ?? props.className ?? ""} ref={mount} />;

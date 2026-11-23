@@ -135,6 +135,14 @@ it("shows a Screenshots tab with each round's images, pairing light and dark cap
     ),
   ).toEqual(["Light", "Dark"]);
   expect(figures[0]!.querySelector("img")?.getAttribute("alt")).toBe("card-light.png");
+  // The link names the file by address, not a blob URL that dies with the page.
+  expect(figures[1]!.querySelector("a")?.getAttribute("href")).toBe(
+    `/screenshot?${new URLSearchParams({
+      card: "card-1",
+      source: "0",
+      path: "docs/screenshots/T-1/spinner.png",
+    })}`,
+  );
   expect(page.request).toHaveBeenCalledWith(GET, {
     id: "card-1",
     round: 0,

@@ -6,9 +6,10 @@ import { recordWorkboardVisualCheck } from "../../lib/workboard/mutations.ts";
 import { getWorkboardState } from "../../lib/workboard/runtime.ts";
 import type { WorkboardCard, WorkboardUiState } from "../../lib/workboard/types.ts";
 import { ChangesPanel, hasCardChanges } from "./view-card-changes.tsx";
+import { FlowsPanel } from "./view-card-flows.tsx";
 import { GrillingPanel } from "./view-card-grilling.tsx";
+import { type CardHtmlFiles, hasHtmlFiles, HtmlFilesPanel } from "./view-card-html-files.tsx";
 import { PreviewPanel } from "./view-card-preview.tsx";
-import { hasPrototypes, PrototypePanel } from "./view-card-prototypes.tsx";
 import { hasCommittedScreenshots, ScreenshotsPanel } from "./view-card-screenshots.tsx";
 import { canMutate, type WorkboardProps, workboardMutationContext } from "./view-helpers.tsx";
 
@@ -98,15 +99,26 @@ function visualCheckControl(props: WorkboardProps, card: WorkboardCard) {
     : undefined;
 }
 
+function listedHtmlFiles(controller: CardHtmlFiles | undefined, card: WorkboardCard) {
+  const listed = controller?.list(card.id);
+  return controller && listed && hasHtmlFiles(controller.kind, listed)
+    ? { controller, listed }
+    : undefined;
+}
+
 /** The card's prototypes, live and committed, once listed and only when there is one. */
 export function detailPrototypes(props: WorkboardProps, card: WorkboardCard) {
   void props.revision;
-  const controller = props.detailPrototypes;
-  const listed = controller?.list(card.id);
-  return controller && listed && hasPrototypes(listed) ? { controller, listed } : undefined;
+  return listedHtmlFiles(props.detailPrototypes, card);
 }
 
-/** A node ticket's Grilling, Changes, Screenshots, Prototype, and Preview tab panels, each only when it has content. */
+/** The card's flow reports, live and committed, once listed and only when there is one. */
+export function detailFlows(props: WorkboardProps, card: WorkboardCard) {
+  void props.revision;
+  return listedHtmlFiles(props.detailFlows, card);
+}
+
+/** A node ticket's Grilling, Changes, Screenshots, Prototype, Flows, and Preview tab panels, each only when it has content. */
 export function NodeTicketTabPanels(props: {
   workboard: WorkboardProps;
   card: WorkboardCard;
@@ -161,11 +173,22 @@ export function NodeTicketTabPanels(props: {
       </Show>
       <Show when={detailPrototypes(props.workboard, props.card)}>
         {(shown) => (
-          <PrototypePanel
-            prototypes={shown().controller}
+          <HtmlFilesPanel
+            files={shown().controller}
             cardId={props.card.id}
             listed={shown().listed}
             active={props.activeTab === "prototype"}
+            revision={props.workboard.revision}
+          />
+        )}
+      </Show>
+      <Show when={detailFlows(props.workboard, props.card)}>
+        {(shown) => (
+          <FlowsPanel
+            files={shown().controller}
+            cardId={props.card.id}
+            listed={shown().listed}
+            active={props.activeTab === "flows"}
             revision={props.workboard.revision}
           />
         )}

@@ -29,7 +29,7 @@ import type {
 import { agentDisplayName, findCardAgent, type WorkboardAgentsList } from "./agent-filter.ts";
 import type { CardChanges } from "./view-card-changes.ts";
 import type { CardGrilling } from "./view-card-grilling.ts";
-import type { CardPrototypes } from "./view-card-prototypes.tsx";
+import type { CardHtmlFiles } from "./view-card-html-files.tsx";
 import type { CardScreenshots } from "./view-card-screenshots.ts";
 
 export type BoardAutomationState = { jobId: string } & (
@@ -49,7 +49,8 @@ export type WorkboardProps = {
   detailChanges?: CardChanges;
   detailGrilling?: CardGrilling;
   detailScreenshots?: CardScreenshots;
-  detailPrototypes?: CardPrototypes;
+  detailPrototypes?: CardHtmlFiles;
+  detailFlows?: CardHtmlFiles;
   /** The transcript viewer's loopback port; card details open its `/card/<cardId>` through a portal. */
   transcriptViewerPort?: number | null;
   host: object;

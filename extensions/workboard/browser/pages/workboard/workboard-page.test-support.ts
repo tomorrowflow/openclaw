@@ -37,7 +37,8 @@ export function mountPage(
     }
     if (
       method === "workboard.cards.screenshots.list" ||
-      method === "workboard.cards.prototypes.list"
+      method === "workboard.cards.prototypes.list" ||
+      method === "workboard.cards.flows.list"
     ) {
       return { committed: { state: "available", rounds: [] } };
     }

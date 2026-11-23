@@ -34,6 +34,7 @@ export const workboardPrototypeCard = {
 export function workboardPrototypeResponses(baseTime: number) {
   return {
     "workboard.cards.screenshots.list": { committed: { state: "available", rounds: [] } },
+    "workboard.cards.flows.list": { committed: { state: "available", rounds: [] } },
     "workboard.cards.prototypes.list": {
       cases: [
         {

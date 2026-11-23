@@ -54,7 +54,11 @@ import { BoardTitle } from "./view-board-title.tsx";
 import { createCardChanges, type CardChanges } from "./view-card-changes.tsx";
 import { getVisibleDetailCard, openCardDetails } from "./view-card-details.tsx";
 import { createCardGrilling, type CardGrilling } from "./view-card-grilling.tsx";
-import { createCardPrototypes, type CardPrototypes } from "./view-card-prototypes.tsx";
+import {
+  type CardHtmlFiles,
+  createCardFlows,
+  createCardPrototypes,
+} from "./view-card-html-files.tsx";
 import { createCardScreenshots, type CardScreenshots } from "./view-card-screenshots.tsx";
 import {
   workboardErrorMessage,
@@ -100,7 +104,8 @@ export function createWorkboardPage(
     const automations = new Map<string, BoardAutomationState>();
     let trust: BoardTrustState | undefined;
     let screenshots: CardScreenshots | undefined;
-    let prototypes: CardPrototypes | undefined;
+    let prototypes: CardHtmlFiles | undefined;
+    let flows: CardHtmlFiles | undefined;
     let changes: CardChanges | undefined;
     let grilling: CardGrilling | undefined;
     type PagePresentation = {
@@ -202,6 +207,8 @@ export function createWorkboardPage(
         : undefined;
       prototypes?.dispose();
       prototypes = connected ? createCardPrototypes(client, publishPresentation) : undefined;
+      flows?.dispose();
+      flows = connected ? createCardFlows(client, publishPresentation) : undefined;
       changes?.dispose();
       changes = connected ? createCardChanges(client, publishPresentation) : undefined;
       grilling?.dispose();
@@ -299,6 +306,7 @@ export function createWorkboardPage(
       const detailCard = getVisibleDetailCard(state);
       screenshots?.show((context.presented && detailCard) || undefined);
       prototypes?.show((context.presented && detailCard) || undefined);
+      flows?.show((context.presented && detailCard) || undefined);
       const detailJobId = detailCard
         ? state.boards.find((board) => board.id === workboardCardBoardId(detailCard))
             ?.automationJobId
@@ -391,6 +399,7 @@ export function createWorkboardPage(
         detailBoardAutomation: detailJobId ? automations.get(detailJobId) : undefined,
         detailScreenshots: screenshots,
         detailPrototypes: prototypes,
+        detailFlows: flows,
         detailChanges: changes,
         detailGrilling: grilling,
         transcriptViewerPort: transcriptViewerPort(),
@@ -413,6 +422,7 @@ export function createWorkboardPage(
           trust = undefined;
           screenshots?.refresh();
           prototypes?.refresh();
+          flows?.refresh();
           changes?.refresh();
           void refreshMetadata();
           sessionResolver.refresh();
@@ -688,6 +698,7 @@ export function createWorkboardPage(
         runningSessionResolvers.dispose();
         screenshots?.dispose();
         prototypes?.dispose();
+        flows?.dispose();
         changes?.dispose();
         grilling?.dispose();
         stopVisibility();

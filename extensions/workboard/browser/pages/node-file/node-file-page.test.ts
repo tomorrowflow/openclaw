@@ -2,8 +2,13 @@ import "../../test/dom.setup.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import { workboardTestHost } from "../../test/host.setup.ts";
 import { createViewContext } from "../../test/host.ts";
-import { createPrototypePage } from "./prototype-page.tsx";
-import { parsePrototypeTarget, prototypePageTarget } from "./prototype-target.ts";
+import { createPrototypePage, createScreenshotPage } from "./node-file-page.tsx";
+import {
+  nodeFilePageTarget,
+  parseNodeFileTarget,
+  PROTOTYPE_PAGE_ID,
+  SCREENSHOT_PAGE_ID,
+} from "./node-file-target.ts";
 
 const GET = "workboard.cards.prototypes.get";
 const PATH = "docs/prototypes/ONB-4/checklist.html";
@@ -47,7 +52,8 @@ function mountPrototypePage(
 
 it("reads the addressed prototype and renders it through the host preview", async () => {
   const page = mountPrototypePage(
-    prototypePageTarget({ cardId: "card-1", source: { round: 2 }, path: PATH }).params ?? {},
+    nodeFilePageTarget(PROTOTYPE_PAGE_ID, { cardId: "card-1", source: { round: 2 }, path: PATH })
+      .params ?? {},
   );
 
   await vi.waitFor(() => expect(page.preview()).not.toBeNull());
@@ -108,8 +114,50 @@ it("names a failed read without a reason", async () => {
 });
 
 it("parses the address the Prototype tab builds", () => {
-  for (const source of [{ live: true } as const, { round: 0 }, { round: 12 }]) {
+  for (const source of [
+    { live: true } as const,
+    { base: true } as const,
+    { round: 0 },
+    { round: 12 },
+  ]) {
     const target = { cardId: "card-1", source, path: PATH };
-    expect(parsePrototypeTarget(prototypePageTarget(target).params ?? {})).toEqual(target);
+    expect(parseNodeFileTarget(nodeFilePageTarget(PROTOTYPE_PAGE_ID, target).params ?? {})).toEqual(
+      target,
+    );
   }
+});
+
+it("reads the addressed screenshot from the default branch and shows it at full size", async () => {
+  const shot = "docs/screenshots/LIN-2.04/dictation-ipad-B.png";
+  const fixture = workboardTestHost();
+  fixture.connection.connected = true;
+  const request = vi.fn(async (_method: string, _input?: unknown) => ({
+    mimeType: "image/png",
+    contentBase64: "iVBORw==",
+  }));
+  fixture.host.request = request as typeof fixture.host.request;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const target = nodeFilePageTarget(SCREENSHOT_PAGE_ID, {
+    cardId: "card-1",
+    source: { base: true },
+    path: shot,
+  });
+  expect(target).toEqual({
+    id: "screenshot",
+    params: { card: "card-1", source: "base", path: shot },
+  });
+  const view = createScreenshotPage()(
+    container,
+    createViewContext(fixture.host, target.params ?? {}),
+  );
+  mounted.push(() => view?.dispose?.());
+
+  await vi.waitFor(() => expect(container.querySelector("img")).not.toBeNull());
+  expect(request.mock.calls).toEqual([
+    ["workboard.cards.screenshots.get", { id: "card-1", base: true, path: shot }],
+  ]);
+  const image = container.querySelector("img");
+  expect(image?.getAttribute("src")).toBe("data:image/png;base64,iVBORw==");
+  expect(image?.getAttribute("alt")).toBe(shot);
 });

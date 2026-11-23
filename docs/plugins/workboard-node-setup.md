@@ -256,11 +256,12 @@ Once the node is paired:
    Restart the node afterwards: the Gateway re-evaluates withheld commands only
    when a node reconnects. `file.fetch` is capped at 16 MiB per bundle.
 
-   For live screenshots in the session **Screens** panel and live prototypes
-   in the card's **Prototype** tab, also allow `dir.list` and `system.run` (the
-   live listing asks the node's git which files the round changed) and grant each
-   target screenshot dir and `docs/prototypes`, both the directory itself and
-   its contents (`**` does not match the directory):
+   For live screenshots in the session **Screens** panel, live prototypes in
+   the card's **Prototype** tab, and live flow reports in its **Flows** tab,
+   also allow `dir.list` and `system.run` (the live listing asks the node's git
+   which files the round changed) and grant each target screenshot dir,
+   `docs/prototypes`, and `docs/flows`, both the directory itself and its
+   contents (`**` does not match the directory):
 
    ```json5 validate=false
    {
@@ -274,6 +275,8 @@ Once the node is paired:
        "/home/factory/factory/worktrees/wb-*/docs/screenshots/**",
        "/home/factory/factory/worktrees/wb-*/docs/prototypes",
        "/home/factory/factory/worktrees/wb-*/docs/prototypes/**",
+       "/home/factory/factory/worktrees/wb-*/docs/flows",
+       "/home/factory/factory/worktrees/wb-*/docs/flows/**",
      ],
    }
    ```

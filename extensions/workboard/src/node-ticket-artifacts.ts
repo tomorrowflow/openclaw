@@ -9,6 +9,7 @@ import type {
   WorkboardLiveNodeFile,
   WorkboardLiveNodeFiles,
   WorkboardNodeFileListResult,
+  WorkboardNodeFileLocation,
   WorkboardNodeFileRound,
   WorkboardNodeFileSource,
 } from "@openclaw/workboard-contract";
@@ -17,6 +18,7 @@ import { fetchNodeFile, isPathSegment, listNodeDir } from "./node-files.js";
 import {
   COMMIT_ID,
   hostGit,
+  nodeTicketBaseRef,
   nodeTicketTarget,
   runNodeCommand,
   type WorkboardNodeTicketRuntime,
@@ -36,9 +38,11 @@ type ArtifactKind = {
   committedDirs?: readonly string[];
 };
 
-export type NodeTicketArtifactKind = "screenshot" | "prototype";
+export type NodeTicketArtifactKind = "screenshot" | "prototype" | "flow";
 
 const PROTOTYPE_DIRS = ["docs/prototypes"];
+const FLOW_DIRS = ["docs/flows"];
+const HTML_TYPES = { html: "text/html", htm: "text/html" };
 
 const KINDS: Record<NodeTicketArtifactKind, ArtifactKind> = {
   screenshot: {
@@ -57,10 +61,18 @@ const KINDS: Record<NodeTicketArtifactKind, ArtifactKind> = {
   // prototypes are bound to the same dir the live walk reads.
   prototype: {
     noun: "prototype",
-    types: { html: "text/html", htm: "text/html" },
+    types: HTML_TYPES,
     maxBytes: 2 * 1024 * 1024,
     liveDirs: () => PROTOTYPE_DIRS,
     committedDirs: PROTOTYPE_DIRS,
+  },
+  // A project's living UX flow reports; they link to screenshots by relative path.
+  flow: {
+    noun: "flow report",
+    types: HTML_TYPES,
+    maxBytes: 2 * 1024 * 1024,
+    liveDirs: () => FLOW_DIRS,
+    committedDirs: FLOW_DIRS,
   },
 };
 
@@ -99,7 +111,7 @@ export function relatedCardIds(card: WorkboardCard): string[] {
 
 /**
  * A node ticket's files of one kind: those its rounds committed, for example
- * under `docs/screenshots/<ID>/` or `docs/prototypes/<ID>/`, and those the
+ * under `docs/screenshots/<ID>/`, `docs/prototypes/<ID>/`, or `docs/flows/`, and those the
  * running agent has added or changed in its node worktree since the round
  * started. The node worktree is a checkout of the base branch, so the walk
  * keeps only what git reports as changed since the round's start commit.
@@ -234,9 +246,142 @@ export async function readNodeTicketArtifact(
   path: string,
 ): Promise<NodeTicketArtifact> {
   const kind = KINDS[kindName];
-  return "live" in source
-    ? readLive(runtime, card, kind, path)
-    : readRound(card, kind, source.round, path);
+  if ("live" in source) {
+    return readLive(runtime, card, kind, path);
+  }
+  return "base" in source ? readBase(card, kind, path) : readRound(card, kind, source.round, path);
+}
+
+/** The commit of the repository's default branch as the host clone last fetched it. */
+async function baseCommit(target: WorkboardExecutionTarget): Promise<string | undefined> {
+  const result = await hostGit(target.hostRepoPath, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    "--end-of-options",
+    `${nodeTicketBaseRef(target)}^{commit}`,
+  ]);
+  const commit = result.stdout.trim();
+  return result.code === 0 && COMMIT_ID.test(commit) ? commit : undefined;
+}
+
+/** Whether the default branch may be asked for this path: the kind's type, inside the kind's dirs. */
+function isBasePath(kind: ArtifactKind, target: WorkboardExecutionTarget, path: string): boolean {
+  return (
+    mediaType(kind, path) !== undefined &&
+    isUnder(kind.committedDirs ?? kind.liveDirs(target), path) &&
+    path.split("/").every(isPathSegment)
+  );
+}
+
+/**
+ * Where the card shows each path from, first match wins: its live worktree,
+ * its rounds newest first, its linked cards in link order, then the default
+ * branch in the host clone. The default branch is read as last fetched; a
+ * clone whose base ref does not resolve finds nothing there.
+ */
+export async function locateNodeTicketArtifacts(
+  runtime: WorkboardNodeTicketRuntime,
+  card: WorkboardCard,
+  kindName: NodeTicketArtifactKind,
+  paths: readonly string[],
+  options: { linked?: readonly WorkboardCard[]; now?: () => number },
+): Promise<WorkboardNodeFileLocation[]> {
+  const kind = KINDS[kindName];
+  const listed = await listNodeTicketArtifacts(runtime, card, kindName, {
+    ...options,
+    live: true,
+  });
+  const found = new Map<string, Omit<WorkboardNodeFileLocation, "path">>();
+  const add = (path: string, location: Omit<WorkboardNodeFileLocation, "path">) => {
+    if (!found.has(path)) {
+      found.set(path, location);
+    }
+  };
+  const addRounds = (committed: WorkboardCommittedNodeFiles, cardId?: string) => {
+    for (const round of committed.state === "available" ? committed.rounds.toReversed() : []) {
+      for (const path of round.paths) {
+        add(path, { ...(cardId ? { cardId } : {}), source: { round: round.round } });
+      }
+    }
+  };
+  for (const file of listed.live?.state === "available" ? listed.live.files : []) {
+    add(file.path, { source: { live: true } });
+  }
+  addRounds(listed.committed);
+  for (const linked of listed.linked ?? []) {
+    addRounds(linked.committed, linked.cardId);
+  }
+  const target = nodeTicketTarget(card);
+  const onBase = target
+    ? paths.filter((path) => !found.has(path) && isBasePath(kind, target, path))
+    : [];
+  const commit = target && onBase.length > 0 ? await baseCommit(target) : undefined;
+  if (target && commit) {
+    const tree = await hostGit(target.hostRepoPath, [
+      "--literal-pathspecs",
+      "ls-tree",
+      "-r",
+      "-z",
+      "--name-only",
+      commit,
+      "--",
+      ...onBase,
+    ]);
+    for (const path of tree.code === 0 ? tree.stdout.split("\0").filter(Boolean) : []) {
+      add(path, { source: { base: true } });
+    }
+  }
+  return paths.map((path) => ({ path, ...found.get(path) }));
+}
+
+async function readBase(
+  card: WorkboardCard,
+  kind: ArtifactKind,
+  path: string,
+): Promise<NodeTicketArtifact> {
+  const target = nodeTicketTarget(card);
+  const mimeType = mediaType(kind, path);
+  const commit = target && isBasePath(kind, target, path) ? await baseCommit(target) : undefined;
+  if (!target || !mimeType || !commit) {
+    throw new Error(`${kind.noun} not found: default branch ${path}`);
+  }
+  return {
+    mimeType,
+    bytes: await readBlob(
+      kind,
+      target.hostRepoPath,
+      commit,
+      path,
+      `${kind.noun} not found: default branch ${path}`,
+    ),
+  };
+}
+
+/** The file's bytes at `commit`; throws `missing` when the commit does not hold it. */
+async function readBlob(
+  kind: ArtifactKind,
+  repoPath: string,
+  commit: string,
+  path: string,
+  missing: string,
+): Promise<Buffer> {
+  const object = `${commit}:${path}`;
+  const size = await hostGit(repoPath, ["cat-file", "-s", object]);
+  const bytes = Number(size.stdout.trim());
+  if (size.code !== 0 || !Number.isInteger(bytes)) {
+    throw new Error(missing);
+  }
+  if (bytes > kind.maxBytes) {
+    throw new Error(`${kind.noun} ${path} is ${bytes} bytes, over the ${kind.maxBytes}-byte limit`);
+  }
+  // The SDK command runner decodes stdout as text, which corrupts image bytes.
+  const { stdout } = await execFileAsync("git", ["-C", repoPath, "cat-file", "blob", object], {
+    encoding: "buffer",
+    maxBuffer: kind.maxBytes + 1,
+    timeout: READ_TIMEOUT_MS,
+  });
+  return stdout;
 }
 
 async function readRound(
@@ -256,22 +401,16 @@ async function readRound(
     throw new Error(`${kind.noun} not found: round ${round} ${path}`);
   }
   const repoPath = target.hostRepoPath;
-  const object = `${changes.to}:${path}`;
-  const size = await hostGit(repoPath, ["cat-file", "-s", object]);
-  const bytes = Number(size.stdout.trim());
-  if (size.code !== 0 || !Number.isInteger(bytes)) {
-    throw new Error(`${kind.noun} ${path} is no longer in ${repoPath}`);
-  }
-  if (bytes > kind.maxBytes) {
-    throw new Error(`${kind.noun} ${path} is ${bytes} bytes, over the ${kind.maxBytes}-byte limit`);
-  }
-  // The SDK command runner decodes stdout as text, which corrupts image bytes.
-  const { stdout } = await execFileAsync("git", ["-C", repoPath, "cat-file", "blob", object], {
-    encoding: "buffer",
-    maxBuffer: kind.maxBytes + 1,
-    timeout: READ_TIMEOUT_MS,
-  });
-  return { mimeType, bytes: stdout };
+  return {
+    mimeType,
+    bytes: await readBlob(
+      kind,
+      repoPath,
+      changes.to,
+      path,
+      `${kind.noun} ${path} is no longer in ${repoPath}`,
+    ),
+  };
 }
 
 /** Where the agent writes this kind, and the commit its round started from; undefined once its round was imported and the worktree removed. */

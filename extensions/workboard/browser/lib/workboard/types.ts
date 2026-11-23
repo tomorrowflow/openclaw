@@ -124,6 +124,7 @@ export type WorkboardUiState = {
     | "changes"
     | "screenshots"
     | "prototype"
+    | "flows"
     | "preview"
     | "session"
     | "details";

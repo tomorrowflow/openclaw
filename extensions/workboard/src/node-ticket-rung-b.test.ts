@@ -1,5 +1,5 @@
 // Workboard tests cover the trust ladder's rung b: class rungs, agent acceptance, and the review sample.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
@@ -13,8 +13,9 @@ import { Value } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawPluginApi } from "../api.js";
 import { registerWorkboardGatewayMethods } from "./gateway.js";
+import { nodeTicketAcceptance } from "./node-ticket-acceptance.js";
 import { publishCandidate, publishNodeTicket } from "./node-ticket-publish.js";
-import { nodeTicketAcceptance, nodeTicketTarget } from "./node-ticket.js";
+import { nodeTicketTarget } from "./node-ticket.js";
 import {
   createFakeGitHub,
   createNodeRepos,
@@ -343,6 +344,62 @@ describe("Workboard rung b", () => {
     ).rejects.toThrow(
       "This round ran before its class reached rung b, so the operator accepts it.",
     );
+  });
+
+  it("leaves a round that changed a flow report to the operator: an agent's accept is refused, its rework verdict and the operator's accept are not", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const root = mkdtempSync(path.join(os.tmpdir(), "workboard-flows-"));
+    roots.push(root);
+    const { hostRepo, target } = createNodeRepos(root);
+    const commitFile = (file: string) => {
+      mkdirSync(path.dirname(path.join(hostRepo, file)), { recursive: true });
+      writeFileSync(path.join(hostRepo, file), `<p>${file}</p>`);
+      git(hostRepo, "add", "-A");
+      git(hostRepo, "commit", "-q", "-m", file);
+      return git(hostRepo, "rev-parse", "HEAD");
+    };
+    const base = git(hostRepo, "rev-parse", "HEAD");
+    const code = commitFile("src/app.ts");
+    const flow = commitFile("docs/flows/dictation.html");
+    const card = await importedDocsTicket(store, { classRungs: { docs: { rung: "b" } }, target });
+    const worktreePath = expectDefined(
+      nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree?.path,
+      "worktree path",
+    );
+    const imported = (to: string) =>
+      store.recordNodeRound(card.id, {
+        worktreePath,
+        changes: { from: base, to, files: [], totals: { files: 0, added: 0, deleted: 0 } },
+      });
+    const move = agentTools(store)("workboard_move");
+    const accept = () => move.execute("accept", { id: card.id, status: "done" });
+    const refusal =
+      "This round changed a flow report (docs/flows/dictation.html), so the operator decides it. Leave the card in review.";
+
+    await imported(flow);
+    await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
+    await expect(accept()).rejects.toThrow(refusal);
+    expect((await store.get(card.id))?.status).toBe("review");
+
+    // A rework verdict still moves the card on to publish the draft.
+    await store.addComment(card.id, { body: "Verdict: rework: broken" }, undefined, "agent:dev");
+    await accept();
+    await expect(handoffOf(store, card)).resolves.toMatchObject({ decidedBy: "agent:dev" });
+    await store.move(card.id, "review", undefined);
+
+    await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
+    await expect(accept()).rejects.toThrow(refusal);
+    await store.move(card.id, "done", undefined);
+    expect((await store.get(card.id))?.status).toBe("done");
+    await store.move(card.id, "review", undefined);
+
+    // The same round without the flow report is the agent's to accept.
+    await imported(code);
+    await accept();
+    await expect(handoffOf(store, card)).resolves.toMatchObject({
+      decidedBy: "agent:dev",
+      sampled: expect.any(Boolean),
+    });
   });
 
   it("gates an agent's rung b accept on a passed verification, never a rework verdict or an operator", async () => {

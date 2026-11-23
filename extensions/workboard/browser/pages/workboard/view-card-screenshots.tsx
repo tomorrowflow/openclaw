@@ -11,7 +11,9 @@ import type {
 import { createSignal, For, Show } from "solid-js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { icons } from "../../components/icons.tsx";
+import { workboardHost } from "../../host.ts";
 import { t } from "../../i18n/index.ts";
+import { nodeFilePageTarget, SCREENSHOT_PAGE_ID } from "../node-file/node-file-target.ts";
 import { type CardFileList, createCardFileList, type SettledList } from "./card-node-files.ts";
 import { RelativeTime } from "./view-card-time.tsx";
 
@@ -198,6 +200,22 @@ function ScreenshotImage(props: ScreenshotsView & { shot: ScreenshotRef; paired:
     const current = image();
     return current.status === "loaded" ? current.url : undefined;
   };
+  // The pop-out page's address names the file, so the link survives copying; a blob URL does not.
+  const popoutHref = () => {
+    const shot = props.shot;
+    return workboardHost().navigation.pageHref(
+      nodeFilePageTarget(
+        SCREENSHOT_PAGE_ID,
+        "live" in shot
+          ? { cardId: props.cardId, source: { live: true }, path: shot.live.path }
+          : {
+              cardId: shot.ownerId ?? props.cardId,
+              source: { round: shot.round.round },
+              path: shot.path,
+            },
+      ),
+    );
+  };
   return (
     <div class="workboard-screenshot__variant">
       <Show
@@ -211,7 +229,7 @@ function ScreenshotImage(props: ScreenshotsView & { shot: ScreenshotRef; paired:
         }
       >
         {(url) => (
-          <a href={url()} target="_blank" rel="noopener" title={path()}>
+          <a href={popoutHref()} target="_blank" rel="noopener" title={path()}>
             <img src={url()} alt={fileName(path())} loading="lazy" />
           </a>
         )}

@@ -6,8 +6,8 @@ import { t } from "./i18n/index.ts";
 import { workboardBoardName } from "./lib/workboard/board-presentation.ts";
 import { createWorkboardCapability } from "./lib/workboard/capability.ts";
 import { WORKBOARD_CHANGED_EVENT, type WorkboardBoardSummary } from "./lib/workboard/types.ts";
+import { PROTOTYPE_PAGE_ID, SCREENSHOT_PAGE_ID } from "./pages/node-file/node-file-target.ts";
 import { createOfficePage } from "./pages/office/office-page.tsx";
-import { PROTOTYPE_PAGE_ID } from "./pages/prototype/prototype-target.ts";
 import { createTranscriptsPage } from "./pages/transcripts/transcripts-page.tsx";
 import { createLazyWorkboardPage } from "./pages/workboard/lazy-page.ts";
 import { workboardPageTarget } from "./pages/workboard/page-target.ts";
@@ -186,8 +186,17 @@ export default defineControlUiPlugin({
         id: PROTOTYPE_PAGE_ID,
         label: t("workboard.detailTabPrototype"),
         mount: createLazyWorkboardPage(async () => {
-          const { createPrototypePage } = await import("./pages/prototype/prototype-page.tsx");
+          const { createPrototypePage } = await import("./pages/node-file/node-file-page.tsx");
           return createPrototypePage();
+        }),
+      }),
+      // Opened only from a screenshot's link in the Screenshots or Flows tab.
+      host.ui.registerPage({
+        id: SCREENSHOT_PAGE_ID,
+        label: t("workboard.screenshotPageLabel"),
+        mount: createLazyWorkboardPage(async () => {
+          const { createScreenshotPage } = await import("./pages/node-file/node-file-page.tsx");
+          return createScreenshotPage();
         }),
       }),
       host.ui.registerPanel({

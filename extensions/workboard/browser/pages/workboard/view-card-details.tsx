@@ -37,6 +37,7 @@ import {
 } from "./view-card-detail-records.tsx";
 import {
   DetailTabs,
+  detailFlows,
   detailPrototypes,
   detailScreenshots,
   NodeTicketTabPanels,
@@ -264,6 +265,9 @@ function CardDetailsContent(props: WorkboardProps & { card: WorkboardCard }) {
         : []),
       ...(detailPrototypes(props, card())
         ? [{ id: "prototype", label: t("workboard.detailTabPrototype") } as const]
+        : []),
+      ...(detailFlows(props, card())
+        ? [{ id: "flows", label: t("workboard.detailTabFlows") } as const]
         : []),
       ...(card().preview
         ? [{ id: "preview", label: t("workboard.detailTabPreview") } as const]
