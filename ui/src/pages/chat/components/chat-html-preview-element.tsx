@@ -95,6 +95,7 @@ type HtmlPreviewProps = {
   sessionFileSource?: SessionFileSource;
   title: string;
   embedSandboxMode: EmbedSandboxMode;
+  onLink?: (href: string) => void;
 };
 export type ChatHtmlPreviewElement = SolidBridgeElement<HtmlPreviewProps>;
 
@@ -154,6 +155,7 @@ export const ChatHtmlPreview = defineSolidBridge<HtmlPreviewProps>(
           snapshot?.phase === "connected",
           getCanvasWidgetFrameConnectionGeneration(),
           retry(),
+          Boolean(props.onLink),
         ] as const;
       },
       { equals: (previous, next) => previous.every((value, index) => value === next[index]) },
@@ -231,6 +233,7 @@ export const ChatHtmlPreview = defineSolidBridge<HtmlPreviewProps>(
               setRendered(true);
             }
           },
+          onLink: host.onLink && ((href) => host.onLink?.(href)),
           onError: fail,
           // A failed frame stays terminal until Retry or a mode change.
           onReadyTimeout: () => fail(new Error(t("board.widget.sandboxUnavailable"))),
@@ -355,6 +358,7 @@ export const ChatHtmlPreview = defineSolidBridge<HtmlPreviewProps>(
       sessionFileSource: { default: undefined, attribute: false },
       title: { default: "" },
       embedSandboxMode: { default: "scripts" },
+      onLink: { default: undefined, attribute: false },
     },
   },
 );

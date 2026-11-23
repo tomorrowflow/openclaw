@@ -304,6 +304,12 @@ export function createControlUiComponents(options: {
         "prop:title": next.title,
         // The operator's embed policy still decides whether scripts run.
         "prop:embedSandboxMode": current().config.current.embedSandboxMode,
+        "prop:onLink":
+          next.onLink &&
+          ((href: string) => {
+            current();
+            next.onLink?.(href);
+          }),
       }),
       undefined,
       (context) => [context.config],

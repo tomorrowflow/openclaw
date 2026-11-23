@@ -82,6 +82,19 @@ function buildSandboxShortcutBridgeHtml(): string {
 })();</script>`;
 }
 
+// URL parsing drops tab and newline anywhere and leading C0 controls and space,
+// so the scheme test does too.
+function buildSandboxLinkBridgeHtml(): string {
+  return `<script>addEventListener("click",event=>{
+  if(event.defaultPrevented)return;
+  const link=event.composedPath().find(node=>node.matches?.("a[href]"));
+  const href=link?.getAttribute("href");
+  if(!href||/^[\\0-\\x20]*(?:$|#|[\\/\\\\]{2}|[a-z][a-z0-9+.-]*:)/i.test(href.replace(/[\\t\\n\\r]/g,"")))return;
+  event.preventDefault();
+  parent.postMessage({type:"openclaw:html-preview-link",href},"*");
+});</script>`;
+}
+
 // Best-effort mitigation of the documented WebRTC residual, not a security
 // boundary. Board widgets remove same-realm constructors and the common APIs
 // that create descendant browsing realms with pristine constructors.
@@ -299,6 +312,10 @@ function buildSandboxHostProxyHtml(csp?: SandboxHostCsp): string {
       buildSandboxWidgetScrollBridgeHtml() +
       WIDGET_SIZE_CONFIRMATION_HTML,
   ).replaceAll("<", "\\u003c");
+  const serializedLinkBridge = JSON.stringify(buildSandboxLinkBridgeHtml()).replaceAll(
+    "<",
+    "\\u003c",
+  );
   return `<!doctype html>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -344,13 +361,14 @@ function buildSandboxHostProxyHtml(csp?: SandboxHostCsp): string {
     return false;
   };
   const documentGuard = ${serializedDocumentGuard};
+  const linkBridge = ${serializedLinkBridge};
   const resolveLeadingDoctypeEnd = ${RESOLVE_LEADING_DOCTYPE_END_SOURCE};
-  const guardDocument = html => {
+  const guardDocument = (html, forwardLinks) => {
     if (blockDescendantFrames && hasBlockedDescendant(new DOMParser().parseFromString(html, "text/html"))) {
       throw new Error("sandbox descendant browsing contexts are disabled");
     }
     const doctypeEnd = resolveLeadingDoctypeEnd(html);
-    return html.slice(0, doctypeEnd) + documentGuard + html.slice(doctypeEnd);
+    return html.slice(0, doctypeEnd) + documentGuard + (forwardLinks ? linkBridge : "") + html.slice(doctypeEnd);
   };
   window.addEventListener("message", (event) => {
     if (event.source === window.parent) {
@@ -358,7 +376,7 @@ function buildSandboxHostProxyHtml(csp?: SandboxHostCsp): string {
       if (event.data?.method === "ui/notifications/sandbox-resource-ready") {
         const params = event.data.params ?? {};
         if (typeof params.html === "string") {
-          const guardedHtml = guardDocument(params.html);
+          const guardedHtml = guardDocument(params.html, params.forwardLinks === true);
           // Replace the browsing context so a superseded document cannot race
           // the new wrapper's first private bridge-port offer.
           const nextInner = createInner(params.allowScripts !== false);
