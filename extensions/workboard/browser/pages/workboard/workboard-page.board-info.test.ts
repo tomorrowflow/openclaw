@@ -35,40 +35,31 @@ function mountBoard(board: Record<string, unknown>, canAdmin: boolean) {
   return page;
 }
 
-it("lists a board's links, env, and secrets, and reveals a secret only for an admin", async () => {
+// The browser e2e proves listing, reveal, and the non-admin view; these cover what it does not.
+it("opens as an expanded dialog, links safely, and drops a revealed value when it closes", async () => {
   const page = mountBoard({ orchestration }, true);
   await vi.waitFor(() =>
     expect(page.container.querySelector(".workboard-board-info")).not.toBeNull(),
   );
+  const button = page.container.querySelector(".workboard-board-info-button")!;
+  expect(button.getAttribute("aria-expanded")).toBe("false");
   const panel = page.container.querySelector<HTMLElement>(".workboard-board-info")!;
   panel.showPopover();
   await vi.waitFor(() => expect(panel.textContent).toContain("Test site"));
+  expect(button.getAttribute("aria-expanded")).toBe("true");
   expect(panel.querySelector("a")?.getAttribute("rel")).toBe("noopener noreferrer");
-  expect(panel.textContent).toContain("LINDRA_TEXT_URL");
-  expect(panel.textContent).not.toContain("s3cret");
   panel.querySelector<HTMLButtonElement>('button[aria-label="Reveal Test token"]')!.click();
   await vi.waitFor(() => expect(panel.textContent).toContain("s3cret"));
-  expect(page.request).toHaveBeenCalledWith("workboard.boards.revealSecret", {
-    boardId: "app",
-    name: "LINDRA_TEST_TOKEN",
-  });
   panel.hidePopover();
   await vi.waitFor(() => expect(panel.textContent).not.toContain("s3cret"));
+  expect(button.getAttribute("aria-expanded")).toBe("false");
 });
 
-it("offers no Reveal to a client without operator.admin and no button for a bare board", async () => {
-  const page = mountBoard({ orchestration }, false);
-  await vi.waitFor(() =>
-    expect(page.container.querySelector(".workboard-board-info")).not.toBeNull(),
-  );
-  const panel = page.container.querySelector<HTMLElement>(".workboard-board-info")!;
-  panel.showPopover();
-  await vi.waitFor(() => expect(panel.textContent).toContain("Test token"));
-  expect(panel.querySelector('button[aria-label^="Reveal"]')).toBeNull();
-
+it("shows no info button for a board with nothing to list", async () => {
   const bare = mountBoard({}, true);
   await vi.waitFor(() =>
     expect(bare.container.querySelector(".workboard-page-title")?.textContent).toContain("App"),
   );
+  expect(bare.container.querySelector(".workboard-board-info-button")).toBeNull();
   expect(bare.container.querySelector(".workboard-board-info")).toBeNull();
 });
