@@ -107,6 +107,43 @@ describe("card numbers", () => {
     expect(task.metadata?.automation?.target).toEqual(NODE_TARGET);
   });
 
+  it("numbers retros RETRO-<n> on every board, apart from the releases", async () => {
+    const { store, create } = await keyedBoard();
+    const spec = await create({ title: "Spec", kind: "spec" });
+    const first = await create({ title: "[LIN-1.18] Retro 11-09 to 11-23", kind: "retro" });
+    const ticket = await create({ title: "Ticket" });
+    const plain = await store.create({ title: "[RETRO-1] Retro", kind: "retro" });
+    const second = await create({ title: "Retro 11-23 to 12-07", kind: "retro" });
+
+    expect(first).toMatchObject({ title: "[RETRO-1] Retro 11-09 to 11-23", seq: 1 });
+    expect(first.release).toBeUndefined();
+    expect(ticket.title).toBe(`[LIN-1.01] Ticket`);
+    expect(spec.title).toBe("[LIN-1.00] Spec");
+    expect(plain.title).toBe("[RETRO-1] Retro");
+    expect(second.title).toBe("[RETRO-2] Retro 11-23 to 12-07");
+    expect((await store.update(second.id, { title: "Retro, renamed" })).title).toBe(
+      "[RETRO-2] Retro, renamed",
+    );
+    await expect(create({ title: "Placed", kind: "retro", seq: 5 })).rejects.toThrow(
+      "numbered RETRO-<n>",
+    );
+
+    const task = await store.update(second.id, { kind: "task" });
+    expect(task).toMatchObject({ title: "[LIN-1.02] Retro, renamed", release: 1, seq: 2 });
+    const back = await store.update(ticket.id, { kind: "retro" });
+    expect(back).toMatchObject({ title: "[RETRO-2] Ticket", seq: 2 });
+    expect(back.release).toBeUndefined();
+  });
+
+  it("drops the RETRO-<n> tag when a retro turns into a task on a board without a key", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const retro = await store.create({ title: "Retro", kind: "retro" });
+    expect(retro.title).toBe("[RETRO-1] Retro");
+    const task = await store.update(retro.id, { kind: "task" });
+    expect(task.title).toBe("Retro");
+    expect(task.seq).toBeUndefined();
+  });
+
   it("refuses a malformed board key", async () => {
     const store = createWorkboardSqliteTestStore();
     await expect(

@@ -423,6 +423,7 @@ export default {
       prototype: "Prototype",
       research: "Research",
       bug: "Bug",
+      retro: "Retro",
     },
     fieldAgent: "Agent",
     fieldSession: "Session",

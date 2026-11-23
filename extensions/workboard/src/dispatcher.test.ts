@@ -918,6 +918,18 @@ describe("dispatchAndStartWorkboardCards", () => {
     });
   });
 
+  it("never starts a retro card, whether started directly or dispatched", async () => {
+    const retro = await createCard({ title: "Retro", status: "todo", kind: "retro" });
+    const direct = await dispatch({ cardId: retro.id });
+    expectRejected(direct, retro.id, expect.stringContaining("never starts"), run);
+
+    await store.update(retro.id, { status: "ready" });
+    const scheduled = await dispatch();
+    expect(scheduled.started).toEqual([]);
+    expect(run).not.toHaveBeenCalled();
+    await expectStatus(retro.id, "ready");
+  });
+
   it("starts the exact lower-priority card without selecting a sibling", async () => {
     const urgent = await createAuthorizedCard({ priority: "urgent", agentId: "urgent-owner" });
     const target = await store.create({

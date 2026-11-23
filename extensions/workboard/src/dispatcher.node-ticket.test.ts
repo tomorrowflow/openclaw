@@ -401,6 +401,32 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
     );
   });
 
+  it("never lets a ready retro take the pool's slot from a ticket", async () => {
+    const store = createWorkboardSqliteTestStore();
+    store.nodeTicketConcurrency = 1;
+    await store.upsertBoard({
+      id: "app",
+      orchestration: { defaultTarget: TARGET, defaultAssignee: "dev" },
+    });
+    const retro = await store.create({
+      title: "Retro",
+      boardId: "app",
+      status: "ready",
+      kind: "retro",
+      priority: "urgent",
+    });
+    const ticket = await store.create({ title: "Ticket", boardId: "app", status: "ready" });
+    const dispatched = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets: createNodeGateway(),
+      options: { now: Date.now(), maxStarts: 2 },
+    });
+    expect(dispatched.started.map((run) => run.cardId)).toEqual([ticket.id]);
+    expect(dispatched.startFailures).toEqual([]);
+    await expect(store.get(retro.id)).resolves.toMatchObject({ status: "ready" });
+  });
+
   it("starts a pooled route's tickets on its first node with a free slot, and keeps a started ticket on its node", async () => {
     const store = createWorkboardSqliteTestStore();
     store.nodeTicketConcurrency = 4;

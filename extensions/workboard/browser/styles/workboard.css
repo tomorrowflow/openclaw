@@ -5421,6 +5421,10 @@ workboard-inline-text {
   --workboard-kind-color: var(--danger);
 }
 
+[data-kind="retro"] {
+  --workboard-kind-color: var(--session-color-purple);
+}
+
 .workboard-card[data-kind]::before {
   content: "";
   position: absolute;
