@@ -1,6 +1,7 @@
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import * as z from "zod";
 import { definedFields } from "../../../record-fields.js";
+import { normalizeBoardInfo } from "./board-info-normalization.ts";
 import {
   normalizeCardSessions,
   normalizeNodeRounds,
@@ -336,7 +337,8 @@ function normalizeCount(value: unknown): number {
 
 /**
  * The UI only needs to know a project board sends its cards to a node (trust
- * KPIs), through its default target or a label route (D67).
+ * KPIs), through its default target or a label route (D67), and what its info
+ * popover lists.
  */
 function normalizeBoardNodeTargets(value: unknown): Pick<WorkboardBoardSummary, "orchestration"> {
   if (!isRecord(value)) {
@@ -352,11 +354,13 @@ function normalizeBoardNodeTargets(value: unknown): Pick<WorkboardBoardSummary, 
         : [];
     },
   );
-  return defaultTarget || targetRoutes.length
+  const info = normalizeBoardInfo(value);
+  return defaultTarget || targetRoutes.length || Object.keys(info).length
     ? {
         orchestration: {
           ...(defaultTarget ? { defaultTarget } : {}),
           ...(targetRoutes.length ? { targetRoutes } : {}),
+          ...info,
         },
       }
     : {};

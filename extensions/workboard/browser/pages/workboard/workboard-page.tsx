@@ -464,8 +464,7 @@ export function createWorkboardPage(
         >
           <BoardTitle
             board={board()}
-            canWrite={presentation()?.workboardProps.canWrite}
-            client={presentation()?.workboardProps.client}
+            access={presentation()?.workboardProps}
             architectureViewerPort={architectureViewerPort()}
             onEdit={(selected) => {
               boardDraft = createBoardDraft({

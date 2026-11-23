@@ -8,13 +8,17 @@ const MAX_LABEL_CHARS = 60;
 const MAX_GROUP_CHARS = 40;
 const MAX_URL_CHARS = 2000;
 
-function normalizeLabelAndGroup(entry: Record<string, unknown>, field: string) {
+function normalizeLabelAndGroup<Own extends object>(
+  entry: Record<string, unknown>,
+  field: string,
+  own: Own,
+) {
   const label = normalizeBoundedString(entry.label, undefined, MAX_LABEL_CHARS, `${field} label`);
   if (!label) {
     throw new Error(`${field} needs a label of 1 to ${MAX_LABEL_CHARS} characters.`);
   }
   const group = normalizeBoundedString(entry.group, undefined, MAX_GROUP_CHARS, `${field} group`);
-  return { label, ...(group ? { group } : {}) };
+  return { label, ...own, ...(group ? { group } : {}) };
 }
 
 function readEntries(value: unknown, field: string): Record<string, unknown>[] | undefined {
@@ -45,7 +49,7 @@ export function normalizeBoardLinks(value: unknown): WorkboardBoardLink[] | unde
         `link url must be an http or https URL of at most ${MAX_URL_CHARS} characters.`,
       );
     }
-    return { ...normalizeLabelAndGroup(entry, "link"), url };
+    return normalizeLabelAndGroup(entry, "link", { url });
   });
 }
 
@@ -63,7 +67,7 @@ export function normalizeBoardSecrets(value: unknown): WorkboardBoardSecret[] | 
       throw new Error(`secrets lists ${name} twice.`);
     }
     names.add(name);
-    return { ...normalizeLabelAndGroup(entry, "secret"), name };
+    return normalizeLabelAndGroup(entry, "secret", { name });
   });
 }
 

@@ -268,7 +268,8 @@
 }
 
 .workboard-board-edit,
-.workboard-board-architecture {
+.workboard-board-architecture,
+.workboard-board-info-button {
   flex: 0 0 32px;
   width: 32px;
   min-width: 32px;
@@ -280,14 +281,15 @@
   color: var(--muted);
 }
 
-/* The architecture button stays visible: it opens the board's map, not an edit. */
+/* The architecture and info buttons stay visible: they open a map or a popover, not an edit. */
 .workboard-board-edit {
   opacity: 0;
   pointer-events: none;
 }
 
 .workboard-heading .workboard-board-edit.btn.btn--icon,
-.workboard-heading .workboard-board-architecture.btn.btn--icon {
+.workboard-heading .workboard-board-architecture.btn.btn--icon,
+.workboard-heading .workboard-board-info-button.btn.btn--icon {
   border: 0;
   background: transparent;
   box-shadow: none;
@@ -307,7 +309,8 @@
 }
 
 .workboard-heading .workboard-board-edit.btn.btn--icon:hover,
-.workboard-heading .workboard-board-architecture.btn.btn--icon:hover {
+.workboard-heading .workboard-board-architecture.btn.btn--icon:hover,
+.workboard-heading .workboard-board-info-button.btn.btn--icon:hover {
   background: transparent;
   color: var(--text);
 }
@@ -551,7 +554,8 @@
 .workboard-toolbar__tools > .btn > svg,
 .workboard-search-trigger > svg,
 .workboard-board-edit > svg,
-.workboard-board-architecture > svg {
+.workboard-board-architecture > svg,
+.workboard-board-info-button > svg {
   width: 18px;
   height: 18px;
   flex: none;
@@ -5513,4 +5517,64 @@ workboard-inline-text {
   gap: 12px;
   padding: 12px;
   color: var(--muted);
+}
+
+.workboard-board-info {
+  position: fixed;
+  inset: auto;
+  width: min(30rem, calc(100vw - var(--space-6)));
+  max-height: var(--workboard-popover-max-height, calc(100dvh - var(--space-6)));
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-3);
+  border: thin solid var(--overlay-border);
+  border-radius: var(--radius-lg);
+  background: var(--popover);
+  box-shadow: var(--overlay-shadow);
+  /* The popover sits inside the page title; reset the title's heading type. */
+  color: var(--text);
+  font-size: var(--control-ui-text-md);
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 1.4;
+}
+
+.workboard-board-info:popover-open {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.workboard-board-info__section {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.workboard-board-info__heading {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--control-ui-text-sm);
+  font-weight: 600;
+}
+
+.workboard-board-info__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.workboard-board-info__label {
+  flex: 0 1 auto;
+  max-width: 55%;
+  overflow-wrap: anywhere;
+  font-size: var(--control-ui-text-sm);
+}
+
+.workboard-board-info__value,
+.workboard-board-info__url {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: var(--control-ui-text-sm);
 }
