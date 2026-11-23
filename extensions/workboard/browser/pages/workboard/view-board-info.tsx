@@ -21,7 +21,7 @@ export function boardHasInfo(board: WorkboardBoardSummary | null | undefined): b
     settings?.links?.length ||
     settings?.secrets?.length ||
     Object.keys(settings?.env ?? {}).length ||
-    Object.keys(settings?.preview?.env ?? {}).length,
+    Object.keys(settings?.previewEnv ?? {}).length,
   );
 }
 
@@ -152,8 +152,8 @@ export function BoardInfo(props: {
   // A preview secret that is also revealable shows once, under its group.
   const previewSecrets = () => {
     const listed = new Set(props.board.orchestration?.secrets?.map((secret) => secret.name));
-    return Object.entries(props.board.orchestration?.preview?.env ?? {}).filter(
-      ([, ref]) => !listed.has(ref.id),
+    return Object.entries(props.board.orchestration?.previewEnv ?? {}).filter(
+      ([, id]) => !listed.has(id),
     );
   };
   return (
@@ -163,7 +163,7 @@ export function BoardInfo(props: {
         type="button"
         popovertarget={POPOVER_ID}
         aria-haspopup="dialog"
-        aria-expanded="false"
+        aria-expanded={open() ? "true" : "false"}
         aria-label={t("workboard.boardInfoOpen")}
         title={t("workboard.boardInfoOpen")}
       >
@@ -224,11 +224,11 @@ export function BoardInfo(props: {
             <section class="workboard-board-info__section">
               <h3 class="workboard-board-info__heading">{t("workboard.boardInfoPreview")}</h3>
               <For each={previewSecrets()}>
-                {([name, ref]) => (
+                {([name, id]) => (
                   <div class="workboard-board-info__row">
                     <code class="workboard-board-info__label">{name}</code>
-                    <Show when={ref.id !== name}>
-                      <span class="workboard-board-info__url">{ref.id}</span>
+                    <Show when={id !== name}>
+                      <span class="workboard-board-info__url">{id}</span>
                     </Show>
                   </div>
                 )}

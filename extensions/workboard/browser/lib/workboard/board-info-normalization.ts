@@ -1,15 +1,10 @@
-import type {
-  WorkboardBoardLink,
-  WorkboardBoardSecret,
-  WorkboardOrchestrationSettings,
-  WorkboardPreviewSecretRef,
-  WorkboardPreviewSettings,
-} from "@openclaw/workboard-contract";
+import type { WorkboardBoardLink, WorkboardBoardSecret } from "@openclaw/workboard-contract";
 import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import type { WorkboardBoardSummary } from "./types.ts";
 
 type BoardInfoSettings = Pick<
-  WorkboardOrchestrationSettings,
-  "links" | "secrets" | "env" | "preview"
+  NonNullable<WorkboardBoardSummary["orchestration"]>,
+  "links" | "secrets" | "env" | "previewEnv"
 >;
 
 function text(value: unknown): string | undefined {
@@ -37,31 +32,20 @@ function readSecret(entry: Record<string, unknown>): WorkboardBoardSecret | unde
   return label && name ? { label, name, ...(group ? { group } : {}) } : undefined;
 }
 
-function readStrings(value: unknown): string[] {
-  return (Array.isArray(value) ? value : []).filter((entry) => typeof entry === "string");
-}
-
-function readPreview(value: unknown): WorkboardPreviewSettings | undefined {
-  if (!isRecord(value) || !isRecord(value.ports) || !isRecord(value.env)) {
-    return undefined;
-  }
-  const env: Record<string, WorkboardPreviewSecretRef> = {};
-  for (const [name, ref] of Object.entries(value.env)) {
-    const provider = isRecord(ref) ? text(ref.provider) : undefined;
-    const id = isRecord(ref) ? text(ref.id) : undefined;
-    if (provider && id) {
-      env[name] = { source: "store", provider, id };
-    }
-  }
-  const { from, to } = value.ports;
-  return Object.keys(env).length && typeof from === "number" && typeof to === "number"
-    ? { up: readStrings(value.up), down: readStrings(value.down), ports: { from, to }, env }
-    : undefined;
+/** Preview env var name -> store entry id; an entry that names no store secret is skipped. */
+function readPreviewEnv(value: unknown): Record<string, string> {
+  const env = isRecord(value) && isRecord(value.env) ? value.env : {};
+  return Object.fromEntries(
+    Object.entries(env).flatMap(([name, ref]) => {
+      const id = isRecord(ref) ? text(ref.id) : undefined;
+      return id ? [[name, id]] : [];
+    }),
+  );
 }
 
 /**
  * What the board info popover lists: links, revealable secret names, the
- * board's plain env, and the names of its preview secrets. The Gateway already
+ * board's plain env, and the env names of its preview secrets. The Gateway already
  * validated them; this keeps only shapes the popover can render.
  */
 export function normalizeBoardInfo(value: Record<string, unknown>): BoardInfoSettings {
@@ -74,11 +58,11 @@ export function normalizeBoardInfo(value: Record<string, unknown>): BoardInfoSet
         ),
       )
     : {};
-  const preview = readPreview(value.preview);
+  const previewEnv = readPreviewEnv(value.preview);
   return {
     ...(links.length ? { links } : {}),
     ...(secrets.length ? { secrets } : {}),
     ...(Object.keys(env).length ? { env } : {}),
-    ...(preview ? { preview } : {}),
+    ...(Object.keys(previewEnv).length ? { previewEnv } : {}),
   };
 }
