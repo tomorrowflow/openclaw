@@ -587,7 +587,7 @@ export type WorkboardNodeChanges = {
 };
 
 /**
- * One finding of a rung b round's standards reviewer. `line` is 1-based in the
+ * One finding of a code round's standards self-review. `line` is 1-based in the
  * round's final commit when `fixed` is false, and in the tree the reviewer saw
  * when true. `rule` names the CODING_STANDARDS.md rule.
  */
@@ -600,7 +600,7 @@ export type WorkboardNodeFinding = {
 };
 
 /**
- * A rung b round's standards review. The counts cover every finding; `items`
+ * A code round's standards self-review. The counts cover every finding; `items`
  * is capped and absent when the report gave only counts.
  */
 export type WorkboardNodeReview = {
@@ -641,7 +641,8 @@ export type WorkboardNodeWorktree = {
   crossVerification?: WorkboardNodeVerification;
   /**
    * The round runs at rung b or c: its class was there on the board when it
-   * launched, so its brief asked for the standards review. Absent = rung a.
+   * launched, so an agent decides it and the import requires its standards
+   * self-review. Absent = rung a.
    */
   rung?: WorkboardAgentRung;
   /**

@@ -272,15 +272,40 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
       `leave the worktree clean (\`git status --porcelain\` prints nothing) and make \`git diff --check ${baseCommit}..HEAD\` pass`,
     );
 
-    // A demotion applies from the next launch: the re-run is briefed and recorded at rung a.
+    // A demotion applies from the next launch: the re-run is recorded at rung a
+    // and still reviews its own code, since the self-review follows the card kind.
     await store.upsertBoard({ id: "default", orchestration: { classRungs: null } });
     const claim = expectDefined((await store.get(card.id))?.metadata?.claim, "claim");
     await store.block(card.id, { reason: "node restarted" }, claim);
     await store.move(card.id, "ready", undefined);
     expect((await dispatch()).startFailures).toEqual([]);
-    expect(briefs()[1]).toBeDefined();
-    expect(briefs()[1]).not.toContain("CODING_STANDARDS.md");
+    expect(briefs()[1]).toContain("run the `deslop` skill over");
     await expect(rung()).resolves.toBeUndefined();
+  });
+
+  it("briefs a spec card without the code self-review", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const nodeTickets = createNodeGateway();
+    await store.create({
+      title: "Specify the parser",
+      status: "ready",
+      kind: "spec",
+      agentId: "dev",
+      labels: [],
+      workspaceAccess: { unrestricted: true },
+      metadata: { automation: { target: TARGET } },
+    });
+    await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets,
+      options: { now: Date.now(), maxStarts: 1 },
+    });
+    const brief = nodeTickets.respond.mock.calls.flatMap(([method, params]) =>
+      method === "sessions.create" ? [String(params?.message)] : [],
+    )[0];
+    expect(brief).toContain("read `~/.claude/skills/implement/SKILL.md` and follow it");
+    expect(brief).not.toContain("CODING_STANDARDS.md");
   });
 
   it("runs node tickets up to the pool size regardless of owner, and review frees a slot", async () => {

@@ -44,6 +44,29 @@ describe("node ticket rework from review", () => {
     expect(message).toContain("Rename the flag to --strict.");
     expect(message.split("## Turn contract")[0]).not.toContain("Draft PR failed");
   });
+  it("briefs the rework with the round's full verdict when the operator only points at it", async () => {
+    const { store, card, repos, handoffs, warn, github, gateway } = await finishNodeTicket({});
+    await handoffs.resume(warn);
+    // Longer than the 400 chars the Recent comments list keeps, with its second ask at the end.
+    const verdict = `**Verdict:** rework: the runbook skips mkdir. ${"Step 5 fails on a fresh account. ".repeat(15)}Also prove reset twice with identical seeded state.`;
+    await postVerdict(store, card.id, verdict);
+    git(repos.hostRepo, "remote", "set-url", "origin", "git@github.com:acme/app.git");
+    github.tokens.set("acme/app", "token-app");
+    github.openPulls.push("https://github.com/acme/app/pull/7");
+    await store.addComment(card.id, { body: "rework as recommended" }, undefined, "operator");
+
+    await store.move(card.id, "todo", undefined);
+    await handoffs.resume(warn);
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    const message = String(
+      gateway.respond.mock.calls.findLast(([method]) => method === "sessions.create")?.[1]?.message,
+    );
+    expect(message).toContain("rework as recommended");
+    expect(message).toContain(`### The reviewer's verdict`);
+    expect(message).toContain(verdict);
+  });
   it("reworks an accepted round with the comments written between its verdict and the accept", async () => {
     const { store, card, repos, handoffs, warn, github, gateway } = await finishNodeTicket({});
     await handoffs.resume(warn);

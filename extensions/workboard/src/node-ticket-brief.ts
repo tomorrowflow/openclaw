@@ -1,15 +1,19 @@
-import {
-  workboardAgentDecides,
-  type WorkboardCard,
-  type WorkboardNodeGrill,
-  type WorkboardNodeWorktree,
+import type {
+  WorkboardCard,
+  WorkboardCardKind,
+  WorkboardNodeGrill,
+  WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
 import { grillEndFromLog } from "./node-ticket-grill.js";
 import { REPORT_FENCE } from "./node-ticket-report.js";
 import { nodeTicketReviewComments, nodeTicketTarget } from "./node-ticket.js";
+import { reviewVerdictOf } from "./review-readiness.js";
 
 // Comments are capped at 8000 chars on write, so this bounds the brief's feedback section.
 const REWORK_FEEDBACK_MAX_ENTRIES = 5;
+
+// Cards whose deliverable is a document, not code, so they skip the code self-review.
+const DOCUMENT_KINDS: ReadonlySet<WorkboardCardKind> = new Set(["spec", "prototype", "research"]);
 
 /** The end of the grilling a resumed round carries out, with the grill session's result. */
 function grillSection(grill: WorkboardNodeGrill, log: string | undefined): string[] {
@@ -37,6 +41,27 @@ function grillSection(grill: WorkboardNodeGrill, log: string | undefined): strin
           : ["Result:", "", end.result]),
     "",
     "Now carry out the ticket with that result and end with `done`, `blocked`, or `needs_input`. Do not start another grilling unless something new and blocking comes up.",
+    "",
+  ];
+}
+
+/**
+ * The published round's rework verdict in full. The review feedback leaves verdicts out,
+ * yet an operator's rework comment often only points at it ("rework as recommended").
+ */
+function reworkVerdictSection(card: WorkboardCard, worktree: WorkboardNodeWorktree): string[] {
+  const verdictAt = worktree.reviews?.at(-1)?.verdictAt;
+  const verdict = card.metadata?.comments?.find(
+    (comment) => comment.createdAt === verdictAt && reviewVerdictOf(comment) === "rework",
+  );
+  if (!verdict) {
+    return [];
+  }
+  return [
+    "### The reviewer's verdict",
+    "The board's reviewer posted this on the round you are reworking. Where the review feedback says otherwise, follow the feedback.",
+    "",
+    verdict.body.trim(),
     "",
   ];
 }
@@ -85,7 +110,10 @@ export function buildNodeTicketMessage(params: {
           )
         : [];
   const feedback = rework || answering ? comments.slice(-REWORK_FEEDBACK_MAX_ENTRIES) : [];
-  const reviewed = workboardAgentDecides(params.worktree.rung);
+  // Every code round reviews itself, whatever its rung; the import requires the
+  // review only where an agent decides (rung b or c), so a rung a round
+  // launched with an older brief is not blocked.
+  const selfReview = !DOCUMENT_KINDS.has(params.card.kind ?? "task");
   // The range the host import checks with `git diff --check` (node-ticket-handoff.ts). A
   // legacy rework without startCommit is checked from the host head, a subset of this range.
   const checkFrom = params.worktree.rework?.startCommit ?? params.worktree.baseCommit;
@@ -107,6 +135,7 @@ export function buildNodeTicketMessage(params: {
       ? [
           `## Review rework, round ${rework.round}`,
           `This ticket already has a draft PR: ${rework.pullRequestUrl}. The worktree starts at the PR branch tip, including commits a reviewer pushed. Address the review feedback ${feedback.length > 0 ? "below" : "in the recent comments below"} with new commits on top; never rewrite or drop existing commits.`,
+          "Address every finding and ask in it, not only the first line or the verdict's headline. In the report's `summary`, list each one with the commit that addresses it, or why you left it.",
           "",
           ...(feedback.length > 0
             ? [
@@ -117,6 +146,7 @@ export function buildNodeTicketMessage(params: {
                 "",
               ]
             : []),
+          ...reworkVerdictSection(params.card, params.worktree),
         ]
       : []),
     ...projectEnvSection(
@@ -133,7 +163,7 @@ export function buildNodeTicketMessage(params: {
     // implement is user-invoked only (disable-model-invocation), so the session reads it; the
     // node profile ships it with tdd and code-review in ~/.claude/skills.
     `- To change code, read \`~/.claude/skills/implement/SKILL.md\` and follow it; it calls the \`tdd\` and \`code-review\` skills. This ticket is its spec; there is no issue tracker to fetch from or label. When \`code-review\` asks for a fixed point, it is \`${checkFrom}\`.`,
-    ...(reviewed
+    ...(selfReview
       ? [
           `- Before a \`done\` report, run the \`deslop\` skill over \`${checkFrom}..HEAD\`, then the \`code-review\` skill from \`${checkFrom}\` with this ticket as its spec. Its Standards axis reads the repository's CODING_STANDARDS.md. Address the findings of both axes and report every one in \`review.items\`: a repo-relative \`path\`, a 1-based \`line\`, the \`rule\` (the CODING_STANDARDS.md section it breaks, \`spec: <quoted ticket line>\`, or the baseline smell's name), a one-line \`body\`, and \`fixed\` true or false, plus a \`note\` on any you left. A review with no findings sends \`"items":[]\`. For a finding you left, \`line\` is its line number in the file at your final commit (HEAD): re-check it after the last commit. A \`done\` report without \`review\` blocks the card.`,
         ]
@@ -141,7 +171,7 @@ export function buildNodeTicketMessage(params: {
     "- End your final message with exactly one report block:",
     "",
     "```" + REPORT_FENCE,
-    `{"outcome":"done|blocked|needs_input|grill","headline":"1-3 plain sentences for the operator","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${reviewed ? '"review":{"items":[{"path":"…","line":1,"rule":"…","body":"…","fixed":true}],"note":"…"},' : ""}"questions":["…"],"decisions":[{"ts":"…","phase":"…","decision":"…","why":"…","evidence":"…","result":"…"}]}`,
+    `{"outcome":"done|blocked|needs_input|grill","headline":"1-3 plain sentences for the operator","summary":"what changed and why","proof":[{"command":"…","status":"passed|failed|skipped","note":"…"}],${selfReview ? '"review":{"items":[{"path":"…","line":1,"rule":"…","body":"…","fixed":true}],"note":"…"},' : ""}"questions":["…"],"decisions":[{"ts":"…","phase":"…","decision":"…","why":"…","evidence":"…","result":"…"}]}`,
     "```",
     "",
     "Its text fields are Markdown. The `headline` of a `done` report replaces the card's summary on the board: say what changed and why in plain words. Use `done` only when the work is committed and its proof passed. Use `needs_input` for one or two open questions a comment can answer, each with your proposed default; the answers come back as the next turn of this session. Use `blocked` for anything else that stops you.",
