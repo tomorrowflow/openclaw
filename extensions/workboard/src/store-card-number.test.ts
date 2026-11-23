@@ -135,6 +135,15 @@ describe("card numbers", () => {
     expect(back.release).toBeUndefined();
   });
 
+  it("drops the RETRO-<n> tag when a retro turns into a task on a board without a key", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const retro = await store.create({ title: "Retro", kind: "retro" });
+    expect(retro.title).toBe("[RETRO-1] Retro");
+    const task = await store.update(retro.id, { kind: "task" });
+    expect(task.title).toBe("Retro");
+    expect(task.seq).toBeUndefined();
+  });
+
   it("refuses a malformed board key", async () => {
     const store = createWorkboardSqliteTestStore();
     await expect(

@@ -320,7 +320,10 @@ async function runWorkboardDispatch(
   const started: WorkboardStartedRun[] = [];
   const startFailures: WorkboardStartFailure[] = [];
   const cards = await params.store.list();
-  const candidates = directCard ? [directCard] : await params.store.list({ boardId });
+  // A retro never starts; leaving it out keeps it from holding a pool slot or a start request.
+  const candidates = directCard
+    ? [directCard]
+    : (await params.store.list({ boardId })).filter((card) => card.kind !== "retro");
   const ownerOverride = params.options?.ownerId?.trim() || undefined;
   const startedOwners = new Set<string>();
   // Allow one fallback per worker slot without draining the queue during an outage.

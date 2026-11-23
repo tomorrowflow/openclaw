@@ -49,9 +49,11 @@ export function cardRef(key: string, number: WorkboardCardNumber): string {
  * over it, and an edit that sends the prefixed title back is measured the same.
  */
 export function withRefTitle(title: unknown, ref: string): string {
-  const text =
-    typeof title === "string" ? title.trim().replace(/^\[[^\]\n]{1,40}\]\s*/, "") : title;
-  return `[${ref}] ${normalizeTitle(text)}`;
+  return `[${ref}] ${normalizeTitle(withoutRefTag(title))}`;
+}
+
+function withoutRefTag(title: unknown): unknown {
+  return typeof title === "string" ? title.trim().replace(/^\[[^\]\n]{1,40}\]\s*/, "") : title;
 }
 
 function numberOption(value: unknown, field: string, min: number): number | undefined {
@@ -250,8 +252,10 @@ export async function updatedCardIdentity(
       })
     : await keptCardNumber(reader, existing, boardId);
   // Every field explicit: the patch spreads over the existing card, so an absent kind must clear it.
+  // A card leaving the retro numbering for a board without a key drops its RETRO-<n> tag.
+  const title = patch.title ?? existing.title;
   return {
-    ...identityOf(patch.title ?? existing.title, kind, number),
+    ...identityOf(crossesRetro && !number ? withoutRefTag(title) : title, kind, number),
     kind,
     release: number?.release,
     seq: number?.seq,
