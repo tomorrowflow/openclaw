@@ -97,6 +97,14 @@ export type ControlUiHtmlPreviewProps = {
   html: string;
   /** Accessible name of the frame. */
   title: string;
+  /**
+   * Receives the authored `href` of a relative link the user clicked, instead of
+   * the frame navigating. The string is unresolved and at most 2048 characters;
+   * the document's scripts can also send one, so validate it before use. Links
+   * with a scheme, protocol-relative and fragment links, and clicks the document
+   * already handled are not reported. Nothing is reported under strict embeds.
+   */
+  onLink?: (href: string) => void;
 };
 
 export type ControlUiComponents = {

@@ -331,6 +331,32 @@ isolated sandbox origin, where its scripts run unless the operator configured
 strict embeds; it cannot reach the Control UI, session files, or widget host
 APIs. `title` names the frame for assistive technology.
 
+Pass `onLink` to handle the document's relative links yourself, for example to
+open a file the document points to:
+
+```ts
+host.components.mountHtmlPreview(container, {
+  html,
+  title: "Flow report",
+  onLink: (href) => {
+    // href is the authored attribute, such as "../screenshots/step-2.png".
+    const path = resolveInsideReportFolder(href);
+    if (path) window.open(screenshotPageUrl(path), "_blank", "noopener");
+  },
+});
+```
+
+When the user clicks an `<a href>` whose value has no scheme and is not
+protocol-relative or a fragment, the frame stays where it is and `onLink`
+receives the `href` exactly as written, up to 2048 characters. The host does not
+resolve it. Resolve it against the path your document came from and check the
+result, because the document's own scripts can report any string. The call
+arrives while the click still counts as a user gesture, so `window.open` is not
+treated as an unrequested popup. Links with a scheme, such as `https:` or
+`mailto:`, are not reported and behave as they do without `onLink`. Under strict
+embeds the document runs no scripts, including the click reporter, so `onLink`
+is never called.
+
 ### Dock a conversation
 
 Check `host.dock` before offering a dock action. From a mounted view, use

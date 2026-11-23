@@ -21,7 +21,7 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-function mountPreview(embedSandbox: "scripts" | "strict") {
+function mountPreview(embedSandbox: "scripts" | "strict", onLink?: (href: string) => void) {
   // The capability reads the embedded bootstrap config when the context is created.
   document.documentElement.setAttribute(
     CONTROL_UI_BOOTSTRAP_CONFIG_ATTRIBUTE,
@@ -50,7 +50,7 @@ function mountPreview(embedSandbox: "scripts" | "strict") {
     signal: lifetime.signal,
     onError,
   });
-  const handle = components.mountHtmlPreview(container, { html, title: "Checklist" });
+  const handle = components.mountHtmlPreview(container, { html, title: "Checklist", onLink });
   return { container, context, handle, request, onError };
 }
 
@@ -111,4 +111,46 @@ it("applies an embed policy change to an open preview", async () => {
   );
   const { params } = await postedDocument(container);
   expect(params).toMatchObject({ allowScripts: false });
+});
+
+function postLink(frame: HTMLIFrameElement, href: unknown, from: Partial<MessageEventInit> = {}) {
+  window.dispatchEvent(
+    new MessageEvent("message", {
+      source: frame.contentWindow,
+      origin: new URL(frame.src).origin,
+      data: { type: "openclaw:html-preview-link", href },
+      ...from,
+    }),
+  );
+}
+
+it("reports a clicked relative link to a host that asked for links", async () => {
+  const onLink = vi.fn();
+  const { container, handle } = mountPreview("scripts", onLink);
+
+  const { frame, params } = await postedDocument(container);
+  expect(params).toMatchObject({ forwardLinks: true });
+  postLink(frame, "../screenshots/board.png");
+  expect(onLink).toHaveBeenCalledExactlyOnceWith("../screenshots/board.png");
+
+  postLink(frame, "forged.png", { source: window });
+  postLink(frame, "forged.png", { origin: "https://elsewhere.example" });
+  postLink(frame, "a".repeat(2049));
+  postLink(frame, { path: "object.png" });
+  handle.dispose();
+  postLink(frame, "late.png");
+  expect(onLink).toHaveBeenCalledOnce();
+});
+
+it("adopts a link handler added after mount", async () => {
+  const onLink = vi.fn();
+  const { container, handle } = mountPreview("scripts");
+  const { frame: plain } = await postedDocument(container);
+
+  handle.update({ html, title: "Checklist", onLink });
+  await vi.waitFor(() => expect(plain.isConnected).toBe(false));
+  const { frame, params } = await postedDocument(container);
+  expect(params).toMatchObject({ forwardLinks: true });
+  postLink(frame, "next.html");
+  expect(onLink).toHaveBeenCalledExactlyOnceWith("next.html");
 });

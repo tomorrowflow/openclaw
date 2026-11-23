@@ -7,6 +7,7 @@ import { generateUUID } from "./uuid.ts";
 export const WIDGET_LOAD_NOTICE_MS = 10_000;
 export const WIDGET_LOAD_TIMEOUT_MS = DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS;
 export class WidgetRenderTimeoutError extends Error {}
+const LINK_HREF_MAX_LENGTH = 2048;
 
 type WidgetSandboxHostOptions = {
   frame: HTMLIFrameElement;
@@ -18,6 +19,7 @@ type WidgetSandboxHostOptions = {
   loadDocument: (signal: AbortSignal) => Promise<string>;
   onLoaded: () => void;
   onRendered?: () => void;
+  onLink?: (href: string) => void;
   onError: (error: unknown) => void;
   onReadyTimeout: () => void;
   onPending?: () => void;
@@ -112,6 +114,13 @@ export class WidgetSandboxHost {
         this.clearReadyTimeout();
         this.renderId = null;
         this.options.onRendered?.();
+      }
+      return;
+    }
+    if (event.data?.type === "openclaw:html-preview-link") {
+      const href: unknown = event.data.href;
+      if (typeof href === "string" && href.length <= LINK_HREF_MAX_LENGTH) {
+        this.options.onLink?.(href);
       }
       return;
     }
@@ -291,6 +300,7 @@ export class WidgetSandboxHost {
           html: document,
           renderId: this.renderId,
           ...(this.options.allowScripts === false ? { allowScripts: false } : {}),
+          ...(this.options.onLink ? { forwardLinks: true } : {}),
         },
       },
       this.options.sandboxOrigin,

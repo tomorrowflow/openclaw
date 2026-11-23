@@ -175,6 +175,76 @@ describe("MCP App sandbox HTTP origin", () => {
     });
   });
 
+  it("adds a relative-link reporter only to documents whose host asked for links", async () => {
+    await withSandboxHost(async (origin) => {
+      const shell = await (await fetch(new URL(buildMcpAppSandboxPath(), origin))).text();
+      const bootstrap = expectDefined(
+        [...shell.matchAll(/<script>([\s\S]*?)<\/script>/gu)].at(-1)?.[1],
+        "sandbox bootstrap script",
+      );
+      const { frames, receive } = bootSandbox(bootstrap, origin);
+      const render = (forwardLinks?: boolean) => {
+        receive({
+          method: "ui/notifications/sandbox-resource-ready",
+          params: { html: "<!doctype html><p>Synthetic report</p>", forwardLinks },
+        });
+        return expectDefined(frames.at(-1), "rendered document frame").srcdoc;
+      };
+      const plain = render();
+      const linked = render(true);
+      expect(plain).not.toContain("openclaw:html-preview-link");
+      const reporter = expectDefined(
+        [...linked.matchAll(/<script>([\s\S]*?)<\/script>/gu)]
+          .map(([, source]) => source)
+          .find((source) => source?.includes("openclaw:html-preview-link")),
+        "link reporter script",
+      );
+      expect(linked.replace(`<script>${reporter}</script>`, "")).toBe(plain);
+
+      const posted: unknown[] = [];
+      let click: (event: unknown) => void = () => {};
+      runInNewContext(reporter, {
+        addEventListener: (_name: string, listener: typeof click) => (click = listener),
+        parent: { postMessage: (data: unknown) => posted.push(data) },
+      });
+      const clickLink = (href: string | null, defaultPrevented = false) => {
+        let prevented = false;
+        const link = { matches: () => href !== null, getAttribute: () => href };
+        click({
+          defaultPrevented,
+          composedPath: () => [{}, link],
+          preventDefault: () => (prevented = true),
+        });
+        return prevented;
+      };
+      for (const href of ["../screenshots/board.png", "report.html?x=1#top", "/docs/flow.html"]) {
+        expect(clickLink(href), href).toBe(true);
+      }
+      expect(posted).toEqual(
+        ["../screenshots/board.png", "report.html?x=1#top", "/docs/flow.html"].map((href) => ({
+          type: "openclaw:html-preview-link",
+          href,
+        })),
+      );
+      for (const href of [
+        "https://example.com/a.png",
+        "//example.com/a.png",
+        "\\\\example.com\\a.png",
+        " java\tscript:alert(1)",
+        "data:text/html,x",
+        "mailto:a@example.com",
+        "about:srcdoc#section",
+        "#section",
+        " ",
+        null,
+      ]) {
+        expect(clickLink(href), String(href)).toBe(false);
+      }
+      expect(clickLink("handled.html", true)).toBe(false);
+      expect(posted).toHaveLength(3);
+    });
+  });
+
   it("rejects other paths, methods, and malformed policy", () => {
     expect(request("/", "GET").res.statusCode).toBe(404);
     expect(request(buildMcpAppSandboxPath(), "POST").res.statusCode).toBe(404);
