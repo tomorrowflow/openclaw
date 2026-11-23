@@ -55,11 +55,12 @@ describe("workboard gateway method registry", () => {
       "workboard.cards.dispatchWithOptions.owner",
       "workboard.boards.list",
       "workboard.boards.upsert",
+      "workboard.boards.archive",
+      "workboard.boards.delete",
+      "workboard.boards.revealSecret",
       "workboard.sessionsBoard.read",
       "workboard.sessionsBoard.update",
       "workboard.sessionsBoard.move",
-      "workboard.boards.archive",
-      "workboard.boards.delete",
       "workboard.cards.stats",
       "workboard.cards.trust",
       "workboard.cards.mergeDigest",
@@ -137,7 +138,7 @@ describe("workboard gateway method registry", () => {
           "notifications.advance",
         ],
       ],
-      ["operator.admin", ["cards.probe"]],
+      ["operator.admin", ["cards.probe", "boards.revealSecret"]],
     ] as const) {
       for (const name of names) {
         expect(methods.get(`workboard.${name}`)?.opts).toEqual({ scope });
