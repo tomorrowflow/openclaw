@@ -13,7 +13,11 @@ import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime
 import { isSecretRef, isValidSecretRef } from "openclaw/plugin-sdk/secret-input";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { normalizeHeldPaths } from "./held-paths.js";
-import { normalizeBoardLinks, normalizeBoardSecrets } from "./store-board-links.js";
+import {
+  assertSecretsNamedForBoard,
+  normalizeBoardLinks,
+  normalizeBoardSecrets,
+} from "./store-board-links.js";
 import type { WorkboardBoardInput } from "./store-inputs.js";
 import { normalizeBoardId, normalizeWorkspace } from "./store-normalizers.js";
 import { normalizeCappedStringList } from "./store-string-lists.js";
@@ -165,6 +169,7 @@ function normalizeOrchestration(
   const secrets = Object.hasOwn(record, "secrets")
     ? normalizeBoardSecrets(record.secrets)
     : fallback?.secrets;
+  assertSecretsNamedForBoard(key, secrets);
   // It runs only after the verifier passed, so alone it would never run.
   if (crossVerifier && !verifier) {
     throw new Error("crossVerifier needs a verifier: it runs after the verifier passed.");

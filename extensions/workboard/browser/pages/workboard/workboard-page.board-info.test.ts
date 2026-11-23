@@ -5,7 +5,7 @@ import { mountPage } from "./workboard-page.test-support.ts";
 
 const orchestration = {
   links: [{ label: "Test site", url: "https://test.example.ts.net:8780", group: "Test" }],
-  secrets: [{ label: "Test token", name: "LINDRA_TEST_TOKEN", group: "Test" }],
+  secrets: [{ label: "Test token", name: "LIN_TEST_TOKEN", group: "Test" }],
   env: { LINDRA_TEXT_URL: "http://192.0.2.17:11434" },
 };
 

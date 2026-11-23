@@ -61,7 +61,7 @@ export function normalizeBoardSecrets(value: unknown): WorkboardBoardSecret[] | 
     // The entry-name rule does not depend on the provider alias; "default" only satisfies the alias grammar.
     if (!isValidSecretRef({ source: "store", provider: "default", id: name })) {
       throw new Error(
-        `secret name ${JSON.stringify(name.slice(0, 64))} must be a secrets-store entry name such as LINDRA_TEST_TOKEN.`,
+        `secret name ${JSON.stringify(name.slice(0, 64))} must be a secrets-store entry name such as LIN_TEST_TOKEN.`,
       );
     }
     if (names.has(name)) {
@@ -70,6 +70,28 @@ export function normalizeBoardSecrets(value: unknown): WorkboardBoardSecret[] | 
     names.add(name);
     return normalizeLabelAndGroup(entry, "secret", { name });
   });
+}
+
+/**
+ * A board reveals only secrets named for it: `<key>_` starts each name, so a
+ * key-less board lists none and project tokens never share a name with
+ * account-wide ones such as `GH_TOKEN`. Checked on every save, a key change
+ * included, so a stored board always holds it.
+ */
+export function assertSecretsNamedForBoard(
+  key: string | undefined,
+  secrets: WorkboardBoardSecret[] | undefined,
+): void {
+  if (!secrets?.length) {
+    return;
+  }
+  if (!key) {
+    throw new Error("secrets needs a board key first: each secret name starts with <key>_.");
+  }
+  const stray = secrets.find((secret) => !secret.name.startsWith(`${key}_`));
+  if (stray) {
+    throw new Error(`secret ${stray.name} must start with ${key}_, the board key.`);
+  }
 }
 
 /** Whether a save changes the revealable-secret list, which only an admin may do. */

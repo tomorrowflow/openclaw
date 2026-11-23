@@ -37,7 +37,7 @@ function isolatedSecretStore() {
 }
 
 const links = [{ label: "Test", url: "https://test.example.ts.net:8780", group: "Test" }];
-const secrets = [{ label: "Test token", name: "LINDRA_TEST_TOKEN", group: "Test" }];
+const secrets = [{ label: "Test token", name: "LIN_TEST_TOKEN", group: "Test" }];
 
 function setup(options: { connectionActive?: boolean } = {}) {
   const store = createWorkboardSqliteTestStore();
@@ -76,15 +76,19 @@ describe("board links and revealable secrets", () => {
     expect(refused.message).toContain("http or https");
     expect((await board())?.orchestration?.links).toEqual(links);
 
-    expect((await upsert({ secrets }, "operator.admin")).ok).toBe(true);
+    expect((await upsert({ key: "LIN", secrets }, "operator.admin")).ok).toBe(true);
     expect((await upsert({ links: null, secrets: null }, "operator.admin")).ok).toBe(true);
-    expect((await board())?.orchestration).toBeUndefined();
+    expect((await board())?.orchestration).toEqual({ key: "LIN" });
   });
 
   it("needs operator.admin to change the secrets list and rejects a bad or repeated name", async () => {
     const { call, board } = setup();
     const upsert = (value: unknown, scope: string) =>
-      call("workboard.boards.upsert", { id: "lindra", orchestration: { secrets: value } }, scope);
+      call(
+        "workboard.boards.upsert",
+        { id: "lindra", orchestration: { key: "LIN", secrets: value } },
+        scope,
+      );
 
     const refused = await upsert(secrets, "operator.write");
     expect(refused.ok).toBe(false);
@@ -96,6 +100,22 @@ describe("board links and revealable secrets", () => {
     expect((await upsert(secrets, "operator.admin")).ok).toBe(true);
   });
 
+  it("lists only secrets named for the board key, through a key change too", async () => {
+    const { call, board } = setup();
+    const upsert = (orchestration: Record<string, unknown>) =>
+      call("workboard.boards.upsert", { id: "lindra", orchestration }, "operator.admin");
+
+    const keyless = await upsert({ secrets });
+    expect(keyless.message).toContain("needs a board key");
+    const foreign = await upsert({ key: "LIN", secrets: [{ label: "GitHub", name: "GH_TOKEN" }] });
+    expect(foreign.message).toContain("must start with LIN_");
+
+    expect((await upsert({ key: "LIN", secrets })).ok).toBe(true);
+    const rekeyed = await upsert({ key: "GH" });
+    expect(rekeyed.message).toContain("must start with GH_");
+    expect((await board())?.orchestration).toEqual({ key: "LIN", secrets });
+  });
+
   it("reveals only a name the board lists, logs without the value, and names the fix when unresolved", async () => {
     const { call, info, methods } = setup();
     expect(methods.get("workboard.boards.revealSecret")?.opts).toMatchObject({
@@ -103,19 +123,19 @@ describe("board links and revealable secrets", () => {
     });
     await call(
       "workboard.boards.upsert",
-      { id: "lindra", orchestration: { secrets } },
+      { id: "lindra", orchestration: { key: "LIN", secrets } },
       "operator.admin",
     );
     const reveal = (name: string) =>
       call("workboard.boards.revealSecret", { boardId: "lindra", name }, "operator.admin");
 
     const store = isolatedSecretStore();
-    await store("LINDRA_TEST_TOKEN", "s3cret");
+    await store("LIN_TEST_TOKEN", "s3cret");
     await store("OTHER_TOKEN", "other");
-    const revealed = await reveal("LINDRA_TEST_TOKEN");
+    const revealed = await reveal("LIN_TEST_TOKEN");
     expect(revealed).toMatchObject({ ok: true, data: { value: "s3cret" } });
     expect(info).toHaveBeenCalledTimes(1);
-    expect(info.mock.calls[0]?.[0]).toContain("LINDRA_TEST_TOKEN");
+    expect(info.mock.calls[0]?.[0]).toContain("LIN_TEST_TOKEN");
     expect(info.mock.calls[0]?.[0]).toContain("conn-1");
     expect(info.mock.calls[0]?.[0]).not.toContain("s3cret");
 
@@ -127,25 +147,25 @@ describe("board links and revealable secrets", () => {
 
     await call(
       "workboard.boards.upsert",
-      { id: "lindra", orchestration: { secrets: [{ label: "Gone", name: "MISSING_TOKEN" }] } },
+      { id: "lindra", orchestration: { secrets: [{ label: "Gone", name: "LIN_MISSING_TOKEN" }] } },
       "operator.admin",
     );
-    const missing = await reveal("MISSING_TOKEN");
+    const missing = await reveal("LIN_MISSING_TOKEN");
     expect(missing.ok).toBe(false);
-    expect(missing.message).toContain("openclaw secrets store set MISSING_TOKEN");
+    expect(missing.message).toContain("openclaw secrets store set LIN_MISSING_TOKEN");
   });
 
   it("gives nothing to a connection that closed during the lookup", async () => {
     const { call } = setup({ connectionActive: false });
     await call(
       "workboard.boards.upsert",
-      { id: "lindra", orchestration: { secrets } },
+      { id: "lindra", orchestration: { key: "LIN", secrets } },
       "operator.admin",
     );
-    await isolatedSecretStore()("LINDRA_TEST_TOKEN", "s3cret");
+    await isolatedSecretStore()("LIN_TEST_TOKEN", "s3cret");
     const revealed = await call(
       "workboard.boards.revealSecret",
-      { boardId: "lindra", name: "LINDRA_TEST_TOKEN" },
+      { boardId: "lindra", name: "LIN_TEST_TOKEN" },
       "operator.admin",
     );
     expect(revealed.ok).toBe(false);

@@ -33,7 +33,7 @@ const board = {
       { label: "Test", url: "https://test.example.ts.net:8780", group: "Test" },
       { label: "Production", url: "https://prod.example.ts.net:8790", group: "Prod" },
     ],
-    secrets: [{ label: "Test token", name: "LINDRA_TEST_TOKEN", group: "Test" }],
+    secrets: [{ label: "Test token", name: "LIN_TEST_TOKEN", group: "Test" }],
     env: {
       LINDRA_TEXT_URL: "http://gpu.example.ts.net:11434",
       LINDRA_TEXT_MODEL: "gpt-oss:20b",
@@ -113,7 +113,7 @@ suite.define(() => {
             await popover.getByRole("button", { name: /Reveal/ }).click();
             await expect.poll(() => popover.getByText("tok-demo-1234").count()).toBe(1);
             expect(await gateway.getRequests("workboard.boards.revealSecret")).toMatchObject([
-              { params: { boardId: "lindra", name: "LINDRA_TEST_TOKEN" } },
+              { params: { boardId: "lindra", name: "LIN_TEST_TOKEN" } },
             ]);
             await capture(page, "after-revealed.png");
             await page.emulateMedia({ colorScheme: "dark" });

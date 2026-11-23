@@ -119,7 +119,7 @@ openclaw secrets store list --plain
 openclaw secrets store get LOG_LEVEL
 ```
 
-Secret values never appear in human, `--json`, or `--plain` output. `store get` refuses a `secret` entry as write-only by design and exits `2`. It exits `3` when the name does not exist. Environment-kind values are readable.
+Secret values never appear in human, `--json`, or `--plain` output. `store get` refuses a `secret` entry as write-only by design and exits `2`. The one exception is a Workboard board's revealable secrets, entries named with the board's key prefix that an `operator.admin` client can reveal; see [Workboard](/plugins/workboard). It exits `3` when the name does not exist. Environment-kind values are readable.
 
 Human-readable `store list` and `store get` output escapes terminal controls in environment values. Use `--json` or `--plain` when you need the original value.
 

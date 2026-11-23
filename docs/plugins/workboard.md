@@ -1009,7 +1009,11 @@ ticket brief or a verification brief, and agent board tools cannot set them.
 - `secrets` is a list of up to 20 `{ label, name, group? }` entries, with the
   same `label` and `group` limits and no repeated `name`. `name` is a
   secrets-store entry name, the same rule as a store SecretRef `id`; the board
-  holds only the name. Changing the list needs `operator.admin`, like
+  holds only the name. Each `name` starts with the board's `key` and an
+  underscore (`LIN_TEST_TOKEN` on a `LIN` board), so a board without a key
+  lists none, and account-wide entries such as `GH_TOKEN` or `BRAVE_API_KEY`
+  can never be listed or revealed. A `key` change that would leave a listed
+  name unprefixed is refused. Changing the list needs `operator.admin`, like
   `preview.env`.
 
 Entries of `links` and `secrets` that share a `group` render under one heading
@@ -1018,7 +1022,7 @@ or `secrets: null` (or an empty list) removes them.
 
 ```bash
 openclaw gateway call workboard.boards.upsert --params \
-  '{"id":"lindra","orchestration":{"links":[{"label":"Test","url":"https://test.example.ts.net:8780","group":"Test"}],"secrets":[{"label":"Test token","name":"LINDRA_TEST_TOKEN","group":"Test"}]}}'
+  '{"id":"lindra","orchestration":{"links":[{"label":"Test","url":"https://test.example.ts.net:8780","group":"Test"}],"secrets":[{"label":"Test token","name":"LIN_TEST_TOKEN","group":"Test"}]}}'
 ```
 
 A listed secret shows masked. A client with `operator.admin` sees a **Reveal**
@@ -1029,7 +1033,9 @@ providers (the default `store` alias), refuses when the connection closed during
 the lookup, and logs the board, the secret name, and the connection (never the
 value). The Control UI hides the value again after 30 seconds or when the
 popover closes. A secret missing from the store fails with the fix: store it
-with `openclaw secrets store set <NAME>`.
+with `openclaw secrets store set <NAME>`. These board-named entries are the
+only store secrets any method returns; every other `secret` entry stays
+write-only.
 
 The plugin passes the session no tool restriction: the agent's own tools are
 the boundary. `agentId` must name a dedicated agent that has only `exec` and
