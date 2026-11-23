@@ -1,7 +1,10 @@
 import { vi } from "vitest";
 import type { OpenClawPluginApi } from "../../api.js";
 
-export function createGatewayMethodCapture(pluginConfig?: Record<string, unknown>) {
+export function createGatewayMethodCapture(
+  pluginConfig?: Record<string, unknown>,
+  logger?: Record<string, unknown>,
+) {
   type RegisteredMethod = {
     handler: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
     opts: Parameters<OpenClawPluginApi["registerGatewayMethod"]>[2];
@@ -9,6 +12,7 @@ export function createGatewayMethodCapture(pluginConfig?: Record<string, unknown
   const methods = new Map<string, RegisteredMethod>();
   const api = {
     pluginConfig,
+    ...(logger ? { logger } : {}),
     runtime: {
       state: {
         openKeyedStore: vi.fn(),

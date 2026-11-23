@@ -20,6 +20,7 @@ import { z } from "zod";
 import type { OpenClawPluginApi } from "../api.js";
 import { redactDispatchResult, redactOperatorCard } from "./card-redaction.js";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
+import { registerWorkboardBoardMethods } from "./gateway-boards.js";
 import { registerNodeTicketReadMethods } from "./gateway-node-ticket-reads.js";
 import type { WorkboardHealthReader } from "./health.js";
 import type { WorkboardLifecycleSessionReader } from "./lifecycle-sessions.js";
@@ -690,12 +691,12 @@ export function registerWorkboardGatewayMethods(params: {
   register("workboard.cards.dispatchWithOptions", WRITE_SCOPE, (request) =>
     dispatchCards(request, { supportsMaxStarts: true }),
   );
-  register("workboard.boards.list", READ_SCOPE, () => store.listBoards());
-  register("workboard.boards.upsert", WRITE_SCOPE, async (request) => {
-    await resolveGatewayWorkspaceMutationAccess(request, request.params);
-    return {
-      board: await store.upsertBoard(request.params, { admin: callerHasAdmin(request.client) }),
-    };
+  registerWorkboardBoardMethods({
+    register,
+    store,
+    logger: api.logger,
+    hasAdmin: callerHasAdmin,
+    authorizeUpsert: (request) => resolveGatewayWorkspaceMutationAccess(request, request.params),
   });
   const sessionsBoard = () => {
     if (!params.sessionsBoard) {
@@ -743,12 +744,6 @@ export function registerWorkboardGatewayMethods(params: {
         sessionsBoardCaller(request),
       ),
     ),
-  );
-  register("workboard.boards.archive", WRITE_SCOPE, async ({ params: input }) => ({
-    board: await store.archiveBoard(input.id, input.archived),
-  }));
-  register("workboard.boards.delete", WRITE_SCOPE, ({ params: input }) =>
-    store.deleteBoard(input.id),
   );
   register("workboard.cards.stats", READ_SCOPE, ({ params: input }) =>
     store.stats({ boardId: input.boardId }),

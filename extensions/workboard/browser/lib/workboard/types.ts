@@ -1,5 +1,6 @@
 import type {
-  WorkboardBoardSummary,
+  WorkboardBoardSummary as ContractBoardSummary,
+  WorkboardOrchestrationSettings,
   WorkboardCardKind,
   WorkboardOperatorCard,
   WorkboardCardCursor,
@@ -10,7 +11,16 @@ import type {
 import type { GatewaySessionRow } from "../../api/types.ts";
 
 export * from "@openclaw/workboard-contract";
-export type { WorkboardBoardSummary } from "@openclaw/workboard-contract";
+/**
+ * A board as the page holds it: the settings the page reads, with the preview's secret
+ * names reduced to `previewEnv` (env var name -> store entry id), which is all the info
+ * popover lists.
+ */
+export type WorkboardBoardSummary = Omit<ContractBoardSummary, "orchestration"> & {
+  orchestration?: Omit<WorkboardOrchestrationSettings, "preview"> & {
+    previewEnv?: Record<string, string>;
+  };
+};
 /** Cards as the Gateway's operator reads return them, with the derived stage. */
 export type WorkboardCard = WorkboardOperatorCard;
 

@@ -20,6 +20,12 @@ describe("workboard tool board targets", () => {
         orchestration: { defaultTarget: NODE_TARGET },
       }),
     ).toBe(false);
+    for (const orchestration of [
+      { links: [{ label: "Test", url: "https://test.example.ts.net" }] },
+      { secrets: [{ label: "Token", name: "APP_TOKEN" }] },
+    ]) {
+      expect(Value.Check(boardCreate.parameters, { id: "app", orchestration })).toBe(false);
+    }
     await boardCreate.execute("call-board", { id: "app", orchestration: { autoDecompose: true } });
 
     const created = readPayload(

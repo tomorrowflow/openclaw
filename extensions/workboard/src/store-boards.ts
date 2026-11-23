@@ -32,6 +32,7 @@ import type {
   WorkboardSubscriptionStore,
   WorkboardWriteAuthority,
 } from "./persistence-types.js";
+import { changesBoardSecrets } from "./store-board-links.js";
 import { changesPreviewSecrets, normalizeBoardMetadata } from "./store-board-normalizers.js";
 import { compareCards } from "./store-card-helpers.js";
 import { normalizeCardKind } from "./store-card-number.js";
@@ -326,7 +327,8 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
 
   /**
    * `admin` says the caller holds operator.admin: preview env resolves with the
-   * Gateway's authority, so only an admin may change what `up` receives.
+   * Gateway's authority, so only an admin may change what `up` receives, or
+   * the list of secrets the board may reveal.
    */
   async upsertBoard(
     input: WorkboardBoardInput,
@@ -338,10 +340,11 @@ export class WorkboardBoardStore extends WorkboardStoreRuntime {
       const board = normalizeBoardMetadata({ ...input, id }, existing?.board);
       if (
         !caller.admin &&
-        changesPreviewSecrets(existing?.board.orchestration, board.orchestration)
+        (changesPreviewSecrets(existing?.board.orchestration, board.orchestration) ||
+          changesBoardSecrets(existing?.board.orchestration, board.orchestration))
       ) {
         throw new Error(
-          "Changing a board's preview env, or its preview up or env while it has preview env, needs operator.admin.",
+          "Changing a board's secrets list, its preview env, or its preview up or env while it has preview env, needs operator.admin.",
         );
       }
       this.assertTargetModelAllowed(input, board);

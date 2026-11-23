@@ -181,6 +181,13 @@ export default {
     officeTitle: "Office",
     architectureTitle: "Architecture map",
     openArchitectureMap: "Open this board's architecture map",
+    boardInfoOpen: "Project links and secrets",
+    boardInfoGeneral: "General",
+    boardInfoEnv: "Environment",
+    boardInfoPreview: "Preview secrets",
+    boardInfoReveal: "Reveal {label}",
+    boardInfoHide: "Hide {label}",
+    boardInfoCopy: "Copy {label}",
     openOfficeViewer: "Open in new tab",
     officeFrameTitle: "Office",
     portalPopupBlocked:
