@@ -23,6 +23,8 @@ type FilePage<Result> = {
   loading: () => string;
   invalid: () => string;
   failed: (error: string) => string;
+  /** Stands in for the error when the Gateway's refusal carries no message. */
+  noReason: () => string;
   view: (props: { result: Result; path: string }) => JSX.Element;
 };
 
@@ -33,6 +35,7 @@ export function createPrototypePage(): ControlUiView {
     loading: () => t("workboard.prototypeLoading"),
     invalid: () => t("workboard.prototypeLinkInvalid"),
     failed: (error) => t("workboard.prototypeFailed", { error }),
+    noReason: () => t("workboard.prototypeReadFailed"),
     view: (props) => (
       <HtmlPreview
         class="workboard-prototype-page__frame"
@@ -50,6 +53,7 @@ export function createScreenshotPage(): ControlUiView {
     loading: () => t("workboard.screenshotPageLoading"),
     invalid: () => t("workboard.screenshotLinkInvalid"),
     failed: (error) => t("workboard.screenshotPageFailed", { error }),
+    noReason: () => t("workboard.screenshotReadFailed"),
     view: (props) => (
       <div class="workboard-screenshot-page__scroll">
         <img
@@ -123,7 +127,7 @@ function createFilePage<Result>(page: FilePage<Result>): ControlUiView {
           (result): PageState<Result> => ({ status: "loaded", result }),
           (error: unknown): PageState<Result> => ({
             status: "failed",
-            error: formatUiError(error, t("workboard.prototypeReadFailed")),
+            error: formatUiError(error, page.noReason()),
           }),
         )
         .then((settled) => {

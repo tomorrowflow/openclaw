@@ -833,7 +833,13 @@ it("locates a screenshot in the card's rounds, then its linked cards, then the d
   const onBase = "docs/screenshots/LIN-1/base.png";
   const outside = "docs/logo.png";
   const gone = "docs/screenshots/LIN-9/gone.png";
-  const base = commit({ [onBase]: Buffer.from([7]), [both]: Buffer.from([1]), [outside]: "x" });
+  const folder = "docs/screenshots/LIN-1/folder.png";
+  const base = commit({
+    [onBase]: Buffer.from([7]),
+    [both]: Buffer.from([1]),
+    [outside]: "x",
+    [`${folder}/notes.txt`]: "x",
+  });
   git("branch", "trunk");
   const linkedRound = commit({ [linkedOnly]: Buffer.from([2]), [both]: Buffer.from([3]) });
   const first = commit({ [own]: Buffer.from([4]) });
@@ -852,7 +858,7 @@ it("locates a screenshot in the card's rounds, then its linked cards, then the d
       noNode,
       card,
       "screenshot",
-      [own, both, linkedOnly, onBase, outside, gone, "docs/screenshots/../logo.png"],
+      [own, both, linkedOnly, onBase, outside, gone, folder, "docs/screenshots/../logo.png"],
       { linked: [proto] },
     ),
   ).toEqual([
@@ -862,14 +868,15 @@ it("locates a screenshot in the card's rounds, then its linked cards, then the d
     { path: onBase, source: { base: true } },
     { path: outside },
     { path: gone },
+    { path: folder },
     { path: "docs/screenshots/../logo.png" },
   ]);
   expect(await readScreenshot(noNode, card, { base: true }, onBase)).toEqual({
     mimeType: "image/png",
     contentBase64: Buffer.from([7]).toString("base64"),
   });
-  // The default branch serves only the screenshot dirs, and only what it holds.
-  for (const file of [outside, own, "docs/screenshots/../logo.png"]) {
+  // The default branch serves only the screenshot dirs, and only the files it holds.
+  for (const file of [outside, own, folder, "docs/screenshots/../logo.png"]) {
     await expect(readScreenshot(noNode, card, { base: true }, file)).rejects.toThrow(
       `screenshot not found: default branch ${file}`,
     );

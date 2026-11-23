@@ -18,6 +18,7 @@ import { publishCandidate, publishNodeTicket } from "./node-ticket-publish.js";
 import { nodeTicketTarget } from "./node-ticket.js";
 import {
   createFakeGitHub,
+  createHostRepo,
   createNodeRepos,
   git,
   NODE_TARGET,
@@ -35,6 +36,15 @@ afterEach(() => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+function tempRoot(): string {
+  const root = mkdtempSync(path.join(os.tmpdir(), "workboard-rung-b-"));
+  roots.push(root);
+  return root;
+}
+
+/** A real host clone for a ticket an agent's accept reads; spread into `importedDocsTicket`. */
+const hostRepo = () => createHostRepo(tempRoot());
 
 const VERDICT_FIRST = "Post `Verdict: accept` or `Verdict: rework: <finding>` as a comment first";
 
@@ -346,60 +356,110 @@ describe("Workboard rung b", () => {
     );
   });
 
-  it("leaves a round that changed a flow report to the operator: an agent's accept is refused, its rework verdict and the operator's accept are not", async () => {
+  it("leaves a pull request that changes a flow report to the operator, in whichever round: an agent's accept is refused, its rework verdict and the operator's accept are not", async () => {
     const store = createWorkboardSqliteTestStore();
-    const root = mkdtempSync(path.join(os.tmpdir(), "workboard-flows-"));
-    roots.push(root);
-    const { hostRepo, target } = createNodeRepos(root);
-    const commitFile = (file: string) => {
-      mkdirSync(path.dirname(path.join(hostRepo, file)), { recursive: true });
-      writeFileSync(path.join(hostRepo, file), `<p>${file}</p>`);
-      git(hostRepo, "add", "-A");
-      git(hostRepo, "commit", "-q", "-m", file);
-      return git(hostRepo, "rev-parse", "HEAD");
+    const { origin, hostRepo: repo, target } = createNodeRepos(tempRoot());
+    const commitFile = (cwd: string, file: string) => {
+      mkdirSync(path.dirname(path.join(cwd, file)), { recursive: true });
+      writeFileSync(path.join(cwd, file), `<p>${file}</p>`);
+      git(cwd, "add", "-A");
+      git(cwd, "commit", "-q", "-m", file);
+      return git(cwd, "rev-parse", "HEAD");
     };
-    const base = git(hostRepo, "rev-parse", "HEAD");
-    const code = commitFile("src/app.ts");
-    const flow = commitFile("docs/flows/dictation.html");
-    const card = await importedDocsTicket(store, { classRungs: { docs: { rung: "b" } }, target });
+    const base = git(repo, "rev-parse", "HEAD");
+    git(repo, "checkout", "-q", "-b", "ticket");
+    commitFile(repo, "src/app.ts");
+    const withFlow = commitFile(repo, "docs/flows/dictation.html");
+    const reworked = commitFile(repo, "src/fix.ts");
+    // A branch without a flow report of its own that merged a main carrying one.
+    commitFile(origin, "docs/flows/onboarding.html");
+    git(repo, "fetch", "-q", "origin");
+    git(repo, "checkout", "-q", "-b", "clean", base);
+    commitFile(repo, "src/clean.ts");
+    git(repo, "merge", "-q", "--no-ff", "-m", "merge main", "origin/main");
+    const mergedMain = git(repo, "rev-parse", "HEAD");
+
+    const card = await importedDocsTicket(store, {
+      classRungs: { docs: { rung: "b" } },
+      target,
+      headCommit: withFlow,
+    });
     const worktreePath = expectDefined(
       nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree?.path,
       "worktree path",
     );
-    const imported = (to: string) =>
-      store.recordNodeRound(card.id, {
+    const imported = async (from: string, to: string) => {
+      await store.setNodeHandoff(card.id, {
         worktreePath,
-        changes: { from: base, to, files: [], totals: { files: 0, added: 0, deleted: 0 } },
+        handoff: { phase: "imported", headCommit: to, importedAt: Date.now() },
       });
+      await store.recordNodeRound(card.id, {
+        worktreePath,
+        changes: { from, to, files: [], totals: { files: 0, added: 0, deleted: 0 } },
+      });
+    };
+    const verdict = (body: string) => store.addComment(card.id, { body }, undefined, "agent:dev");
     const move = agentTools(store)("workboard_move");
     const accept = () => move.execute("accept", { id: card.id, status: "done" });
     const refusal =
-      "This round changed a flow report (docs/flows/dictation.html), so the operator decides it. Leave the card in review.";
+      "This pull request changes a flow report (docs/flows/dictation.html), so the operator decides it. Leave the card in review.";
 
-    await imported(flow);
-    await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
+    await imported(base, withFlow);
+    await verdict("Verdict: accept");
     await expect(accept()).rejects.toThrow(refusal);
     expect((await store.get(card.id))?.status).toBe("review");
 
     // A rework verdict still moves the card on to publish the draft.
-    await store.addComment(card.id, { body: "Verdict: rework: broken" }, undefined, "agent:dev");
+    await verdict("Verdict: rework: broken");
     await accept();
     await expect(handoffOf(store, card)).resolves.toMatchObject({ decidedBy: "agent:dev" });
     await store.move(card.id, "review", undefined);
 
-    await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
+    // The rework round left the flow report alone; the pull request still carries it.
+    await imported(withFlow, reworked);
+    await verdict("Verdict: accept");
     await expect(accept()).rejects.toThrow(refusal);
     await store.move(card.id, "done", undefined);
     expect((await store.get(card.id))?.status).toBe("done");
     await store.move(card.id, "review", undefined);
 
-    // The same round without the flow report is the agent's to accept.
-    await imported(code);
+    // Main's own flow reports, merged into the branch, are not the pull request's.
+    await imported(base, mergedMain);
+    await verdict("Verdict: accept");
     await accept();
     await expect(handoffOf(store, card)).resolves.toMatchObject({
       decidedBy: "agent:dev",
       sampled: expect.any(Boolean),
     });
+  });
+
+  it("refuses an agent's accept of a flow report whose round recorded no changes, and of a pull request it cannot read", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const host = hostRepo();
+    const repo = host.target.hostRepoPath;
+    git(repo, "checkout", "-q", "-b", "ticket");
+    mkdirSync(path.join(repo, "docs/flows"), { recursive: true });
+    writeFileSync(path.join(repo, "docs/flows/dictation.html"), "<p>flow</p>");
+    git(repo, "add", "-A");
+    git(repo, "commit", "-q", "-m", "flow");
+    const unrecorded = await importedDocsTicket(store, {
+      classRungs: { docs: { rung: "b" } },
+      target: host.target,
+      headCommit: git(repo, "rev-parse", "HEAD"),
+    });
+    const unreadable = await importedDocsTicket(store);
+    const move = agentTools(store)("workboard_move");
+
+    for (const [card, refusal] of [
+      [unrecorded, "This pull request changes a flow report (docs/flows/dictation.html)"],
+      [unreadable, "Could not check this pull request for flow reports"],
+    ] as const) {
+      await store.addComment(card.id, { body: "Verdict: accept" }, undefined, "agent:dev");
+      await expect(move.execute("accept", { id: card.id, status: "done" })).rejects.toThrow(
+        refusal,
+      );
+      expect((await store.get(card.id))?.status).toBe("review");
+    }
   });
 
   it("gates an agent's rung b accept on a passed verification, never a rework verdict or an operator", async () => {
@@ -408,12 +468,13 @@ describe("Workboard rung b", () => {
       id: "default",
       orchestration: { verifier: { agentId: "verifier", model: "openai/gpt-6-sol" } },
     });
-    const card = await importedDocsTicket(store, { classRungs: { docs: { rung: "b" } } });
+    const host = hostRepo();
+    const card = await importedDocsTicket(store, { classRungs: { docs: { rung: "b" } }, ...host });
     const worktreePath = expectDefined(
       nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree?.path,
       "worktree path",
     );
-    const head = "b".repeat(40);
+    const head = host.headCommit;
     const facts = { round: 0, headCommit: head, startedAt: 1, endedAt: 2, findings: [] };
     const verified = async (verification: WorkboardNodeVerification | undefined) =>
       verification
@@ -490,8 +551,10 @@ describe("Workboard rung b", () => {
 
   it("lets an agent accept at rung b after its verdict, and an operator retry decides again", async () => {
     const store = createWorkboardSqliteTestStore();
+    const host = hostRepo();
     const card = await importedDocsTicket(store, {
       classRungs: { docs: { rung: "b", sampleEvery: 1 } },
+      ...host,
     });
     const move = agentTools(store)("workboard_move");
     await expect(move.execute("early", { id: card.id, status: "done" })).rejects.toThrow(
@@ -531,20 +594,22 @@ describe("Workboard rung b", () => {
     expect(respond).toHaveBeenCalledWith(true, expect.anything());
     await expect(handoffOf(store, card)).resolves.toEqual({
       phase: "imported",
-      headCommit: "b".repeat(40),
+      headCommit: host.headCommit,
       importedAt: expect.any(Number),
     });
   });
 
   it("runs a rung c class as rung b: the launch records c and an agent accepts after its verdict", async () => {
     const store = createWorkboardSqliteTestStore();
-    const atC = await importedDocsTicket(store, { classRungs: { docs: { rung: "c" } } });
+    const host = hostRepo();
+    const atC = await importedDocsTicket(store, { classRungs: { docs: { rung: "c" } }, ...host });
     const worktree = nodeTicketTarget(expectDefined(await store.get(atC.id), "card"))?.worktree;
     expect(worktree?.rung).toBe("c");
     // A round launched at b stays the agent's to decide once its class reaches c.
     const promoted = await importedDocsTicket(store, {
       classRungs: { docs: { rung: "b" } },
       later: { docs: { rung: "c" } },
+      ...host,
     });
     const move = agentTools(store)("workboard_move");
     for (const card of [atC, promoted]) {
@@ -564,17 +629,23 @@ describe("Workboard rung b", () => {
         crossVerifier: { agentId: "verifier-claude", model: "anthropic/claude-opus-5-5" },
       },
     });
+    const host = hostRepo();
     const atC = await importedDocsTicket(store, {
       classRungs: { docs: { rung: "c" } },
       crossVerify: true,
+      ...host,
     });
     const atB = await importedDocsTicket(store, {
       classRungs: { docs: { rung: "b" } },
       later: { docs: { rung: "c" } },
+      ...host,
     });
     // A rung c round its import left out of the cross-verifier's sample.
-    const unsampled = await importedDocsTicket(store, { classRungs: { docs: { rung: "c" } } });
-    const facts = { round: 0, headCommit: "b".repeat(40), startedAt: 1, endedAt: 2, findings: [] };
+    const unsampled = await importedDocsTicket(store, {
+      classRungs: { docs: { rung: "c" } },
+      ...host,
+    });
+    const facts = { round: 0, headCommit: host.headCommit, startedAt: 1, endedAt: 2, findings: [] };
     const record = async (
       card: WorkboardCard,
       slot: "verification" | "crossVerification",

@@ -763,9 +763,9 @@ its address), at full size. The **Screenshots** tab's images link to the same
 page, so a copied screenshot link keeps working, also on another device signed
 in to the same Control UI.
 
-An agent's accept is refused for a round that added, changed, or removed a
-file under `docs/flows/`: flow reports are the operator's to decide at every
-rung (see **Agent acceptance at rung b**).
+An agent's accept is refused for a pull request that adds, changes, or removes
+a file under `docs/flows/`, in any of its rounds: flow reports are the
+operator's to decide at every rung (see **Agent acceptance at rung b**).
 
 All three tabs show a card's own files plus those of the cards it links with a
 `relates_to` link, each labeled "From <card title>" with its round. Only the
@@ -1315,10 +1315,14 @@ model on its own, so a verdict always comes from a model the board names
    operator decides or re-runs it."). A round whose import stamped
    `crossVerify`, while the board still has a `crossVerifier`, also needs its
    cross-verification to have passed, with the same refusals naming the
-   cross-verification. An accept of a round that added, changed, or removed a
-   file under `docs/flows/` is refused whatever the rung, naming the files
-   ("This round changed a flow report (docs/flows/dictation.html), so the
-   operator decides it. Leave the card in review."). A rework verdict and
+   cross-verification. An accept of a pull request that adds, changes, or
+   removes a file under `docs/flows/` is refused whatever the rung, naming the
+   files ("This pull request changes a flow report
+   (docs/flows/dictation.html), so the operator decides it. Leave the card in
+   review."). The check covers everything on the ticket's branch since it left
+   the default branch, so a flow report from an earlier round still counts
+   after a rework round that left it alone; a pull request that cannot be
+   checked is refused the same way. A rework verdict and
    an operator's move are never gated; the operator's move waits for the
    cross-verification as it waits for the verification. Otherwise the move fails and
    names the next step: at rung a, post the verdict and let the operator

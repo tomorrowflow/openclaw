@@ -601,6 +601,7 @@ export default {
     screenshotPageLabel: "Screenshot",
     screenshotPageLoading: "Loading screenshot…",
     screenshotPageFailed: "Could not load this screenshot: {error}",
+    screenshotReadFailed: "the Gateway gave no reason",
     screenshotLinkInvalid:
       "This screenshot link needs a card, a source (live, base, or a round number), and a file path. Open it again from the card's Screenshots or Flows tab.",
     flowsUnavailable: "Flow reports could not be listed: {error}",

@@ -4,7 +4,15 @@ import type {
   WorkboardNodeWorktree,
   WorkboardOrchestrationSettings,
 } from "@openclaw/workboard-contract";
-import { cardInSample, COMMIT_ID, nodeTicketTarget, requireHostGit } from "./node-ticket.js";
+import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import {
+  cardInSample,
+  COMMIT_ID,
+  hostGit,
+  nodeTicketBaseRef,
+  nodeTicketTarget,
+  requireHostGit,
+} from "./node-ticket.js";
 import {
   currentNodeVerification,
   type ImportedHandoff,
@@ -104,29 +112,38 @@ function requirePassedVerification(
 const MAX_NAMED_FLOW_REPORTS = 3;
 
 /**
- * The `docs/flows/` files the imported round added, changed, or removed, read
- * from the host clone because the round's recorded file list is capped. A
- * round whose import recorded no commit range is not checked.
+ * The `docs/flows/` files the ticket's pull request adds, changes, or removes:
+ * everything on its branch since it left the default branch, so a flow report
+ * from an earlier round still counts after a rework round that left it alone.
+ * Read from the host clone, which needs no recorded round. Accepted edge case:
+ * a branch that merged a default branch newer than the host clone's also lists
+ * that merge's flow reports, a refusal the operator's accept clears.
  */
-async function roundFlowReports(
+async function pullRequestFlowReports(
   hostRepoPath: string,
+  baseRef: string,
   worktree: WorkboardNodeWorktree,
+  headCommit: string,
 ): Promise<string[]> {
-  const round = worktree.rework?.round ?? 0;
-  const changes = worktree.rounds?.find((entry) => entry.round === round)?.changes;
-  if (!changes) {
-    return [];
+  if (!COMMIT_ID.test(headCommit)) {
+    throw new Error(`the imported head ${headCommit} is not a commit id`);
   }
-  if (!COMMIT_ID.test(changes.from) || !COMMIT_ID.test(changes.to)) {
-    throw new Error(`round commits ${changes.from}..${changes.to} are not commit ids`);
-  }
+  const leftMain = await hostGit(hostRepoPath, [
+    "merge-base",
+    "--end-of-options",
+    baseRef,
+    headCommit,
+  ]);
+  const mergeBase = leftMain.stdout.trim();
+  // Without a default-branch ref the whole ticket is checked, from the commit its branch started at.
+  const from = leftMain.code === 0 && COMMIT_ID.test(mergeBase) ? mergeBase : worktree.baseCommit;
   const diff = await requireHostGit(hostRepoPath, [
     "diff",
     "--name-only",
     "--no-renames",
     "--end-of-options",
-    changes.from,
-    changes.to,
+    from,
+    headCommit,
     "--",
     "docs/flows",
   ]);
@@ -140,7 +157,7 @@ async function roundFlowReports(
  * round's verification and verdict (see `nodeReviewReadiness`), as does its
  * move to todo or ready (rework), which the handoff publishes first because
  * the rework session starts from the PR branch. Agents rework via done. An
- * agent's accept of a round that changed a flow report is refused: the
+ * agent's accept of a pull request that changes a flow report is refused: the
  * operator decides those at every rung.
  */
 export async function withImportedNodeTicketMove(params: {
@@ -195,16 +212,25 @@ export async function withImportedNodeTicketMove(params: {
     board: actor ? await params.board() : undefined,
   });
   // `sampled` marks an agent's accept; its rework verdict moves on to publish the draft PR.
-  const flowReports =
-    actor && handoff.sampled !== undefined
-      ? await roundFlowReports(target.hostRepoPath, worktree)
-      : [];
-  if (flowReports.length > 0) {
-    const named = flowReports.slice(0, MAX_NAMED_FLOW_REPORTS).join(", ");
-    const more = flowReports.length - MAX_NAMED_FLOW_REPORTS;
-    throw new Error(
-      `This round changed a flow report (${named}${more > 0 ? ` and ${more} more` : ""}), so the operator decides it. Leave the card in review.`,
-    );
+  if (actor && handoff.sampled !== undefined) {
+    const flowReports = await pullRequestFlowReports(
+      target.hostRepoPath,
+      nodeTicketBaseRef(target),
+      worktree,
+      handoff.headCommit,
+    ).catch((error: unknown) => {
+      throw new Error(
+        `Could not check this pull request for flow reports (${formatErrorMessage(error)}), so the operator decides it. Leave the card in review.`,
+        { cause: error },
+      );
+    });
+    if (flowReports.length > 0) {
+      const named = flowReports.slice(0, MAX_NAMED_FLOW_REPORTS).join(", ");
+      const more = flowReports.length - MAX_NAMED_FLOW_REPORTS;
+      throw new Error(
+        `This pull request changes a flow report (${named}${more > 0 ? ` and ${more} more` : ""}), so the operator decides it. Leave the card in review.`,
+      );
+    }
   }
   return {
     ...next,

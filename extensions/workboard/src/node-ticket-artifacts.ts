@@ -367,9 +367,11 @@ async function readBlob(
   missing: string,
 ): Promise<Buffer> {
   const object = `${commit}:${path}`;
+  // A directory named like a file of this kind is a tree, which has a size too.
+  const type = await hostGit(repoPath, ["cat-file", "-t", object]);
   const size = await hostGit(repoPath, ["cat-file", "-s", object]);
   const bytes = Number(size.stdout.trim());
-  if (size.code !== 0 || !Number.isInteger(bytes)) {
+  if (type.stdout.trim() !== "blob" || size.code !== 0 || !Number.isInteger(bytes)) {
     throw new Error(missing);
   }
   if (bytes > kind.maxBytes) {
