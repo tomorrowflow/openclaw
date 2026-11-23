@@ -14,6 +14,7 @@ import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   listNodeTicketArtifacts,
+  locateNodeTicketArtifacts,
   readNodeTicketArtifact,
   relatedCardIds,
 } from "./node-ticket-artifacts.js";
@@ -107,6 +108,7 @@ function nodeCard(
     handoff?: WorkboardNodeWorktree["handoff"];
     screenshotDirs?: string[];
     baseCommit?: string;
+    baseRef?: string;
     id?: string;
     title?: string;
     links?: WorkboardLink[];
@@ -132,6 +134,7 @@ function nodeCard(
           repoPath: "/repo",
           worktreesRoot: "/wt",
           hostRepoPath: repo,
+          ...(options.baseRef ? { baseRef: options.baseRef } : {}),
           ...(options.screenshotDirs ? { screenshotDirs: options.screenshotDirs } : {}),
           worktree: {
             path: "/wt/card-1",
@@ -790,4 +793,97 @@ it("lists the committed files of cards linked with relates_to, in link order", a
   expect(
     await readScreenshot(noNode, proto1, { round: 0 }, "docs/screenshots/PROTO-1/a.png"),
   ).toEqual({ mimeType: "image/png", contentBase64: Buffer.from([1]).toString("base64") });
+});
+
+it("lists only the HTML a round committed under docs/flows and serves its exact text", async () => {
+  const base = commit({ "README.md": "base", "docs/flows/old.html": "<p>old</p>" });
+  const html = '<a href="../screenshots/LIN-2.04/dictation.png">Dictation</a>';
+  const round = commit({
+    "docs/flows/dictation.html": html,
+    "docs/flows/notes.md": "notes",
+    "docs/prototypes/T-1/sketch.html": "<p>sketch</p>",
+  });
+  const card = nodeCard([{ round: 0, changes: changes(base, round) }]);
+
+  expect(await listNodeTicketArtifacts(noNode, card, "flow", COMMITTED)).toEqual(
+    committed([{ round: 0, commit: round, paths: ["docs/flows/dictation.html"] }]),
+  );
+  const read = await readNodeTicketArtifact(
+    noNode,
+    card,
+    "flow",
+    { round: 0 },
+    "docs/flows/dictation.html",
+  );
+  expect({ mimeType: read.mimeType, text: read.bytes.toString("utf8") }).toEqual({
+    mimeType: "text/html",
+    text: html,
+  });
+  for (const file of ["docs/prototypes/T-1/sketch.html", "docs/flows/old.html"]) {
+    await expect(readNodeTicketArtifact(noNode, card, "flow", { round: 0 }, file)).rejects.toThrow(
+      `flow report not found: round 0 ${file}`,
+    );
+  }
+});
+
+it("locates a screenshot in the card's rounds, then its linked cards, then the default branch, else nowhere", async () => {
+  const own = "docs/screenshots/T-1/own.png";
+  const both = "docs/screenshots/LIN-1/both.png";
+  const linkedOnly = "docs/screenshots/PROTO-1/linked.png";
+  const onBase = "docs/screenshots/LIN-1/base.png";
+  const outside = "docs/logo.png";
+  const gone = "docs/screenshots/LIN-9/gone.png";
+  const folder = "docs/screenshots/LIN-1/folder.png";
+  const base = commit({
+    [onBase]: Buffer.from([7]),
+    [both]: Buffer.from([1]),
+    [outside]: "x",
+    [`${folder}/notes.txt`]: "x",
+  });
+  git("branch", "trunk");
+  const linkedRound = commit({ [linkedOnly]: Buffer.from([2]), [both]: Buffer.from([3]) });
+  const first = commit({ [own]: Buffer.from([4]) });
+  const rework = commit({ [own]: Buffer.from([5]), [both]: Buffer.from([6]) });
+  const proto = linkedCard("p1", "Proto", [{ round: 0, changes: changes(base, linkedRound) }]);
+  const card = nodeCard(
+    [
+      { round: 0, changes: changes(linkedRound, first) },
+      { round: 1, changes: changes(first, rework) },
+    ],
+    { handoff: imported, baseRef: "trunk", links: [relates("p1")] },
+  );
+
+  expect(
+    await locateNodeTicketArtifacts(
+      noNode,
+      card,
+      "screenshot",
+      [own, both, linkedOnly, onBase, outside, gone, folder, "docs/screenshots/../logo.png"],
+      { linked: [proto] },
+    ),
+  ).toEqual([
+    { path: own, source: { round: 1 } },
+    { path: both, source: { round: 1 } },
+    { path: linkedOnly, cardId: "p1", source: { round: 0 } },
+    { path: onBase, source: { base: true } },
+    { path: outside },
+    { path: gone },
+    { path: folder },
+    { path: "docs/screenshots/../logo.png" },
+  ]);
+  expect(await readScreenshot(noNode, card, { base: true }, onBase)).toEqual({
+    mimeType: "image/png",
+    contentBase64: Buffer.from([7]).toString("base64"),
+  });
+  // The default branch serves only the screenshot dirs, and only the files it holds.
+  for (const file of [outside, own, folder, "docs/screenshots/../logo.png"]) {
+    await expect(readScreenshot(noNode, card, { base: true }, file)).rejects.toThrow(
+      `screenshot not found: default branch ${file}`,
+    );
+  }
+  // A clone whose base ref does not resolve finds nothing there.
+  const unresolved = nodeCard([], { handoff: imported, baseRef: "no-such-branch" });
+  expect(await locateNodeTicketArtifacts(noNode, unresolved, "screenshot", [onBase], {})).toEqual([
+    { path: onBase },
+  ]);
 });

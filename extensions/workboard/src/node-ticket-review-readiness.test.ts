@@ -1,29 +1,47 @@
 // Workboard tests cover holding an imported round until its verification and verdict exist.
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import type { WorkboardCard, WorkboardNodeVerification } from "@openclaw/workboard-contract";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { redactOperatorCard } from "./card-redaction.js";
 import { nodeTicketTarget } from "./node-ticket.js";
-import { postVerdict, startNodeCard } from "./node-ticket.test-support.js";
+import { createHostRepo, postVerdict, startNodeCard } from "./node-ticket.test-support.js";
 import { nodeReviewReadiness, REVIEW_READINESS_DEADLINE_MS } from "./review-readiness.js";
 import type { WorkboardStore } from "./store.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 import { createWorkboardTools } from "./tools.js";
 
 const HEAD = "b".repeat(40);
+const roots: string[] = [];
 
 afterEach(() => {
   vi.useRealTimers();
+  for (const root of roots.splice(0)) {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
-/** A docs ticket at rung b imported as the bundle import leaves it, waiting in review. */
-async function importedTicket(params: { verify?: boolean } = {}) {
+function tempRoot(): string {
+  const root = mkdtempSync(path.join(os.tmpdir(), "workboard-ready-"));
+  roots.push(root);
+  return root;
+}
+
+/**
+ * A docs ticket at rung b imported as the bundle import leaves it, waiting in
+ * review. `hostRepo` gives it a real host clone, which an agent's accept reads.
+ */
+async function importedTicket(params: { verify?: boolean; hostRepo?: boolean } = {}) {
+  const host = params.hostRepo ? createHostRepo(tempRoot()) : undefined;
+  const headCommit = host?.headCommit ?? HEAD;
   const store = createWorkboardSqliteTestStore();
   await store.upsertBoard({
     id: "default",
     orchestration: { classRungs: { docs: { rung: "b", sampleEvery: 1 } } },
   });
-  const { card } = await startNodeCard(store, undefined, undefined, ["class:docs"]);
+  const { card } = await startNodeCard(store, undefined, host?.target, ["class:docs"]);
   const running = expectDefined(await store.get(card.id), "running card");
   const claim = expectDefined(running.metadata?.claim, "claim");
   const worktree = expectDefined(nodeTicketTarget(running)?.worktree, "worktree");
@@ -33,7 +51,7 @@ async function importedTicket(params: { verify?: boolean } = {}) {
       worktreePath: worktree.path,
       handoff: {
         phase: "imported",
-        headCommit: HEAD,
+        headCommit,
         importedAt: Date.now(),
         ...(params.verify ? { verify: true as const } : {}),
       },
@@ -49,7 +67,7 @@ async function importedTicket(params: { verify?: boolean } = {}) {
     const verification: WorkboardNodeVerification = {
       phase: "done",
       round: 0,
-      headCommit: HEAD,
+      headCommit,
       startedAt,
       endedAt: Date.now(),
       verdict,
@@ -94,7 +112,7 @@ describe("imported round readiness", () => {
   });
 
   it("leaves an agent's move to its acceptance checks, which ask it for its verdict", async () => {
-    const { store, card } = await importedTicket({ verify: true });
+    const { store, card } = await importedTicket({ verify: true, hostRepo: true });
     const move = agentMove(store, card.id);
 
     await expect(move()).rejects.toThrow("as a comment first");

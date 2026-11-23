@@ -566,7 +566,7 @@ do not need it: each worker run is granted `workboard_heartbeat`,
 | `workboard_read`                                                                                                                                 | Return one card plus bounded worker context from the same card read (notes, attempts, comments, links, proof, artifacts, parent results, recent assignee work, active diagnostics).        |
 | `workboard_create`                                                                                                                               | Create a card with optional parents, tenant, skills, touches, board, workspace metadata, idempotency key, runtime limit, retry budget, operator summary.                                   |
 | `workboard_link`                                                                                                                                 | Link a parent to a child card. Queued children stay `todo` until every parent is `done`, then move to `ready`; backlog children wait until started.                                        |
-| `workboard_reference`                                                                                                                            | Reference another card with a `relates_to` link (no dependency), so the card's Prototype and Screenshots tabs also show its committed files                                                |
+| `workboard_reference`                                                                                                                            | Reference another card with a `relates_to` link (no dependency), so the card's Prototype, Flows, and Screenshots tabs also show its committed files                                        |
 | `workboard_claim`                                                                                                                                | Claim a card for the calling agent; moves `backlog`/`todo`/`ready` into `running`.                                                                                                         |
 | `workboard_heartbeat`                                                                                                                            | Refresh the claim heartbeat during a longer run.                                                                                                                                           |
 | `workboard_release`                                                                                                                              | Release the claim after completion, pause, or handoff; can move the card to a next status.                                                                                                 |
@@ -738,7 +738,36 @@ UI. The tab lists when the drawer opens, when the card imports a round, and on
 **List again** or a board refresh; a ticket with no prototype yet shows the tab
 once a later list finds one. Files over 2 MiB are refused.
 
-Both tabs show a card's own files plus those of the cards it links with a
+A project's living UX flow reports are self-contained HTML files under
+`docs/flows/` (for example `docs/flows/dictation.html`) that link to
+screenshots by relative path, such as
+`<a href="../screenshots/LIN-2.04/dictation-ipad-B.png">`. The card drawer's
+**Flows** tab works like the Prototype tab for the `.html` and `.htm` files a
+card's rounds changed there, live and committed, and appears once at least one
+exists. Above the report it lists the screenshots the report links to, each
+with where the card shows it from, first match wins: the node worktree while a
+round runs, the card's own rounds (newest first), the cards it links with
+`relates_to`, then the repository's default branch (the target's `baseRef`,
+default `origin/HEAD`) as the Gateway's clone at `hostRepoPath` last fetched
+it. A screenshot in none of them is marked **missing**. Clicking a screenshot
+link inside the report, or its name in the list, opens that screenshot in a
+new window; if the browser refuses the window, the tab shows a link to click.
+Only relative links that resolve to an image under `docs/screenshots/` open:
+any other relative link is named in a note under the list and not followed.
+With `gateway.controlUi.embedSandbox: "strict"` the report runs no scripts, so
+links inside it are not reported; use the list.
+
+A screenshot opens as its own Control UI page (plugin page `screenshot`, with
+the card, the source `live`, `base`, or a round number, and the file path in
+its address), at full size. The **Screenshots** tab's images link to the same
+page, so a copied screenshot link keeps working, also on another device signed
+in to the same Control UI.
+
+An agent's accept is refused for a pull request that adds, changes, or removes
+a file under `docs/flows/`, in any of its rounds: flow reports are the
+operator's to decide at every rung (see **Agent acceptance at rung b**).
+
+All three tabs show a card's own files plus those of the cards it links with a
 `relates_to` link, each labeled "From <card title>" with its round. Only the
 card's own outgoing `relates_to` links count; parent, child, and blocking
 links schedule work and pull in no files, and a linked card contributes its
@@ -1286,7 +1315,14 @@ model on its own, so a verdict always comes from a model the board names
    operator decides or re-runs it."). A round whose import stamped
    `crossVerify`, while the board still has a `crossVerifier`, also needs its
    cross-verification to have passed, with the same refusals naming the
-   cross-verification. A rework verdict and
+   cross-verification. An accept of a pull request that adds, changes, or
+   removes a file under `docs/flows/` is refused whatever the rung, naming the
+   files ("This pull request changes a flow report
+   (docs/flows/dictation.html), so the operator decides it. Leave the card in
+   review."). The check covers everything on the ticket's branch since it left
+   the default branch, so a flow report from an earlier round still counts
+   after a rework round that left it alone; a pull request that cannot be
+   checked is refused the same way. A rework verdict and
    an operator's move are never gated; the operator's move waits for the
    cross-verification as it waits for the verification. Otherwise the move fails and
    names the next step: at rung a, post the verdict and let the operator

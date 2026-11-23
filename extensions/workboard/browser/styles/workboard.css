@@ -5376,6 +5376,51 @@ workboard-inline-text {
   color: var(--muted);
 }
 
+.workboard-screenshot-page__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4);
+}
+
+/* Full size: the page scrolls rather than shrinking the capture. */
+.workboard-screenshot-page__image {
+  display: block;
+  max-width: none;
+  margin: 0 auto;
+}
+
+.workboard-flows__screenshots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  max-height: 96px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  font-size: 12px;
+  list-style: none;
+}
+
+.workboard-flows__screenshots a {
+  cursor: pointer;
+}
+
+.workboard-flows__source,
+.workboard-flows__note {
+  color: var(--muted);
+}
+
+.workboard-flows__missing {
+  color: var(--warn);
+}
+
+.workboard-flows__note {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .workboard-prototypes__placeholder {
   display: grid;
   place-items: center;

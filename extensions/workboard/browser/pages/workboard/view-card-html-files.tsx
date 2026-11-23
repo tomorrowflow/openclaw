@@ -1,9 +1,13 @@
 /** @jsxImportSource @solidjs/web */
 import type {
   WorkboardNodeFileListResult,
+  WorkboardNodeFileLocateResult,
+  WorkboardNodeFileLocation,
   WorkboardNodeFileSource,
   WorkboardPrototypeResult,
 } from "@openclaw/workboard-contract";
+import { WORKBOARD_MAX_LOCATED_FILES } from "@openclaw/workboard-contract";
+import type { JSX } from "@solidjs/web";
 import { createMemo, createSignal, For, Show } from "solid-js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { HtmlPreview } from "../../components/host-components.tsx";
@@ -11,16 +15,17 @@ import { icons } from "../../components/icons.tsx";
 import { workboardHost } from "../../host.ts";
 import { t } from "../../i18n/index.ts";
 import { formatUiError } from "../../lib/format-error.ts";
-import { prototypePageTarget } from "../prototype/prototype-target.ts";
+import { nodeFilePageTarget, PROTOTYPE_PAGE_ID } from "../node-file/node-file-target.ts";
 import { type CardFileList, createCardFileList, type SettledList } from "./card-node-files.ts";
+import { flowScreenshotPaths } from "./flow-links.ts";
 import { RelativeTime } from "./view-card-time.tsx";
 
 /**
- * One prototype file: a round's committed HTML or a live file in the node
+ * One HTML file: a round's committed file or a live file in the node
  * worktree. `ownerId` is the linked card the file belongs to; absent for the
  * shown card's own files.
  */
-type PrototypeRef = {
+export type HtmlFileRef = {
   key: string;
   source: WorkboardNodeFileSource;
   path: string;
@@ -28,24 +33,80 @@ type PrototypeRef = {
   ownerId?: string;
 };
 
+/** `screenshots` are those a flow report links to, each with where the card shows it from. */
+type LoadedHtml = { html: string; screenshots?: WorkboardNodeFileLocation[] };
+
 type HtmlState =
   | { status: "loading" }
-  | { status: "loaded"; html: string }
+  | ({ status: "loaded" } & LoadedHtml)
   | { status: "failed"; error: string };
 
-/** One node ticket's prototypes on one Gateway connection, live files included. */
-export type CardPrototypes = Omit<CardFileList, "refresh"> & {
+/** A kind of HTML file a node ticket's drawer shows in its own tab. */
+type HtmlFileKind = {
+  tab: "prototype" | "flows";
+  /** The repository dir the files live in, left out of their labels. */
+  dir: string;
+  listMethod: string;
+  read: (client: GatewayBrowserClient, cardId: string, ref: HtmlFileRef) => Promise<LoadedHtml>;
+  /** The pop-out page that shows one file on its own; absent when the kind has none. */
+  popoutPage?: string;
+  unavailable: (error: string) => string;
+  liveUnavailable: (reason: string) => string;
+  failed: (error: string) => string;
+  pick: () => string;
+};
+
+const readHtml = (method: string, client: GatewayBrowserClient, cardId: string, ref: HtmlFileRef) =>
+  client.request<WorkboardPrototypeResult>(method, {
+    id: ref.ownerId ?? cardId,
+    path: ref.path,
+    ...ref.source,
+  });
+
+const PROTOTYPE_FILES: HtmlFileKind = {
+  tab: "prototype",
+  dir: "docs/prototypes/",
+  listMethod: "workboard.cards.prototypes.list",
+  read: (client, cardId, ref) => readHtml("workboard.cards.prototypes.get", client, cardId, ref),
+  popoutPage: PROTOTYPE_PAGE_ID,
+  unavailable: (error) => t("workboard.prototypesUnavailable", { error }),
+  liveUnavailable: (reason) => t("workboard.prototypesLiveUnavailable", { reason }),
+  failed: (error) => t("workboard.prototypeFailed", { error }),
+  pick: () => t("workboard.prototypePick"),
+};
+
+const FLOW_FILES: HtmlFileKind = {
+  tab: "flows",
+  dir: "docs/flows/",
+  listMethod: "workboard.cards.flows.list",
+  // The screenshots are located for the shown card, whichever card the report belongs to.
+  read: async (client, cardId, ref) => {
+    const { html } = await readHtml("workboard.cards.flows.get", client, cardId, ref);
+    // A report linking to more screenshots than one call locates lists the first ones.
+    const paths = flowScreenshotPaths(ref.path, html).slice(0, WORKBOARD_MAX_LOCATED_FILES);
+    const located =
+      paths.length > 0
+        ? await client.request<WorkboardNodeFileLocateResult>(
+            "workboard.cards.screenshots.locate",
+            { id: cardId, paths },
+          )
+        : { files: [] };
+    return { html, screenshots: located.files };
+  },
+  unavailable: (error) => t("workboard.flowsUnavailable", { error }),
+  liveUnavailable: (reason) => t("workboard.flowsLiveUnavailable", { reason }),
+  failed: (error) => t("workboard.flowFailed", { error }),
+  pick: () => t("workboard.flowPick"),
+};
+
+/** One node ticket's HTML files of one kind on one Gateway connection, live files included. */
+export type CardHtmlFiles = Omit<CardFileList, "refresh"> & {
+  kind: HtmlFileKind;
   /** Lists the shown card again and retries failed reads; a no-op while the current list is loading. */
   refresh(): void;
   /** The file's HTML, read on first use. */
-  html(cardId: string, ref: PrototypeRef): HtmlState;
+  html(cardId: string, ref: HtmlFileRef): HtmlState;
 };
-
-const PROTOTYPE_DIR = "docs/prototypes/";
-
-function shortPath(path: string): string {
-  return path.startsWith(PROTOTYPE_DIR) ? path.slice(PROTOTYPE_DIR.length) : path;
-}
 
 function roundLabel(round: number): string {
   return round === 0
@@ -57,10 +118,11 @@ function roundLabel(round: number): string {
  * Live files first, newest first, then each round's committed files, newest
  * round first, then the files of linked cards in link order.
  */
-function prototypeRefs(result: WorkboardNodeFileListResult): PrototypeRef[] {
+function htmlFileRefs(dir: string, result: WorkboardNodeFileListResult): HtmlFileRef[] {
+  const shortPath = (path: string) => (path.startsWith(dir) ? path.slice(dir.length) : path);
   const live =
     result.live?.state === "available"
-      ? result.live.files.map((file): PrototypeRef => ({
+      ? result.live.files.map((file): HtmlFileRef => ({
           key: `live:${file.mtimeMs}:${file.bytes}:${file.path}`,
           source: { live: true },
           path: file.path,
@@ -70,7 +132,7 @@ function prototypeRefs(result: WorkboardNodeFileListResult): PrototypeRef[] {
   const committed =
     result.committed.state === "available"
       ? result.committed.rounds.toReversed().flatMap((round) =>
-          round.paths.map((path): PrototypeRef => ({
+          round.paths.map((path): HtmlFileRef => ({
             key: `${round.commit}:${path}`,
             source: { round: round.round },
             path,
@@ -81,7 +143,7 @@ function prototypeRefs(result: WorkboardNodeFileListResult): PrototypeRef[] {
   const linked = (result.linked ?? []).flatMap((entry) =>
     entry.committed.state === "available"
       ? entry.committed.rounds.toReversed().flatMap((round) =>
-          round.paths.map((path): PrototypeRef => ({
+          round.paths.map((path): HtmlFileRef => ({
             key: `linked:${entry.cardId}:${round.commit}:${path}`,
             source: { round: round.round },
             path,
@@ -94,12 +156,12 @@ function prototypeRefs(result: WorkboardNodeFileListResult): PrototypeRef[] {
   return [...live, ...committed, ...linked];
 }
 
-/** Whether the drawer offers its Prototype tab: a file is listed, or listing failed. */
-export function hasPrototypes(state: SettledList): boolean {
+/** Whether the drawer offers the kind's tab: a file is listed, or listing failed. */
+export function hasHtmlFiles(kind: HtmlFileKind, state: SettledList): boolean {
   return (
     state.status === "unavailable" ||
     state.result.committed.state === "unavailable" ||
-    prototypeRefs(state.result).length > 0
+    htmlFileRefs(kind.dir, state.result).length > 0
   );
 }
 
@@ -107,19 +169,20 @@ export function hasPrototypes(state: SettledList): boolean {
  * Created per connection, so a reconnect lists and reads afresh. Live files
  * are listed too, so the tab shows what a running or waiting session wrote.
  */
-export function createCardPrototypes(
+function createCardHtmlFiles(
   client: GatewayBrowserClient,
   requestUpdate: () => void,
-): CardPrototypes {
+  kind: HtmlFileKind,
+): CardHtmlFiles {
   const reads = new Map<string, HtmlState>();
 
   const files = createCardFileList(client, requestUpdate, {
-    method: "workboard.cards.prototypes.list",
+    method: kind.listMethod,
     live: true,
     onForget: () => reads.clear(),
     // A live file rewritten since the last list has a new key; drop the stale reads.
     onListed: (result) => {
-      const current = new Set(prototypeRefs(result).map((ref) => ref.key));
+      const current = new Set(htmlFileRefs(kind.dir, result).map((ref) => ref.key));
       for (const key of reads.keys()) {
         if (key.startsWith("live:") && !current.has(key)) {
           reads.delete(key);
@@ -129,6 +192,7 @@ export function createCardPrototypes(
   });
 
   return {
+    kind,
     show: files.show,
     list: files.list,
     dispose: files.dispose,
@@ -137,7 +201,11 @@ export function createCardPrototypes(
         return;
       }
       for (const [key, read] of reads) {
-        if (read.status === "failed") {
+        // A screenshot missing before may have been committed or merged since.
+        if (
+          read.status === "failed" ||
+          (read.status === "loaded" && read.screenshots?.some((shot) => !shot.source))
+        ) {
           reads.delete(key);
         }
       }
@@ -149,14 +217,11 @@ export function createCardPrototypes(
       }
       const pending: HtmlState = { status: "loading" };
       reads.set(ref.key, pending);
-      void client
-        .request<WorkboardPrototypeResult>("workboard.cards.prototypes.get", {
-          id: ref.ownerId ?? cardId,
-          path: ref.path,
-          ...ref.source,
-        })
+      // Started inside the chain so a throwing request still settles the read.
+      void Promise.resolve()
+        .then(() => kind.read(client, cardId, ref))
         .then(
-          (result): HtmlState => ({ status: "loaded", html: result.html }),
+          (result): HtmlState => ({ status: "loaded", ...result }),
           (error: unknown): HtmlState => ({ status: "failed", error: formatUiError(error) }),
         )
         .then((settled) => {
@@ -171,38 +236,56 @@ export function createCardPrototypes(
   };
 }
 
+export const createCardPrototypes = (client: GatewayBrowserClient, requestUpdate: () => void) =>
+  createCardHtmlFiles(client, requestUpdate, PROTOTYPE_FILES);
+
+export const createCardFlows = (client: GatewayBrowserClient, requestUpdate: () => void) =>
+  createCardHtmlFiles(client, requestUpdate, FLOW_FILES);
+
+/** The file the panel shows, with what its read returned. */
+export type ShownHtmlFile = { ref: HtmlFileRef } & LoadedHtml;
+
 /**
- * The drawer's Prototype tab. The host renders the prototype with its scripts
- * on the sandbox origin, apart from the Control UI's storage and DOM.
+ * The drawer's tab for one kind of HTML file (Prototype, Flows). The host
+ * renders the file with its scripts on the sandbox origin, apart from the
+ * Control UI's storage and DOM. `above` renders between the bar and the frame.
  */
-export function PrototypePanel(props: {
-  prototypes: CardPrototypes;
+export function HtmlFilesPanel(props: {
+  files: CardHtmlFiles;
   cardId: string;
   listed: SettledList;
   active: boolean;
   revision?: number;
+  above?: (shown: () => ShownHtmlFile) => JSX.Element;
+  /** A relative link clicked inside the shown file, as its raw href. */
+  onLink?: (shown: ShownHtmlFile, href: string) => void;
 }) {
+  const kind = () => props.files.kind;
   const [selectedKey, setSelectedKey] = createSignal<string>();
   const loaded = () => (props.listed.status === "loaded" ? props.listed : undefined);
   const refs = createMemo(() => {
     const listed = loaded();
-    return listed ? prototypeRefs(listed.result) : [];
+    return listed ? htmlFileRefs(kind().dir, listed.result) : [];
   });
   const selected = () => refs().find((ref) => ref.key === selectedKey()) ?? refs()[0];
   const html = () => {
     void props.revision;
     const ref = selected();
-    return ref && props.active ? props.prototypes.html(props.cardId, ref) : undefined;
+    return ref && props.active ? props.files.html(props.cardId, ref) : undefined;
   };
-  const frameHtml = () => {
+  const shown = (): ShownHtmlFile | undefined => {
     const state = html();
-    return state?.status === "loaded" ? state.html : undefined;
+    const ref = selected();
+    return ref && state?.status === "loaded"
+      ? { ref, html: state.html, ...(state.screenshots ? { screenshots: state.screenshots } : {}) }
+      : undefined;
   };
   const popoutHref = () => {
     const ref = selected();
-    return ref
+    const page = kind().popoutPage;
+    return ref && page
       ? workboardHost().navigation.pageHref(
-          prototypePageTarget({
+          nodeFilePageTarget(page, {
             cardId: ref.ownerId ?? props.cardId,
             source: ref.source,
             path: ref.path,
@@ -213,7 +296,7 @@ export function PrototypePanel(props: {
   const placeholder = () => {
     const state = html();
     return state?.status === "failed"
-      ? t("workboard.prototypeFailed", { error: state.error })
+      ? kind().failed(state.error)
       : state?.status === "loading"
         ? t("workboard.screenshotLoading")
         : undefined;
@@ -229,9 +312,9 @@ export function PrototypePanel(props: {
   return (
     <section
       class="workboard-detail__tabpanel workboard-detail__prototypes"
-      id="workboard-detail-panel-prototype"
+      id={`workboard-detail-panel-${kind().tab}`}
       role="tabpanel"
-      aria-labelledby="workboard-detail-tab-prototype"
+      aria-labelledby={`workboard-detail-tab-${kind().tab}`}
       tabindex="0"
       hidden={!props.active}
     >
@@ -239,9 +322,7 @@ export function PrototypePanel(props: {
         when={loaded()}
         fallback={
           <p class="workboard-detail__empty">
-            {t("workboard.prototypesUnavailable", {
-              error: props.listed.status === "unavailable" ? props.listed.error : "",
-            })}
+            {kind().unavailable(props.listed.status === "unavailable" ? props.listed.error : "")}
           </p>
         }
       >
@@ -258,7 +339,7 @@ export function PrototypePanel(props: {
               >
                 <select
                   class="workboard-prototypes__picker"
-                  aria-label={t("workboard.prototypePick")}
+                  aria-label={kind().pick()}
                   onChange={(event) => setSelectedKey(event.currentTarget.value)}
                 >
                   <For each={refs()} keyed={(ref) => ref.key}>
@@ -294,7 +375,7 @@ export function PrototypePanel(props: {
                 class="btn btn--icon btn--ghost workboard-screens__refresh"
                 aria-label={t("workboard.screensRefresh")}
                 title={t("workboard.screensRefresh")}
-                onClick={() => props.prototypes.refresh()}
+                onClick={() => props.files.refresh()}
               >
                 {icons.refresh}
               </button>
@@ -302,26 +383,34 @@ export function PrototypePanel(props: {
             <Show when={liveUnavailable()}>
               {(reason) => (
                 <p class="workboard-screens__unavailable" role="status">
-                  {t("workboard.prototypesLiveUnavailable", { reason: reason() })}
+                  {kind().liveUnavailable(reason())}
                 </p>
               )}
             </Show>
             <Show when={committedUnavailable()}>
               {(reason) => (
                 <p class="workboard-screens__unavailable" role="status">
-                  {t("workboard.prototypesUnavailable", { error: reason() })}
+                  {kind().unavailable(reason())}
                 </p>
               )}
             </Show>
             <Show when={placeholder()}>
               {(text) => <p class="workboard-prototypes__placeholder">{text()}</p>}
             </Show>
-            <Show when={frameHtml() !== undefined}>
-              <HtmlPreview
-                class="workboard-prototypes__frame"
-                html={frameHtml() ?? ""}
-                title={selected()?.path ?? ""}
-              />
+            <Show when={shown()}>
+              {(file) => (
+                <>
+                  {props.above?.(file)}
+                  <HtmlPreview
+                    class="workboard-prototypes__frame"
+                    html={file().html}
+                    title={file().ref.path}
+                    {...(props.onLink
+                      ? { onLink: (href: string) => props.onLink?.(file(), href) }
+                      : {})}
+                  />
+                </>
+              )}
             </Show>
           </>
         )}

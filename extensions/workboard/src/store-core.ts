@@ -12,8 +12,8 @@ import type {
 import { resolveNonNegativeIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { definedFields } from "../record-fields.js";
+import { withImportedNodeTicketMove } from "./node-ticket-acceptance.js";
 import { assertAgentMayMoveCard } from "./node-ticket-probe.js";
-import { withImportedNodeTicketMove } from "./node-ticket.js";
 import type { PersistedWorkboardCard } from "./persistence-types.js";
 import { reviewVerdictOf, withVerdictSession } from "./review-readiness.js";
 import { sessionCaptureCardId } from "./session-capture-id.js";

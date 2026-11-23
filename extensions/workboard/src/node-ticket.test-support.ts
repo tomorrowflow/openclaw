@@ -83,6 +83,20 @@ export function git(cwd: string, ...args: string[]): string {
 }
 
 /**
+ * A host clone under `root` holding one commit on `main`, with the target and
+ * imported head of a ticket whose branch has not left it.
+ */
+export function createHostRepo(root: string) {
+  const hostRepo = path.join(root, "host-repo");
+  spawnSync("git", ["init", "-q", "-b", "main", hostRepo]);
+  git(hostRepo, "commit", "-q", "--allow-empty", "-m", "base");
+  return {
+    target: { ...NODE_TARGET, hostRepoPath: hostRepo },
+    headCommit: git(hostRepo, "rev-parse", "HEAD"),
+  };
+}
+
+/**
  * An origin, a node clone and a host clone of it, and a worktrees root under
  * `root`; the node side is reached only through {@link createLocalNodeGateway}.
  */
