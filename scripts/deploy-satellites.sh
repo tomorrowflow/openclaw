@@ -20,7 +20,9 @@
 # user gets in ~/.claude: `provision` replaces settings.json with
 # claude/settings.<linux|macos>.json, skills/ with claude/skills, and library/
 # with claude/library (removed when the profile has none), then runs
-# the profile's tools.manifest checks as the node user. A failed check installs
+# the profile's tools.manifest checks as the node user. Settings env values of
+# the form `workboard-secret:<board>/<NAME>` are resolved from the secrets store
+# at provision time (see render_settings). A failed check installs
 # nothing: the satellite reports a WARNING and the script exits 3 (or 1 if a
 # satellite failed). It also copies claude/settings.<os>.json for both OSes to
 # $OPENCLAW_NODE_RULES_DIR (default: the factory workspace's node-tool-rules/)
@@ -359,7 +361,7 @@ SCRIPT
 provision_one() {
   local name="$1" kind="$2" target="$3" os=linux
   [[ "$kind" == macos-source ]] && os=macos
-  local pack=(tar -C "$PROFILE_DIR" -cf - "claude/settings.$os.json" claude/skills tools.manifest)
+  local pack=(tar -cf - -C "$RENDERED_DIR" "claude/settings.$os.json" -C "$PROFILE_DIR" claude/skills tools.manifest)
   [[ -d "$PROFILE_DIR/claude/library" ]] && pack+=(claude/library)
   local land='umask 077 && mkdir -p ~/.cache && cat > ~/.cache/openclaw-node-profile.tar'
   local script="OS=$os
@@ -396,7 +398,40 @@ publish_node_rules() {
     sudo -n -u openclaw tee "$NODE_RULES_DIR/settings.$os.json" >/dev/null <"$PROFILE_DIR/claude/settings.$os.json" || return 1
   done
 }
+# A settings env value `workboard-secret:<board>/<NAME>` names a secrets-store
+# entry that board lists under orchestration.secrets. The profile and the
+# published tool rules keep the reference; only the copy sent to the nodes
+# carries the value, resolved through the Gateway's admin-gated reveal. An
+# unresolved reference stops provision before any node changes, so nodes keep
+# their previous settings.
+REVEAL_CMD="${OPENCLAW_PROVISION_REVEAL_CMD:-sudo -n -u openclaw -H openclaw gateway call workboard.boards.revealSecret --json --params}"
+render_settings() {
+  local os ref board secret value src out
+  mkdir -p "$RENDERED_DIR/claude"
+  for os in linux macos; do
+    src="$PROFILE_DIR/claude/settings.$os.json"
+    out="$RENDERED_DIR/claude/settings.$os.json"
+    cp "$src" "$out"
+    while read -r ref; do
+      [[ -n "$ref" ]] || continue
+      board="${ref#workboard-secret:}"
+      secret="${board#*/}"
+      board="${board%%/*}"
+      if ! value=$($REVEAL_CMD "$(jq -nc --arg b "$board" --arg n "$secret" '{boardId: $b, name: $n}')" </dev/null | jq -er '.value'); then
+        echo "[satellites] provision: could not resolve $ref; is $secret in the store and in board $board's orchestration.secrets?" >&2
+        return 1
+      fi
+      # Passed through the environment, not argv, so the value never shows in ps.
+      REF="$ref" VALUE="$value" jq '.env |= with_entries(if .value == env.REF then .value = env.VALUE else . end)' "$out" >"$out.next"
+      mv "$out.next" "$out"
+    done < <(jq -r '.env // {} | .[] | select(type == "string" and startswith("workboard-secret:"))' "$src" | sort -u)
+  done
+}
+
 if [[ "$PHASE" == provision ]]; then
+  RENDERED_DIR=$(mktemp -d)
+  trap 'rm -rf "$RENDERED_DIR"' EXIT
+  render_settings || exit 1
   if publish_node_rules; then
     echo "[satellites] provision: node tool rules published to $NODE_RULES_DIR"
   else
