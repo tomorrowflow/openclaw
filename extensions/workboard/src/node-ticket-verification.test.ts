@@ -190,6 +190,7 @@ describe("node ticket verification", () => {
     // Its own simulator, named like its session, so it never tests on a ticket session's.
     expect(message).toContain(`xcrun simctl create verify-${card.id.slice(0, 8)}-r0 "<device>"`);
     expect(message).toContain("sips -Z 800 -s format jpeg");
+    expect(message).toContain("the install command the repository's AGENTS.md names");
     expect(message).toContain('image("data:image/jpeg;base64,<base64>")');
     expect(message).toContain('"visual":{"verdict":"looks_right|problem|not_checked"');
     expect(message).toContain(
