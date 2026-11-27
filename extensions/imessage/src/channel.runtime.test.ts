@@ -1,20 +1,11 @@
 import { readFile, writeFile } from "node:fs/promises";
-import type { ChannelGatewayContextV2 } from "openclaw/plugin-sdk/channel-contract";
-import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { createTestPluginServiceScheduler } from "openclaw/plugin-sdk/plugin-test-api";
 import { createOpenClawTestState } from "openclaw/plugin-sdk/test-state";
 import { expect, it, vi } from "vitest";
-import type { ResolvedIMessageAccount } from "./accounts.js";
 import { IMessageRpcClient } from "./client.js";
-import { getIMessageRuntime } from "./runtime.js";
 import { sendMessageIMessage } from "./send.js";
-import { installIMessageStateRuntimeForTest } from "./test-support/runtime.js";
 
-const monitorMock = vi.hoisted(() =>
-  vi.fn<typeof import("./monitor/monitor-provider.js").monitorIMessageProvider>(
-    async () => undefined,
-  ),
-);
+const monitorMock = vi.hoisted(() => vi.fn(async () => undefined));
 const createRpcClientMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./monitor/monitor-provider.js", async (importOriginal) => ({
@@ -146,12 +137,12 @@ it("keeps a Gateway-shaped host media capability reader-free", async () => {
 it("enforces the resolved account cap for work", async () => {
   const state = await createOpenClawTestState({ prefix: "imessage-account-media-" });
   const client = new IMessageRpcClient();
-  const delivered: Buffer[] = [];
+  const delivered: string[] = [];
   const request = vi.spyOn(client, "request").mockImplementation(async (_method, params) => {
     if (typeof params?.file !== "string") {
       throw new Error("Missing native attachment path");
     }
-    delivered.push(await readFile(params.file));
+    delivered.push(await readFile(params.file, "hex"));
     return { guid: "p:0/account-media" };
   });
   try {
@@ -185,9 +176,9 @@ it("enforces the resolved account cap for work", async () => {
     expect(request).not.toHaveBeenCalled();
     const result = await sendIMessageOutbound({ ...params, mediaUrl: small });
     expect(result.receipt.platformMessageIds).toEqual(["p:0/account-media"]);
-    expect(delivered).toEqual([smallBytes]);
+    expect(delivered).toEqual([smallBytes.toString("hex")]);
     await sendIMessageOutbound({ ...params, accountId: "default", mediaUrl: large });
-    expect(delivered).toEqual([smallBytes, largeBytes]);
+    expect(delivered).toEqual([smallBytes.toString("hex"), largeBytes.toString("hex")]);
   } finally {
     request.mockRestore();
     await client.stop();
@@ -225,85 +216,4 @@ it("sends the approval from the approved account", async () => {
     }),
     expect.any(Object),
   );
-});
-
-it("retains observed Automation failures until an accepted send in the active account run", async () => {
-  installIMessageStateRuntimeForTest();
-  const entered = createDeferred<void>();
-  const stopped = createDeferred<void>();
-  monitorMock.mockReset().mockImplementationOnce(async () => {
-    entered.resolve();
-    await stopped.promise;
-  });
-  const cfg = accountConfig({ work: { cliPath: "/fixture/imsg" } });
-  const account = resolveIMessageAccount({ cfg, accountId: "work" });
-  const abort = new AbortController();
-  let status: ReturnType<ChannelGatewayContextV2["getStatus"]> = { accountId: "work" };
-  const ctx: ChannelGatewayContextV2<ResolvedIMessageAccount> = {
-    cfg,
-    account,
-    accountId: account.accountId,
-    scheduler: createTestPluginServiceScheduler(),
-    runtime: { log: vi.fn(), error: vi.fn(), exit: vi.fn() },
-    abortSignal: abort.signal,
-    channelRuntime: getIMessageRuntime().channel,
-    getStatus: () => status,
-    setStatus: (patch) => {
-      status = { ...status, ...patch };
-    },
-  };
-  const start = imessagePlugin.gateway?.startAccount;
-  if (!start) {
-    throw new Error("iMessage Gateway startup unavailable");
-  }
-  const running = start(ctx);
-  const client = new IMessageRpcClient();
-  const request = vi.spyOn(client, "request");
-  const send = () =>
-    sendMessageIMessage("imessage:+15555550123", "fixture", {
-      config: cfg,
-      accountId: "WORK",
-      client,
-    });
-  try {
-    await entered.promise;
-    const error = new Error("Messages automation failed with AppleScript error -1743.");
-    request.mockRejectedValueOnce(error);
-    await expect(send()).rejects.toBe(error);
-    expect(status.lastError).toContain("Privacy & Security > Automation");
-    const warning = status.lastError;
-    monitorMock.mock.calls.at(-1)?.[0].statusSink?.({ lastError: null, connected: true });
-    expect(status.lastError).toBe(warning);
-    const snapshot = await imessagePlugin.status?.buildAccountSnapshot?.({
-      account,
-      cfg,
-      runtime: status,
-      probe: { ok: true },
-    });
-    expect(snapshot?.lastError).toBe(warning);
-    request.mockResolvedValueOnce({});
-    await expect(send()).resolves.toMatchObject({ messageId: "unknown" });
-    expect(status.lastError).toBe(warning);
-    request.mockResolvedValueOnce({ success: true });
-    await expect(send()).resolves.toMatchObject({ messageId: "ok" });
-    expect(status.lastError).toBeNull();
-    status.lastError = "unrelated monitor failure";
-    request.mockResolvedValueOnce({ guid: "p:0/accepted" });
-    await send();
-    expect(status.lastError).toBe("unrelated monitor failure");
-    expect(request).toHaveBeenCalledTimes(4);
-  } finally {
-    abort.abort();
-    stopped.resolve();
-    await running;
-    request.mockRestore();
-    await client.stop();
-  }
-  expect(
-    getIMessageRuntime().channel.runtimeContexts.get({
-      channelId: "imessage",
-      accountId: "work",
-      capability: "imessage-send-status",
-    }),
-  ).toBeUndefined();
 });

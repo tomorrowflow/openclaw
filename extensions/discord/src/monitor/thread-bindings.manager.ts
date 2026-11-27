@@ -1,4 +1,5 @@
 import { resolveSessionAgentIdStrict } from "openclaw/plugin-sdk/agent-scope-runtime";
+import { isPluginOwnedSessionBindingRecord } from "openclaw/plugin-sdk/conversation-binding-runtime";
 import {
   resolveThreadBindingFarewellText,
   resolveThreadBindingThreadName,
@@ -379,20 +380,14 @@ function createLoadedThreadBindingManager(
         }
         const targetKind = normalizeTargetKind(bindParams.targetKind, targetSessionKey);
         let agentId = normalizeOptionalString(bindParams.agentId);
-        // No agent owns a plugin's binding; the record names the plugin, which
-        // only serves as the webhook's fallback display name.
-        const pluginId =
-          bindParams.metadata?.pluginBindingOwner === "plugin"
-            ? normalizeOptionalString(bindParams.metadata.pluginId)
-            : undefined;
-        const resolveBindingAgentId = () =>
-          pluginId ?? resolveSessionAgentIdStrict({ config: cfg, sessionKey: targetSessionKey });
 
         if (!threadId && bindParams.createThread) {
           if (!channelId) {
             return null;
           }
-          agentId ??= resolveBindingAgentId();
+          if (!isPluginOwnedSessionBindingRecord(bindParams)) {
+            agentId ??= resolveSessionAgentIdStrict({ config: cfg, sessionKey: targetSessionKey });
+          }
           const threadName = resolveThreadBindingThreadName({
             agentId: bindParams.agentId,
             label: bindParams.label,
@@ -434,10 +429,16 @@ function createLoadedThreadBindingManager(
         const existingValue = manager.getByThreadId(threadId);
         const previous =
           existingValue?.targetSessionKey === targetSessionKey &&
-          existingValue.targetKind === targetKind
+          // ACP and ordinary targets share the public session kind, including legacy ACP-coerced rows.
+          (existingValue.targetKind === "subagent") === (targetKind === "subagent")
             ? existingValue
             : undefined;
-        agentId ??= normalizeOptionalString(previous?.agentId) ?? resolveBindingAgentId();
+        const metadata = { ...previous?.metadata, ...bindParams.metadata };
+        agentId ??=
+          normalizeOptionalString(previous?.agentId) ??
+          (isPluginOwnedSessionBindingRecord({ metadata })
+            ? undefined
+            : resolveSessionAgentIdStrict({ config: cfg, sessionKey: targetSessionKey }));
         let webhookId =
           normalizeOptionalString(bindParams.webhookId) ??
           normalizeOptionalString(existingValue?.webhookId) ??
@@ -487,7 +488,7 @@ function createLoadedThreadBindingManager(
               ? existingValue.idleTimeoutMs
               : idleTimeoutMs,
           maxAgeMs: typeof existingValue?.maxAgeMs === "number" ? existingValue.maxAgeMs : maxAgeMs,
-          metadata: { ...previous?.metadata, ...bindParams.metadata },
+          metadata,
         };
 
         // A confirmed native create must be published even if its initiator was revoked in flight.

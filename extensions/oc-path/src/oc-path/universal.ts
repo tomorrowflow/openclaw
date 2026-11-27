@@ -408,7 +408,10 @@ function setMdInsertion(ast: MdAst, info: InsertionInfo, value: string): OcAst {
     if (info.marker !== "+") {
       throw new OcPathEditError("not-writable", "md file-level insertion uses bare `+`");
     }
-    const gap = ast.raw.replace(/^\uFEFF/, "").length > 0 && !/\n\r?\n$/.test(ast.raw) ? "\n" : "";
+    const gap =
+      ast.raw.replace(/^\uFEFF/, "").length > 0 && !ast.raw.replace(/\r\n?/g, "\n").endsWith("\n\n")
+        ? "\n"
+        : "";
     return insertMdSource(ast, ast.raw.length, `${gap}## ${value}`, (shifted, line) => ({
       ...shifted,
       blocks: [
@@ -429,6 +432,13 @@ function setMdInsertion(ast: MdAst, info: InsertionInfo, value: string): OcAst {
       throw new OcPathEditError("not-writable", "md frontmatter insertion requires +key");
     }
     const key = info.marker.key;
+    // Keep inserted keys addressable by the Markdown frontmatter reader.
+    if (!/^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(key)) {
+      throw new OcPathEditError(
+        "not-writable",
+        "md frontmatter keys must start with an ASCII letter or underscore and contain only ASCII letters, digits, underscores, or hyphens",
+      );
+    }
     if (ast.frontmatter.some((e) => e.key === key)) {
       throw new OcPathEditError(
         "type-mismatch",

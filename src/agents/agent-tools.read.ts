@@ -1,18 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { detectMime } from "@openclaw/media-core/mime";
 import { asPositiveFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
 import { resolveRootPath } from "../infra/boundary-path.js";
 import { toErrorObject } from "../infra/errors.js";
 import { findExistingAncestor, root as fsRoot, FsSafeError } from "../infra/fs-safe.js";
-import { decodeWindowsTextFileBuffer } from "../infra/windows-encoding.js";
-import {
-  classifyMediaReferenceSource,
-  normalizeMediaReferenceSource,
-  resolveMediaReferenceSandboxPath,
-} from "../media/media-reference.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
 import { clampNumber } from "../utils.js";
 import {
@@ -23,11 +16,23 @@ import {
   REQUIRED_PARAM_GROUPS,
   assertRequiredParams,
   getToolParamsRecord,
+  isDailyMemoryReadPath,
   normalizeFileToolPathParam,
   normalizeFileToolPathParamsFromKeys,
+  prepareReadToolParams,
   wrapToolParamValidation,
 } from "./agent-tools.params.js";
+import {
+  createFsAccessError,
+  createSandboxMutationOperations,
+  createSandboxReadOperations,
+} from "./agent-tools.read.operations.js";
 import type { AnyAgentTool } from "./agent-tools.types.js";
+import {
+  type ApplyPatchContainmentSource,
+  isSandboxRootEscapeError,
+  withWorkspaceRecoveryHint,
+} from "./apply-patch-containment-hint.js";
 import { collectTextContentBlocks } from "./content-blocks.js";
 import { writeHostFile } from "./host-file-write.js";
 import type { ImageSanitizationLimits } from "./image-sanitization.js";
@@ -43,7 +48,6 @@ import {
 } from "./path-policy.js";
 import type { AgentTool, AgentToolResult } from "./runtime/index.js";
 import { assertSandboxPath } from "./sandbox-paths.js";
-import { resolveSandboxFileMutationQueueKey } from "./sandbox/file-mutation-identity.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
 import {
   createEditTool,
@@ -435,20 +439,6 @@ function normalizeReadResultDetails(
   return { ...result, details: { kind: "text", content: displayText } };
 }
 
-function isSandboxRootEscapeError(error: unknown): error is Error {
-  return error instanceof Error && /^Path escapes sandbox root \(/i.test(error.message);
-}
-
-function withWorkspaceSafeTempHint(error: unknown): unknown {
-  if (!isSandboxRootEscapeError(error)) {
-    return error;
-  }
-  const message = error.message.includes(".openclaw/tmp/")
-    ? error.message
-    : `${error.message}. Use a relative path under \`.openclaw/tmp/\` inside the workspace for scratch/temp/meta files that file tools need to read or write later.`;
-  return new Error(message, { cause: error });
-}
-
 async function assertSandboxPathWithinAnyRoot(params: {
   cwd?: string;
   filePath: string;
@@ -501,6 +491,7 @@ export function wrapToolWorkspaceRootGuardWithOptions<TDetails>(
     pathParamKeys?: readonly string[];
     normalizeGuardedPathParams?: boolean;
     resolutionCwd?: string;
+    containmentSource?: ApplyPatchContainmentSource;
     bridge?: SandboxFsBridge;
     readPathValidation?: "bridge";
   },
@@ -571,7 +562,11 @@ export function wrapToolWorkspaceRootGuardWithOptions<TDetails>(
             });
           }
         } catch (error) {
-          throw withWorkspaceSafeTempHint(error);
+          throw withWorkspaceRecoveryHint(
+            error,
+            !options?.bridge && mounts.length === 0,
+            options?.containmentSource,
+          );
         }
         if (options?.normalizeGuardedPathParams && record) {
           normalizedRecord ??= { ...record };
@@ -593,6 +588,22 @@ type SandboxToolParams = {
   imageSanitization?: ImageSanitizationLimits;
   modelHasVision?: boolean;
 };
+
+function withSandboxToolAbortSignal<TDetails>(
+  tool: AnyAgentTool<TDetails>,
+  runSignal?: AbortSignal,
+): AnyAgentTool<TDetails> {
+  return {
+    ...tool,
+    execute: (id, args, signal, onUpdate) =>
+      tool.execute(
+        id,
+        args,
+        runSignal && signal ? AbortSignal.any([runSignal, signal]) : (signal ?? runSignal),
+        onUpdate,
+      ),
+  };
+}
 
 /** Preserve the sandbox namespace before session tools use host path resolution. */
 export function wrapSandboxFileToolPath(
@@ -637,12 +648,15 @@ export function createSandboxedReadTool(params: SandboxToolParams) {
       modelHasVision: params.modelHasVision,
     }),
   );
-  return createOpenClawReadTool(base, {
-    modelContextWindowTokens: params.modelContextWindowTokens,
-    imageSanitization: params.imageSanitization,
-    cwd: params.root,
-    bridge: params.bridge,
-  });
+  return withSandboxToolAbortSignal(
+    createOpenClawReadTool(base, {
+      modelContextWindowTokens: params.modelContextWindowTokens,
+      imageSanitization: params.imageSanitization,
+      cwd: params.root,
+      bridge: params.bridge,
+    }),
+    params.abortSignal,
+  );
 }
 
 export function createSandboxedWriteTool(params: SandboxToolParams) {
@@ -651,9 +665,9 @@ export function createSandboxedWriteTool(params: SandboxToolParams) {
       operations: createSandboxMutationOperations(params),
     }),
   );
-  return wrapToolParamValidation(
-    wrapSandboxFileToolPath(base, params),
-    REQUIRED_PARAM_GROUPS.write,
+  return withSandboxToolAbortSignal(
+    wrapToolParamValidation(wrapSandboxFileToolPath(base, params), REQUIRED_PARAM_GROUPS.write),
+    params.abortSignal,
   );
 }
 
@@ -663,7 +677,10 @@ export function createSandboxedEditTool(params: SandboxToolParams) {
       operations: createSandboxMutationOperations(params),
     }),
   );
-  return wrapToolParamValidation(wrapSandboxFileToolPath(base, params), REQUIRED_PARAM_GROUPS.edit);
+  return withSandboxToolAbortSignal(
+    wrapToolParamValidation(wrapSandboxFileToolPath(base, params), REQUIRED_PARAM_GROUPS.edit),
+    params.abortSignal,
+  );
 }
 
 type HostWorkspaceMutationOptions = {
@@ -701,6 +718,7 @@ export function createOpenClawReadTool(
   const modelBudget = resolveToolResultBudget(options?.modelContextWindowTokens);
   return {
     ...base,
+    prepareArguments: prepareReadToolParams,
     execute: async (toolCallId, params, signal) => {
       const record = getToolParamsRecord(params);
       const normalizedRecord = record
@@ -709,12 +727,11 @@ export function createOpenClawReadTool(
       assertRequiredParams(normalizedRecord, REQUIRED_PARAM_GROUPS.read, base.name);
       const filePath =
         typeof normalizedRecord?.path === "string" ? normalizedRecord.path : "<unknown>";
-      const dailyMemoryPath =
-        process.platform === "win32" ? filePath.replace(/\\/g, "/") : filePath;
       // Daily journals may not exist yet; let the concrete reader own filesystem errors.
       const implicitlyOptional =
-        normalizedRecord?.optional === undefined &&
-        /^(?:\.\/)*memory\/\d{4}-\d{2}-\d{2}\.md$/u.test(dailyMemoryPath);
+        normalizedRecord &&
+        !Object.hasOwn(normalizedRecord, "optional") &&
+        isDailyMemoryReadPath(filePath);
       const result = await executeReadWithAdaptivePaging({
         base,
         toolCallId,
@@ -843,24 +860,18 @@ export function wrapReadToolWithSkillContent(
               options,
             ))
           : tool;
-      // Skill instructions are served whole. Some models still send paging arguments,
-      // so windows are dropped rather than rejected.
-      const instructionArgs: Record<string, unknown> = { ...record, path: normalizedPath };
-      for (const key of ["offset", "limit", "cursor"]) {
-        delete instructionArgs[key];
-      }
+      // Instructions that fit are served whole, ignoring stray paging arguments. Larger
+      // ones page through the normal read continuation, whose notice fits the budget.
+      const readArgs: Record<string, unknown> = { ...record, path: normalizedPath };
+      const { offset, limit, cursor, ...instructionArgs } = readArgs;
       try {
         const result = await instructionTool.execute(toolCallId, instructionArgs, signal, onUpdate);
         const details = result.details;
         const detailsKind = details.kind;
         if (detailsKind === "truncated") {
           resetDelivery();
-          const text =
-            "Skill instructions cannot be partially served: the whole document exceeds this call's read or model-context budget. Ask the operator to reduce the document or increase the model context.";
-          return {
-            content: [{ type: "text", text }],
-            details: { kind: "text", content: text },
-          };
+          const windowed = offset !== undefined || limit !== undefined || cursor !== undefined;
+          return windowed ? await instructionTool.execute(toolCallId, readArgs, signal) : result;
         }
         if (detailsKind !== "text") {
           resetDelivery();
@@ -877,79 +888,6 @@ export function wrapReadToolWithSkillContent(
       }
     },
   };
-}
-
-function createSandboxReadOperations(params: SandboxToolParams) {
-  return {
-    resolveQueueKey: (absolutePath: string, signal?: AbortSignal) =>
-      resolveSandboxFileQueueKey(params, absolutePath, signal),
-    resolvePath: (filePath: string) => {
-      const normalizedMediaSource = normalizeMediaReferenceSource(filePath);
-      if (classifyMediaReferenceSource(normalizedMediaSource).isMediaStoreUrl) {
-        return resolveMediaReferenceSandboxPath(normalizedMediaSource, "media/inbound").resolved;
-      }
-      return resolveContainerPathCandidate(filePath);
-    },
-    decodeText: ({ buffer, absolutePath }: { buffer: Buffer; absolutePath: string }) =>
-      params.bridge.resolvePath({ filePath: absolutePath, cwd: params.root }).hostPath
-        ? decodeWindowsTextFileBuffer({ buffer })
-        : decodeWindowsTextFileBuffer({ buffer, platform: "linux" }),
-    readFile: (absolutePath: string) =>
-      params.bridge.readFile({ filePath: absolutePath, cwd: params.root }),
-    access: (absolutePath: string) => assertSandboxFileExists(params, absolutePath),
-    detectImageMimeType: async (absolutePath: string, buffer: Buffer) => {
-      const mime = await detectMime({ buffer, filePath: absolutePath });
-      return mime?.startsWith("image/") ? mime : undefined;
-    },
-  } as const;
-}
-
-function createSandboxMutationOperations(params: SandboxToolParams) {
-  return withMemoryWriteProvenance(
-    {
-      resolveQueueKey: (absolutePath: string, signal?: AbortSignal) =>
-        resolveSandboxFileQueueKey(params, absolutePath, signal),
-      writeFile: async (absolutePath: string, content: string) => {
-        await params.bridge.writeFile({
-          filePath: absolutePath,
-          cwd: params.root,
-          data: content,
-          mkdir: true,
-          signal: params.abortSignal,
-        });
-      },
-      readFile: (absolutePath: string) =>
-        params.bridge.readFile({ filePath: absolutePath, cwd: params.root }),
-      statFile: (absolutePath: string) =>
-        params.bridge.stat({ filePath: absolutePath, cwd: params.root }),
-      access: (absolutePath: string) => assertSandboxFileExists(params, absolutePath),
-    } as const,
-    params.memoryWriteProvenance,
-  );
-}
-
-async function resolveSandboxFileQueueKey(
-  params: SandboxToolParams,
-  absolutePath: string,
-  signal?: AbortSignal,
-) {
-  return await resolveSandboxFileMutationQueueKey({
-    bridge: params.bridge,
-    root: params.root,
-    filePath: absolutePath,
-    cwd: params.root,
-    signal,
-  });
-}
-
-async function assertSandboxFileExists(params: SandboxToolParams, absolutePath: string) {
-  const stat = await params.bridge.stat({ filePath: absolutePath, cwd: params.root });
-  if (!stat) {
-    throw createFsAccessError("ENOENT", absolutePath);
-  }
-  if (stat.type === "directory") {
-    throw createFsAccessError("EISDIR", absolutePath);
-  }
 }
 
 function resolveHostPath(filePath: string): string {
@@ -1116,9 +1054,4 @@ function createHostMutationOperations(
   );
 }
 
-function createFsAccessError(code: string, filePath: string): NodeJS.ErrnoException {
-  const error = new Error(`Sandbox FS error (${code}): ${filePath}`) as NodeJS.ErrnoException;
-  error.code = code;
-  return error;
-}
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

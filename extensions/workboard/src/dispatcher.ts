@@ -42,6 +42,7 @@ import {
   isWorkboardNodeTicket,
   type WorkboardNodeTicketSlot,
   type WorkboardSlotFull,
+  workboardBoardOwnerSlotLimit,
   workboardCardConsumesNodeTicketSlot,
   workboardCardConsumesOwnerSlot,
   workboardCardSlotOwner,
@@ -155,6 +156,10 @@ function selectStartableCards(
   now: number,
   mode: "scheduled" | "exact",
   nodeTicketSlots: ReadonlyMap<string, WorkboardNodeTicketSlot>,
+  ownerSlots: {
+    active: ReadonlyMap<string, number>;
+    limit: (card: WorkboardCard) => number;
+  },
 ): {
   cards: WorkboardCard[];
   rejection?: WorkboardStartFailure;
@@ -163,17 +168,11 @@ function selectStartableCards(
   if (limit <= 0) {
     return { cards: [] };
   }
-  const runningOwners = new Set<string>();
   // Selected node tickets join the running ones, so one pass cannot overfill
   // the pool or a capped route.
-  const nodeTicketOccupants: WorkboardCard[] = [];
-  for (const card of cards) {
-    if (workboardCardConsumesNodeTicketSlot(card, now)) {
-      nodeTicketOccupants.push(card);
-    } else if (workboardCardConsumesOwnerSlot(card, now)) {
-      runningOwners.add(workboardCardSlotOwner(card));
-    }
-  }
+  const nodeTicketOccupants = cards.filter((card) =>
+    workboardCardConsumesNodeTicketSlot(card, now),
+  );
   const usageLimits = nodeTicketUsageLimits(cards, now);
   const selected: WorkboardCard[] = [];
   const fallback: WorkboardCard[] = [];
@@ -230,8 +229,8 @@ function selectStartableCards(
       cardRefusal ??
       (wait
         ? nodeTicketStartWaitRefusal(wait)
-        : !nodeTicketSlot && runningOwners.has(owner)
-          ? `Owner ${owner} already has active Workboard work; complete or stop it before starting another card.`
+        : !nodeTicketSlot && (ownerSlots.active.get(owner) ?? 0) >= ownerSlots.limit(card)
+          ? `Owner ${owner} already has ${ownerSlots.active.get(owner)} active Workboard card(s); this board allows ${ownerSlots.limit(card)}. Complete or stop one before starting another card.`
           : undefined);
     if (rejection !== undefined) {
       if (mode === "exact") {
@@ -331,7 +330,20 @@ async function runWorkboardDispatch(
     ? [directCard]
     : (await params.store.list({ boardId })).filter((card) => card.kind !== "retro");
   const ownerOverride = params.options?.ownerId?.trim() || undefined;
-  const startedOwners = new Set<string>();
+  const { boards } = await params.store.listBoards();
+  const boardsById = new Map(boards.map((board) => [board.id, board]));
+  const ownerSlotLimit = (card: WorkboardCard) =>
+    workboardBoardOwnerSlotLimit(boardsById.get(cardBoardId(card)));
+  // Owner capacity is shared across boards; each card's board sets how much of it may be used.
+  const activeByOwner = new Map<string, number>();
+  for (const card of cards) {
+    if (workboardCardConsumesOwnerSlot(card, now)) {
+      const owner = workboardCardSlotOwner(card);
+      activeByOwner.set(owner, (activeByOwner.get(owner) ?? 0) + 1);
+    }
+  }
+  const ownerHasRoom = (owner: string, card: WorkboardCard) =>
+    (activeByOwner.get(owner) ?? 0) < ownerSlotLimit(card);
   // Allow one fallback per worker slot without draining the queue during an outage.
   const maxAttempts = maxStarts * 2;
   let attemptedStarts = 0;
@@ -349,6 +361,7 @@ async function runWorkboardDispatch(
     now,
     directCardId ? "exact" : "scheduled",
     nodeTicketSlots,
+    { active: activeByOwner, limit: ownerSlotLimit },
   );
   // An exact start queues only on request, below.
   await queueMergeWaits(params.store, directCard ? [] : candidates, cards, nodeTicketSlots, now);
@@ -362,7 +375,7 @@ async function runWorkboardDispatch(
       break;
     }
     const nodeTarget = nodeTicketTarget(card);
-    if (!nodeTarget && startedOwners.has(ownerId)) {
+    if (!nodeTarget && !ownerHasRoom(ownerId, card)) {
       continue;
     }
     const sessionKey = workboardSessionKeyForCard(card);
@@ -646,7 +659,7 @@ async function runWorkboardDispatch(
           })
           .catch(() => undefined)) ?? acceptedCard;
       if (!nodeTarget) {
-        startedOwners.add(ownerId);
+        activeByOwner.set(ownerId, (activeByOwner.get(ownerId) ?? 0) + 1);
       }
       started.push({
         cardId: updated.id,

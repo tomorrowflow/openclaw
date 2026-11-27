@@ -11,16 +11,14 @@ import {
   withOpenClawTestState,
   type OpenClawTestState,
 } from "../../test-utils/openclaw-test-state.js";
-import type {
-  SqliteTranscriptSnapshotRow,
-  TranscriptEvent,
-} from "./session-accessor.sqlite-contract.js";
+import type { TranscriptEvent } from "./session-accessor.sqlite-contract.js";
 import { readActiveTranscriptStats } from "./session-accessor.sqlite-history.test-support.js";
 import {
   readTranscriptEventAtSeqInTransaction,
   readTranscriptEventRows,
   readTranscriptStatsSync,
   readTranscriptStorageRows,
+  type SqliteTranscriptSnapshotRow,
 } from "./session-accessor.sqlite-read.js";
 import {
   readTranscriptGenerationInTransaction,

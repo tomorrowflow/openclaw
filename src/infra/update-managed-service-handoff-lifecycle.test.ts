@@ -4,7 +4,8 @@ import {
   createSpawnMock,
   useManagedServiceHandoffLifecycleFixture,
 } from "./update-managed-service-handoff-fixture.test-support.js";
-import { readFileSync } from "node:fs";
+import type { ChildProcess } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -29,6 +30,7 @@ import {
   isManagedServiceInspectionCommand,
   registerManagedHandoffOwnerTests,
 } from "./update-managed-service-handoff-lifecycle.test-support.js";
+import * as boundaryProcesses from "./update-managed-service-handoff-process.test-support.js";
 import type { ManagedServiceUpdateHandoffParams } from "./update-managed-service-handoff-types.js";
 import { pathExists } from "./update-managed-service-native.test-support.js";
 import { recordUpdateRunStep } from "./update-run-ledger.js";
@@ -103,6 +105,74 @@ async function createUserSystemdFixture() {
 describe("managed service update handoff", () => {
   const itUnix = it.runIf(process.platform !== "win32");
 
+  itUnix.each(["setup", "operational"] as const)(
+    "retains aggregate branches, causes and codes after a %s failure",
+    async (phase) => {
+      const root = tempDirs.make("openclaw-handoff-error-log-");
+      const preload = path.join(root, "failure.cjs");
+      const runtime = path.join(root, "dist", "cli", "daemon-cli.js");
+      await fs.mkdir(path.dirname(runtime), { recursive: true });
+      await fs.writeFile(runtime, "module.exports = {};\n");
+      await fs.writeFile(
+        preload,
+        `const Module = require("node:module");
+        const load = Module._load;
+        Module._load = function(id, ...args) {
+          const loaded = load.call(this, id, ...args);
+          if (!id.endsWith("/managed-handoff-runtime.mjs")) return loaded;
+          return { ...loaded, ${phase === "setup" ? "prepareManagedHandoffLeaseStore" : "prepareManagedHandoffLedger"}: () => {
+            const read = Object.assign(new Error("distinct state read failure"), { code: "SQLITE_READ_TEST" });
+            const cleanup = Object.assign(new Error("distinct state cleanup failure"), { code: "SQLITE_CLEANUP_TEST" });
+            const nested = new AggregateError([read, cleanup], "state lifecycle failed", { cause: cleanup });
+            const failure = Object.assign(new Error("handoff wrapper", { cause: nested }), { code: "HANDOFF_TEST" });
+            read.cause = failure;
+            throw failure;
+          } };
+        };`,
+      );
+      const { spawn } =
+        await vi.importActual<typeof import("node:child_process")>("node:child_process");
+      let completion: Promise<number | null> | undefined;
+      let logPath = "";
+      spawnMock.mockImplementationOnce((command, args, options) => {
+        const artifacts = readManagedHandoffArtifacts(args);
+        const params = JSON.parse(readFileSync(artifacts.paramsPath, "utf8"));
+        // Startup rejection removes staged artifacts; retain the private log for inspection.
+        logPath = path.join(root, "handoff.log");
+        writeFileSync(artifacts.paramsPath, JSON.stringify({ ...params, logPath }));
+        const child = spawn(command, args, options);
+        completion = new Promise((resolve, reject) => {
+          child.once("error", reject);
+          child.once("close", resolve);
+        });
+        return child;
+      });
+      await expect(
+        startHandoff({
+          root,
+          execPath: resolveTestNodeExecPath(),
+          argv1: runtime,
+          ...(phase === "operational" ? { runId: "error-log-test" } : {}),
+          env: { ...process.env, OPENCLAW_STATE_DIR: root, NODE_OPTIONS: `--require ${preload}` },
+        }),
+      ).rejects.toThrow();
+      expect(await completion).toBe(1);
+      const log = await fs.readFile(logPath, "utf8");
+      expect(log).toContain(phase === "setup" ? "handoff setup failed:" : "handoff failed:");
+      for (const detail of [
+        "handoff wrapper",
+        "HANDOFF_TEST",
+        "state lifecycle failed",
+        "distinct state read failure",
+        "SQLITE_READ_TEST",
+        "distinct state cleanup failure",
+        "SQLITE_CLEANUP_TEST",
+      ]) {
+        expect.soft(log).toContain(detail);
+      }
+    },
+  );
+
   it("refuses cleanup registration outside temporary descendants and at cwd", async () => {
     const tracker = createManagedHandoffTempDirTracker();
     for (const dir of [
@@ -115,6 +185,38 @@ describe("managed service update handoff", () => {
       expect(() => tracker.add(dir), dir).toThrow(JSON.stringify(dir));
     }
     expect(tracker.dirs.size).toBe(0);
+  });
+
+  itUnix("reaps the parent when fixture setup rejects", async () => {
+    let parent: ChildProcess | undefined;
+    let closed = false;
+    const createParent = boundaryProcesses.createManagedServiceBoundaryParent;
+    const observer = vi
+      .spyOn(boundaryProcesses, "createManagedServiceBoundaryParent")
+      .mockImplementation((spawn) => {
+        const result = createParent(spawn);
+        parent = result.parent;
+        void result.parentClosed.then(() => {
+          closed = true;
+        });
+        return result;
+      });
+    try {
+      await expect(
+        runBoundary("systemd", {
+          async prepareState() {
+            await Promise.resolve();
+            throw new Error("fixture setup rejected");
+          },
+        }),
+      ).rejects.toThrow("fixture setup rejected");
+      expect(observer).toHaveBeenCalledTimes(1);
+      expect(closed).toBe(true);
+    } finally {
+      observer.mockRestore();
+      // The regression must reap its real parent even on the broken fixture.
+      await boundaryProcesses.createManagedServiceBoundaryCleanup(() => [parent])();
+    }
   });
 
   itUnix("tracks the real handoff artifacts with Bun runtime arguments", async () => {
@@ -200,7 +302,9 @@ describe("managed service update handoff", () => {
         }
       }
       if (outcome === "data-at-risk") {
-        expect(result.log).toContain("keep the gateway stopped: data at risk (unreadable-state)");
+        expect(result.log).toContain(
+          "gateway left stopped: data at risk (unreadable-state) recorded and not yet verified; run openclaw update repair to verify the state and restart the gateway",
+        );
       }
       if (outcome === "unsafe") {
         expect(result.log).toContain("runtime-verification-failed");

@@ -1,15 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { beforeEach, expect, it } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import {
   resetConfigRuntimeState,
   setRuntimeConfigSnapshot,
 } from "../../config/runtime-snapshot.js";
 import { updateRegistryWorktree } from "./registry.js";
 import { getRegistryWorktree } from "./registry.test-support.js";
+import { IDLE_GC_MS } from "./retention.js";
 import { acquireWorktreeRunLease } from "./run-lease.js";
 import { hasLiveWorktreeRunLease, testing as runLeaseTesting } from "./run-lease.test-support.js";
-import { classifyWorktreeRemovalError, IDLE_GC_MS, ManagedWorktreeService } from "./service.js";
+import { classifyWorktreeRemovalError, ManagedWorktreeService } from "./service.js";
 import { git, useManagedWorktreeTestRepository } from "./service.test-support.js";
 import { useWorktreeStateRoots } from "./state-fixture.test-support.js";
 
@@ -106,7 +107,9 @@ it("allows only one concurrent remover to own the claim", async () => {
 });
 
 it("skips idle garbage collection for a worktree with a live run lease", async () => {
-  await updateRegistryWorktree(env, created.id, { lastActiveAt: Date.now() - IDLE_GC_MS - 1 });
+  await updateRegistryWorktree(env, created.id, {
+    lastActiveAt: Date.now() - IDLE_GC_MS - 3_600_001,
+  });
   const lease = await acquireWorktreeRunLease(created.id, { env });
 
   const skipped = await service.gc();
@@ -114,6 +117,34 @@ it("skips idle garbage collection for a worktree with a live run lease", async (
   expect(getRegistryWorktree(env, created.id)?.removedAt).toBeUndefined();
 
   await lease.release();
+  expect((await service.gc()).removed).toEqual([]);
+  await updateRegistryWorktree(env, created.id, {
+    lastActiveAt: Date.now() - IDLE_GC_MS - 3_600_001,
+  });
   const collected = await service.gc();
   expect(collected.removed).toContain(created.id);
+});
+
+it("retains an old checkout used yesterday after its run lease has ended", async () => {
+  const yesterday = Date.now() - 24 * 60 * 60 * 1000;
+  await updateRegistryWorktree(env, created.id, {
+    lastActiveAt: yesterday - IDLE_GC_MS,
+  });
+  const clock = vi.spyOn(Date, "now").mockReturnValue(yesterday);
+  try {
+    const lease = await acquireWorktreeRunLease(created.id, { env });
+    await lease.release();
+    expect(getRegistryWorktree(env, created.id)?.lastActiveAt).toBe(yesterday);
+    clock.mockReturnValue(yesterday + 60_000);
+    const next = await acquireWorktreeRunLease(created.id, { env });
+    expect(getRegistryWorktree(env, created.id)?.lastActiveAt).toBe(yesterday);
+    // A long-running use refreshes activity when its last holder releases custody.
+    clock.mockReturnValue(yesterday + 10 * 60_000);
+    await next.release();
+  } finally {
+    clock.mockRestore();
+  }
+  expect((await service.gc()).removed).not.toContain(created.id);
+  expect(getRegistryWorktree(env, created.id)?.lastActiveAt).toBe(yesterday + 10 * 60_000);
+  expect(await fs.readFile(path.join(created.path, "README.md"), "utf8")).toBe("base\n");
 });

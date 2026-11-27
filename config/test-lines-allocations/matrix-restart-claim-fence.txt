@@ -1,2 +1,0 @@
-# Real-queue restart-fence regression preserves the unclaimed row and rollback delivery.
-45

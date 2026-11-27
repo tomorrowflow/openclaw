@@ -1,3 +1,0 @@
-# Async shared-state read custody: owner retirement after awaits and dispatch-time file replacement regressions.
-# Includes the full-stack auth reproducer, sync/async native owner contracts, and required authority test adapters.
-88

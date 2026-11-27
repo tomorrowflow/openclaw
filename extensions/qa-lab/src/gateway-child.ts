@@ -176,6 +176,7 @@ async function startOwnedGatewayChild(
     lifetime.rpcClient = await startQaGatewayRpcClient({
       wsUrl: launch.wsUrl,
       token: gatewayToken,
+      password: params.rpcPassword,
       logs,
     });
     await lifetime.rpcClient.request("config.get", {}, { timeoutMs: 30_000 });
@@ -231,17 +232,8 @@ async function startOwnedGatewayChild(
       return active.identity?.pid ?? active.child.pid ?? null;
     },
     getProcessCpuMs: () => readProcessTreeCpuMs(active.identity?.pid ?? active.child.pid ?? null),
-    getProcessRssBytes: () => {
-      const rootPid = active.identity?.pid ?? active.child.pid ?? null;
-      return readProcessTreeRssBytes(rootPid, (reason) => {
-        try {
-          // Suite success can discard Gateway logs; keep unavailable sampling in the runner log.
-          writeSync(2, `[qa-rss] at=${new Date().toISOString()} rootPid=${rootPid} ${reason}\n`);
-        } catch {
-          // Diagnostic sink failure must not change the strict unavailable metric.
-        }
-      });
-    },
+    getProcessRssBytes: () =>
+      readProcessTreeRssBytes(active.identity?.pid ?? active.child.pid ?? null),
     token: gatewayToken,
     workspaceDir,
     tempRoot,

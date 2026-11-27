@@ -9,14 +9,57 @@ import {
 import { getMediaDir } from "../media/store.js";
 import * as assistantDisplay from "../shared/assistant-display-content.js";
 import { readRunFailureNotice } from "../shared/run-failure-notice.js";
+import { extractTextFromMessage } from "../tui/tui-formatters.js";
 import { augmentChatHistoryWithCanvasBlocks } from "./chat-display-projection.canvas.js";
 import {
   projectChatDisplayMessage,
   projectChatDisplayMessages,
+  projectChatDisplayMessagesWithState,
 } from "./chat-display-projection.js";
 import { sanitizeChatHistoryMessages } from "./chat-display-projection.sanitize.js";
 
 const text = (value: string) => ({ type: "text", text: value });
+
+it("keeps size recovery in text fallback without adding prose to the rich card", () => {
+  const card = {
+    type: "attachment_error",
+    attachment: {
+      code: "file-too-large",
+      kind: "document",
+      label: "private-filename.zip",
+      mimeType: "application/zip",
+    },
+  };
+  const display = [text("Saved the import pack."), card];
+  const saved = {
+    role: "assistant",
+    content: [text("Original model text remains private to its own history.")],
+    openclawDisplayContent: display,
+  };
+  const before = structuredClone(saved);
+  const history = projectChatDisplayMessages([saved])[0]!;
+  const live = projectChatDisplayMessage({ role: "assistant", content: display })!;
+  for (const message of [history, live, projectChatDisplayMessage(history)!]) {
+    expect(message.content).toEqual(display);
+    expect(message.text).toBe(
+      "⚠️ file attachment: Too large to attach. Look for this file in Files.\nSaved the import pack.",
+    );
+    // This reader still recognizes only the shipped four attachment-error codes.
+    expect(extractTextFromMessage(message)).toBe(message.text);
+    expect(message.text).not.toContain("private-filename");
+    expect(message.text).not.toContain("Original model text");
+  }
+  expect(saved).toEqual(before);
+  const failureOnly = projectChatDisplayMessage({ role: "assistant", content: [card] })!;
+  expect(extractTextFromMessage(failureOnly)).toContain("Look for this file in Files");
+  const bounded = projectChatDisplayMessages(
+    [{ role: "assistant", content: [text("Long caption. ".repeat(100)), card] }],
+    { maxChars: 256 },
+  )[0]!;
+  expect(extractTextFromMessage(bounded)).toContain("Look for this file in Files");
+  const unrelated = { role: "assistant", content: [text("Ordinary reply.")] };
+  expect(projectChatDisplayMessage(unrelated)).not.toHaveProperty("text");
+});
 
 it("admits display content once before sanitizing a history page", () => {
   const messages = [
@@ -332,7 +375,6 @@ it("refreshes cached profile aliases without rewriting non-profile or unresolved
           kind: "resolved" as const,
           profileId: "canonical-id",
           avatarUrl: "/api/users/canonical-id/avatar?v=20",
-          hasUploadedAvatar: false,
         },
   );
   const projected = projectStable(messages, { resolveCurrentUserProfileDisplay });
@@ -580,10 +622,36 @@ const terminal = (runId = "run-a") => ({
   details: { runId },
   __openclaw: { id: "terminal-" + runId, seq: 10, runId },
 });
+it.each([undefined, "", "   ", "Desktop-specific failure details"])(
+  "preserves shared failure text while projecting desktop notice %j",
+  (desktopNotice) => {
+    const receipt = {
+      ...terminal(),
+      details: { runId: "run-a", desktopNotice },
+    };
+    const [projected] = projectChatDisplayMessages([receipt]);
+    if (!projected) {
+      throw new Error("Expected the failure receipt to remain in chat history");
+    }
+    expect(projected).toMatchObject({
+      content: "Recovery exhausted.",
+      openclawRunError: {
+        runId: "run-a",
+        summary: "Recovery exhausted.",
+      },
+    });
+    if (desktopNotice?.trim()) {
+      expect(projected.openclawRunError).toHaveProperty("desktopSummary", desktopNotice);
+    } else {
+      expect(projected.openclawRunError).not.toHaveProperty("desktopSummary");
+    }
+  },
+);
+
 const projectedIds = (messages: unknown[]) =>
   projectChatDisplayMessages(messages).map((message) => message["__openclaw"]);
 
-it.each(["length", "stop"])("hides empty %s attempts when no recovery is pending", (stopReason) => {
+it.each(["length", "stop"])("hides empty %s attempts", (stopReason) => {
   const empty = assistant([text("")], { stopReason, __openclaw: { runId: "run-empty" } });
   const thinking = { ...empty, content: [text(""), { type: "thinking", thinking: "" }] };
   const toolMessage = assistant([tool], { stopReason });
@@ -592,7 +660,7 @@ it.each(["length", "stop"])("hides empty %s attempts when no recovery is pending
     toolMessage,
     answer,
   ]);
-  expect(projectStable([empty], { assistantErrorPending: true })).toEqual([empty]);
+  expect(projectStable([empty], { assistantErrorPending: true })).toEqual([]);
 });
 
 it.each(["length", "stop"])("retains keyed commentary from a %s attempt", (stopReason) => {
@@ -651,6 +719,64 @@ it.each([
     ).toEqual(expected);
   }
 });
+
+it("drops invisible assistant attempts without pending recovery", () => {
+  const emptyAttempt = (id: string, stopReason: "length" | "stop") =>
+    assistant([text(""), { type: "thinking", thinking: "" }], {
+      stopReason,
+      __openclaw: { id, runId: "run-empty" },
+    });
+  expect(
+    projectStable([
+      user,
+      emptyAttempt("empty-primary", "length"),
+      emptyAttempt("empty-fallback", "stop"),
+      assistant([text("model-only")], { stopReason: "stop", openclawDisplayContent: [] }),
+    ]),
+  ).toEqual([user]);
+});
+
+it.each([false, true])(
+  "retains completed material without settling pending recovery (earlier page=%s)",
+  (assistantErrorPending) => {
+    const reasoning = assistant([{ type: "thinking", thinking: "Compare the evidence." }], {
+      stopReason: "stop",
+      __openclaw: { id: "reasoning", runId: "run-a" },
+    });
+    const progress = "Checking the evidence.";
+    const commentary = assistant([phasedText(progress, "commentary")], {
+      stopReason: "length",
+      __openclaw: { id: "commentary", runId: "run-a" },
+    });
+    const input = [
+      ...(assistantErrorPending ? [] : [failed]),
+      reasoning,
+      commentary,
+      ...["stop", "length"].map((stopReason) =>
+        assistant([text(" "), { type: "thinking", thinking: "" }], { stopReason }),
+      ),
+    ];
+    const original = structuredClone(input);
+    const projected = projectChatDisplayMessagesWithState(input, {
+      assistantErrorPending,
+      includeCommentaryFallbacks: true,
+    });
+    expect(projected).toMatchObject({
+      messages: [
+        reasoning,
+        {
+          content: [text(progress)],
+          __openclaw: commentary["__openclaw"],
+          openclawStreamFallback: { source: "segment", itemId: "commentary" },
+        },
+      ],
+      assistantErrorPending: true,
+      assistantErrorRecoveryObserved: false,
+    });
+    expect(projectChatDisplayMessages(projected.messages)).toEqual(projected.messages);
+    expect(input).toEqual(original);
+  },
+);
 
 const legacyGuidance = "The provider stopped this request as a safety precaution (misalignment).";
 it.each([
@@ -721,7 +847,7 @@ it("shows one settled notice while preserving each attempt's partial output", ()
   };
   const raw = [user, partial, empty, receipt];
   const projected = projectStable(raw);
-  expect(projected.map(readRunFailureNotice).filter(Boolean)).toEqual([
+  expect(projected.map((message) => readRunFailureNotice(message)).filter(Boolean)).toEqual([
     { runId: "run-a", summary: "The request failed after retries." },
   ]);
   expect(projected.filter((message) => message.role === "assistant")).toEqual([

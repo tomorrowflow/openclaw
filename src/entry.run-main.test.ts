@@ -5,9 +5,8 @@ import { pathToFileURL } from "node:url";
 import { Command } from "commander";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../test/helpers/temp-dir.js";
-import { ExpectedCliError } from "./cli/failure-output.js";
+import { ExpectedCliError } from "./cli/expected-cli-error.js";
 import { runMainOrRootHelp } from "./entry.js";
-import { loggingState } from "./logging/state.js";
 import type { PluginRuntime } from "./plugin-sdk/runtime-store.js";
 import { buildPluginApi } from "./plugins/api-builder.js";
 import { instrumentPluginInstanceApi } from "./plugins/api-facades.js";
@@ -21,14 +20,11 @@ describe("entry run-main boundary", () => {
   beforeEach(() => {
     previousExitCode = process.exitCode;
     process.exitCode = undefined;
-    // Console capture retains the terminal sink across CLI calls in this process.
-    errorSpy = vi
-      .spyOn(loggingState.rawConsole ?? console, "error")
-      .mockClear()
-      .mockImplementation(() => {});
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(async () => {
     vi.doUnmock("./cli/run-main.js");
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
     process.exitCode = previousExitCode;
     await instance?.dispose();
@@ -59,6 +55,27 @@ describe("entry run-main boundary", () => {
         expect.stringContaining(startup ? "The CLI command failed" : "Could not start the CLI"),
       );
     }
+  });
+
+  it("shows a redacted connect startup failure with root options", async () => {
+    vi.stubEnv("OPENCLAW_DEBUG", "0");
+    vi.stubEnv("OPENCLAW_UPDATE_IN_PROGRESS", "");
+    const token = "sk-abcdefghijklmnopqrstuv";
+    // mock-isolation: Fail during CLI setup before the connect action can report its own error.
+    vi.doMock("./cli/run-main.js", async () => ({
+      runCli: async () => {
+        throw new Error(`Node startup failed. Authorization: Bearer ${token}`, {
+          cause: new Error("private nested diagnostic"),
+        });
+      },
+    }));
+    await runMainOrRootHelp(["node", "openclaw", "--profile", "fixture", "connect", "--ephemeral"]);
+    expect(process.exitCode).toBe(1);
+    const output = errorSpy.mock.calls.map(([line]) => String(line)).join("\n");
+    expect(output).toContain("[openclaw] The CLI command failed.");
+    expect(output).toContain("[openclaw] Reason: Node startup failed.");
+    expect(output).not.toContain(token);
+    expect(output).not.toMatch(/private nested diagnostic|Stack:/u);
   });
 
   it.each([false, true])("reports plugin action failures (JSON: %s)", async (json) => {
@@ -130,7 +147,7 @@ it.each([
       "src/shared/detached-async-context.ts",
       "src/shared/global-singleton.ts",
       "src/cli/dotenv.ts",
-      "src/logging/console.ts",
+      "src/logging.ts",
       "src/cli/failure-output.ts",
       "src/cli/json-output-mode.ts",
       "src/logging/json-console-line.ts",

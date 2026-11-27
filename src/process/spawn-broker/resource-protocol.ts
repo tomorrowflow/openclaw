@@ -1,5 +1,4 @@
 import type { NativeWorkerFailure } from "../../infra/worker-native-error.js";
-import type { NativeResourceAuthority } from "./resource-authority.js";
 
 export const SPAWN_BROKER_STARTUP_TIMEOUT_MS = 15_000;
 
@@ -12,7 +11,7 @@ export function spawnBrokerStartupNowMs(): number {
 
 export type BrokerBootstrap = {
   type: "bootstrap";
-  nativeResource?: NativeResourceAuthority & { generation: number };
+  nativeResource?: { endpoint: string; secret: string; generation: number };
 };
 
 /** The domain decoder, not a transport adapter, restores this original cleanup payload. */

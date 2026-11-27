@@ -1,2 +1,0 @@
-# Five capability probe prompt regressions; retain denial and tool receipt assertions.
-19

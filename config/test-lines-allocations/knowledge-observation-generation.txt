@@ -1,2 +1,0 @@
-# Deterministic regression for a stale publication scan inflating revision 2 to 4.
-43

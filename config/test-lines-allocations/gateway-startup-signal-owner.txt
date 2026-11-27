@@ -1,2 +1,0 @@
-# Gateway startup real-process signal custody and handoff regression coverage.
-167

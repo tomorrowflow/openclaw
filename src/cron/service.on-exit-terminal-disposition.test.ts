@@ -51,11 +51,6 @@ it.each<
       });
       expect(f.runCronFailureRepair).not.toHaveBeenCalled();
       expect(f.sendCronFailureAlert).toHaveBeenCalledTimes(alerts);
-      if (alerts) {
-        expect(f.sendCronFailureAlert.mock.lastCall?.[0].payload.text).toContain(
-          `was auto-disabled after ${priorFailures + 1} consecutive run failures.`,
-        );
-      }
       expect(f.enqueueSessionEvent).toHaveBeenCalledTimes(notices);
       if (notices) {
         expect(f.enqueueSessionEvent).toHaveBeenCalledWith(
@@ -85,7 +80,11 @@ it.each([true, false])(
       expect(stored?.enabled).toBe(enabled);
       expect(stored?.state.autoDisabled).toBeUndefined();
       expect(f.enqueueSessionEvent).not.toHaveBeenCalled();
-      expect(f.sendCronFailureAlert).not.toHaveBeenCalled();
+      // An ordinary first-failure alert, not a terminal auto-disable notice.
+      expect(f.sendCronFailureAlert).toHaveBeenCalledOnce();
+      expect(f.sendCronFailureAlert.mock.calls[0]?.[0]?.payload.text).not.toContain(
+        "auto-disabled",
+      );
       expect(f.runCronFailureRepair).not.toHaveBeenCalled();
     });
   },

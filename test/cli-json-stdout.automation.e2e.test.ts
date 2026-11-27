@@ -6,6 +6,7 @@ import {
   expectCleanOutput,
   expectCliError,
   expectMissing,
+  expectOnlyDiagnosticLogs,
   runIsolatedCli,
   withCliHome,
 } from "./cli-json-stdout-contract.test-support.js";
@@ -69,8 +70,7 @@ describe("cli json stdout contract", () => {
           'import net from "node:net";',
           `net.Socket.prototype.connect = function () { throw new Error(${JSON.stringify(gatewayError)}); };`,
         ],
-        // Exclude state-local file logs from the no-state validation contract.
-        env: { OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1", OPENCLAW_LOG_LEVEL: "silent" },
+        env: { OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1" },
       });
       const message =
         "gatewayRequest" in testCase
@@ -97,7 +97,7 @@ describe("cli json stdout contract", () => {
       } else {
         expect(result.stderr).toContain(message);
         expect(result.stderr).not.toContain(gatewayError);
-        await expectMissing(stateDir);
+        await expectOnlyDiagnosticLogs(stateDir);
       }
       if ("tty" in testCase && !("human" in testCase)) {
         expect(result.stderr).toContain("\u001B[?25h");

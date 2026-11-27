@@ -317,7 +317,7 @@ describe("workboard sqlite batch card persistence", () => {
           target.id,
           persisted(next),
           target.updatedAt - (result === "conflict" ? 1 : 0),
-          { kind: "owner", ownerId: "slot-owner" },
+          { kind: "owner", ownerId: "slot-owner", limit: 1 },
           3000,
         ),
       ).resolves.toBe(result);
@@ -367,7 +367,7 @@ describe("workboard sqlite batch card persistence", () => {
           target.id,
           persisted(next),
           target.updatedAt,
-          { kind: "owner", ownerId: "slot-owner" },
+          { kind: "owner", ownerId: "slot-owner", limit: 1 },
           1_000_000,
         ),
       ).resolves.toBe(expected);
@@ -381,37 +381,48 @@ describe("workboard sqlite batch card persistence", () => {
     ["node ticket outside the owner slot", "running", undefined, "updated"],
     ["running node ticket fills the pool", "running", 1, "slot_busy"],
     ["node ticket pool with room", "running", 2, "updated"],
-  ] as const)("preserves node ticket pool capacity for %s", async (_name, status, limit, expected) => {
-    await using stores = openKernel();
-    const occupied: WorkboardCard = {
-      ...fixtureCard(0),
-      status,
-      agentId: "slot-owner",
-      metadata: {
-        automation: {
-          target: {
-            kind: "node-claude",
-            nodeId: "node-1",
-            repoPath: "/repo",
-            worktreesRoot: "/worktrees",
-            hostRepoPath: "/host/repo",
+  ] as const)(
+    "preserves node ticket pool capacity for %s",
+    async (_name, status, limit, expected) => {
+      await using stores = openKernel();
+      const occupied: WorkboardCard = {
+        ...fixtureCard(0),
+        status,
+        agentId: "slot-owner",
+        metadata: {
+          automation: {
+            target: {
+              kind: "node-claude",
+              nodeId: "node-1",
+              repoPath: "/repo",
+              worktreesRoot: "/worktrees",
+              hostRepoPath: "/host/repo",
+            },
           },
         },
-      },
-    };
-    const target = fixtureCard(2);
-    await stores.cards.register(occupied.id, persisted(occupied));
-    await stores.cards.register(target.id, persisted(target));
-    const next = { ...target, updatedAt: target.updatedAt + 1 };
-    const slot: WorkboardClaimSlot =
-      limit === undefined ? { kind: "owner", ownerId: "slot-owner" } : { kind: "node-tickets", limit };
-    await expect(
-      stores.cards.claimIfSlotAvailable(target.id, persisted(next), target.updatedAt, slot, 1_000_000),
-    ).resolves.toBe(expected);
-    await expect(stores.cards.lookup(target.id)).resolves.toEqual(
-      persisted(expected === "updated" ? next : target),
-    );
-  });
+      };
+      const target = fixtureCard(2);
+      await stores.cards.register(occupied.id, persisted(occupied));
+      await stores.cards.register(target.id, persisted(target));
+      const next = { ...target, updatedAt: target.updatedAt + 1 };
+      const slot: WorkboardClaimSlot =
+        limit === undefined
+          ? { kind: "owner", ownerId: "slot-owner", limit: 1 }
+          : { kind: "node-tickets", limit };
+      await expect(
+        stores.cards.claimIfSlotAvailable(
+          target.id,
+          persisted(next),
+          target.updatedAt,
+          slot,
+          1_000_000,
+        ),
+      ).resolves.toBe(expected);
+      await expect(stores.cards.lookup(target.id)).resolves.toEqual(
+        persisted(expected === "updated" ? next : target),
+      );
+    },
+  );
 
   it.each(["constraint", "binding"])(
     "rolls back earlier batches, grouped writes, and claims after a later child %s fails",
@@ -471,7 +482,7 @@ describe("workboard sqlite batch card persistence", () => {
               target.id,
               persisted(next),
               target.updatedAt,
-              { kind: "owner", ownerId: "slot-owner" },
+              { kind: "owner", ownerId: "slot-owner", limit: 1 },
               3000,
             );
           }),

@@ -1,2 +1,0 @@
-# PR191633: drain startup before the interrupted-delta regression; retain dirty and resume assertions.
-1

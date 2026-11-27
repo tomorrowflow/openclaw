@@ -18,6 +18,16 @@ import {
 const LIVE_TEST_SUFFIX = ".live.test.ts";
 const OPTIONAL_LIVE_SHARD_FILE_ENVS = new Map([
   // Whole-file opt-in gates: without the flag every case skips, so the file has no pass evidence.
+  ["extensions/agentsapi/agentsapi-harness.live.test.ts", ["OPENCLAW_LIVE_AGENTSAPI"]],
+  ["extensions/comfy/comfy.live.test.ts", ["COMFY_LIVE_TEST"]],
+  [
+    "extensions/codex/src/app-server/isolated-completion.acceptance.live.test.ts",
+    ["OPENCLAW_LIVE_RESEARCH_ACCEPTANCE"],
+  ],
+  [
+    "extensions/codex/src/app-server/isolated-completion.real-binary.live.test.ts",
+    ["OPENCLAW_LIVE_CODEX_OUTPUT_SCHEMA"],
+  ],
   ["extensions/anthropic/cli-output.compaction.live.test.ts", ["OPENCLAW_LIVE_CLAUDE_COMPACTION"]],
   [
     "extensions/codex/src/app-server/approval-requester.real-binary.live.test.ts",
@@ -79,7 +89,6 @@ const OPTIONAL_LIVE_SHARD_FILE_ENVS = new Map([
     ["OPENCLAW_LIVE_SUBAGENT_STRESS"],
   ],
   ["src/agents/tools/sessions-send-peer.live.test.ts", ["OPENCLAW_LIVE_SUBAGENT_STRESS"]],
-  ["src/agents/tools/sessions-send-retained-child.live.test.ts", ["OPENCLAW_LIVE_RETAINED_CHILD"]],
   ["src/agents/tools/image-tool.ollama.live.test.ts", ["OPENCLAW_LIVE_OLLAMA_IMAGE"]],
   ["src/agents/tools/image-tool.providers.live.test.ts", ["OPENCLAW_LIVE_IMAGE_TOOL_TEST"]],
   ["extensions/openai/realtime-meeting.live.test.ts", ["OPENCLAW_LIVE_GPT_LIVE"]],
@@ -96,15 +105,15 @@ const OPTIONAL_LIVE_SHARD_FILE_ENVS = new Map([
   ["src/gateway/gateway-cli-backend.live.test.ts", ["OPENCLAW_LIVE_CLI_BACKEND"]],
   ["src/gateway/gateway-codex-bind.live.test.ts", ["OPENCLAW_LIVE_CODEX_BIND"]],
   ["src/gateway/gateway-codex-harness.live.test.ts", ["OPENCLAW_LIVE_CODEX_HARNESS"]],
-  ["src/gateway/gateway-openai-long-context.live.test.ts", ["OPENCLAW_LIVE_OPENAI_LONG_CONTEXT"]],
+  ["src/gateway/gateway-codex-subagent-shell.live.test.ts", ["OPENCLAW_LIVE_CODEX_SUBAGENT_SHELL"]],
   [
     "src/gateway/gateway-personal-native-child-abort.live.test.ts",
     ["OPENCLAW_LIVE_CODEX_HARNESS_PERSONAL_STOP"],
   ],
+  ["src/gateway/gateway-openai-long-context.live.test.ts", ["OPENCLAW_LIVE_OPENAI_LONG_CONTEXT"]],
   ["src/gateway/gateway-trajectory-export.live.test.ts", ["OPENCLAW_LIVE_CODEX_HARNESS"]],
   ["src/infra/push-apns-http2.live.test.ts", ["OPENCLAW_LIVE_APNS_REACHABILITY"]],
   ["test/e2e/crabbox-sandbox.live.test.ts", ["OPENCLAW_E2E_CRABBOX"]],
-  ["test/gateway-local-codex-goal-resume.live.test.ts", ["OPENCLAW_LIVE_CODEX_GOAL_RESUME"]],
   ["test/image-generation.infer-cli.live.test.ts", ["OPENCLAW_LIVE_INFER_CLI_TEST"]],
 ]);
 const SKIPPED_ASSERTION_STATUSES = new Set(["disabled", "pending", "skipped", "todo"]);
@@ -182,14 +191,18 @@ function walkFiles(rootDir: string) {
  */
 export function collectAllLiveTestFiles(repoRoot = process.cwd()) {
   const externalFiles = listExternalLiveTestFiles(repoRoot);
-  if (externalFiles) {
-    return externalFiles;
-  }
-  return ["src", "test", "extensions"]
-    .flatMap((dir) => walkFiles(path.join(repoRoot, dir)))
-    .map((file) => path.relative(repoRoot, file).split(path.sep).join("/"))
-    .filter((file) => file.endsWith(LIVE_TEST_SUFFIX))
-    .toSorted((a, b) => a.localeCompare(b));
+  const files =
+    externalFiles ??
+    ["src", "test", "extensions"]
+      .flatMap((dir) => walkFiles(path.join(repoRoot, dir)))
+      .map((file) => path.relative(repoRoot, file).split(path.sep).join("/"))
+      .filter((file) => file.endsWith(LIVE_TEST_SUFFIX));
+  return (
+    files
+      // This operator-selected catalog probe explicitly refuses CI (#187509).
+      .filter((file) => file !== "src/gateway/gateway-thinking-probe.live.test.ts")
+      .toSorted((a, b) => a.localeCompare(b))
+  );
 }
 
 function listExternalLiveTestFiles(repoRoot: string) {
@@ -276,12 +289,7 @@ function isExtensionInRange(file: string, start: string, end: string) {
 }
 
 function isSourceGatewayLiveTest(file: string) {
-  // The thinking experiment is deliberately manual-only; its dedicated command
-  // records observations and refuses CI execution, rather than qualifying a release.
-  return (
-    file !== "src/gateway/gateway-thinking-probe.live.test.ts" &&
-    (file.startsWith("src/gateway/") || file.startsWith("src/system-agent/"))
-  );
+  return file.startsWith("src/gateway/") || file.startsWith("src/system-agent/");
 }
 
 function isGatewayBackendLiveTest(file: string) {
@@ -345,6 +353,7 @@ export function selectLiveShardFiles(shard: string, files = collectAllLiveTestFi
       return files.filter(
         (file) =>
           file.startsWith("src/agents/") ||
+          file.startsWith("src/auto-reply/") ||
           file.startsWith("src/decisions/") ||
           file.startsWith("src/llm/") ||
           file.startsWith("src/skills/"),

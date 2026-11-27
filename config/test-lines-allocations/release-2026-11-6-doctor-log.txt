@@ -1,2 +1,0 @@
-3
-# Preserve the parked-service outcome in console-only startup refusal diagnostics.

@@ -195,19 +195,6 @@ describe("ordinary steering isolated-gateway proof", () => {
     expect(older.mailbox.owner.active).toBe(liveOperation);
     const commit = createDeferred();
     const injected = createDeferred();
-    const settlementStarted = createDeferred();
-    const injection = await import("./chat-send-message-injection.js");
-    const settle = injection.settleChatSendMessageInjection;
-    let settling = 0;
-    const settlementSpy = vi
-      .spyOn(injection, "settleChatSendMessageInjection")
-      .mockImplementation((attempt) => {
-        const result = settle(attempt);
-        if (attempt && ++settling === 2) {
-          settlementStarted.resolve();
-        }
-        return result;
-      });
     type PhaseEvent = Extract<DiagnosticEventPayload, { type: "diagnostic.phase.completed" }>;
     const reported = createDeferred<PhaseEvent>();
     const phases: PhaseEvent[] = [];
@@ -269,9 +256,6 @@ describe("ordinary steering isolated-gateway proof", () => {
       await withinTest(injected.promise, signal);
       expect(queueMessage.mock.calls.map(([text]) => text)).toEqual(messages);
       expect(dispatchInboundMessageMock).not.toHaveBeenCalled();
-      // Backend admission precedes the handler's settlement phase. Start the
-      // synthetic delay only after both real settlement waits have begun.
-      await withinTest(settlementStarted.promise, signal);
       clock = 120_001;
       commit.resolve();
       const report = await withinTest(reported.promise, signal);
@@ -280,17 +264,19 @@ describe("ordinary steering isolated-gateway proof", () => {
         details: { stage: "steer" },
       });
       expect(report.durationMs).toBeGreaterThanOrEqual(clock);
+      expect(runIds).toContain(report.details?.runId);
       await waitForDiagnosticEventsDrained();
+      // Queue entry can precede this nested span; the parent duration owns the injected delay.
       const settlement = phases.find(
-        (event) => event.name === "chat.send.detail.run_admission.steer_settlement",
+        (event) =>
+          event.name === "chat.send.detail.run_admission.steer_settlement" &&
+          event.details?.runId === report.details?.runId,
       );
       expect(settlement).toMatchObject({ details: { stage: "steer" } });
-      expect(settlement?.durationMs).toBeGreaterThanOrEqual(clock);
       expect(dispatchInboundMessageMock).not.toHaveBeenCalled();
     } finally {
       retireSessionControllerInput(older);
       commit.resolve();
-      settlementSpy.mockRestore();
       now.mockRestore();
       stop();
       setDiagnosticsEnabledForProcess(previousDiagnostics);

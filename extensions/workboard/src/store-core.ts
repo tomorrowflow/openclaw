@@ -41,6 +41,7 @@ import {
   withWorkboardRouteTarget,
   withoutStaleStartRequest,
 } from "./store-constants.js";
+import { normalizeWithoutEvidence, withStoredEvidence } from "./store-evidence.js";
 import type {
   WorkboardCardPatch,
   WorkboardCommentInput,
@@ -132,10 +133,11 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     if (!ownedPatch) {
       return { card: current, updated: false };
     }
-    const { ownedLaunch, ...patch } = ownedPatch;
+    const { ownedLaunch, ownedEvidence, ...patch } = ownedPatch;
     const card = await this.updateCard(current, patch, {
       ...options,
       automationLaunch: ownedLaunch,
+      automationEvidence: ownedEvidence,
       expectedUpdatedAt: current.updatedAt,
     });
     return { card, updated: card.updatedAt !== current.updatedAt };
@@ -302,7 +304,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
           templateId: normalizeTemplateId(input.templateId),
           ...(childAutomation ? { automation: childAutomation } : {}),
         },
-        { allowDependencyLinks: false, allowArchivedAt: false },
+        { allowMetadataDependencyLinks: false, allowArchivedAt: false },
       ),
       input,
       sessionKey,
@@ -463,13 +465,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
           ? existing.execution
           : syncExecutionSessionKey(existing.execution, sessionKey)
         : normalizeExecution(effectivePatch.execution);
-    let metadata = normalizeMetadata(effectivePatch.metadata, existing.metadata, {
-      allowAutomationLaunch: options.allowAutomationLaunch,
-      automationLaunch: options.automationLaunch,
-      allowDependencyLinks: options.allowMetadataDependencyLinks !== false,
-      preserveProofId: options.preserveProofId,
-      preserveNotificationId: options.preserveNotificationId,
-    });
+    let metadata = normalizeWithoutEvidence(effectivePatch.metadata, existing, options);
     if (status !== existing.status && !hasFreshLifecycleStatusSource) {
       ({ execution, metadata } = settleManualStatusTransition({
         existing,
@@ -521,8 +517,9 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       ...(startedAt ? { startedAt } : {}),
       ...(completedAt ? { completedAt } : {}),
     });
-    next.metadata = trimMetadataToBudget(
+    next.metadata = withStoredEvidence(
       syncExecutionAttemptMetadata(next.metadata ?? {}, execution, now),
+      existing,
       options,
     );
     next = withoutStaleStartRequest(next, now);

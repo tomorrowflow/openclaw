@@ -1,3 +1,0 @@
-# Exact +18 LF lines from canonical formatter wrapping in four existing release
-# repair test files. No new tests, assertions, runtime work, or timeout changes.
-18

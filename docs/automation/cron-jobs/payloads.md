@@ -30,6 +30,7 @@ The weekly Skill Workshop curator (declaration key `skill-collection-review:<age
 
 <ParamField path="--message" type="string" required>
   Prompt text for an agent-turn job, including main, isolated, current, and custom sessions.
+  Creation preserves leading and trailing whitespace in nonblank prompts and treats a whitespace-only message input as missing.
 </ParamField>
 <ParamField path="--model" type="string">
   Model override; must resolve to an allowed model or the run fails with a validation error.
@@ -132,6 +133,11 @@ and before its effects. If the device or grant is revoked, or the role changes,
 the next occurrence is refused with a message asking you to recreate the
 automation from an authenticated turn, and the job is disabled. A revocation
 during a run stops that run's remaining operator effects.
+Rotating a shared Gateway token or password refuses jobs created through it. A job
+created through [trusted-proxy authentication](/gateway/trusted-proxy-auth) follows
+its proxy user's grant instead: changing `trustedProxies`, `userHeader`, or
+`requiredHeaders` keeps it, while removing the user from `allowUsers`, changing
+its identity scopes, or leaving trusted-proxy mode refuses it.
 
 The link names the creating conversation by key. After a message edit, branch
 switch, or reset, a linked detached job keeps that conversation's workspace,
@@ -239,8 +245,16 @@ and compatible authentication route. OAuth and API keys can remain enabled toget
 changing interactive defaults, profile order, or the job’s plain model selection does
 not switch the job’s account or billing route. Automatic ownership remains distinct
 from an explicit user profile pin. Token refresh within the same authorization is
-allowed; deleting, replacing, or revoking that authorization stops the job rather
-than falling back to another account. Model and route compatibility still apply.
+allowed. Deleting, replacing, or revoking that authorization refuses the job's models on
+that provider instead of switching to another of its accounts. Model and route
+compatibility still apply.
+
+The recorded account governs only its own provider. Configured fallback models on other
+providers select their credentials live, the same way an interactive run does, so a job
+bound to one provider still fails over when that provider is out of quota or down. This
+also applies when the recorded account was replaced or removed: its provider is refused,
+and the rest of the fallback chain still runs. If a job has no model of its own and the
+default model moves to another provider, the job follows it with live credentials.
 
 At creation, account capture follows scheduled-model selection, including an
 allowed `model@profile` value in per-agent or global `subagents.model`. A disallowed
@@ -255,25 +269,40 @@ cooldowns. With `auth.order` set, that is the account every earlier run used; wi
 it, runs rotated between accounts of the same type by last use, and Doctor records one
 of them. When several accounts are eligible, Doctor names the others and the command
 to change the choice.
+Doctor can also adopt host-managed accounts on an explicitly selected Codex runtime; it records that runtime with the account. Native-owned or model-locked sessions remain unchanged.
 Doctor uses normal automation model selection, preserves inherited defaults and
 fallback lists, leaves existing bindings unchanged, and backs up cron state before
 committing. Missing accounts, and personal accounts needing their owner's
 authorization, are left unchanged with job-specific adoption instructions.
+Run `openclaw doctor --lint` to preview missing bindings. Add `--all` to inspect
+unavailable profiles referenced by saved account order. An empty per-agent credential store
+can be valid when credentials are inherited from the shared store; Doctor checks
+effective credentials before reporting a missing profile. It does not remove a
+missing profile from account order or recreate its credentials automatically.
 
 Managed updates and the standard container entrypoint run repairing Doctor before
 activation. A manual source upgrade must include `openclaw doctor --fix` before
-starting the Gateway. Startup reports potentially unmigrated host-account jobs
-before scheduling; it does not capture credentials or rewrite jobs.
+starting the Gateway. Startup checks potentially unmigrated host-account jobs in the background without
+delaying cron readiness or operations. The scan has a five-second aggregate budget;
+if it expires, one warning reports how many jobs were not checked and points to
+`openclaw doctor --lint` for a complete check. Startup does not capture credentials
+or rewrite jobs.
 
 Keys in the environment or provider config have no stored account to record. A job
 on such a route stays unbound and runs on that key; once a stored account becomes eligible for its route, the
 job stops with the adoption instructions instead of switching to that account. Job
 creation follows the same rule. An account refusal ends the run; it never falls back
-to another model or provider unless `cron.allowFallbackWithoutAccount` allows it (below). Credentialless models remain usable without an account.
+to another model or provider. Credentialless models remain usable without an account.
 
-Unbound CLI-runtime automations use the CLI's own login and do not require an
-inference binding. OpenClaw does not forward a stored inference profile on this
-native-only path. Jobs with a saved inference binding keep using that account.
+Unbound CLI-runtime automations need no inference binding when the CLI account
+selector chooses native login. If it selects a stored profile, scheduled runs refuse
+to borrow that account: Doctor, lint, and startup name the job and its explicit
+`openclaw automations edit <jobId> --model <provider/model>@<profileId>` recovery
+command. This edit also sets the primary model; Doctor never adopts CLI accounts
+automatically. To explicitly choose Claude CLI's native login, use
+`anthropic/<model>@anthropic:claude-cli` with the same edit command.
+OpenClaw does not forward a stored inference profile on the native-only path.
+Jobs with a saved inference binding keep using that account.
 Known provider-auth environment variables and the backend's credential exclusions
 are removed after environment overrides, even when the live-test preserve-env
 option is set. Runtime settings, such as the context window, are retained.
@@ -283,22 +312,26 @@ remove credentials. Older nodes retain their existing local environment behavior
 and receive no new invocation parameter. Update the node and approve its new
 capability to apply node-side filtering.
 
-By default a job with a recorded account only runs candidates from that account's
-provider, so its fallback chain stops at the first model from another provider. Set
-`cron.allowFallbackWithoutAccount: true` to let those jobs fall back to models that use
-no stored account: credentialless local models, or providers whose key is declared in
+Set `cron.allowFallbackWithoutAccount: true` to keep a job with a recorded account off
+every other stored account. Its fallbacks on other providers then run only on models that
+use no stored account: credentialless local models, or providers whose key is declared in
 config (for example Ollama). Such a fallback never selects another stored auth profile,
-an ambient credential that config does not name, or a key a provider runtime discovers on its own; fallbacks to CLI runtimes, native connections, and harness-owned logins stay refused.
+an ambient credential that config does not name, or a key a provider runtime discovers on its own; fallbacks to CLI runtimes, native connections, and harness-owned logins are refused.
+With the default `false`, other-provider fallbacks select their credentials live as described above.
 `openclaw cron status` reports the setting as `fallbackWithoutAccount`, and each run's
 history entry records the provider and model that actually ran.
 
 Native runtime-owned jobs retain their runtime’s existing authorization checks, and a
 native connection cannot silently replace a job’s recorded host-managed inference account.
 An explicit update from an authorized native creator can adopt its runtime authority.
+An authorized `--model anthropic/<model>@anthropic:claude-cli` edit can replace a
+stored account with Claude CLI’s native login when the job’s execution route uses
+that CLI. This preserves the job’s identity, history and tool cap; ordinary
+model or default changes never clear a stored account.
 Moving a job to an agent with a different credential owner requires explicit account adoption.
 Tool and delivery accounts remain separate from the inference account.
 
-`--model` sets the job's primary model; it does not replace a session `/model` override, so configured fallback chains still apply on top of it. An unresolved or disallowed model fails the run with an explicit validation error rather than silently falling back to the default. If a job has `--model` but no explicit or configured fallback list, OpenClaw passes an empty fallback override instead of silently appending the agent primary as a hidden retry target.
+`--model` selects the job's primary model ahead of any carried session preference. It does not erase the session's saved `/model` preference; that preference can apply again after the job's model is cleared. Configured fallback chains still apply. An unresolved or disallowed model fails the run with an explicit validation error rather than silently falling back to the default. If a job has `--model` but no explicit or configured fallback list, OpenClaw passes an empty fallback override instead of silently appending the agent primary as a hidden retry target.
 
 A fallback after a provider timeout continues the same scheduled turn and reuses its saved user input. Failed attempts do not complete the turn or duplicate the scheduled prompt.
 
@@ -361,8 +394,9 @@ the content instead of overwriting another edit.
 Use a normal final reply for a visible result and `NO_REPLY` for silence.
 `record_result` accepts one outcome (`no_change`, `progress`, `done`, `blocked`,
 or `needs_attention`). `no_change` needs no summary; every other outcome requires
-a trimmed summary of 1–2000 characters. It records the result without sending a
-notification by itself. Structured results are retained in run history. After a
+a trimmed summary of 1–2000 characters. Repeating the accepted result returns it
+again; a different second result is rejected. It records the result without
+sending a notification by itself. Structured results are retained in run history. After a
 successful run, the last meaningful result is saved with the job and included as
 bounded context in its next prompt, even when the final reply is silent. Quiet
 checks and execution failures do not overwrite that result or append result
@@ -370,14 +404,21 @@ boilerplate to the conversation. This is not a delivery retry queue. `no_change`
 keeps runner delivery silent without hiding execution failures. A `progress`,
 `done`, `blocked`, or `needs_attention` summary is the run's authored outcome:
 an earlier tool failure the run moved past no longer adds a generic
-`⚠️ <tool> failed` notice to an otherwise silent run. The failure stays visible
-in the transcript and progress lane. Adaptive scheduling still uses `next_check` on a paced
+`⚠️ <tool> failed` notice to an otherwise silent run. The notice names the
+called tool, not the Tool Search dispatcher. The failure stays visible
+in the transcript and progress lane. A failed tool call counts as recovered
+once the same tool later succeeds. A call to a tool the run does not have never
+runs, so the next tool call that runs and succeeds recovers it. A run that only
+made that call and then ended silently is still a failure. Adaptive scheduling still uses `next_check` on a paced
 job. Scratch is context, not another scheduler:
 runtime does not parse `tasks:` blocks or read `HEARTBEAT.md`.
 
 With `payload.skipIfScratchEmpty: true` (`--skip-if-scratch-empty`), blank text,
 comments, headings, fence markers, and empty checklist stubs count as an empty
-checklist. Removing scratch with `--unset` is different: missing scratch does
+checklist. An empty checklist completes the run without a model call: history
+records `status: "ok"` and `completionStatus: "succeeded"` with the summary
+`Automation scratch is explicitly empty`, with no "did not start" notice or
+skipped-run alert. Removing scratch with `--unset` is different: missing scratch does
 not suppress a run. Disable the job when it should stop regardless of scratch.
 
 ### Command payloads
@@ -400,7 +441,9 @@ openclaw automations create "*/15 * * * *" \
   --to "-1001234567890"
 ```
 
-`--command <shell>` stores `argv: ["sh", "-lc", <shell>]`. Use `--command-argv '["node","scripts/report.mjs"]'` for exact argv execution without shell parsing. Optional `--command-env KEY=VALUE` (repeatable), `--command-input`, `--timeout-seconds` (default 10 minutes), `--no-output-timeout-seconds`, and `--output-max-bytes` control the process environment, stdin, and output bounds.
+`--command <shell>` stores the Gateway host's shell: `argv: ["sh", "-lc", <shell>]` on macOS and Linux, or `argv: ["cmd.exe", "/d", "/s", "/c", <shell>]` on Windows, where the command uses `cmd.exe` syntax such as `%VAR%`. The CLI asks the Gateway for its platform; when the Gateway cannot report it, the command fails and asks for `--command-argv` instead. Jobs created before this rule on a Windows Gateway keep their stored `sh -lc` argv and fail with `spawn sh ENOENT`; rerun `openclaw cron edit <job-id> --command <shell>` to store the Windows shell. Use `--command-argv '["node","scripts/report.mjs"]'` for exact argv execution without shell parsing. Optional `--command-env KEY=VALUE` (repeatable), `--command-input`, `--timeout-seconds` (default 10 minutes), `--no-output-timeout-seconds`, and `--output-max-bytes` control the process environment, stdin, and output bounds.
+
+On `automations edit`, `--command-env` replaces all stored environment overrides; repeat every variable you want to keep. After a successful edit, the CLI warns on stderr with the dropped key names, never their values. This warning is best effort if the stored job cannot be read.
 
 Delivered text is derived from process output: non-empty stdout wins; if stdout is empty and stderr is non-empty, stderr is delivered; if both are present, the scheduler sends a small `stdout:` / `stderr:` block. Exit code `0` records the run `ok`; non-zero exit, signal, timeout, or no-output timeout records `error` and can trigger failure alerts. A command that prints only `NO_REPLY` uses the normal automation silent-token suppression and posts nothing back to chat.
 
@@ -507,6 +550,8 @@ With `announce`, agent, command, and script results belong to the chat or topic 
 
     To come back to this conversation later (for example, to recheck CI), add a one-shot `at` job with `payload: { kind: "agentTurn", message: "Instructions for your next turn" }` and `sessionTarget: "session:<your session key from Runtime>"`. It runs inside the existing conversation with the same history and saved workspace/worktree.
 
+    With `session.scope: "global"`, `session:global` targets the selected agent's existing global conversation, just like its main-session alias. Keep the literal `global` key; an explicitly agent-qualified named key remains a separate target.
+
     Custom-session agent turns use the existing session’s saved workspace and working directory, including its managed worktree. Requester-scoped jobs may use a saved workspace only for their owning conversation; trusted operator-scheduled jobs can target another conversation’s saved workspace. A missing, retired, or mismatched worktree stops the run instead of falling back to the agent’s default workspace. Filesystem containment and the job’s tool restrictions still apply; a path in the job prompt does not grant access. Persistent-session rollover keeps the saved workspace binding, permission mode, containment root, and inherited tool restrictions; other detached runs inherit it only from a current creating conversation, as described for `current` jobs above. A new `session:custom-id` without an existing session starts in the configured agent workspace. Use `delivery: { mode: "none" }` without an external target for quiet named-session work that needs no runner fallback announcement.
 
     Main-session automation events are self-contained reminders. They include their own job scratch and notices assigned to that occurrence, not another monitor’s checklist or unrelated queued events. Put required instructions in the job payload or scratch.
@@ -515,10 +560,13 @@ With `announce`, agent, command, and script results belong to the chat or topic 
 
   </Accordion>
   <Accordion title="What 'fresh session' means for isolated jobs">
-    A new transcript/session id per run. OpenClaw carries safe preferences (thinking/fast/verbose settings, labels, explicit user-selected model/auth overrides), but does not inherit ambient conversation context from an older automation session row: channel/group routing, send or queue policy, elevation, origin, or ACP runtime binding. Use `current` or `session:<id>` when a recurring job should deliberately build on the same conversation context.
+    A new transcript/session id per run. OpenClaw carries safe preferences (thinking/fast/verbose settings, labels, display names, sidebar placement, custom categories, icons and colors, dashboard face and presentation, explicit user-selected model/auth overrides), but does not inherit ambient conversation context from an older automation session row: channel/group routing, send or queue policy, elevation, origin, or ACP runtime binding. Use `current` or `session:<id>` when a recurring job should deliberately build on the same conversation context.
+
+    Messages sent to the job's `cron:<jobId>` session, for example with `sessions_send`, address its latest run. A message still queued when that run ends can fail, and the next run reassigns the key, so later runs start without it. Put information that later runs need in the job payload or [scratch](#job-scratch-and-quiet-results).
+
   </Accordion>
   <Accordion title="Unattended run contract">
-    A started scheduled turn finishes under the configuration it started with; configuration edits apply to the next run. Stop, cancellation, and revoked source authority still end affected work. An unstarted occurrence can be re-admitted under the current configuration.
+    A started scheduled turn finishes under the configuration it started with; configuration edits apply to the next run. The MCP owner still retires changed server connections; retained calls cannot use a retired connection. Unstarted work can re-admit automatically after a relevant policy change.
 
     Isolated automation and hook agent turns are explicitly unattended: no one is present to clarify or approve. The final reply must be the deliverable rather than a plan, acknowledgement, or request for input. The agent records `no_change` without a summary and returns `NO_REPLY` when nothing needs doing. Unchanged state and repeated known blockers stay quiet; new blockers and changes that need action get a concise result. Explicitly requested recurring reports and digests still run and deliver at their requested cadence. Execution failures remain visible rather than being treated as no change. For machine-checkable conditions, use an existing deterministic condition trigger or script to skip inference when nothing changed, instead of paying for a model turn to rediscover that fact.
 

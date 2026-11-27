@@ -90,7 +90,6 @@ it.each(["EPERM", "EXDEV"])("fails closed without hard-link support (%s)", async
     .spyOn(directoryDurability, "publishFileExclusive")
     .mockRejectedValue(Object.assign(new Error("hard links unsupported"), { code }));
   await withBackupFixture({ prefix: "openclaw-backup-no-hardlinks-" }, async (state) => {
-    await isolateBackupScratch(state);
     const outputDir = state.path("backups");
     await fs.mkdir(outputDir, { recursive: true });
 
@@ -113,7 +112,6 @@ describe("backup traversal", () => {
     "records a file vanishing before %s and restores survivors",
     async (operation) => {
       await withBackupFixture({ layout: "split" }, async (state) => {
-        await isolateBackupScratch(state);
         await state.writeConfig({
           agents: { entries: { main: { workspace: state.workspaceDir } } },
         });
@@ -175,7 +173,6 @@ describe("backup traversal", () => {
 
   it("backs up a second workspace and preserves its dangling absolute link", async () => {
     await withBackupFixture({ layout: "split" }, async (state) => {
-      await isolateBackupScratch(state);
       const second = state.path("second-workspace");
       await fs.mkdir(second);
       await state.writeConfig({
@@ -251,7 +248,6 @@ describe("backup traversal", () => {
     "refuses missing required config or source I/O errors: %s",
     async (code) => {
       await withBackupFixture({}, async (state) => {
-        await isolateBackupScratch(state);
         await state.writeConfig({});
         const source =
           code === "ENOENT" ? state.configPath : await state.writeText("keep.txt", "data");
@@ -275,7 +271,6 @@ describe("backup traversal", () => {
 
   it("reports many volatile paths without overflowing the restore manifest", async () => {
     await withBackupFixture({ layout: "split" }, async (state) => {
-      await isolateBackupScratch(state);
       await state.writeConfig({ agents: { entries: { main: { workspace: state.workspaceDir } } } });
       const files = Array.from({ length: 9_000 }, (_, index) =>
         path.join(state.workspaceDir, `pending-${index}.tmp.123`),

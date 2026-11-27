@@ -9,7 +9,7 @@ import type {
   NativeWorkerResourcePort,
 } from "./worker-native-lifecycle.types.js";
 
-export default function createTestNativeWorkerResource(
+export function createNativeWorkerResource(
   port: NativeWorkerResourcePort,
   input: unknown,
   ownerPort?: NativeWorkerResourcePort,

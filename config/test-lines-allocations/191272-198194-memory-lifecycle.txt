@@ -1,3 +1,0 @@
-326
-# Memory lifecycle adaptation: startup/constrained-headroom pressure, severity-aware idle retirement, and dependent-reader shutdown ordering.
-# Existing targeted files cover real native worker close/reopen and preserved active/queued ownership.

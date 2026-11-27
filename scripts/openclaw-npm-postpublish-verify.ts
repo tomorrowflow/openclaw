@@ -29,7 +29,8 @@ import {
   WORKER_BUNDLE_SQLITE_STORE_PATH,
 } from "../src/shared/worker-bundle-hash.js";
 import { readBoundedResponseText } from "./lib/bounded-response.mjs";
-import { formatErrorMessage } from "./lib/error-format.mts";
+import { bundledModuleRegions } from "./lib/bundled-module-regions.mjs";
+import { formatErrorMessage, formatErrorMessageWithCauses } from "./lib/error-format.mts";
 import { verifyNpmRegistrySignatures } from "./lib/npm-registry-signatures.mjs";
 import { runNpmVerifyCommand } from "./lib/npm-verify-exec.ts";
 import {
@@ -700,7 +701,7 @@ function extractJavaScriptImportSpecifiers(
 ): ParsedImportSpecifiersResult {
   try {
     const regions: Array<{ start: number; end: number; extensionId?: string }> = [];
-    const stack: Array<{ start: number; extensionId?: string }> = [];
+    const stack: Array<{ start: number; extensionId?: string; flat: boolean }> = [];
     // Published modules need stricter validation than the CommonJS-aware dependency scanner.
     acorn.parse(source, {
       allowHashBang: true,
@@ -711,9 +712,16 @@ function extractJavaScriptImportSpecifiers(
             if (block) {
               return;
             }
-            if (text.startsWith("#region ")) {
-              const extensionId = /^#region extensions\/([a-z0-9][a-z0-9-]*)\//u.exec(text)?.[1];
-              stack.push({ start: end, extensionId });
+            const marker = bundledModuleRegions(source.slice(start, end)).next().value;
+            if (marker) {
+              // Simple labels close at the next module; historical regions can nest.
+              const previous = stack.at(-1);
+              if (previous?.flat) {
+                stack.pop();
+                regions.push({ ...previous, end: start });
+              }
+              const extensionId = /^extensions\/([a-z0-9][a-z0-9-]*)\//u.exec(marker[1] ?? "")?.[1];
+              stack.push({ start: end, extensionId, flat: !marker[0].startsWith("//#region ") });
             } else if (text.trim() === "#endregion") {
               const region = stack.pop();
               if (region) {
@@ -723,6 +731,11 @@ function extractJavaScriptImportSpecifiers(
           }
         : undefined,
     });
+    for (const region of stack) {
+      if (region.flat) {
+        regions.push({ ...region, end: source.length });
+      }
+    }
     const imports: RuntimeImport[] = [];
     collectPackageRootImports(source, (specifier, start, kind) => {
       // Inner regions close first. Inspect real comments and full-source bindings;
@@ -1192,15 +1205,22 @@ export function buildPublishedInstallCommandArgs(prefixDir: string, spec: string
   return ["install", "-g", "--prefix", prefixDir, spec, "--no-fund", "--no-audit"];
 }
 
+class NpmRegistryReadError extends Error {
+  constructor(url: string, cause: unknown) {
+    super(`npm registry read failed: ${url}: ${formatErrorMessage(cause)}`, { cause });
+  }
+}
+
 export async function fetchRegistryJson(
   url: string,
   options: FetchRegistryJsonOptions = {},
 ): Promise<unknown> {
+  const diagnosticUrl = url.replace(/^(https?:[/][/])[^/]*@/u, "$1");
   const timeoutMs = options.timeoutMs ?? NPM_REGISTRY_REQUEST_TIMEOUT_MS;
   const maxBodyBytes = options.maxBodyBytes ?? NPM_REGISTRY_RESPONSE_BODY_MAX_BYTES;
   const controller = new AbortController();
   const timeoutError = Object.assign(
-    new Error(`npm registry request timed out after ${timeoutMs}ms: ${url}`),
+    new Error(`npm registry request timed out after ${timeoutMs}ms: ${diagnosticUrl}`),
     { code: "ETIMEDOUT" },
   );
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -1223,21 +1243,25 @@ export async function fetchRegistryJson(
       timeoutPromise,
     ]);
     if (!response.ok) {
-      throw new Error(`npm registry request failed (${response.status}): ${url}`);
+      throw new Error(`npm registry request failed (${response.status}): ${diagnosticUrl}`);
     }
     return JSON.parse(
-      await readBoundedResponseText(response, `npm registry ${url}`, maxBodyBytes, {
+      await readBoundedResponseText(response, `npm registry ${diagnosticUrl}`, maxBodyBytes, {
         signal: controller.signal,
         timeoutPromise,
       }),
     );
+  } catch (error) {
+    throw new NpmRegistryReadError(diagnosticUrl, error);
   } finally {
     clearTimeout(timeout);
   }
 }
 
 function isRetryableRegistryProvenanceError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
+  // Endpoint text is diagnostic context, not a reason to retry a terminal failure.
+  const failure = error instanceof NpmRegistryReadError ? error.cause : error;
+  const message = failure instanceof Error ? failure.message : String(failure);
   if (
     message.includes("npm provenance attestation") ||
     message.includes("npm registry signature") ||
@@ -1446,7 +1470,7 @@ if (entrypoint !== null && import.meta.url === entrypoint) {
   try {
     await main();
   } catch (error) {
-    console.error(`openclaw-npm-postpublish-verify: ${formatErrorMessage(error)}`);
+    console.error(`openclaw-npm-postpublish-verify: ${formatErrorMessageWithCauses(error)}`);
     process.exitCode = 1;
   }
 }

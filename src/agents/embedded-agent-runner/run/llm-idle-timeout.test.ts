@@ -22,11 +22,16 @@ import {
   resetDiagnosticRunActivityForTest,
 } from "../../../logging/diagnostic-run-activity.js";
 import { SESSION_WATCHDOG_WARNING_MS } from "../../../sessions/session-controller.watchdog-state.js";
-import type { SessionControllerWatchdogAttempt } from "../../../sessions/session-controller.watchdog.js";
+import {
+  createSessionControllerWatchdog,
+  type SessionControllerWatchdogAttempt,
+} from "../../../sessions/session-controller.watchdog.js";
+import { AsyncWorkScope } from "../../../shared/async-work-scope.js";
 import {
   clearToolActivityRun,
   notifyToolActivity,
 } from "../../../shared/tool-activity-heartbeat.js";
+import { createAgentRunRestartAbortError } from "../../run-termination.js";
 import type { StreamFn } from "../../runtime/index.js";
 import { makeAgentAssistantMessage } from "../../test-helpers/agent-message-fixtures.js";
 import { wrapStreamFnRepairMalformedToolCallArguments } from "./attempt.tool-call-argument-repair.js";
@@ -84,6 +89,39 @@ afterEach(() => {
 });
 
 describe("streamWithIdleTimeout", () => {
+  it("bounds recovery after a long request ends even if cleanup repeats", async () => {
+    const stop = vi.fn(() => "settled" as const);
+    const watchdog = createSessionControllerWatchdog({
+      startedAtMs: Date.now(),
+      isCurrent: () => true,
+      readPhase: () => "active",
+      requestStop: stop,
+      expireCleanup: stop,
+    });
+    const source = createAssistantMessageEventStream();
+    const stream = await streamWithIdleTimeout(() => source, 600_000, undefined, {
+      watchdogAttempt: watchdog.attachAttempt({ assertCurrent() {} }),
+    })({} as Parameters<StreamFn>[0], { messages: [] });
+    const iterator = stream[Symbol.asyncIterator]();
+    try {
+      await vi.advanceTimersByTimeAsync(510_000);
+      source.end(makeAgentAssistantMessage({ content: [], stopReason: "length" }));
+      await vi.advanceTimersByTimeAsync(0);
+      await watchdog.tick();
+      expect(stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(SESSION_WATCHDOG_WARNING_MS - 1);
+      await iterator.return?.();
+      await watchdog.tick();
+      expect(stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await watchdog.tick()).toMatchObject({ action: "stop", reason: "semantic_stall" });
+      expect(stop).toHaveBeenCalledOnce();
+    } finally {
+      await iterator.return?.();
+      watchdog.close();
+    }
+  });
+
   it("keeps watchdog allocations and abort subscriptions bounded across streamed deltas", async () => {
     const timers = vi.spyOn(globalThis, "setTimeout");
     const caller = new AbortController();
@@ -581,3 +619,63 @@ describe("streamWithIdleTimeout parked consumer", () => {
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
   });
 });
+
+it.each([
+  { scope: "creation-and-gaps", terminal: false },
+  { scope: "creation-only", terminal: false },
+  { scope: "creation-and-gaps", terminal: true },
+] as const)(
+  "bounds restart consumption without dropping timely terminals ($scope, terminal=$terminal)",
+  async ({ scope, terminal }) => {
+    const caller = new AbortController();
+    const source = createAssistantMessageEventStream();
+    const timedOut = vi.fn();
+    const work = new AsyncWorkScope();
+    const stream = await work.run(() =>
+      streamWithIdleTimeout(() => source, 300_000, timedOut, { scope })(
+        {} as Parameters<StreamFn>[0],
+        {} as Parameters<StreamFn>[1],
+        { signal: caller.signal },
+      ),
+    );
+    const iterator = stream[Symbol.asyncIterator]();
+    let outcome: unknown;
+    let pending = iterator.next().catch((error: unknown) => {
+      outcome = error;
+    });
+    const reason = createAgentRunRestartAbortError();
+    try {
+      caller.abort(reason);
+      await vi.advanceTimersByTimeAsync(200);
+      source.push(textDelta("late chunk"));
+      await pending;
+      if (terminal) {
+        const error = makeAgentAssistantMessage({
+          content: [{ type: "text", text: "partial" }],
+          stopReason: "aborted",
+        });
+        source.push({ type: "error", reason: "aborted", error });
+        // The producer finished in budget; a parked consumer may read it later.
+        await vi.advanceTimersByTimeAsync(250);
+        await expect(iterator.next()).resolves.toMatchObject({ value: { error } });
+        return;
+      }
+      pending = iterator.next().catch((error: unknown) => {
+        outcome = error;
+      });
+      await vi.advanceTimersByTimeAsync(49);
+      expect(outcome).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(outcome).toMatchObject({ name: "AbortError", cause: reason });
+      expect(timedOut).not.toHaveBeenCalled();
+      // Caller preemption cannot release possibly write-capable producer cleanup.
+      expect(work.hasPendingWork).toBe(true);
+    } finally {
+      source.end(makeAgentAssistantMessage({ content: [], stopReason: "aborted" }));
+      await pending;
+      await iterator.return?.();
+      await work.drain();
+      expect(work.hasPendingWork).toBe(false);
+    }
+  },
+);

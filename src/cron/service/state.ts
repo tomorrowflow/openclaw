@@ -115,8 +115,11 @@ export type CronServiceDeps = {
   cronEnabled: boolean;
   /** CronConfig for session retention settings. */
   cronConfig?: CronConfig;
-  /** Host-owned, read-only diagnostics before startup recovery can dispatch loaded jobs. */
-  describeJobLoadWarning?: (job: CronStoredJob) => string | undefined;
+  /** Best-effort host diagnostics after inventory publication, outside cron readiness and operations. */
+  describeJobLoadWarning?: (
+    job: CronStoredJob,
+    signal: AbortSignal,
+  ) => string | undefined | Promise<string | undefined>;
   /** Disallow automation jobs that run commands or scripts on the host. */
   hostExecutionDisabled?: boolean;
   resolveUserTimezone?: () => string | undefined;
@@ -206,10 +209,13 @@ export type CronServiceDeps = {
       agentId?: string;
       sessionKey?: string;
       contextKey?: string;
+      deliver?: false;
       deliveryContext?: DeliveryContext;
       expectedTarget?: SessionEventTarget;
       createIfMissing?: true;
       assertAcceptanceCurrent?: () => void;
+      /** The job a notice is about; its turn acts for that job's requester. */
+      jobId?: string;
     },
   ) => void | Promise<{ ok: true } | { ok: false; error: string }>;
   deferSessionEvent?: (
@@ -277,7 +283,7 @@ export type CronServiceDeps = {
     /** Consumed by the occurrence; command runs are not agent runs and mint no context. */
     occurrence: ScheduledOccurrence;
     deliveryAttemptFence: CronCompletionDeliveryFence | null;
-    job: CronJob;
+    job: CronStoredJob;
     abortSignal?: AbortSignal;
   }) => Promise<CronRunOutcome & CronRunDeliveryResult>;
   runScriptJob?: (params: {
@@ -321,6 +327,8 @@ export type CronServiceDeps = {
     payload: ReplyPayload;
     runAtMs?: number;
     channel: CronMessageChannel;
+    target?: ResolvedFailureAlert["target"];
+    directPolicy?: ResolvedFailureAlert["directPolicy"];
     to?: string;
     mode?: "announce" | "webhook";
     accountId?: string;
@@ -365,7 +373,8 @@ type CronServiceDepsInternal = Omit<CronServiceDeps, "env" | "nowMs"> & {
 
 /** Dependencies consumed by job policy before its mutation is committed. */
 export type CronJobPolicyContext = {
-  deps: Pick<CronServiceDepsInternal, "cronConfig" | "nowMs" | "log" | "failureRepairTimeoutMs">;
+  deps: Pick<CronServiceDepsInternal, "cronConfig" | "nowMs" | "log" | "defaultAgentId"> &
+    Partial<Pick<CronServiceDepsInternal, "resolveDefaultAgentId">>;
   /** Resolved by the host for this exact job while its recovery transaction holds the row. */
   preparedFailureAlert?: { jobId: string; value: ResolvedFailureAlert | null };
 };
@@ -609,7 +618,7 @@ export type CronWakeMode = "now" | "next-heartbeat";
 export type CronStatusSummary = {
   enabled: boolean;
   triggersEnabled: boolean;
-  /** Bound jobs may fall back to models that use no stored account (`cron.allowFallbackWithoutAccount`). */
+  /** Bound jobs fall back to other providers only on models that use no stored account (`cron.allowFallbackWithoutAccount`). */
   fallbackWithoutAccount?: boolean;
   /** @deprecated Alias for `sqlitePath`. */
   storePath: string;
@@ -665,6 +674,7 @@ export type CronUpdateOptions = Pick<
   | "execPolicy"
   | "streamExecApproval"
   | "streamSandbox"
+  | "streamOperatorSource"
   | "sessionEntryCurrent"
 > & {
   /** Parent incarnation recorded by `automations bind`; only fills an absent link. */

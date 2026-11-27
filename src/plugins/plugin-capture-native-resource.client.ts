@@ -17,9 +17,10 @@ import {
   type PluginCaptureResourceRoot,
   type PluginCaptureRootAnnouncement,
 } from "./plugin-capture-native-resource.types.js";
+import { markPluginSourceAcquisitionError } from "./plugin-instance-error.js";
 import type { PluginSourceCaptureStorage } from "./plugin-instance-invocation.types.js";
 import type { PluginNativeCaptureRoot } from "./plugin-native-root.types.js";
-import type { PluginRecoveryCaptureInput } from "./plugin-recovery-source-copy.types.js";
+import type { PluginRecoveryCaptureInput } from "./plugin-recovery-source-copy.js";
 import { subscribePluginNativeLoads } from "./plugin-source-capture-native-loads.js";
 
 export function createPluginCaptureResourceClient(
@@ -55,6 +56,7 @@ export function createPluginCaptureResourceClient(
   port.on("message", receive);
   port.on("close", fail);
   port.on("messageerror", fail);
+  port.unref();
   const start = (command: PluginCaptureResourceCommand) => {
     if (unavailable) {
       throw unavailable;
@@ -66,13 +68,14 @@ export function createPluginCaptureResourceClient(
     } = { completion: createDeferredCore() };
     void call.completion.promise.catch(() => {});
     pending.set(id, call);
+    port.ref();
     port.postMessage({ id, command });
     return { id, call };
   };
   const unwrap = (reply: PluginCaptureResourceReply) => {
     if (!reply.ok) {
       const error = decodeNativeWorkerFailure(reply.error);
-      throw error;
+      throw reply.sourceAcquisitionFailure ? markPluginSourceAcquisitionError(error) : error;
     }
     return reply;
   };
@@ -83,6 +86,9 @@ export function createPluginCaptureResourceClient(
         return unwrap(await call.completion.promise);
       } finally {
         pending.delete(id);
+        if (!pending.size) {
+          port.unref();
+        }
       }
     },
     requestSync(command: PluginCaptureResourceCommand) {
@@ -103,6 +109,9 @@ export function createPluginCaptureResourceClient(
         return unwrap(call.reply).root;
       } finally {
         pending.delete(id);
+        if (!pending.size) {
+          port.unref();
+        }
       }
     },
   };
@@ -195,6 +204,8 @@ export async function createPluginCaptureOwner(
       port1.postMessage(reply);
     };
     port1.on("message", receive);
+    // The execution worker keeps active preparation alive, not this idle relay.
+    port1.unref();
     return {
       port: port2,
       service() {
@@ -227,11 +238,11 @@ export async function createPluginCaptureOwner(
       return root;
     },
     async copyRecovery(captureId: number, input: PluginRecoveryCaptureInput) {
-      const { root } = await client.request({ type: "recovery", captureId, input });
-      if (!root) {
+      const { root, copiedBytes } = await client.request({ type: "recovery", captureId, input });
+      if (!root || copiedBytes === undefined) {
         throw new Error("Plugin capture owner returned no recovery source");
       }
-      return { root };
+      return { root, copiedBytes };
     },
     releaseSource: (captureId: number) =>
       client.request({ type: "release-source", captureId }).then(() => {}),

@@ -24,9 +24,7 @@ import {
   sendMinimalGatewayConnectChallenge,
   sendMinimalGatewayResponse,
 } from "../../gateway/minimal-gateway.test-helpers.js";
-import * as gatewayBootLifecycle from "../../infra/gateway-boot-lifecycle.js";
 import { requireNodeSqlite } from "../../infra/node-sqlite.js";
-import type { GatewayRestartHandoff } from "../../infra/restart-handoff.js";
 import { resetSecretRedactionRegistryForTest } from "../../logging/secret-redaction-registry.test-support.js";
 import { defaultRuntime } from "../../runtime.js";
 import { OPENCLAW_AGENT_SCHEMA_VERSION } from "../../state/openclaw-agent-db-contract.js";
@@ -40,7 +38,10 @@ import { registerGatewayCli } from "../gateway-cli/register.js";
 import { registerDaemonCli } from "./register.js";
 import type { GatewayRestartSnapshot } from "./restart-health.js";
 import { registerStatusConfigReadTests } from "./status.gather.config.test-support.js";
+import { registerStatusDatabaseRecoveryTests } from "./status.gather.database.test-support.js";
+import { registerStatusInstallRecordReadTests } from "./status.gather.install-records.test-support.js";
 import { gatherDaemonStatus } from "./status.gather.js";
+import { registerStatusLaunchdScanTests } from "./status.gather.launchd.test-support.js";
 import {
   callGatewayStatusProbe,
   capturePrintedDaemonStatus,
@@ -53,6 +54,10 @@ import {
   inspectPortConnections,
   inspectPortUsage,
   inspectPortUsages,
+  originalReadGatewayLastShutdown,
+  readGatewayLastShutdownAsync,
+  readGatewayRecentCrashesAsync,
+  readGatewayRestartHandoffSync,
   readLastGatewayErrorLine,
   type GatewayStatusProbeOptions,
   type PortUsageInspectionOptions,
@@ -89,11 +94,6 @@ const fetchNpmPackageTargetStatus = vi.fn(
     nodeEngine: null,
   }),
 );
-const readGatewayRestartHandoffSync = vi.fn<
-  (_env?: NodeJS.ProcessEnv) => GatewayRestartHandoff | null
->(() => null);
-const originalReadGatewayLastShutdown = gatewayBootLifecycle.readGatewayLastShutdownAsync;
-const readGatewayLastShutdownAsync = vi.spyOn(gatewayBootLifecycle, "readGatewayLastShutdownAsync");
 const findSystemdGatewayInstallation = vi.fn<
   typeof import("../../daemon/systemd-scope.js").findSystemdGatewayInstallation
 >(async () => ({ kind: "none" }));
@@ -255,7 +255,8 @@ vi.mock("../../daemon/inspect.js", () => ({
   findExtraGatewayServices: (env: unknown, opts?: unknown) => findExtraGatewayServices(env, opts),
 }));
 
-vi.mock("../../state/openclaw-database-preflight.js", () => ({
+vi.mock("../../state/openclaw-database-preflight.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../state/openclaw-database-preflight.js")>()),
   OpenClawDatabaseSchemaPreflightError,
   preflightOpenClawDatabaseSchemas: (
     options: Parameters<typeof preflightOpenClawDatabaseSchemas>[0],
@@ -505,6 +506,7 @@ describe("gatherDaemonStatus", () => {
     readLastGatewayErrorLine.mockResolvedValue(null);
     readGatewayRestartHandoffSync.mockClear();
     readGatewayLastShutdownAsync.mockReset().mockResolvedValue(undefined);
+    readGatewayRecentCrashesAsync.mockReset().mockResolvedValue([]);
     preflightOpenClawDatabaseSchemas
       .mockReset()
       .mockResolvedValue({ incompatible: [], indeterminate: [] });
@@ -978,6 +980,35 @@ describe("gatherDaemonStatus", () => {
     expect(output.errors).toContain(`this OpenClaw command is version ${VERSION}`);
   });
 
+  it.each([
+    { args: ["--port", "19001"], port: 19002, role: "diagnostic-only" },
+    { args: [], port: 19002, role: "diagnostic-only" },
+    { args: ["--port", "19001"], port: 19001, role: "target" },
+  ])(
+    "probes the dashboard port $port with installed args $args ($role)",
+    async ({ args, port, role }) => {
+      daemonLoadedConfig = { gateway: { port: 19001, auth: { token: "daemon-token" } } };
+      setTestEnvValue("OPENCLAW_GATEWAY_PORT", String(port));
+      resolveGatewayPort.mockImplementationOnce((cfg, env) => {
+        const configPort = (cfg as { gateway?: { port?: number } }).gateway?.port;
+        const envPort = (env as NodeJS.ProcessEnv).OPENCLAW_GATEWAY_PORT;
+        return envPort ? Number(envPort) : (configPort ?? 18789);
+      });
+      serviceReadCommand.mockResolvedValueOnce({
+        programArguments: ["/bin/node", "cli", "gateway", "run", ...args],
+        environment: daemonEnvironment,
+      });
+
+      const probeUrl = "ws://127.0.0.1:" + port;
+      const status = await gatherStatus({ dashboardTarget: { port, probeUrl } });
+
+      expect(status.rpc?.url).toBe(probeUrl);
+      expect(status.service.targetRole).toBe(role);
+      expect(probeInput().url).toBe(probeUrl);
+      expect(probeInput().token).toBe(role === "target" ? "daemon-token" : undefined);
+    },
+  );
+
   it("uses raw explicit URLs for probes but redacts them from status diagnostics", async () => {
     const rawUrl =
       "wss://user:password@override.example:18790/ws?token=secret&key=api-key&X-Amz-Signature=signed";
@@ -1163,27 +1194,10 @@ describe("gatherDaemonStatus", () => {
     expect(await fs.readFile(databasePath)).toEqual(before);
   });
 
-  it("reports an unreadable state database instead of a config read failure", async () => {
-    const stateDir = tempDirs.make("openclaw-status-unreadable-state-");
-    const env = { OPENCLAW_STATE_DIR: stateDir };
-    const databasePath = resolveOpenClawStateSqlitePath(env);
-    await fs.mkdir(path.dirname(databasePath), { recursive: true });
-    await fs.writeFile(databasePath, "not a sqlite database ".repeat(256));
-    const before = await fs.readFile(databasePath);
-    await useRealSchemaPreflight(env);
-    const { program, writeJson, exit } = createStatusCommand();
-    await expect(
-      program
-        .parseAsync(["gateway", "status", "--deep", "--no-probe", "--json"], { from: "user" })
-        .then(() => undefined),
-    ).rejects.toThrow("status-exit");
-    const output = JSON.stringify(writeJson.mock.calls);
-    expect(output).toContain(`shared state database is unreadable at ${databasePath}`);
-    expect(output).toContain("restore this file from a verified backup");
-    expect(output).not.toContain("CONFIG_READ_FAILED");
-    expect(exit).toHaveBeenCalledWith(1);
-    expect(createConfigIOCalls).not.toHaveBeenCalled();
-    expect(await fs.readFile(databasePath)).toEqual(before);
+  registerStatusDatabaseRecoveryTests({
+    makeTempDir: (prefix) => tempDirs.make(prefix),
+    useRealSchemaPreflight,
+    createConfigIOCalls,
   });
 
   it("keeps readable shutdown history when a registered agent database has a newer schema", async () => {
@@ -1255,37 +1269,24 @@ describe("gatherDaemonStatus", () => {
     }
   });
 
-  it.runIf(process.platform === "darwin")(
-    "surfaces stale updater launchd jobs only during deep status",
-    async () => {
+  registerStatusLaunchdScanTests({
+    gatherStatus: (deep) => gatherStatus({ probe: false, deep }),
+    setServiceCommand: () =>
       serviceReadCommand.mockResolvedValueOnce({
         programArguments: ["/bin/node", "cli", "gateway", "--port", "19001"],
         environment: {
           ...daemonEnvironment,
           OPENCLAW_LAUNCHD_LABEL: "ai.openclaw.manual-update.gateway",
         },
-      });
-      const jobs = [
-        {
-          label: "ai.openclaw.update.2026.5.12",
-          lastExitStatus: 127,
-        },
-        {
-          label: "ai.openclaw.manual-update.1717168800",
-          lastExitStatus: 0,
-        },
-      ];
-      findStaleOpenClawUpdateLaunchdJobs.mockResolvedValueOnce(structuredClone(jobs));
-
-      const status = await gatherStatus({ probe: false, deep: true });
-
-      const staleScanEnv = findStaleOpenClawUpdateLaunchdJobs.mock.calls[0]?.[0];
-      expect(staleScanEnv?.OPENCLAW_STATE_DIR).toBe("/tmp/openclaw-daemon");
-      expect(staleScanEnv?.OPENCLAW_CONFIG_PATH).toBe("/tmp/openclaw-daemon/openclaw.json");
-      expect(staleScanEnv?.OPENCLAW_LAUNCHD_LABEL).toBe("ai.openclaw.manual-update.gateway");
-      expect(status.service.staleUpdateLaunchdJobs).toEqual(jobs);
-    },
-  );
+      }),
+    setStaleScan: (scanFails, jobs) =>
+      findStaleOpenClawUpdateLaunchdJobs.mockImplementationOnce(() =>
+        scanFails
+          ? Promise.reject(new Error("launchctl list failed (exit 1): Operation not permitted"))
+          : Promise.resolve(structuredClone(jobs)),
+      ),
+    staleScanEnv: () => findStaleOpenClawUpdateLaunchdJobs.mock.calls[0]?.[0],
+  });
 
   it("surfaces foreign launchd jobs and restart correlation without --deep", async () => {
     const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
@@ -1522,45 +1523,13 @@ describe("gatherDaemonStatus", () => {
     },
   );
 
-  it("compares plugin drift against the running gateway version from the probe, not the CLI VERSION", async () => {
-    // Gateway is still running an older version than the invoking CLI.
-    // An npm plugin pinned to the running gateway version must NOT be
-    // reported as drifted just because the CLI package is newer.
-    callGatewayStatusProbe.mockResolvedValueOnce({
-      ok: true,
-      url: "ws://127.0.0.1:19001",
-      error: null,
-      server: { version: "2026.5.4", connId: "c1" },
-    } as never);
-    loadInstalledPluginIndexInstallRecords.mockResolvedValueOnce({
-      brave: {
-        source: "npm",
-        spec: "@openclaw/brave-plugin@2026.5.3",
-        resolvedName: "@openclaw/brave-plugin",
-        resolvedVersion: "2026.5.3",
-      },
-      whatsapp: {
-        source: "npm",
-        resolvedName: "@openclaw/whatsapp",
-        resolvedVersion: "2026.5.4",
-      },
-    } as never);
-
-    const status = await gatherStatus();
-
-    expect(status.pluginVersionDrift?.gatewayVersion).toBe("2026.5.4");
-    expect(status.pluginVersionDrift?.drifts.map((drift) => drift.pluginId)).toEqual(["brave"]);
-    expect(status.pluginVersionDrift?.drifts[0]?.targetResolution).toBeUndefined();
-    const output = capturePrintedDaemonStatus(status, { json: false }).logs;
-    expect(output).toContain("Plugin version drift: 1 active official plugin");
-    expect(output).toContain("openclaw gateway status --deep");
-    expect(output).not.toContain("brave:");
-    expect(fetchNpmPackageTargetStatus).not.toHaveBeenCalled();
-    expect(loadInstalledPluginIndexInstallRecords).toHaveBeenCalledWith(
-      expect.objectContaining({
-        env: expect.objectContaining({ OPENCLAW_STATE_DIR: "/tmp/openclaw-daemon" }),
-      }),
-    );
+  registerStatusInstallRecordReadTests({
+    captureLogs: (status) => capturePrintedDaemonStatus(status, { json: false }).logs,
+    gatherStatus,
+    setGatewayProbe: (probe) => callGatewayStatusProbe.mockResolvedValueOnce(probe as never),
+    setInstallRecordReader: (reader) =>
+      loadInstalledPluginIndexInstallRecords.mockImplementationOnce(reader),
+    withStateConfig: (run) => withStatusConfig("{}", run, true),
   });
 
   it.each([

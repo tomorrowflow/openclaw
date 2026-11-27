@@ -240,6 +240,11 @@ vi.mock("./model-catalog.js", async () => ({
   buildPreparedModelCatalogSnapshot: mocks.buildPreparedModelCatalogSnapshot,
 }));
 
+vi.mock("../state/openclaw-agent-execution.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../state/openclaw-agent-execution.js")>()),
+  prepareOpenClawAgentDatabaseExecution: async () => {},
+}));
+
 // mock-isolation: Static startup fixtures keep model planning and publication persistence unloaded.
 vi.mock("./models-config.core.js", () => ({
   ensureOpenClawModelsJsonWithInput: mocks.ensureOpenClawModelsJson,
@@ -440,10 +445,7 @@ describe("prepared model runtime Gateway catalog mode", () => {
     mocks.prepareStaticCatalog.mockImplementationOnce(async (...args: unknown[]) => {
       started.resolve();
       await finish.promise;
-      if (!defaultPrepareStaticCatalog) {
-        throw new Error("expected default static catalog implementation");
-      }
-      return await defaultPrepareStaticCatalog(...args);
+      return await defaultPrepareStaticCatalog!(...args);
     });
 
     const stale = refresh(staleConfig);
@@ -466,12 +468,15 @@ describe("prepared model runtime Gateway catalog mode", () => {
     const provider = "fixture-provider";
     const modelId = "fixture-model-2026-08-09";
     const registry = createEmptyPluginRegistry();
-    const resolveDynamicModel = vi.fn((context: { provider: string; modelId: string }) =>
-      mocks.model(context.provider, context.modelId, "Fixture dated model"),
-    );
+    const prepareDynamicModel = vi.fn(async () => {});
+    const resolveDynamicModel = vi.fn((context: { provider: string; modelId: string }) => ({
+      ...mocks.model(context.provider, context.modelId, "Fixture dated model"),
+      reasoning: prepareDynamicModel.mock.calls.length > 0,
+    }));
+    const hooks = { resolveDynamicModel, prepareDynamicModel };
     registry.providers.push({
       pluginId: provider,
-      provider: { id: provider, label: "Fixture provider", auth: [], resolveDynamicModel },
+      provider: { id: provider, label: "Fixture provider", auth: [], ...hooks },
       source: "test",
     });
     mocks.loadAgentRuntimePluginRegistryHandle.mockReturnValue(registry);
@@ -521,7 +526,7 @@ describe("prepared model runtime Gateway catalog mode", () => {
         (configured) => `${configured.provider}/${configured.modelId}`,
       ),
     ).toEqual([`${provider}/${modelId}`, "openai/gpt-5.5"]);
-    expect(snapshot?.configuredRuntimeModels[0]?.model.id).toBe(modelId);
+    expect(snapshot?.configuredRuntimeModels[0]?.model.reasoning).toBe(true);
     for (const entries of [snapshot?.modelCatalog.entries, snapshot?.modelCatalog.routeVariants]) {
       expect(entries?.map((entry) => `${entry.provider}/${entry.id}`)).toEqual([
         `${provider}/${modelId}`,

@@ -6,12 +6,11 @@ import { resetLogger, setLoggerOverride } from "../logging/logger.js";
 import { loggingState } from "../logging/state.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { defaultRuntime } from "../runtime.js";
+import { writeConfigMachineStateAsync } from "../state/config-machine-state-async.js";
 import { OpenClawDatabaseSchemaPreflightError } from "../state/openclaw-database-preflight.messages.js";
 import { OPENCLAW_STATE_SCHEMA_VERSION } from "../state/openclaw-state-db-contract.js";
-import {
-  closeOpenClawStateDatabaseForTest,
-  openOpenClawStateDatabase,
-} from "../state/openclaw-state-db.js";
+import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
+import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { VERSION } from "../version.js";
 import { prepareGatewayServerBootstrap } from "./server-startup-bootstrap.js";
@@ -22,11 +21,11 @@ vi.mock("../daemon/launchd.js", async (importOriginal) => ({
   parkCurrentLaunchAgentForMaintenance: park,
 }));
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
   park.mockClear();
   setConsoleSubsystemFilter(null);
-  closeOpenClawStateDatabaseForTest();
+  await closeStateDatabaseForTest();
   setLoggerOverride(null);
   loggingState.rawConsole = null;
   resetLogger();
@@ -41,7 +40,8 @@ it.each([
     withOpenClawTestState({ label: "startup-schema-refusal" }, async (state) => {
       await state.writeConfig({ plugins: { enabled: false } });
       const databasePath = openOpenClawStateDatabase({ env: state.env }).path;
-      closeOpenClawStateDatabaseForTest();
+      await writeConfigMachineStateAsync("startup.refusal.fixture", true, { env: state.env });
+      await closeStateDatabaseForTest();
       {
         using database = new DatabaseSync(databasePath);
         database.exec(`PRAGMA user_version = ${OPENCLAW_STATE_SCHEMA_VERSION + 1}`);
@@ -76,8 +76,7 @@ it.each([
       expect(refusal).toBeInstanceOf(Error);
       const facts = `uses schema ${OPENCLAW_STATE_SCHEMA_VERSION + 1}; this build supports ${OPENCLAW_STATE_SCHEMA_VERSION}; It was written by OpenClaw 9999.1.1; it is newer than this Gateway (${VERSION}).`;
       await expect(handleGatewayStartupMaintenance(refusal)).rejects.toBe(exited);
-      // Refused profiles write directly to the pre-capture console, never the file sink.
-      const output = errorLog.mock.calls.flat().join("\n");
+      const output = runtimeError.mock.calls.flat().join("\n");
       expect(output).toContain(facts);
       expect(output).toContain("Refused by OpenClaw");
       expect(output).toContain("Use the newer install that supports these schemas");
@@ -100,13 +99,21 @@ it.each([
         "Doctor refused to continue",
         "Gateway refused startup",
       );
-      expect(runtimeError).not.toHaveBeenCalled();
-      expect(errorLog).toHaveBeenCalledExactlyOnceWith(
-        expect.stringContaining(
-          JSON.stringify(`Gateway failed to start: ${message} Parked the managed LaunchAgent.`),
-        ),
+      expect(runtimeError).toHaveBeenCalledExactlyOnceWith(`Gateway failed to start: ${message}`);
+      expect(runtimeError.mock.invocationCallOrder[0]).toBeLessThan(
+        exit.mock.invocationCallOrder[0]!,
       );
-      expect(errorLog.mock.invocationCallOrder[0]).toBeLessThan(exit.mock.invocationCallOrder[0]!);
+      if (backendLogsOnly) {
+        expect(errorLog).not.toHaveBeenCalled();
+      } else {
+        expect(errorLog).toHaveBeenCalledOnce();
+        expect(errorLog.mock.calls.flat().join("\n")).toContain(
+          JSON.stringify(message).slice(1, -1),
+        );
+        expect(errorLog.mock.invocationCallOrder[0]).toBeLessThan(
+          exit.mock.invocationCallOrder[0]!,
+        );
+      }
       expect(park).toHaveBeenCalledOnce();
       expect(exit).toHaveBeenCalledWith(78);
     }),

@@ -19,11 +19,7 @@ function codexSpawnFailureReason(error: unknown): string | undefined {
     return undefined;
   }
   const failure: NodeJS.ErrnoException = error;
-  if (
-    failure.syscall === undefined ||
-    failure.syscall === "access" ||
-    failure.syscall.startsWith("spawn")
-  ) {
+  if (failure.syscall === undefined || failure.syscall.startsWith("spawn")) {
     if (
       failure.code === "EBADARCH" ||
       failure.errno === -86 ||
@@ -48,7 +44,7 @@ export class CodexAppServerSpawnError extends Error {
     cause: unknown,
   ) {
     super(
-      `Codex catalog updater cannot run: ${command} ${reason}. Repair the executable or working directory and restart the Gateway.`,
+      `Codex cannot run: ${command} ${reason}. Repair the executable or working directory and restart the Gateway.`,
       { cause },
     );
     this.name = "CodexAppServerSpawnError";

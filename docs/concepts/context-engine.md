@@ -135,6 +135,8 @@ OpenClaw calls two optional subagent lifecycle hooks:
 
 The `assemble` method can return a `systemPromptAddition` string. OpenClaw prepends this to the system prompt for the run. This lets engines inject dynamic recall guidance, retrieval instructions, or context-aware hints without requiring static workspace files.
 
+Generic CLI backends such as `claude-cli` call `assemble()` after `bootstrap()` on every agent turn and send the `systemPromptAddition` with that turn's input (for `claude-cli`, as turn context beside OpenClaw's runtime facts). The CLI system prompt stays byte-identical across turns, so a per-turn addition does not invalidate the CLI's prompt cache or restart a warm CLI process.
+
 ## The legacy engine
 
 The built-in `legacy` engine preserves OpenClaw's original behavior:
@@ -304,9 +306,7 @@ The logical-turn owner removes unaccepted admissions when the run ends, includin
 when it exits before reporting a terminal transcript boundary. Recovery after a
 Gateway interruption also removes admissions without host acceptance and logs
 the skipped advancement; it never infers success from later transcript entries.
-Accepted work remains queued until the engine acknowledges it. Bounded retries
-select only sessions whose first pending turn is ready; unresolved heads do not
-consume other sessions’ retry slots or allow later turns to overtake them. No migration or
+Accepted work remains queued until the engine acknowledges it. No migration or
 configuration change is required for existing outbox rows.
 
 After accepted-turn finalization acknowledges `committed` or `duplicate`, the host
@@ -439,8 +439,9 @@ info: {
 ```
 
 Native Codex and OpenClaw embedded agent runs satisfy `assemble-before-prompt`.
-Generic CLI backends do not, so engines that require it are rejected before the
-CLI process starts.
+Generic CLI backends do not: the CLI's native session owns its history, so they
+use only `systemPromptAddition` and ignore the assembled messages. Engines that
+require the capability are rejected before the CLI process starts.
 
 ### Failure isolation
 

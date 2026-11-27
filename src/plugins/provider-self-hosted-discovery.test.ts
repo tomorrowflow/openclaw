@@ -6,8 +6,7 @@ import { discoverOpenAICompatibleLocalModels } from "./provider-self-hosted-disc
 
 const fetchWithSsrFGuardMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../infra/net/fetch-guard.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../infra/net/fetch-guard.js")>()),
+vi.mock("../infra/net/fetch-guard.js", () => ({
   fetchWithSsrFGuard: fetchWithSsrFGuardMock,
 }));
 

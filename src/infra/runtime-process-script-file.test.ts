@@ -23,53 +23,47 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it.each(["sync", "async"] as const)(
-  "runs and removes %s retained programs without source neighbors",
-  async (mode) => {
-    const root = directories.make("runtime-script-bootstrap-");
-    const scriptParent = path.join(root, "scratch");
-    fs.mkdirSync(scriptParent, { mode: 0o700 });
-    const copiedBootstrap = path.join(root, "runtime-process-scripts.generated.mjs");
-    fs.copyFileSync(
-      new URL("../../runtime-process-scripts.generated.mjs", import.meta.url),
-      copiedBootstrap,
-    );
-    const database = path.join(root, "database.sqlite");
-    fs.writeFileSync(database, "database");
-    fs.writeFileSync(database + "-wal", "wal");
-    const bootstrap: typeof import("../../runtime-process-scripts.generated.mjs") = await import(
-      pathToFileURL(copiedBootstrap).href
-    );
-    const output = { nodeRuntimeProbe: "", daemonRuntimeProbe: "", updateStateSizes: "" };
-    for (const name of ["nodeRuntimeProbe", "daemonRuntimeProbe", "updateStateSizes"] as const) {
-      const create =
-        mode === "sync"
-          ? bootstrap.createRuntimeProcessScriptFile
-          : bootstrap.createRuntimeProcessScriptFileAsync;
-      const script = await create(name, { parentDirectory: scriptParent });
-      const directory = fileURLToPath(new URL(".", script.url));
-      if (process.platform !== "win32") {
-        expect(fs.statSync(directory).mode & 0o777).toBe(0o700);
-      }
-      try {
-        output[name] = runScript(
-          script.url,
-          name === "daemonRuntimeProbe" ? "node" : "",
-          JSON.stringify({ files: [database] }),
-        );
-      } finally {
-        await script.dispose();
-      }
-      expect(fs.readdirSync(scriptParent)).toEqual([]);
-    }
-    expect(output.nodeRuntimeProbe).toBe(node);
-    expect(JSON.parse(output.daemonRuntimeProbe)).toMatchObject({
-      bunVersion: null,
-      sqliteProbe: { available: true, text: true, blob: true, json: true },
+it("runs and removes retained programs without source neighbors", async () => {
+  const root = directories.make("runtime-script-bootstrap-");
+  const scriptParent = path.join(root, "scratch");
+  fs.mkdirSync(scriptParent, { mode: 0o700 });
+  const copiedBootstrap = path.join(root, "runtime-process-scripts.generated.mjs");
+  fs.copyFileSync(
+    new URL("../../runtime-process-scripts.generated.mjs", import.meta.url),
+    copiedBootstrap,
+  );
+  const database = path.join(root, "database.sqlite");
+  fs.writeFileSync(database, "database");
+  fs.writeFileSync(database + "-wal", "wal");
+  const bootstrap: typeof import("../../runtime-process-scripts.generated.mjs") = await import(
+    pathToFileURL(copiedBootstrap).href
+  );
+  const output = { nodeRuntimeProbe: "", daemonRuntimeProbe: "", updateStateSizes: "" };
+  for (const name of ["nodeRuntimeProbe", "daemonRuntimeProbe", "updateStateSizes"] as const) {
+    const script = bootstrap.createRuntimeProcessScriptFile(name, {
+      parentDirectory: scriptParent,
     });
-    expect(JSON.parse(output.updateStateSizes)).toEqual([{ path: database, sizeBytes: "11" }]);
-  },
-);
+    const directory = fileURLToPath(new URL(".", script.url));
+    if (process.platform !== "win32") {
+      expect(fs.statSync(directory).mode & 0o777).toBe(0o700);
+    }
+    {
+      using _ = { [Symbol.dispose]: () => script.dispose() };
+      output[name] = runScript(
+        script.url,
+        name === "daemonRuntimeProbe" ? "node" : "",
+        JSON.stringify({ files: [database] }),
+      );
+    }
+    expect(fs.readdirSync(scriptParent)).toEqual([]);
+  }
+  expect(output.nodeRuntimeProbe).toBe(node);
+  expect(JSON.parse(output.daemonRuntimeProbe)).toMatchObject({
+    bunVersion: null,
+    sqliteProbe: { available: true, text: true, blob: true, json: true },
+  });
+  expect(JSON.parse(output.updateStateSizes)).toEqual([{ path: database, sizeBytes: "11" }]);
+});
 
 it("passes required flags as data to the tested runtime", () => {
   const root = directories.make("runtime-script-required-flag-");
@@ -77,6 +71,22 @@ it("passes required flags as data to the tested runtime", () => {
   using _ = { [Symbol.dispose]: () => script.dispose() };
   expect(runScript(script.url, "--max-old-space-size")).toBe(node);
   expect(runScript(script.url, "--openclaw-unsupported-'\";process.exit(42)")).toBe("");
+});
+
+it.each(["20.20.2", "24.16.0"])("checks Node %s in the generated probe", (version) => {
+  const script = createRuntimeProcessScriptFile("nodeRuntimeProbe");
+  using _ = { [Symbol.dispose]: () => script.dispose() };
+  const output = execFileSync(
+    node,
+    [
+      "--input-type=module",
+      "-e",
+      `Object.defineProperty(process.versions, "node", { value: ${JSON.stringify(version)} });
+       await import(${JSON.stringify(script.url.href)});`,
+    ],
+    { encoding: "utf8", timeout: 5000, env: {} },
+  );
+  expect(output).toBe(version === "20.20.2" ? "" : node);
 });
 
 it("uses embedded self dispatch while keeping external runtime scripts physical", () => {

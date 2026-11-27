@@ -8,7 +8,6 @@ import { resolveSessionStorePathCore } from "../../config/sessions/paths.js";
 import { resolveSqliteSessionKey } from "../../config/sessions/session-accessor.sqlite-scope-helpers.js";
 import { captureSessionEntrySourceAssertion } from "../../config/sessions/session-entry-source-authority.js";
 import type { PreparedSessionSourceAuthority } from "../../config/sessions/session-source-authority.js";
-import { sameSessionTranscriptStorePath } from "../../config/sessions/transcript-store-identity.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { readAgentSelfHeldRefusal } from "../../gateway/agent-turn/agent-admission-refusal.js";
 import { readOperatorToolGatewayAuthority } from "../../gateway/operator-tool-gateway-authority.js";
@@ -45,8 +44,7 @@ type Send = {
   sessionKey: string;
   targetAgentId: string;
   storePath: string;
-  targetTask?: SessionsSendToolOptions["expectedTargetTask"];
-  targetRun: SessionsSendToolOptions["expectedTargetRun"];
+  hadTask: boolean;
   requesterParentOwned: boolean;
 };
 type HeldSend = {
@@ -70,7 +68,6 @@ type Batch = {
   ready: Promise<unknown>;
 };
 const batches = new WeakMap<ReplyOperation, Batch>();
-
 /**
  * Retained sends, so a reset or delete of their target can stop them. Weak: a handoff that never
  * replays (its requester stopped first) does not keep its sends alive.
@@ -99,7 +96,7 @@ function settleStopped(held: HeldSend): unknown {
  * addresses the chat by key and never infers a stop from a changed transcript or revision.
  */
 export function stopRetainedSessionSends(
-  chat: { agentId: string; storePath: string; sessionKeys: readonly string[] },
+  chat: { agentId: string; sessionKeys: readonly string[] },
   cause: "reset" | "deleted",
 ): void {
   for (const ref of retainedSends) {
@@ -108,7 +105,6 @@ export function stopRetainedSessionSends(
       retainedSends.delete(ref);
     } else if (
       normalizeAgentId(held.send.targetAgentId) === normalizeAgentId(chat.agentId) &&
-      sameSessionTranscriptStorePath(held.send.storePath, chat.storePath) &&
       chat.sessionKeys.includes(held.send.sessionKey)
     ) {
       held.state = { kind: "stopped", cause };
@@ -336,6 +332,7 @@ export function createSelfHeldSendRetainer(
               // result must not be replaced by a later classification check.
               const assertCurrent = prepared.policy.read;
               assertCurrent();
+              // A reset or delete of the target recorded its stop while this send waited.
               const stopped = settleStopped(item);
               if (stopped) {
                 outcomes.push(stopped);
@@ -351,8 +348,7 @@ export function createSelfHeldSendRetainer(
                   assertSourceCurrent: assertCurrent,
                   idempotencyKey: item.send.runId,
                   expectedTargetStorePath: item.send.storePath,
-                  expectedTargetTask: item.send.targetTask,
-                  expectedTargetRun: item.send.targetRun,
+                  expectTargetTask: item.send.hadTask,
                   retainedReplay: true,
                 },
                 {
@@ -421,20 +417,10 @@ export function createSelfHeldSendRetainer(
       toolCallId: string;
       readTarget: () => { storePath: string };
     }) {
-      const original = getLatestLiveSubagentRunByChildSessionKey(
-        input.sessionKey,
-        undefined,
-        input.targetAgentId,
+      const hadTask = Boolean(
+        getLatestLiveSubagentRunByChildSessionKey(input.sessionKey, undefined, input.targetAgentId),
       );
-      const targetRun = original
-        ? {
-            runId: original.runId,
-            taskRunId: original.taskRunId,
-            generation: original.generation,
-            createdAt: original.createdAt,
-          }
-        : null;
-      return (proof: Refusal, mode: Send["mode"], targetTask?: Send["targetTask"]) => {
+      return (proof: Refusal, mode: Send["mode"]) => {
         return retain(
           proof,
           {
@@ -447,8 +433,7 @@ export function createSelfHeldSendRetainer(
                 ? { ...input.args, timeoutSeconds: 0, watch: undefined }
                 : input.args,
             mode,
-            targetRun,
-            targetTask,
+            hadTask,
             storePath: input.readTarget().storePath,
           },
           input.toolCallId,

@@ -132,10 +132,7 @@ export type {
   ProviderRequestTlsOverride,
   ProviderRequestTransportOverrides,
 } from "../agents/provider-request-config.types.js";
-export {
-  getModelProviderRequestTransport,
-  resolveProviderRequestHeaders,
-} from "../agents/provider-request-config.js";
+export { resolveProviderRequestHeaders } from "../agents/provider-request-config.js";
 export { resolveProviderTransportSsrFPolicy } from "../agents/provider-network-policy.js";
 export { fetchWithProviderHttpGuard } from "../agents/provider-transport-dispatcher-pool.js";
 export {

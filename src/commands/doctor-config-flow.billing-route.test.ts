@@ -1,11 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it } from "vitest";
 import { resolveAgentEffectiveModelPrimary } from "../agents/agent-scope.js";
 import { loadAuthProfileStoreForRuntime } from "../agents/auth-profiles/store-runtime.js";
 import { createModelAuthAvailabilityResolver } from "../agents/model-auth-availability.js";
 import { writeFixtureJson } from "../cli/cli-fixtures.test-support.js";
-import { readConfigFileSnapshotForWrite } from "../config/config.js";
 import { writeOpenClawConfig } from "../config/test-helpers.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { loadCronJobsStore, resolveCronJobsStorePathFromConfig } from "../cron/store.js";
@@ -13,7 +12,6 @@ import {
   runInitialConfigWriteHealth,
   runWriteConfigHealth,
 } from "../flows/doctor-health-contribution-runners.config.js";
-import { commitGatewayConfigWrite } from "../gateway/server-methods/config-write-flow.js";
 import { createUpdatePostInstallDoctorResultPath } from "../infra/update-doctor-result.js";
 import { createUpdateRun, getUpdateRun, recordUpdateRunStep } from "../infra/update-run-ledger.js";
 import { updateRunWarningMessages } from "../infra/update-run-step.js";
@@ -86,7 +84,7 @@ function billingDefaults(model: string, retired: string) {
 
 it("does not compare Decision selectors through conversational billing routes", async () => {
   await withDoctorConfigPreflightHome(async (home) => {
-    const { config: before, configPath } = await writeBillingFixture(home, "gpt-4o-mini", {
+    const { config: before } = await writeBillingFixture(home, "gpt-4o-mini", {
       defaults: billingDefaults("gpt-5.4", "gpt-4o-mini"),
       entries: { main: { decisionModel: "openai/gpt-4o-mini" } },
     });
@@ -94,9 +92,11 @@ it("does not compare Decision selectors through conversational billing routes", 
       ...before,
       agents: { ...before.agents, entries: { main: { decisionModel: "openai/gpt-5.6-luna" } } },
     };
-    await using ctx = await prepareDoctorContext(configPath);
-    expect(ctx.sourceConfigValid).toBe(true);
-    expect(collectModelBillingRouteMigrationWarnings({ before, after })).toEqual([]);
+    await maybeMigrateAuthProfileJsonStoresToSqlite({
+      cfg: before,
+      prompter: { confirmAutoFix: async () => true },
+    });
+    expect(await collectModelBillingRouteMigrationWarnings({ before, after })).toEqual([]);
     const withChatSelection = (config: OpenClawConfig, model: string): OpenClawConfig => ({
       ...config,
       agents: {
@@ -104,21 +104,18 @@ it("does not compare Decision selectors through conversational billing routes", 
         entries: { main: { ...config.agents?.entries?.main, model } },
       },
     });
-    const warnings = collectModelBillingRouteMigrationWarnings({
+    const warnings = await collectModelBillingRouteMigrationWarnings({
       before: withChatSelection(before, "openai/gpt-4o-mini"),
       after: withChatSelection(after, "openai/gpt-5.6-luna"),
     });
-    expect(warnings).toEqual(
-      ["model.primary", "subagents.model"].map((selector) =>
-        expect.stringContaining(
-          `Billing route changed for agents.entries.main.${selector} (agent main):`,
-        ),
-      ),
-    );
+    expect(warnings).toEqual([
+      "Billing route changed for agents.entries.main.model.primary (agent main): openai/gpt-4o-mini via metered API-key profile openai:default -> openai/gpt-5.6-luna via subscription/OAuth profile openai:chatgpt-default. Review its model and authentication settings.",
+      "Billing route changed for agents.entries.main.subagents.model (agent main): openai/gpt-4o-mini via metered API-key profile openai:default -> openai/gpt-5.6-luna via subscription/OAuth profile openai:chatgpt-default. Review its model and authentication settings.",
+    ]);
   });
 });
 
-it("reports credential billing changes after a persisted Gateway config write", async () => {
+it("compares credential kinds for providers without catalog billing routes", async () => {
   await withDoctorConfigPreflightHome(async (home) => {
     const withPrimary = (model: string): OpenClawConfig => ({
       agents: { defaults: { model }, entries: { main: {} } },
@@ -139,21 +136,13 @@ it("reports credential billing changes after a persisted Gateway config write", 
       cfg: before,
       prompter: { confirmAutoFix: async () => true },
     });
-    const after = withPrimary("anthropic/claude-opus-4-6@anthropic:sub");
-    const respond = vi.fn();
-    const write = await commitGatewayConfigWrite({
-      ...(await readConfigFileSnapshotForWrite()),
-      nextConfig: after,
-      respond,
-    });
-    expect(JSON.parse(await fs.readFile(configPath, "utf8"))).toMatchObject(after);
-    const warning =
-      "Billing route changed for agents.entries.main.model.primary (agent main): anthropic/claude-opus-4-6 via metered API-key profile anthropic:default -> anthropic/claude-opus-4-6 via subscription/OAuth profile anthropic:sub. Review its model and authentication settings.";
-    expect(write).toMatchObject({ billingRouteWarnings: expect.arrayContaining([warning]) });
-    write.reply(true, { ok: true });
-    expect(respond).toHaveBeenCalledWith(
-      true,
-      expect.objectContaining({ billingRouteWarnings: expect.arrayContaining([warning]) }),
+    expect(
+      await collectModelBillingRouteMigrationWarnings({
+        before,
+        after: withPrimary("anthropic/claude-opus-4-6@anthropic:sub"),
+      }),
+    ).toContain(
+      "Billing route changed for agents.entries.main.model.primary (agent main): anthropic/claude-opus-4-6 via metered API-key profile anthropic:default -> anthropic/claude-opus-4-6 via subscription/OAuth profile anthropic:sub. Review its model and authentication settings.",
     );
   });
 });

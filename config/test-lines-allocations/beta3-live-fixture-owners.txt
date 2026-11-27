@@ -1,3 +1,0 @@
-# Retain the live trajectory fixture runtime owner after startup and its first turn.
-# Exact observed-failure backport from #188840 and #188958; no new test cases.
-5

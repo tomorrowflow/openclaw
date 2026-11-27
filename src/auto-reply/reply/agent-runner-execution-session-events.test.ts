@@ -288,14 +288,7 @@ describe("ordinary session event execution", () => {
       };
       using acquire = vi.spyOn(cronInference, "prepareCronRunInference");
       acquire.mockResolvedValue({
-        runParams: {
-          authProfileId: "scheduled-profile",
-          authProfileIdSource: "auto",
-          authProfileBinding,
-          allowAuthProfileFallback: false,
-          onSuccessfulAuthProfile,
-        },
-        runParamsFor: () => ({
+        runParams: () => ({
           authProfileId: "scheduled-profile",
           authProfileIdSource: "auto",
           authProfileBinding,
@@ -304,6 +297,7 @@ describe("ordinary session event execution", () => {
         }),
         runtimeSessionEntry: (entry) => entry,
         assertCandidate,
+        assertCurrent: () => assertCurrent(),
         resolveCliAuthProfile: vi.fn(async () => "scheduled-profile"),
         dispose,
       });
@@ -354,6 +348,54 @@ describe("ordinary session event execution", () => {
     },
   );
 
+  it("lets a cross-provider CLI fallback select its own account, not the recorded one", async () => {
+    const automation = createScheduledAutomation();
+    automation.job.inferenceBinding = {
+      version: 1,
+      provider: "openai",
+      profileId: "openai:primary",
+      authorizationId: "a".repeat(64),
+      authRequirement: "api-key",
+      source: "user",
+    };
+    // Admission selects the recorded account for the run; the CLI fallback is on another provider.
+    const followupRun = createFollowupRun({
+      scheduledAutomation: automation,
+      authProfileId: "openai:primary",
+      authProfileIdSource: "user",
+    });
+    useCliFallback(followupRun);
+    using acquire = vi.spyOn(cronInference, "prepareCronRunInference");
+    acquire.mockResolvedValue({
+      runParams: () => ({
+        scheduledLiveProviderAuth: true,
+        authProfileId: undefined,
+        authProfileIdSource: undefined,
+      }),
+      runtimeSessionEntry: (entry) => entry,
+      assertCandidate: vi.fn(),
+      assertCurrent: vi.fn(),
+      resolveCliAuthProfile: async (provider, _recorded, live) => {
+        expect(provider).toBe("claude-cli");
+        return await live();
+      },
+      dispose: vi.fn(),
+    });
+    state.runCliAgentMock.mockImplementationOnce(async (params: RunCliAgentParams) => {
+      // The recorded openai account never reaches the Claude CLI selection.
+      expect(params.authProfileId).not.toBe("openai:primary");
+      return { payloads: [{ text: "done" }], meta: {} };
+    });
+
+    const result = await executeAgentTurn(createMinimalRunAgentTurnParams({ followupRun }));
+
+    expect(result.outcome, JSON.stringify(result.outcome)).toMatchObject({
+      kind: "settled",
+      status: "ok",
+    });
+    expect(state.runCliAgentMock).toHaveBeenCalledOnce();
+  });
+
   it("resolves a session job's candidates on its captured runtime, not the row's override", async () => {
     const automation = createScheduledAutomation();
     automation.job.inferenceBinding = {
@@ -371,18 +413,14 @@ describe("ordinary session event execution", () => {
     const assertCandidate = vi.fn();
     using acquire = vi.spyOn(cronInference, "prepareCronRunInference");
     acquire.mockResolvedValue({
-      runParams: {
-        authProfileId: "scheduled-profile",
-        authProfileIdSource: "auto",
-        allowAuthProfileFallback: false,
-      },
-      runParamsFor: () => ({
+      runParams: () => ({
         authProfileId: "scheduled-profile",
         authProfileIdSource: "auto",
         allowAuthProfileFallback: false,
       }),
       runtimeSessionEntry,
       assertCandidate,
+      assertCurrent: vi.fn(),
       resolveCliAuthProfile: vi.fn(async () => "scheduled-profile"),
       dispose: vi.fn(),
     });
@@ -394,7 +432,7 @@ describe("ordinary session event execution", () => {
     });
 
     expect(result.outcome).toMatchObject({ kind: "settled", status: "ok" });
-    expect(runtimeSessionEntry).toHaveBeenCalledWith(rowEntry);
+    expect(runtimeSessionEntry).toHaveBeenCalledWith(rowEntry, "anthropic");
     expect(assertCandidate).toHaveBeenCalledWith("anthropic", false, "openclaw");
     expect(state.runCliAgentMock).not.toHaveBeenCalled();
   });

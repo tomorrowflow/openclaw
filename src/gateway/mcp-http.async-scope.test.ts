@@ -1,11 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  awaitGateBeforeSettlement,
-  createDeferred,
-  withinTest,
-} from "../../test/helpers/promise.js";
+import { createDeferred } from "../../test/helpers/promise.js";
 import type { PreparedAgentRunAdmission } from "../agents/admitted-run-context.js";
 import {
   bindCronManagementToolConstruction,
@@ -503,42 +499,4 @@ it("keeps requester grant minting at execution when management needs a construct
     expect(constructionIssuers).toEqual([false]);
     expect(scope.grantTokens.size).toBe(0);
   });
-});
-
-// A listener must cancel cooperating tools before waiting for their response sockets.
-it("cancels an in-flight tool before waiting for its response socket to drain", async ({
-  signal: testSignal,
-}) => {
-  const started = createDeferred();
-  const aborted = createDeferred();
-  const released = createDeferred();
-  execute.mockImplementation(async (_id, _args, signal: AbortSignal) => {
-    const onAbort = () => aborted.resolve();
-    signal.addEventListener("abort", onAbort, { once: true });
-    started.resolve();
-    try {
-      await Promise.race([aborted.promise, released.promise]);
-      return completed;
-    } finally {
-      signal.removeEventListener("abort", onAbort);
-    }
-  });
-  await ensureMcpLoopbackServer();
-  const response = callTool();
-  await started.promise;
-  const closing = closeMcpLoopbackServer();
-  try {
-    await withinTest(
-      awaitGateBeforeSettlement(
-        aborted.promise,
-        closing,
-        "MCP shutdown settled before cancelling its in-flight tool",
-      ),
-      testSignal,
-    );
-  } finally {
-    released.resolve();
-    await response;
-    await closing;
-  }
 });

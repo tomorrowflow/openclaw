@@ -1,2 +1,0 @@
-# PR191633: preserve uncertain-retry authority checks and terminal FRV/lazy Kitchen Sink regressions; restore retained-base workflow fixtures.
-27

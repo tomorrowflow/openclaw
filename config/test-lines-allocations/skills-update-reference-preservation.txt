@@ -1,2 +1,0 @@
-# Skills API key reference preservation through the registered Gateway handler.
-29

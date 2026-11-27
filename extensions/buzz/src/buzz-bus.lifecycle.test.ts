@@ -1,7 +1,6 @@
 import { getPublicKey, verifyEvent, type Event } from "nostr-tools";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import * as fetchRuntime from "openclaw/plugin-sdk/fetch-runtime";
-import { withinTest } from "openclaw/plugin-sdk/test-fixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("nostr-tools", async (importOriginal) => {
@@ -338,22 +337,18 @@ describe("Buzz bus lifecycle", () => {
     expect(relayMocks.close).toHaveBeenCalled();
   });
 
-  it.for(["queue", "dedupe claim"] as const)(
+  it.each(["queue", "dedupe claim"] as const)(
     "rejects revoked membership across the %s",
-    async (boundary, { signal }) => {
+    async (boundary) => {
       const remainingSecret = Uint8Array.from(Buffer.from("02".repeat(32), "hex"));
       const remainingPublicKey = getPublicKey(remainingSecret);
       relayMocks.membershipEvents[0]!.tags.push(["p", remainingPublicKey, "", "member"]);
       const running = createDeferred<void>();
-      const remainingHandled = createDeferred<void>();
       const handled: string[] = [];
       const onMessageError = vi.fn();
       await startTestBus({
         onMessage: async (message) => {
           handled.push(message.text);
-          if (message.text === "remaining-member") {
-            remainingHandled.resolve();
-          }
           if (message.text.startsWith("running-")) {
             await running.promise;
           }
@@ -390,9 +385,7 @@ describe("Buzz bus lifecycle", () => {
           senderMessage("remaining-member", { created_at: 1_700_000_012 }, remainingSecret),
         );
         running.resolve();
-        // Queue slots stay occupied until the preceding replay commits settle.
-        await withinTest(remainingHandled.promise, signal);
-        expect(handled).toContain("remaining-member");
+        await vi.waitFor(() => expect(handled).toContain("remaining-member"));
         expect(handled).not.toContain("queued-before-removal");
         expectError(onMessageError, expect.stringContaining("no longer a room member"));
       } finally {

@@ -1,2 +1,0 @@
-# Preserve exact byte comparison while avoiding per-byte deep assertion overhead in two 8 MiB databases.
-6

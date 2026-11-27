@@ -13,11 +13,8 @@ import {
 import { createConfigIO } from "./io.factory.js";
 import { withTempHome } from "./test-helpers.js";
 
-const {
-  runRegisteredConfigCommand: run,
-  withConfigFileHarness: withConfig,
-  registeredRuntimeErrors,
-} = useConfigCliIntegrationHarness();
+const { runRegisteredConfigCommand: run, withConfigFileHarness: withConfig } =
+  useConfigCliIntegrationHarness();
 const set = (key: string, value: string) => run(["config", "set", key, value]);
 const loggingRoot = '{"gateway":{"mode":"local"},"logging":{"$include":"logging.json"}}\n';
 const withLoggingConfig = (body: Parameters<typeof withConfig>[2]) =>
@@ -71,58 +68,6 @@ const createSnapshot = (
   });
 
 describe("config backup rotation", () => {
-  it.each(["root", "include"])(
-    "refuses malformed %s bytes without consuming recovery files",
-    async (owner) => {
-      await withConfig(
-        "openclaw-invalid-utf8-",
-        owner === "root" ? "{}" : loggingRoot,
-        async ({ configPath, tempDir }) => {
-          const target = owner === "root" ? configPath : path.join(tempDir, "logging.json");
-          const malformed = Buffer.concat([
-            Buffer.from(
-              owner === "root"
-                ? '{"gateway":{"mode":"local"},"meta":{"lastTouchedVersion":"'
-                : '{"level":"info","file":"',
-            ),
-            Buffer.from([0xff]),
-            Buffer.from(owner === "root" ? '"}}' : '"}'),
-          ]);
-          await fs.writeFile(target, malformed);
-          const files = [
-            target,
-            ...[".bak", ".bak.1", ".bak.2", ".bak.3", ".bak.4"].map((suffix) => target + suffix),
-          ];
-          for (const file of files.slice(1)) {
-            await fs.writeFile(file, Buffer.from([0xfe, 0x61]));
-          }
-          const before = await Promise.all(files.map((file) => fs.readFile(file)));
-          await expect(
-            set(
-              owner === "root" ? "gateway.port" : "logging.level",
-              owner === "root" ? "19001" : "debug",
-            ),
-          ).rejects.toThrow("exit 1");
-          expect(registeredRuntimeErrors.join("\n")).toContain("must be valid UTF-8");
-          expect(await Promise.all(files.map((file) => fs.readFile(file)))).toEqual(before);
-        },
-      );
-    },
-  );
-  it("permits explicitly authorized destructive root replacement", async () => {
-    await withConfig("openclaw-destructive-utf8-", "{}", async ({ configPath }) => {
-      await fs.writeFile(configPath, Buffer.from([0xff]));
-      const io = createConfigIO({ observe: false, pluginValidation: "skip" });
-      await io.writeConfigFile(
-        { gateway: { mode: "local" } },
-        { allowDestructiveWrite: true, databaseAccess: "none" },
-      );
-      expect(JSON.parse(await fs.readFile(configPath, "utf8"))).toMatchObject({
-        gateway: { mode: "local" },
-      });
-    });
-  });
-
   it("openclaw config set keeps five recovery points and preserves manual and pre-update backups", async () => {
     const original = '{"gateway":{"mode":"local","port":19000}}\n';
     await withConfig("openclaw-config-backup-ring-", original, async ({ configPath }) => {

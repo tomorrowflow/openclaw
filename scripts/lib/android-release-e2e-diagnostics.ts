@@ -1,5 +1,4 @@
 import path from "node:path";
-import { z } from "zod";
 
 /** Public failure facts must never copy command arguments, app text or raw logs. */
 export function androidReleaseCommandFacts(
@@ -26,6 +25,27 @@ export function androidReleaseCommandFacts(
   return {
     tool,
     operation,
+    // Stable-client build output is private too; retain only fixed failure classes.
+    buildFailure:
+      (
+        [
+          [
+            "dependency-resolution",
+            /could not resolve|could not download|could not get resource/iu,
+          ],
+          ["daemon", /daemon disappeared|unable to start the daemon|daemon.*unexpectedly/iu],
+          ["compilation", /compilation error|compilation failed|compile.*failed/iu],
+          ["sdk", /SDK location not found|failed to find.*SDK|license.*not accepted/iu],
+          ["java-version", /unsupported class file|requires Java|invalid source release/iu],
+          ["module-resolution", /cannot find (?:module|package)|ERR_MODULE_NOT_FOUND/iu],
+          ["tls", /PKIX path building failed|SSLHandshakeException/iu],
+          ["lock", /timeout waiting to lock|could not acquire.*lock/iu],
+        ] as const
+      ).find(([, pattern]) => pattern.test(output))?.[0] ?? "unknown",
+    buildHttpStatus:
+      /(?:status code|HTTP response code)\D{0,8}(401|403|404|429|500|502|503|504)\b/iu.exec(
+        output,
+      )?.[1] ?? undefined,
     permissionDenied: /permission denied/iu.test(output),
     missingFile: /no such file or directory/iu.test(output),
     deviceOffline: /device offline/iu.test(output),
@@ -87,49 +107,4 @@ export function androidReleaseNativeFacts(text: string) {
       .slice(0, 8)
       .map((match) => ({ file: `${match[1]}.kt`, line: Number(match[2]) })),
   };
-}
-
-const readerCoordinate = z.number().finite();
-const readerBounds = z
-  .string()
-  .max(128)
-  .regex(/^-?\d+ -?\d+ -?\d+ -?\d+$/u);
-const readerNode = z.object({
-  textLength: z.number().int().nonnegative(),
-  sentinelIndex: z.number().int().min(-1),
-  visible: z.boolean(),
-  bounds: readerBounds,
-  characterRefresh: z.boolean(),
-  characterBoxes: z
-    .array(
-      z.tuple([readerCoordinate, readerCoordinate, readerCoordinate, readerCoordinate]).nullable(),
-    )
-    .max(32)
-    .nullable(),
-  ancestors: z
-    .array(
-      z.object({
-        scrollable: z.boolean(),
-        visible: z.boolean(),
-        bounds: readerBounds,
-      }),
-    )
-    .max(32),
-});
-const readerCapture = z.object({
-  reader: z.object({
-    displayWidth: z.number().int().positive(),
-    displayHeight: z.number().int().positive(),
-    round: z.boolean(),
-    sentinels: z.object({
-      "HEAD SENTINEL": z.array(readerNode).max(8),
-      "TRAILING SENTINEL": z.array(readerNode).max(8),
-    }),
-  }),
-});
-
-/** Strip app text and identities at egress; only bounded reader geometry is public. */
-export function androidReleaseReaderFacts(input: unknown) {
-  const parsed = readerCapture.safeParse(input);
-  return parsed.success ? parsed.data.reader : undefined;
 }

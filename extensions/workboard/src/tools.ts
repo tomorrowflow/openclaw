@@ -1,6 +1,7 @@
 import {
   WORKBOARD_CARD_KINDS,
   WORKBOARD_STATUSES,
+  WORKBOARD_VERIFICATION_OUTCOMES,
   type WorkboardCard,
 } from "@openclaw/workboard-contract";
 import { jsonResult, readStringArrayParam, readStringParam } from "openclaw/plugin-sdk/core";
@@ -231,7 +232,7 @@ const toolSchemas = {
   release: strictObject({
     id: cardIdField(),
     token: claimTokenField(),
-    status: Type.Optional(Type.String({ description: "Optional next card status after release." })),
+    status: Type.Optional(Type.String({ description: "Omit: clear claim only, preserve status." })),
   }),
   comment: strictObject({
     id: cardIdField(),
@@ -284,6 +285,35 @@ const toolSchemas = {
     createdCardIds: Type.Optional(
       Type.Array(Type.String(), { description: "Cards created during this run." }),
     ),
+    claims: Type.Optional(
+      Type.Array(
+        strictObject({
+          statement: Type.String({ description: "One thing you claim the result does." }),
+          proofId: Type.Optional(
+            Type.String({ description: "Existing proof id that backs this claim." }),
+          ),
+        }),
+        {
+          description:
+            "Optional itemized claims, recorded as your claims; completion never waits on them.",
+        },
+      ),
+    ),
+  }),
+  verify: strictObject({
+    id: cardIdField(),
+    scope: Type.String({ description: "What you checked, and how." }),
+    outcome: Type.Union(
+      WORKBOARD_VERIFICATION_OUTCOMES.map((outcome) => Type.Literal(outcome)),
+      { description: "Your conclusion." },
+    ),
+    claimId: Type.Optional(Type.String({ description: "Claim record you checked." })),
+    proofId: Type.Optional(Type.String({ description: "Proof record you checked." })),
+    artifactId: Type.Optional(Type.String({ description: "Artifact you checked." })),
+    runId: Type.Optional(Type.String({ description: "Run whose result you checked." })),
+    note: Type.Optional(Type.String({ description: "Short finding." })),
+    url: Type.Optional(Type.String({ description: "http(s) link to your check." })),
+    token: ScopedClaimTokenField,
   }),
   attachment_add: strictObject({
     id: cardIdField(),
@@ -359,13 +389,14 @@ export function createWorkboardTools(params: {
 }): AnyAgentTool[] {
   const { store } = params;
   const ownerId = contextOwner(params.context);
+  const runId = params.context?.runId;
   const commentSource = normalizeCommentSource(
     params.context?.agentId ? `agent:${params.context.agentId}` : undefined,
   );
   // Every agent tool mutation is an agent's, including one without an agent id.
   const actor = commentSource && commentSource !== "operator" ? commentSource : "agent:unknown";
   const { readScopedCardToolParams, scopedCardMutation, claimedCardMutation } =
-    createWorkboardCardMutations(store, ownerId);
+    createWorkboardCardMutations(store, ownerId, runId);
   const tools: AnyAgentTool[] = [
     {
       name: "workboard_list",
@@ -505,7 +536,7 @@ export function createWorkboardTools(params: {
       name: "workboard_release",
       label: "Workboard Release",
       description:
-        "Release this agent's Workboard claim after finishing, pausing, or handing off card work.",
+        "Release this agent's Workboard claim. Omitting status only clears the claim and preserves the current card status, including running. Pass status (e.g. todo, ready, or review) to pause or hand off work.",
       parameters: toolSchemas.release,
       execute: scopedCardMutation((id, record, scope) =>
         store.releaseClaim(id, { ...scope, status: record.status }, actor),
@@ -567,6 +598,14 @@ export function createWorkboardTools(params: {
         "Complete a claimed Workboard card with a structured summary, proof, artifacts, and created-card manifest.",
       parameters: toolSchemas.complete,
       execute: claimedCardMutation((id, record, scope) => store.complete(id, record, scope, actor)),
+    },
+    {
+      name: "workboard_verify",
+      label: "Workboard Verify",
+      description:
+        "Record your check of a Workboard card's result: what you checked and what you concluded. Evidence only; it never changes the card's status.",
+      parameters: toolSchemas.verify,
+      execute: scopedCardMutation((id, record, scope) => store.verify(id, record, scope)),
     },
     {
       name: "workboard_attachment_add",
@@ -664,6 +703,7 @@ export function createWorkboardTools(params: {
     ...createWorkboardOrchestrationTools({
       store,
       ownerId,
+      runId,
       actor,
       agentId: params.context?.agentId,
       health: params.health,

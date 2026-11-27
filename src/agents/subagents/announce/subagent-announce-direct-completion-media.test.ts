@@ -88,7 +88,6 @@ it("retains the original failed text fallback error", async () => {
   expect(result).toMatchObject({
     delivered: false,
     path: "direct",
-    reason: "delivery_failed",
     error: "text completion direct delivery failed: synthetic channel failure",
   });
   expect(sendMessage).toHaveBeenCalledOnce();
@@ -152,7 +151,6 @@ it("does not settle or retry a partially sent media batch", async () => {
     delivered: false,
     terminal: true,
     disposition: "permanent_failure",
-    reason: "delivery_failed",
   });
   expect(sendMessage).toHaveBeenCalledOnce();
   expect(onDeliveryResult).not.toHaveBeenCalled();

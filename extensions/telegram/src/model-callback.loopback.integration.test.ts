@@ -15,7 +15,7 @@ import {
   listSessionEntriesAsync,
 } from "openclaw/plugin-sdk/session-store-runtime";
 import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TelegramCallbackMessageRuntime } from "./bot-handlers.callback-router-controls.js";
 import { createTelegramCallbackRouter } from "./bot-handlers.callback-router.js";
 import type { TelegramHandlerAuthorization } from "./bot-handlers.inbound-authorization.js";
@@ -106,6 +106,7 @@ async function withApi(
   run: (apiRoot: string, requests: TelegramApiRequest[]) => Promise<void>,
 ) {
   const requests: TelegramApiRequest[] = [];
+  let fixtureError: Error | undefined;
   const server = createServer((request, response) => {
     void readJsonBody(request)
       .then((payload) => {
@@ -114,14 +115,22 @@ async function withApi(
         handler(method, payload, response);
       })
       .catch((error: unknown) => {
-        response.destroy(error instanceof Error ? error : new Error(String(error)));
+        fixtureError = new Error("Telegram loopback API fixture failed", { cause: error });
+        response.destroy(fixtureError);
       });
   });
   await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
   try {
-    await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, requests);
+    try {
+      await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, requests);
+    } catch (error) {
+      throw fixtureError ?? error;
+    }
+    if (fixtureError) {
+      throw fixtureError;
+    }
   } finally {
     server.close();
     server.closeAllConnections();
@@ -216,6 +225,12 @@ function configureRouter(apiRoot: string, storePath: string, steps: string[] = [
 }
 
 describe("Telegram model callback loopback", () => {
+  beforeEach(() => {
+    // Keep this fixture's Bot API traffic local even when the host requires a proxy.
+    vi.stubEnv("NO_PROXY", "127.0.0.1,localhost,::1");
+    vi.stubEnv("no_proxy", "127.0.0.1,localhost,::1");
+  });
+
   afterEach(() => {
     resetTelegramClientOptionsCacheForTests();
     resetPluginRuntimeStateForTest();
@@ -437,22 +452,20 @@ describe("Telegram model callback loopback", () => {
 
         await tapModel(bot, callbackData, mediaMessage, true);
 
-        // Clear stale buttons before sending the replacement confirmation.
+        // Retire the stale controls only after the replacement has been accepted.
         expect(requests.map(({ method }) => method)).toEqual([
           "answerCallbackQuery",
           "editMessageText",
+          "sendMessage",
           "deleteMessage",
           "editMessageReplyMarkup",
-          "sendMessage",
         ]);
-        expect(requests[3]?.payload).toMatchObject({
+        expect(requests[4]?.payload).toMatchObject({
           chat_id: CHAT_ID,
           message_id: 99,
           reply_markup: { inline_keyboard: [] },
         });
-        expect(requests.at(-1)?.payload.text).toContain(
-          `Model changed to <b>${PROVIDER}/${MODEL}</b>`,
-        );
+        expect(requests[2]?.payload.text).toContain(`Model changed to <b>${PROVIDER}/${MODEL}</b>`);
       },
     );
   });

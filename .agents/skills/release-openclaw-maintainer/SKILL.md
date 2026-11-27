@@ -1,6 +1,6 @@
 ---
 name: release-openclaw-maintainer
-description: "Manage one OpenClaw release or orchestrate release owners across beta, stable, and extended-stable: preparation, hotfix routing, publication, handoff, and closeout."
+description: "Manage one OpenClaw release or orchestrate release owners across beta, stable, and extended-stable: preparation, fix-inclusion tracing, hotfix routing, publication, handoff, and closeout."
 ---
 
 # OpenClaw Release Maintainer
@@ -29,6 +29,7 @@ with current evidence rather than starting another release.
 Read only the references needed for the selected phase:
 
 - Regular beta/stable preparation or publication: [regular release](references/regular-release.md), which routes preparation and phase-specific proof. If the request does not specify stable/full, default to beta; beta authorization does not authorize later stable promotion.
+- Fix status, candidate inclusion, first published version, or cumulative upstream-fix counts: [fix-inclusion tracing](references/fix-inclusion.md).
 - Backport discovery and porting: [candidate inventory and worker brief](references/backport-discovery.md). For extended-stable also read [backport preparation](references/extended-stable-backports.md); SDK/config changes need a visible maintenance-risk warning and maintainer decision.
 - Extended-stable `.33+` Gateway publication: [extended-stable publication](references/extended-stable-publish.md). Use the shared publisher with extended-stable inputs; its non-Latest GitHub Release carries evidence without native-app or ClawHub publication.
 - Validation selection or failed proof: [validation and confidence](references/validation.md), with `$release-openclaw-ci` for workflow execution and immutable manifests.
@@ -37,11 +38,14 @@ Read only the references needed for the selected phase:
 - Stable postpublish synchronization and the exact-SHA deployment handoff:
   [main closeout](references/stable-main-closeout.md).
 - Release retrospective and shared issue ledger (every track, and any handoff
-  snapshot): [retrospective](references/retrospective.md).
+  snapshot): [retrospective](references/retrospective.md), including
+  [in-flight fix tracking](references/retrospective.md#track-in-flight-fixes-per-agent).
 - Release notes: `$openclaw-changelog-update`, including its separate approved post-release docs-mirror route. Initial release generation keeps its existing format; docs publication does not run automatically during release. Requested announcements: `$release-openclaw-announcement` for Discord, `$release-tweets` for X. Announcements never gate publication and require explicit posting authorization.
 - Published artifact verification: `$verify-release`. GHSA operations: `$openclaw-ghsa-maintainer` only with explicit security-workflow authorization.
 
 ## Backports and new fixes
+
+During preparation, complete the required [bundled Codex update and pin](references/preparation.md#update-and-pin-bundled-codex-required).
 
 For every release track, apply approved changes already on `main` directly to
 the canonical release branch, one commit at a time in dependency order with
@@ -76,18 +80,37 @@ recommended bookkeeping, not another release gate.
 
 ## Shared release boundaries
 
-FRV must conclude **success** under pinned P's
+FRV must conclude **success** with trusted P evaluating pinned Q’s
 [checked-in release-tooling policy](../../../docs/reference/full-release-validation/evidence.md#release-tooling-waivers).
-Only exact failed live-provider or Telegram leaves may be waived, without
-skipping tests or changing C/Q. All other required lanes must succeed: Windows
+Record the approved release version, child role, and short reason. Include a
+candidate SHA only for candidate-specific approval. Name a job to waive only
+that job, regardless of outcome or whether it ran. Optional `step` narrows the
+grant to that job’s first incomplete or failed step. Omit `jobName` to waive
+all descendants of the role without dispatch, lookup, reuse, or a receipt.
+Record the exception separately from a pass, keeping raw outcomes unchanged.
+See [#204382](https://github.com/openclaw/openclaw/pull/204382): cancellation in
+[Performance 45327586533](https://github.com/openclaw/openclaw/actions/runs/45327586533)
+blocked [FRV 45326913251](https://github.com/openclaw/openclaw/actions/runs/45326913251).
+For grant-only edits, reuse the policy tests; add cases only for new matching or
+validation behavior. Keep new reasons to one sentence and authorization details
+in the release handoff, not public Q data or published docs ([#199776](https://github.com/openclaw/openclaw/pull/199776)).
+Commit authorized grants directly to Q’s `scripts/lib/release-validation-waivers.json`;
+no grant PR to `main`, no grant cherry-pick into C. Pin the new Q in a fresh
+request/admission, then reevaluate eligible raw successful/failed receipts under
+its grants. Executable Q changes do not by themselves invalidate authenticated
+child receipts; opt out of reuse when the new harness must run. Historical artifact
+selection has a separate workload compatibility check. Public Q branches are not
+private storage.
+A grant does not change C. All unwaived required lanes must succeed: Windows
 and macOS Node and other normal CI jobs, install smoke, survivor
 lanes, `update-first-hop-compat*`, pack/npm qualification, package integrity,
 and Linux/Windows/macOS Gateway checks, including Windows packaged
-install/upgrade checks in Release Checks. A cancelled run still blocks. Preserve
+install/upgrade checks in Release Checks. A cancelled FRV parent still blocks. Preserve
 first failures and classify each one as below before recovery. Stable
 publication requires stable/full evidence, soak, and blocking performance.
-Beta-profile evidence cannot authorize stable publication. None of those hard
-gates, soak, or performance can be waived. All nine Gateway install/upgrade
+Beta-profile evidence cannot authorize stable publication. Hard gates and soak
+remain mandatory; performance exceptions are limited to the checked-in policy.
+All nine Gateway install/upgrade
 combinations across Linux, Windows, and macOS are required for all-group
 qualification. Preserve identity, provenance, complete evidence, and existing
 publication approvals.
@@ -101,7 +124,7 @@ blocker is a regression in shipped bytes or behavior, or an update/install/
 publish defect; fix it on the release branch. Rerun a flake on
 the same Release SHA with at most two recorded reruns by default, and file a
 fix-in-parallel issue or PR on `main` with the evidence. Never re-cut for a flake.
-A deliberate tooling-code waiver requires FRV validation under the new pinned P,
+A deliberate grant requires FRV validation under the new pinned Q,
 not a publisher override. An unwaived flake that remains red blocks publication.
 Main-only failures and infrastructure
 failures (runner outages, GitHub ghost jobs, hosted-runner offload) count as
@@ -148,7 +171,9 @@ verify their original admitted qualification identity (or historical trusted-mai
 workflow SHA) and current attempt. The sealed
 manifest supplies the SDK evidence digest and npm publication decisions; it
 never acknowledges SDK API changes, so supply
-`plugin_sdk_api_acknowledgement` whenever the SDK report contains changes. The
+`plugin_sdk_api_acknowledgement` whenever the SDK report contains changes.
+Review the diff and acknowledge it yourself; stop for the operator only if a
+change looks harmful. The
 publisher accepts only successful FRV and cannot grant a waiver. Explicit
 publisher inputs select publication scope; the candidate helper still validates its explicit
 SDK acknowledgement when needed.
@@ -193,7 +218,7 @@ matching record, and root index may use `split-changelog-release-v1`
 to reuse product proof while qualifying new publication bytes. Any other
 source delta, rename, or deletion returns to the Code SHA loop. Historical
 root-only receipts retain `changelog-only-release-v1`.
-New test qualification defaults to **Q=C**. An explicit reviewed main-ancestor
+New test qualification defaults to **Q=C**. An explicit assessed qualification
 **Q** may instead be admitted through the candidate route while **C** retains
 source, package bytes, version, and baselines. Keep independently trusted **P**
 (admission, aggregate decision, verifier, and publisher) separate. A Q repair
@@ -220,9 +245,11 @@ Explicit operator-approved additions follow the
 record the changed scope and requalify the new candidate, never silently reuse
 invalidated proof. A manager's opportunity notification is not that approval.
 
-Release process improvements normally land on both branches, except independent
-qualification-only repairs as described below.
-Workflow, release-script, release-test, `RELEASING.md`, and release-skill changes
+All release channels, including extended-stable, backport applicable release
+tooling and validation changes regardless of product-hotfix severity. Release
+process improvements normally land on both branches, except independent
+qualification-only repairs and Q-only grant data as described below.
+Executable workflow, release-script, release-test, `RELEASING.md`, and release-skill changes
 normally merge to `main` first, then get cherry-picked (`-x`) directly onto the
 canonical release branch for the next candidate or patch, without a backport PR.
 Urgent release-first repairs follow [the new-fix route](#backports-and-new-fixes).
@@ -241,7 +268,7 @@ each repair PR with a reason; confirm its fix is on `main` and, when it is relea
 tooling, on the release branch when the selected Q=C route requires it. Also
 remove the release's temporary worktrees,
 abandoned local cut branches, and stale `scripts/pr` worktrees. Then write the
-[retrospective](references/retrospective.md) and open its `openclaw/maintainers`
+[retrospective](references/retrospective.md) and open its `openclaw/tideclaw`
 PR with the issue-ledger update; keep a findings notes file from the start of the
 release so it can be written from evidence.
 
@@ -252,9 +279,15 @@ failures, repair their owner, retry the affected surface, then reassess rather
 than repeating the full release.
 
 Required publication proofs and enforced environment approvals remain required.
-A passing sibling cannot replace missing required evidence. npm + ClawHub is the
-priority path. macOS, Windows, Linux, and Android native publication runs in
-parallel and never gates npm/ClawHub, GitHub release finalization, or main closeout.
+A passing sibling cannot replace missing required evidence. Successfully publish
+selected npm plugins before core npm. ClawHub publication starts at its existing
+dispatch point but runs independently from then on: planning, authorization,
+dispatch, publication, verification, and recovery never gate core npm, GitHub
+release finalization, main closeout, or the retrospective PR. Retain a separate
+owner, run/attempt, status, and follow-up for pending or failed ClawHub work; do
+not report it as complete. macOS, Windows, Linux, and Android native publication
+also runs in parallel and never gates npm/ClawHub, GitHub release finalization,
+or main closeout.
 Selected Windows Node, Linux/Windows/macOS Gateway, and native-app CI failures
 block release validation. Platform publishers retain their own artifact
 and updater contracts; report pending platforms and proof gaps accurately.

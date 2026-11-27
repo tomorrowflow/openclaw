@@ -7,6 +7,7 @@ import {
 } from "../agents/failover/assistant-request-failure-copy.js";
 import { readTranscriptSenderIdentity } from "../chat/sender-identity.js";
 import { projectPreservedCatalogMessageForDisplay } from "../chat/session-catalog-display.js";
+import type { PendingTurnBoundary } from "../config/sessions/session-history-types.js";
 import {
   projectAgentHistoryActivity,
   type AgentHistoryActivity,
@@ -24,12 +25,12 @@ import {
   CONTEXT_OVERFLOW_ERROR_MESSAGE,
   formatProviderRefusalText,
 } from "../shared/assistant-error-format.js";
-import { readRunFailureNotice } from "../shared/run-failure-notice.js";
+import { readRunFailureCause, readRunFailureNotice } from "../shared/run-failure-notice.js";
+import { preserveCollectedSubagentCompletions } from "../shared/subagent-completion.js";
 import {
   isOpenClawMessageToolMirrorAssistantMessage,
   isTranscriptOnlyOpenClawAssistantMessage,
 } from "../shared/transcript-only-openclaw-assistant.js";
-import { projectAssistantCommentaryFallbacks } from "./chat-display-projection.commentary.js";
 import {
   DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
   extractAssistantTextForSilentCheck,
@@ -38,6 +39,7 @@ import {
   hasTranscriptMediaFacts,
   isAssistantTextContentType,
   isAssistantInternalReasoningContentType,
+  projectReplyMediaFailureText,
 } from "./chat-display-projection.helpers.js";
 import {
   createSubagentCoordinationHistoryProjection,
@@ -72,7 +74,7 @@ export type ChatDisplayProjectionOptions = {
   activity?: false;
   resolveCurrentUserProfileDisplay?: CurrentUserProfileDisplayResolver;
   stripEnvelope?: boolean;
-  turnBoundaryPending?: boolean;
+  turnBoundaryPending?: PendingTurnBoundary;
   assistantErrorPending?: boolean;
   subagentCoordination?: SubagentCoordinationDisplayResolver;
 };
@@ -133,7 +135,7 @@ function projectCurrentUserProfileAvatars(
 type ChatDisplayProjectionResult = {
   messages: Array<Record<string, unknown>>;
   activity: AgentHistoryActivity[];
-  turnBoundaryPending: boolean;
+  turnBoundaryPending: PendingTurnBoundary;
   assistantErrorPending: boolean;
   assistantErrorRecoveryObserved: boolean;
   commentaryFallbacksObserved?: true;
@@ -271,10 +273,7 @@ function isPureStreamErrorFallbackAssistantMessage(message: Record<string, unkno
   );
 }
 
-function hasVisibleAssistantDisplayContent(
-  message: Record<string, unknown>,
-  maxChars = Number.MAX_SAFE_INTEGER,
-): boolean {
+function hasVisibleAssistantDisplayContent(message: Record<string, unknown>): boolean {
   if (
     message.role !== "assistant" ||
     message.display === false ||
@@ -282,7 +281,7 @@ function hasVisibleAssistantDisplayContent(
   ) {
     return false;
   }
-  const sanitized = sanitizeChatHistoryMessage(message, maxChars).message as Record<
+  const sanitized = sanitizeChatHistoryMessage(message, Number.MAX_SAFE_INTEGER).message as Record<
     string,
     unknown
   >;
@@ -309,6 +308,32 @@ function hasVisibleAssistantReplyText(message: Record<string, unknown>): boolean
     const visible = text.trim();
     return visible.length > 0 && visible !== STREAM_ERROR_FALLBACK_TEXT;
   });
+}
+
+function isCompletedAssistantMessage(message: Record<string, unknown>): boolean {
+  return (
+    message.role === "assistant" &&
+    (message.stopReason === "stop" || message.stopReason === "length")
+  );
+}
+
+/** Sanitized reasoning is display material without being a recovery-completing answer. */
+function hasAssistantHistoryMaterial(message: Record<string, unknown>): boolean {
+  return (
+    hasVisibleAssistantReplyText(message) ||
+    hasAssistantDisplayableNonTextContent(message) ||
+    hasTranscriptMediaFacts(message) ||
+    (Array.isArray(message.content) &&
+      message.content.some((block) => {
+        const entry = asOptionalRecord(block);
+        return (
+          isAssistantInternalReasoningContentType(entry?.type) &&
+          [entry?.thinking, entry?.text].some(
+            (value) => typeof value === "string" && value.trim().length > 0,
+          )
+        );
+      }))
+  );
 }
 
 function isDiagnosticOnlyAssistantError(value: unknown): boolean {
@@ -395,28 +420,10 @@ export function createChatHistoryRecoveryProjection(options?: ChatHistoryRecover
       pendingIndexes.push(index);
       return;
     }
-    // Recovery matching needs the full reply; ordinary visibility checks use the preview bound.
-    const hasVisibleAssistant = hasVisibleAssistantDisplayContent(
-      message,
-      unseenPending || pendingIndexes.length > 0
-        ? Number.MAX_SAFE_INTEGER
-        : (options?.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS),
-    );
     if (
-      message.role === "assistant" &&
-      (message.stopReason === "stop" || message.stopReason === "length") &&
-      !hasVisibleAssistant &&
-      !unseenPending &&
-      pendingIndexes.length === 0 &&
-      // Commentary is not a final answer, but its fallback owner may retain it.
-      (!options?.includeCommentaryFallbacks ||
-        projectAssistantCommentaryFallbacks(message, Number.MAX_SAFE_INTEGER).fallbacks.length ===
-          0)
+      (!unseenPending && pendingIndexes.length === 0) ||
+      !hasVisibleAssistantDisplayContent(message)
     ) {
-      messages.pop();
-      return;
-    }
-    if ((!unseenPending && pendingIndexes.length === 0) || !hasVisibleAssistant) {
       return;
     }
     // An incremental reader carries only a pending bit. It must reload raw
@@ -482,7 +489,25 @@ function projectRunFailureNotices(
       const summary =
         readRunFailureNotice(message)?.summary ??
         (typeof message.content === "string" ? message.content.trim() : undefined);
-      return runId && summary ? [{ ...message, openclawRunError: { runId, summary } }] : [message];
+      const cause =
+        readRunFailureNotice(message)?.cause ??
+        readRunFailureCause(asOptionalRecord(message.details)?.cause);
+      const desktopNotice = asOptionalRecord(message.details)?.desktopNotice;
+      const desktopSummary =
+        typeof desktopNotice === "string" && desktopNotice.trim() ? desktopNotice : undefined;
+      return runId && summary
+        ? [
+            {
+              ...message,
+              openclawRunError: {
+                runId,
+                summary,
+                ...(desktopSummary ? { desktopSummary } : {}),
+                ...(cause ? { cause } : {}),
+              },
+            },
+          ]
+        : [message];
     }
     if (readSessionTranscriptRunId(message) && isPendingAssistantError(message)) {
       // Legacy receipt-less attempts stay in the raw transcript. Inactivity or
@@ -528,11 +553,7 @@ function projectEmptyAssistantErrorMessages(
 
 type ChatHistoryRecoveryOptions = Pick<
   ChatDisplayProjectionOptions,
-  | "maxChars"
-  | "stripEnvelope"
-  | "assistantErrorPending"
-  | "subagentCoordination"
-  | "includeCommentaryFallbacks"
+  "maxChars" | "stripEnvelope" | "assistantErrorPending" | "subagentCoordination"
 >;
 
 export function prepareChatHistoryRecoveryMessages(
@@ -540,7 +561,9 @@ export function prepareChatHistoryRecoveryMessages(
   options?: ChatHistoryRecoveryOptions,
 ) {
   const projectedMessages = messages.map((original) => {
-    const message = projectTranscriptImageArtifacts(prepareAssistantHistoryMessage(original));
+    const message = preserveCollectedSubagentCompletions(
+      projectTranscriptImageArtifacts(prepareAssistantHistoryMessage(original)),
+    );
     const entry = asOptionalRecord(message);
     const failureRunId = readSessionTranscriptFailureRunId(entry);
     if (failureRunId) {
@@ -620,7 +643,9 @@ export function projectChatDisplayMessagesWithState(
     : (options?.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS);
   const sanitizedMessages = sanitizeChatHistoryMessages(projectedErrors, normalizationMaxChars, {
     includeCommentaryFallbacks: options?.includeCommentaryFallbacks,
-  });
+  }).filter(
+    (message) => !isCompletedAssistantMessage(message) || hasAssistantHistoryMaterial(message),
+  );
   const commentaryFallbacksObserved =
     options?.includeCommentaryFallbacks === true &&
     sanitizedMessages.some(
@@ -636,7 +661,10 @@ export function projectChatDisplayMessagesWithState(
     options?.turnBoundaryPending,
   );
   const displayMessages = sanitizeChatHistoryMessages(
-    mergeTtsSupplementMessages(filtered.messages),
+    mapChatDisplayMessages(
+      mergeTtsSupplementMessages(filtered.messages),
+      projectReplyMediaFailureText,
+    ),
     options?.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
     { toolResultMaxChars: options?.toolResultMaxChars },
   );

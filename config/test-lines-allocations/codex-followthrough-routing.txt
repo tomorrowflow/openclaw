@@ -1,3 +1,0 @@
-# Exact net regression lines: private current-conversation route propagation through
-# agentCommandFromIngress in existing direct-root tests (69) and bounded diagnostics (43).
-112

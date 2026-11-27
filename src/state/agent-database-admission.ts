@@ -6,15 +6,21 @@ import {
   tryResolveLegacyCompatibilityAgentId,
 } from "../agents/agent-scope-config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
 import { collectNestedErrorCandidates } from "../infra/error-graph-internal.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { runWithSqliteDatabaseAdmissionTurn } from "../infra/sqlite-database-admission-turn.js";
 import { isSqliteLockError } from "../infra/sqlite-error-diagnostics.js";
 import {
+  hasSqliteWorkerOutcomeUnknown,
+  isSqliteWorkerError,
+} from "../infra/sqlite-worker-error.js";
+import {
   formatAgentDatabaseCorruptionRepairHint,
   formatAgentDatabaseOwnershipRepairHint,
 } from "../infra/state-migrations.agent-owner-guidance.js";
 import { resolveUpdateRehearsalRoot } from "../infra/update-rehearsal-paths.js";
+import { WorkerTaskError } from "../infra/worker-task-pool.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { sessionChanges } from "../sessions/session-row-changes.js";
@@ -36,7 +42,8 @@ export type AgentDatabaseAdmissionRefusal = {
       code:
         | "agent-database-inspection-pending"
         | "agent-database-inspection-failed"
-        | "agent-database-held";
+        | "agent-database-held"
+        | "agent-deletion";
       embeddedOwnerId?: undefined;
     }
 );
@@ -101,8 +108,17 @@ const preparation = new AsyncLocalStorage<{
   access: "read" | "write";
   active: boolean;
   assertCurrent: () => void;
+  signal?: AbortSignal;
   workers: AsyncDisposableStack;
 }>();
+
+/**
+ * Background work that a preparation started (such as model discovery) writes later as an
+ * ordinary caller: refused while admission is pending, admitted once the database is.
+ */
+export function runOutsideAgentDatabasePreparation<T>(run: () => T): T {
+  return preparation.exit(run);
+}
 
 /** Startup owns isolated native workers until preparation settles, including failed admission. */
 export function retainAgentDatabaseStartupWorker(
@@ -119,8 +135,19 @@ export function retainAgentDatabaseStartupWorker(
     return false;
   }
   scope.assertCurrent();
-  scope.workers.defer(close);
+  // Native owners retain closing generations; shutdown only stops this admission's wait.
+  scope.workers.defer(() => racePromiseWithAbortSignal(close(), scope.signal));
   return true;
+}
+
+/** Only rejected work or known contention can replay; mixed cleanup failures stay terminal. */
+export function isAgentDatabasePreparationRetryable(error: unknown): boolean {
+  return (
+    !hasSqliteWorkerOutcomeUnknown(error) &&
+    (isSqliteLockError(error) ||
+      isSqliteWorkerError(error, "overloaded") ||
+      (error instanceof WorkerTaskError && error.code === "overloaded"))
+  );
 }
 
 export function createAgentDatabaseInspectionRefusal(params: {
@@ -145,17 +172,18 @@ export function createAgentDatabaseInspectionRefusal(params: {
     paths: params.paths,
     code: params.pending ? "agent-database-inspection-pending" : "agent-database-inspection-failed",
     reason: locked ? "database locked by another process" : params.reason,
-    repairHint: locked
-      ? "Close other processes accessing this database, then restart the Gateway to retry admission. Lock contention does not require database repair."
-      : candidateSnapshotCapacity
-        ? "Free space in the reported snapshot cache, then retry the update. This candidate snapshot failure does not require repairing the serving database."
-        : serializationFailure
-          ? "A worker request could not be serialized. Update OpenClaw and restart the Gateway; repeating database migration will not repair this request."
-          : publicationFailure
-            ? "Sessions remain unavailable because newer config or plugin changes kept replacing this agent's runtime preparation. Restart the Gateway to retry admission. This failure does not require database repair."
-            : params.pending
-              ? 'Sessions remain unavailable until background inspection and preparation finish. If they cannot complete, stop the Gateway, run "openclaw doctor --fix", and restart.'
-              : `Sessions remain unavailable. ${formatAgentDatabaseCorruptionRepairHint(params.agentId, params.cause) ?? 'Stop the Gateway, run "openclaw doctor --fix" to inspect and repair this agent database, and restart.'}`,
+    repairHint:
+      !params.pending && isAgentDatabasePreparationRetryable(params.cause)
+        ? "Wait for competing database work to finish, then restart the Gateway to retry admission. Lock or worker capacity contention does not require database repair."
+        : candidateSnapshotCapacity
+          ? "Free space in the reported snapshot cache, then retry the update. This candidate snapshot failure does not require repairing the serving database."
+          : serializationFailure
+            ? "A worker request could not be serialized. Update OpenClaw and restart the Gateway; repeating database migration will not repair this request."
+            : publicationFailure
+              ? "Sessions remain unavailable because newer config or plugin changes kept replacing this agent's runtime preparation. Restart the Gateway to retry admission. This failure does not require database repair."
+              : params.pending
+                ? "Startup preparation is in progress or waiting for capacity. Retry the request after startup preparation finishes. Pending startup does not indicate a database failure."
+                : `Sessions remain unavailable. ${formatAgentDatabaseCorruptionRepairHint(params.agentId, params.cause) ?? 'Stop the Gateway, run "openclaw doctor --fix" to inspect and repair this agent database, and restart.'}`,
   };
   refusalCauses.set(refusal, params.cause);
   return refusal;
@@ -172,6 +200,19 @@ function sameKnownState(left: string, right: string): boolean {
   const leftIdentity = openClawStateDatabaseCache.getKnownOpenClawStateDatabaseIdentity(left);
   const rightIdentity = openClawStateDatabaseCache.getKnownOpenClawStateDatabaseIdentity(right);
   return Boolean(leftIdentity && rightIdentity && leftIdentity.key === rightIdentity.key);
+}
+
+export function createAgentDatabaseDeletionRefusal(
+  refusal: AgentDatabaseAdmissionRefusal,
+): AgentDatabaseAdmissionRefusal {
+  return {
+    agentId: refusal.agentId,
+    paths: refusal.paths,
+    code: "agent-deletion",
+    reason: `Agent ${refusal.agentId} was deleted during startup inspection`,
+    repairHint:
+      "Deletion has closed this agent's admission. If cleanup remains pending, resolve its reported failure and retry agents.delete. Database repair is not required.",
+  };
 }
 
 export function createAgentDatabaseHeldRefusal(
@@ -256,13 +297,7 @@ export function captureAgentDatabasePreparationDeletionForIdentity(
         continue;
       }
       const refusals = new Map(owner.refusals);
-      refusals.set(
-        id,
-        createAgentDatabaseInspectionRefusal({
-          ...refusal,
-          reason: `Agent ${id} was deleted during startup inspection`,
-        }),
-      );
+      refusals.set(id, createAgentDatabaseDeletionRefusal(refusal));
       owner.refusals = refusals;
     }
   };
@@ -291,7 +326,7 @@ export function captureAgentDatabasePreparationJournal(
   return (present) => {
     assertCurrent();
     if (present !== false) {
-      throw new Error(`Agent ${scope.refusal.agentId} was deleted during startup inspection`);
+      throw new AgentDatabaseAdmissionError(createAgentDatabaseDeletionRefusal(scope.refusal));
     }
   };
 }
@@ -416,10 +451,21 @@ export function readAgentDatabaseReadAdmissionRefusal(
   agentId: string,
   options: AdmissionOptions = {},
 ): AgentDatabaseAdmissionRefusal | undefined {
-  const key = stateKey(options);
+  return readSelectedAgentDatabaseReadAdmissionRefusal(
+    stateKey(options),
+    normalizeAgentId(agentId),
+    agentId,
+  );
+}
+
+function readSelectedAgentDatabaseReadAdmissionRefusal(
+  key: string,
+  normalizedAgentId: string,
+  agentId: string,
+): AgentDatabaseAdmissionRefusal | undefined {
   const refusal = readSelectedAgentDatabaseAdmissionRefusal(
     key,
-    normalizeAgentId(agentId),
+    normalizedAgentId,
     agentId,
     "read",
   );
@@ -552,7 +598,7 @@ function readSelectedAgentDatabaseAdmissionRefusal(
 /** Preparation borrows only its own pending admission; public callers remain refused. */
 export async function preparePendingAgentDatabase(
   refusal: AgentDatabaseAdmissionRefusal,
-  options: AdmissionOptions & { assertCurrent: () => void },
+  options: AdmissionOptions & { assertCurrent: () => void; signal?: AbortSignal },
   run: () => Promise<void>,
 ): Promise<void> {
   await withPendingAgentDatabasePreparation(refusal, options, "write", run);
@@ -570,7 +616,7 @@ export async function preparePendingAgentDatabaseRead(
 
 async function withPendingAgentDatabasePreparation(
   refusal: AgentDatabaseAdmissionRefusal,
-  options: AdmissionOptions & { assertCurrent: () => void },
+  options: AdmissionOptions & { assertCurrent: () => void; signal?: AbortSignal },
   access: "read" | "write",
   run: () => Promise<void>,
 ): Promise<void> {
@@ -591,6 +637,7 @@ async function withPendingAgentDatabasePreparation(
     assertCurrent,
     access,
     active: true,
+    signal: options.signal,
     workers: new AsyncDisposableStack(),
   };
   try {
@@ -623,7 +670,15 @@ export function failPendingAgentDatabase(
   const refusals = new Map(current.refusals);
   refusals.set(
     refusal.agentId,
-    createAgentDatabaseInspectionRefusal({ ...refusal, reason: formatErrorMessage(cause), cause }),
+    cause instanceof AgentDatabaseAdmissionError &&
+      cause.refusal.agentId === refusal.agentId &&
+      cause.refusal.code !== "agent-database-inspection-pending"
+      ? cause.refusal
+      : createAgentDatabaseInspectionRefusal({
+          ...refusal,
+          reason: formatErrorMessage(cause),
+          cause,
+        }),
   );
   current.refusals = refusals;
 }
@@ -663,12 +718,15 @@ export function assertAgentDatabaseAdmitted(agentId: string, options: AdmissionO
 /** Capture only the selector; refusal decisions and the caller's preparation remain live. */
 export function captureAgentDatabaseAdmission(
   agentId: string,
-  options: AdmissionOptions = {},
+  options: AdmissionOptions & { access?: "read" | "write" } = {},
 ): () => void {
   const key = stateKey(options);
   const normalizedAgentId = normalizeAgentId(agentId);
+  const readOnly = options.access === "read";
   return () => {
-    const refusal = readSelectedAgentDatabaseAdmissionRefusal(key, normalizedAgentId, agentId);
+    const refusal = readOnly
+      ? readSelectedAgentDatabaseReadAdmissionRefusal(key, normalizedAgentId, agentId)
+      : readSelectedAgentDatabaseAdmissionRefusal(key, normalizedAgentId, agentId);
     if (refusal) {
       throw new AgentDatabaseAdmissionError(refusal);
     }

@@ -53,17 +53,7 @@ describe("Gateway completed requester replay", () => {
       const instance = await createOpenClawTestInstance({
         name: "gateway-completion-replay",
         config: createConfig(model.url),
-        env: {
-          OPENCLAW_SKIP_PROVIDERS: undefined,
-          OPENCLAW_TEST_MINIMAL_GATEWAY: undefined,
-          // Only the owned loopback provider is direct; external proxy routing is preserved.
-          NO_PROXY: [process.env.no_proxy ?? process.env.NO_PROXY, "127.0.0.1", "localhost", "::1"]
-            .filter(Boolean)
-            .join(","),
-          no_proxy: [process.env.no_proxy ?? process.env.NO_PROXY, "127.0.0.1", "localhost", "::1"]
-            .filter(Boolean)
-            .join(","),
-        },
+        env: { OPENCLAW_SKIP_PROVIDERS: undefined, OPENCLAW_TEST_MINIMAL_GATEWAY: undefined },
       });
       instances.push(instance);
       instance.state.applyEnv();
@@ -150,6 +140,11 @@ describe("Gateway completed requester replay", () => {
         expect(model.effectCalls()).toBe(1);
         expect(model.failures()).toEqual([]);
         await expect(fs.readFile(effectPath, "utf8")).resolves.toBe("effect\n");
+      } catch (error) {
+        // Preserve the restarted process failure before fixture teardown removes its state.
+        throw new Error(String(error) + "\nGateway after restart: " + instance.logs(), {
+          cause: error,
+        });
       } finally {
         await disconnectGatewayClient(restoredClient);
         await instance.stopGateway();

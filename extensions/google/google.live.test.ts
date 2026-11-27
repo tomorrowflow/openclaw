@@ -25,7 +25,7 @@ import {
 } from "../test-support/message-fixtures.test-support.js";
 import { RED_H264_VIDEO_BASE64 as GOOGLE_LIVE_RED_VIDEO_BASE64 } from "../test-support/native-video-fixture.test-support.js";
 import plugin from "./index.js";
-import { buildGoogleLiveCatalogProvider } from "./provider-catalog-runtime.js";
+import { loadGoogleLiveCatalog } from "./provider-catalog-runtime.js";
 import { buildGoogleRealtimeVoiceProvider } from "./realtime-voice-provider.js";
 import { createGeminiWebSearchProvider } from "./src/gemini-web-search-provider.js";
 
@@ -117,7 +117,7 @@ describeLive("google plugin live", () => {
   it.each(["gemini-4-argon", "gemini-3.8-flash", "gemini-3.5-flash-lite"])(
     "discovers and completes through %s",
     async (modelId) => {
-      const provider = await buildGoogleLiveCatalogProvider({
+      const { provider } = await loadGoogleLiveCatalog({
         apiKey: "GEMINI_API_KEY",
         discoveryApiKey: GOOGLE_API_KEY,
       });
@@ -146,7 +146,7 @@ describeLive("google plugin live", () => {
   );
 
   it("completes a Gemini 4 tool-call round trip with unsigned replay through the registered transport", async () => {
-    const catalog = await buildGoogleLiveCatalogProvider({
+    const { provider: catalog } = await loadGoogleLiveCatalog({
       apiKey: "GEMINI_API_KEY",
       discoveryApiKey: GOOGLE_API_KEY,
     });
@@ -157,19 +157,14 @@ describeLive("google plugin live", () => {
       provider: "google",
       baseUrl: catalog.baseUrl,
       api: "google-generative-ai",
-    } as ProviderModel<"google-generative-ai">;
+    } as Model<"google-generative-ai">;
     const { providers } = await registerGooglePlugin();
     const provider = requireRegisteredProvider(providers, "google");
     const streamFn = provider.createStreamFn?.({
       provider: "google",
       modelId: model.id,
-      model: model as never,
-    }) as
-      | ProviderStreamFunction<
-          "google-generative-ai",
-          SimpleStreamOptions & { toolChoice: "required" | "none" }
-        >
-      | undefined;
+      model,
+    });
     if (!streamFn) {
       throw new Error("registered Google provider did not create its chat transport");
     }
@@ -178,10 +173,14 @@ describeLive("google plugin live", () => {
       "Call live_echo with value argon. Do not answer directly.",
       Date.now(),
     );
-    const first = await streamFn(
-      model,
-      { messages: [userPrompt], tools: [tool] },
-      { apiKey: GOOGLE_API_KEY, reasoning: "low", maxTokens: 2048, toolChoice: "required" },
+    const firstOptions: SimpleStreamOptions & { toolChoice: "required" } = {
+      apiKey: GOOGLE_API_KEY,
+      reasoning: "low",
+      maxTokens: 2048,
+      toolChoice: "required",
+    };
+    const first = await (
+      await streamFn(model, { messages: [userPrompt], tools: [tool] }, firstOptions)
     ).result();
     expect(first.stopReason, first.errorMessage).toBe("toolUse");
     const call = first.content.find((block) => block.type === "toolCall");
@@ -199,18 +198,26 @@ describeLive("google plugin live", () => {
       name: call.name,
       arguments: call.arguments,
     };
-    const second = await streamFn(
-      model,
-      {
-        messages: [
-          userPrompt,
-          { ...first, content: [unsignedCall] },
-          makeTextToolResult(call.id, call.name, "argon", false, Date.now()),
-          { role: "user", content: "Reply with exactly: argon", timestamp: Date.now() },
-        ],
-        tools: [tool],
-      },
-      { apiKey: GOOGLE_API_KEY, reasoning: "low", maxTokens: 2048, toolChoice: "none" },
+    const secondOptions: SimpleStreamOptions & { toolChoice: "none" } = {
+      apiKey: GOOGLE_API_KEY,
+      reasoning: "low",
+      maxTokens: 2048,
+      toolChoice: "none",
+    };
+    const second = await (
+      await streamFn(
+        model,
+        {
+          messages: [
+            userPrompt,
+            { ...first, content: [unsignedCall] },
+            makeTextToolResult(call.id, call.name, "argon", false, Date.now()),
+            { role: "user", content: "Reply with exactly: argon", timestamp: Date.now() },
+          ],
+          tools: [tool],
+        },
+        secondOptions,
+      )
     ).result();
     expect(second.stopReason, second.errorMessage).toBe("stop");
     const answer = second.content
@@ -222,7 +229,7 @@ describeLive("google plugin live", () => {
   }, 180_000);
 
   it("understands native video through the registered Google chat transport", async () => {
-    const catalog = await buildGoogleLiveCatalogProvider({
+    const { provider: catalog } = await loadGoogleLiveCatalog({
       apiKey: "GEMINI_API_KEY",
       discoveryApiKey: GOOGLE_API_KEY,
     });

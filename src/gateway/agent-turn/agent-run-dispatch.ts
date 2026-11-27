@@ -15,7 +15,7 @@ import {
 } from "../../agents/cron-creator-authority-context.js";
 import { findReplaySafeRunAbort } from "../../agents/embedded-agent-runner/transcript-conflict.js";
 import { isTimeoutError } from "../../agents/failover-error.js";
-import { runWithCanonicalSkillWorkspace } from "../../agents/skill-workshop-workspace-context.js";
+import { isHostMissingReplyNoticeText } from "../../agents/reply-completion.js";
 import type {
   FollowupCompletionOwner,
   FollowupReply,
@@ -92,7 +92,6 @@ export function dispatchAgentRunFromGateway(params: {
   cleanupAbortController: () => void | Promise<void>;
   io: AgentTurnIo;
   context: AgentTurnContext;
-  canonicalSkillWorkspaceDir?: string;
   commandRuntimeContext?: PreparedAgentCommandRuntimeContext;
   /** Privacy classification carried from the resolved session entry. */
   isIncognito?: boolean;
@@ -335,15 +334,13 @@ export function dispatchAgentRunFromGateway(params: {
       readAgentRunDispatchExecutionIdentity(params),
     );
     const invoke = () =>
-      runWithCanonicalSkillWorkspace(params.canonicalSkillWorkspaceDir, () =>
-        agentCommandFromGatewayIngress(
-          cronCreatorAuthorityCapability
-            ? { ...ingressOptsWithSpawnFacts, cronCreatorAuthorityCapability }
-            : ingressOptsWithSpawnFacts,
-          diagnostics.runtime,
-          params.context.deps,
-          params.commandRuntimeContext,
-        ),
+      agentCommandFromGatewayIngress(
+        cronCreatorAuthorityCapability
+          ? { ...ingressOptsWithSpawnFacts, cronCreatorAuthorityCapability }
+          : ingressOptsWithSpawnFacts,
+        diagnostics.runtime,
+        params.context.deps,
+        params.commandRuntimeContext,
       );
     if (followupCompletion) {
       if (
@@ -478,6 +475,10 @@ export function dispatchAgentRunFromGateway(params: {
             : responseStatus === "error"
               ? "failed"
               : "completed",
+        // agent.wait reads this replay. Keep the host's retry guidance, never arbitrary diagnostics.
+        ...(responseStatus === "error" && isHostMissingReplyNoticeText(terminalOutcome.error)
+          ? { error: terminalOutcome.error }
+          : {}),
         ...(responseStatus !== "ok" && terminalOutcome.stopReason
           ? { stopReason: terminalOutcome.stopReason }
           : {}),

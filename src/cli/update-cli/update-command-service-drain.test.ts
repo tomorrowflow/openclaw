@@ -14,14 +14,18 @@ import type { CallGatewayCliOptions } from "../../gateway/call.js";
 import { GATEWAY_STALE_INSTALL_CLOSE_REASON } from "../../gateway/stale-install.js";
 import { createGatewayCloseTransportError } from "../../gateway/transport-error.js";
 import type { PortUsage } from "../../infra/ports-types.js";
-import { DEFAULT_UPDATE_STEP_TIMEOUT_MS } from "../../infra/update-run-timeouts.js";
 import { gatewayHello } from "./update-command-service-fixtures.test-support.js";
 
 const mocks = vi.hoisted(() => ({
+  auth: vi.fn(),
   call: vi.fn(),
   managerTimeout: vi.fn(),
   legacyLock: vi.fn(),
   portUsage: vi.fn(),
+}));
+vi.mock("../../gateway/call-device-auth.js", async (actual) => ({
+  ...(await actual<typeof import("../../gateway/call-device-auth.js")>()),
+  resolveReadOnlyLocalGatewayAuth: mocks.auth,
 }));
 vi.mock("../../gateway/call.js", () => ({ callGatewayCli: mocks.call }));
 vi.mock("../../infra/gateway-lock-legacy.js", () => ({
@@ -93,6 +97,7 @@ const delay = (ms: number) =>
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance", "Date"] });
+  mocks.auth.mockReset().mockResolvedValue({ token: "fixture-token" });
   mocks.call.mockReset();
   mocks.managerTimeout.mockReset().mockResolvedValue(330_000);
   mocks.legacyLock.mockReset().mockResolvedValue(undefined);
@@ -178,7 +183,7 @@ function fixture(
       return options.resident ?? { pid: 42, shutdownBudget: { timeoutMs: 25_000 } };
     }
     if (request.method === "system.info") {
-      return { pid: 42, processInstanceId: "resident-instance" };
+      return { pid: options.resident?.pid ?? 42, processInstanceId: "resident-instance" };
     }
     if (request.method === "gateway.suspend.prepare") {
       const observed = expectDefined(
@@ -318,38 +323,30 @@ it("retains stop authority after checking an offline Gateway port", async () => 
   expect(f.stop).not.toHaveBeenCalled();
 });
 
-// The bounded drain replaces the 30-minute update step deadline, so a running
-// Gateway with a free port gets startup time to bind and still releases state
-// custody to its replacement within the drain budget.
-it("stops a running Gateway whose port stays free at the drain budget, not before", async () => {
+it("stops an offline Gateway without waiting on unavailable client credentials", async () => {
   const f = fixture();
-  mocks.call.mockRejectedValue(
-    Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
-  );
-  mocks.portUsage.mockResolvedValue({ port: 18789, status: "free", listeners: [], hints: [] });
-  const running = withGatewayMaintenanceDrain(
-    { ...f.params, timeoutMs: DEFAULT_UPDATE_STEP_TIMEOUT_MS },
-    f.stop,
-  );
-  await vi.advanceTimersByTimeAsync(29_000);
-  expect(f.stop).not.toHaveBeenCalled();
-  await vi.advanceTimersByTimeAsync(1_000);
+  f.params.state.running = false;
+  f.params.state.runtime = { status: "stopped" };
+  mocks.auth.mockRejectedValue(new Error("Client credential directory is unsafe."));
+  mocks.portUsage.mockResolvedValue(portUsage("free", []));
+
+  const running = f.run();
+  await vi.advanceTimersByTimeAsync(0);
   expect(f.stop).toHaveBeenCalledOnce();
   await expect(running).resolves.toBe("stopped");
-  expect(f.warn).toHaveBeenCalledWith(expect.stringContaining("drain deadline reached"));
+  expect(f.warn).not.toHaveBeenCalled();
+  expect(mocks.auth).not.toHaveBeenCalled();
 });
 
-it("keeps draining a running Gateway whose port is still bound", async () => {
+it("keeps explicit drain requirements for an offline Gateway with unavailable credentials", async () => {
   const f = fixture();
-  mocks.call.mockRejectedValue(
-    Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" }),
-  );
-  const running = withGatewayMaintenanceDrain(f.params, f.stop);
-  await vi.advanceTimersByTimeAsync(0);
+  f.params.state.running = false;
+  f.params.state.runtime = { status: "stopped" };
+  mocks.auth.mockRejectedValue(new Error("Client credential directory is unsafe."));
+  mocks.portUsage.mockResolvedValue(portUsage("free", []));
+
+  expect(await f.outcome()).toMatchObject({ message: "Client credential directory is unsafe." });
   expect(f.stop).not.toHaveBeenCalled();
-  await vi.advanceTimersByTimeAsync(f.params.timeoutMs);
-  await expect(running).resolves.toBe("stopped");
-  expect(f.warn).toHaveBeenCalledWith(expect.stringContaining("drain deadline reached"));
 });
 
 it.each(["admitted work", "published resident", "expired observation"] as const)(
@@ -634,6 +631,33 @@ it.each(["authority", "boot"] as const)(
       change === "authority" ? "service operation authority lost" : "Gateway process changed",
     );
     expect(f.events).toEqual(change === "authority" ? ["status", "observe:ready"] : ["status"]);
+    expect(f.stop).not.toHaveBeenCalled();
+  },
+);
+
+// Runtime recovery reruns a Gateway whose Node fails admission under another
+// Node: systemd's main process is the launcher and its child serves (#202954).
+it.each([
+  { listener: { pid: 43, ppid: 42 }, explicit: false, stops: true },
+  { listener: { pid: 43, ppid: 42 }, explicit: true, stops: true },
+  { listener: { pid: 43, ppid: 7 }, explicit: false, stops: false },
+  { listener: { pid: 44, ppid: 42 }, explicit: false, stops: false },
+])(
+  "drains a resident $listener.pid served under launcher $listener.ppid (explicit=$explicit, stops=$stops)",
+  async ({ listener, explicit, stops }) => {
+    const f = fixture({ resident: { pid: 43 } });
+    mocks.portUsage.mockResolvedValue(portUsage("busy", [listener]));
+    const running = explicit ? f.interrupt() : f.run();
+    if (stops) {
+      await expect(running).resolves.toBe("stopped");
+      expect(f.events).toEqual(
+        explicit
+          ? ["status", "observe:ready", "handoff", "stop"]
+          : ["status", "observe:ready", "stop"],
+      );
+      return;
+    }
+    await expect(running).rejects.toThrow("Gateway process changed");
     expect(f.stop).not.toHaveBeenCalled();
   },
 );

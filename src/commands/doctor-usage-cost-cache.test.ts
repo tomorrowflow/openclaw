@@ -217,13 +217,7 @@ describe("legacy usage-cost cache cleanup", () => {
       const query = "SELECT * FROM cache_entries ORDER BY scope, key";
       const before = firstDatabase.db.prepare(query).all();
       if (failure === "inspection") {
-        const stat = fs.stat;
-        vi.spyOn(fs, "stat").mockImplementation((...args) => {
-          if (args[0] === firstDatabase.path) {
-            return Promise.reject(fsError("EACCES"));
-          }
-          return stat(...args);
-        });
+        vi.spyOn(fs, "stat").mockRejectedValueOnce(fsError("EACCES"));
       } else if (failure === "write") {
         vi.spyOn(usageCacheSqlite, "retireLegacySessionCostUsageCache").mockRejectedValueOnce(
           new Error("pruning rejected"),
@@ -262,7 +256,13 @@ describe("legacy usage-cost cache cleanup", () => {
     if (operation === "readdir") {
       vi.spyOn(fs, "readdir").mockRejectedValueOnce(error);
     } else {
-      vi.spyOn(fs, "stat").mockRejectedValueOnce(error);
+      const stat = fs.stat;
+      vi.spyOn(fs, "stat").mockImplementation((...args) => {
+        if (args[0] === tempFile) {
+          return Promise.reject(error);
+        }
+        return stat(...args);
+      });
     }
     await maybeRepairLegacyRuntimeFiles(shouldRepair, { OPENCLAW_STATE_DIR: root });
     if (diagnostic) {

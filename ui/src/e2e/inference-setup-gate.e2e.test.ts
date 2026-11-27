@@ -23,68 +23,92 @@ async function expectSetupRoute(page: Page) {
 }
 
 suite.define(() => {
-  it("keeps help available on empty chat home while messages require a model", async () => {
-    await withSetupPage(async (page, gateway) => {
-      await page.goto(`${suite.server.baseUrl}chat`);
-      await page.getByRole("heading", { name: "No AI provider configured" }).waitFor();
+  it.each([null, "openai/test-model"])(
+    "keeps help available while unconnected models require setup (%s)",
+    async (agentModel) => {
+      await withSetupPage(
+        async (page, gateway) => {
+          await page.goto(`${suite.server.baseUrl}chat`);
+          await page.locator(".agent-chat__empty").waitFor();
 
-      await expect.poll(() => page.locator(".agent-chat__composer-shell").count()).toBe(1);
-      const textarea = page.locator(".agent-chat__composer-combobox textarea");
-      await expect.poll(() => textarea.isDisabled()).toBe(false);
-      const welcome = page.locator(".agent-chat__welcome--setup");
-      const setupAction = page.getByRole("button", { name: "Connect an AI provider", exact: true });
-      await expect.poll(() => setupAction.count()).toBe(1);
-      await setupAction.click();
-      await expectSetupRoute(page);
-      await page.goBack();
-      const sendButton = page.getByRole("button", { name: "Send message", exact: true });
-      await textarea.fill("/help");
-      await expect.poll(() => sendButton.isDisabled()).toBe(false);
-      await sendButton.click();
-      await page.getByText("Available Commands", { exact: true }).waitFor();
-      expect(await gateway.getRequests("chat.send")).toHaveLength(0);
-      await expect.poll(() => welcome.count()).toBe(0);
-      await expect.poll(() => setupAction.count()).toBe(1);
-      await expect
-        .poll(() =>
-          page.locator(".agent-chat__composer-shell").evaluate((shell) => {
-            const banner = shell.querySelector(".agent-chat__disabled-banner");
-            const input = shell.querySelector(".agent-chat__input");
-            if (!banner || !input) {
-              throw new Error("expected setup notice above the composer");
-            }
-            return {
-              stylesMatch: ["border-radius", "corner-shape"].every(
-                (key) =>
-                  getComputedStyle(banner).getPropertyValue(key) ===
-                  getComputedStyle(input).getPropertyValue(key),
-              ),
-              edgesMatch: (["left", "right"] as const).every(
-                (edge) =>
-                  Math.abs(
-                    banner.getBoundingClientRect()[edge] - input.getBoundingClientRect()[edge],
-                  ) <= 1,
-              ),
-            };
-          }),
-        )
-        .toEqual({ stylesMatch: true, edgesMatch: true });
-      await setupAction.click();
-      await expectSetupRoute(page);
-      await page.goBack();
-      await textarea.fill("Start a conversation.");
-      await expect.poll(() => sendButton.isDisabled()).toBe(true);
-      expect(await textarea.inputValue()).toBe("Start a conversation.");
-      expect(await gateway.getRequests("chat.send")).toHaveLength(0);
-    });
-  });
+          await expect.poll(() => page.locator(".agent-chat__composer-shell").count()).toBe(1);
+          const textarea = page.locator(".agent-chat__composer-combobox textarea");
+          await expect.poll(() => textarea.isDisabled()).toBe(false);
+          const welcome = page.locator(".agent-chat__welcome--setup");
+          const setupAction = page.getByRole("button", {
+            name: "Set up a model",
+            exact: true,
+          });
+          await expect.poll(() => setupAction.count()).toBe(1);
+          await setupAction.click();
+          await expectSetupRoute(page);
+          await page.goBack();
+          const sendButton = page.getByRole("button", { name: "Send message", exact: true });
+          await textarea.fill("/help");
+          await expect.poll(() => sendButton.isDisabled()).toBe(false);
+          await sendButton.click();
+          await page.getByText("Available commands", { exact: true }).waitFor();
+          expect(await gateway.getRequests("chat.send")).toHaveLength(0);
+          await expect.poll(() => welcome.count()).toBe(0);
+          await expect.poll(() => setupAction.count()).toBe(1);
+          await expect
+            .poll(() =>
+              page.locator(".agent-chat__composer-shell").evaluate((shell) => {
+                const banner = shell.querySelector(".agent-chat__disabled-banner");
+                const input = shell.querySelector(".agent-chat__input");
+                if (!banner || !input) {
+                  throw new Error("expected setup notice above the composer");
+                }
+                return {
+                  stylesMatch: ["border-radius", "corner-shape"].every(
+                    (key) =>
+                      getComputedStyle(banner).getPropertyValue(key) ===
+                      getComputedStyle(input).getPropertyValue(key),
+                  ),
+                  edgesMatch: (["left", "right"] as const).every(
+                    (edge) =>
+                      Math.abs(
+                        banner.getBoundingClientRect()[edge] - input.getBoundingClientRect()[edge],
+                      ) <= 1,
+                  ),
+                };
+              }),
+            )
+            .toEqual({ stylesMatch: true, edgesMatch: true });
+          await setupAction.click();
+          await expectSetupRoute(page);
+          await page.goBack();
+          await textarea.fill("Start a conversation.");
+          await expect.poll(() => sendButton.isDisabled()).toBe(true);
+          expect(await textarea.inputValue()).toBe("Start a conversation.");
+          expect(await gateway.getRequests("chat.send")).toHaveLength(0);
+        },
+        {
+          agentModel,
+          ...(agentModel
+            ? {
+                sessionInfo: {
+                  model: "test-model",
+                  modelProvider: "openai",
+                  modelOverrideSource: null,
+                },
+                models: [
+                  { id: "test-model", name: "Test Model", provider: "openai", available: false },
+                ],
+                methodResponses: { "models.authStatus": { ts: 1, providers: [] } },
+              }
+            : {}),
+        },
+      );
+    },
+  );
 
   it.each(["new", "custodian"])("blocks %s until a model is connected", async (surface) => {
     const custodian = surface === "custodian";
     await withSetupPage(
       async (page, gateway) => {
         await page.goto(`${suite.server.baseUrl}${custodian ? "custodian" : "new?agent=main"}`);
-        await page.getByRole("heading", { name: "No AI provider configured" }).waitFor();
+        await page.getByRole("heading", { name: "No model set up" }).waitFor();
         const composer = custodian ? ".agent-chat__composer-shell" : ".new-session-page__composer";
         await expect.poll(() => page.locator(composer).count()).toBe(0);
         await expect.poll(() => page.locator("textarea").count()).toBe(0);
@@ -97,7 +121,7 @@ suite.define(() => {
 
           await page.setViewportSize({ height: 520, width: 900 });
           await expect
-            .poll(() => page.getByRole("button", { name: "Connect an AI provider" }).isVisible())
+            .poll(() => page.getByRole("button", { name: "Set up a model" }).isVisible())
             .toBe(true);
           await expect
             .poll(() =>
@@ -109,7 +133,7 @@ suite.define(() => {
 
           await page.setViewportSize({ height: 900, width: 1660 });
         }
-        await page.getByRole("button", { name: "Connect an AI provider" }).click();
+        await page.getByRole("button", { name: "Set up a model" }).click();
         await expectSetupRoute(page);
         if (custodian) {
           const modelsLink = page.locator(

@@ -68,7 +68,8 @@ function resolveHunksToRelease(file, base, release) {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-  git(["add", "--", file]);
+  // -f: the release may track a file under a path the fork gitignores.
+  git(["add", "-f", "--", file]);
   return true;
 }
 
@@ -161,7 +162,7 @@ function main(target) {
           .some((e) => e.includes(" 3\t"))
       ) {
         git(["checkout", "--theirs", "--", file]);
-        git(["add", "--", file]);
+        git(["add", "-f", "--", file]);
       } else {
         git(["rm", "-q", "--", file]);
       }

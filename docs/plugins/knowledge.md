@@ -115,6 +115,7 @@ optional.
 | `maintenance.enabled`       | boolean  | `true`            | Run the scheduled maintenance pass.                                                                                                          |
 | `maintenance.schedule`      | string   | `"30 3 * * *"`    | Five-field cron expression for the pass.                                                                                                     |
 | `maintenance.timezone`      | string   | Gateway host zone | IANA time zone for the schedule.                                                                                                             |
+| `recallGate`                | object   | absent            | Optional decision-model recall gate. Off when absent. See [Recall gate](/plugins/knowledge/memory-provider#recall-gate).                     |
 
 `operatorRead` and `writesEnabled` are plugin-wide gates. Changes to
 `plugins.entries.knowledge.config.stores` do not reload the plugin; Knowledge
@@ -174,10 +175,6 @@ entries after a Windows power failure. Keep a complete backup of the store.
 
 ## Writes and authority
 
-Warm storage workers check live authority in each operation’s own calling context,
-so a retired earlier turn does not prevent a current turn from using Knowledge.
-Revocation during an operation still prevents unauthorized publication.
-
 - Agents publish through journaled operations with revision/hash preconditions
   and exact-retry semantics. A `published` receipt means files were written.
 - Claims and relationships require retained, hash-verified evidence. Pages may
@@ -222,7 +219,7 @@ an autonomous ingestion engine.
 | ------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `knowledge-automation`          | Create and verify scheduled ingestion through the host scheduler with a retained authorized worker. |
 | `knowledge-capture`             | Save decisions, preferences, facts, and short notes with attribution and readback.                  |
-| `knowledge-claim-consolidation` | Review and consolidate claims: unlinked, on one page, or about one subject; supersede snapshots.    |
+| `knowledge-claim-consolidation` | Consolidate claims (unlinked, on one page, or about one subject) and review pages for currency.     |
 | `knowledge-correct`             | Correct or withdraw exact records and inspect affected knowledge.                                   |
 | `knowledge-entities`            | Resolve and enrich people, companies, projects, and concepts with sourced profiles.                 |
 | `knowledge-ingest`              | Ingest documents, articles, and conversations; learn lessons from sets of sources (`/learn`).       |

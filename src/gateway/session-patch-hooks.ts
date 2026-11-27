@@ -1,7 +1,7 @@
 // Publishes internal mutation notifications after Gateway session patch calls.
 import {
-  createInternalHookEvent,
   hasInternalHookListeners,
+  omitHookSessionOperatorSources,
   triggerInternalHook,
   type SessionPatchHookContext,
   type SessionPatchHookEvent,
@@ -17,10 +17,17 @@ export function triggerSessionPatchHook(
   }
 
   const hookContext: SessionPatchHookContext = structuredClone({
-    sessionEntry: params.sessionEntry,
+    sessionEntry: omitHookSessionOperatorSources(params.sessionEntry),
     patch: params.patch,
     cfg: params.cfg,
   });
-  const hookEvent = createInternalHookEvent("session", "patch", params.sessionKey, hookContext);
+  const hookEvent: SessionPatchHookEvent = {
+    type: "session",
+    action: "patch",
+    sessionKey: params.sessionKey,
+    context: hookContext,
+    timestamp: new Date(),
+    messages: [],
+  };
   void triggerInternalHook(hookEvent);
 }
