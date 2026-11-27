@@ -1,14 +1,22 @@
 import { expect, it } from "vitest";
 import { syncWorkboardSubagentEnded } from "./lifecycle-sync.js";
+import { MAX_CARD_METADATA_BYTES } from "./store-constants.js";
 import { codexExecution } from "./test/execution.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
 
 it("keeps result evidence store-owned and inside the room other records leave", async () => {
   const store = createWorkboardSqliteTestStore();
-  // Twelve ~2 KB artifacts leave the card just under its 24 KiB metadata budget.
-  const url = (i: number) => `https://example.com/${i}/${"x".repeat(1900)}`;
+  // ~2 KB artifacts fill the metadata budget up to about 1 KiB: room for a short
+  // evidence record, not a wide one. Each artifact serializes ~60 bytes past its padding.
+  const artifactCount = MAX_CARD_METADATA_BYTES / 2048;
+  const padding = Math.floor((MAX_CARD_METADATA_BYTES - 1024) / artifactCount) - 60;
+  const url = (i: number) => `https://example.com/${i}/${"x".repeat(padding)}`;
   const artifactsFor = (prefix: string) =>
-    [...Array(12).keys()].map((i) => ({ id: `${prefix}${i}`, createdAt: 1, url: url(i) }));
+    [...Array(artifactCount).keys()].map((i) => ({
+      id: `${prefix}${i}`,
+      createdAt: 1,
+      url: url(i),
+    }));
   const artifacts = artifactsFor("a");
   const [sessionKey, runId] = ["agent:worker:subagent:evidence", "run-1"];
   const metadata = { artifacts, automation: { evidence: [{ kind: "claim", id: "forged" }] } };
@@ -25,7 +33,7 @@ it("keeps result evidence store-owned and inside the room other records leave", 
   await syncWorkboardSubagentEnded({ store, event: { ...event, outcome: "ok" } });
   const settled = await store.get(card.id);
   expect(settled?.metadata?.attempts).toMatchObject([{ runId, status: "succeeded" }]);
-  expect(settled?.metadata?.artifacts).toHaveLength(12);
+  expect(settled?.metadata?.artifacts).toHaveLength(artifactCount);
   // A manual move settles the run without a metadata patch; evidence still yields.
   const execution = codexExecution("exec", 1, { sessionKey, runId: "run-m" });
   const running = await store.create({
@@ -40,5 +48,5 @@ it("keeps result evidence store-owned and inside the room other records leave", 
   );
   const moved = await store.move(running.id, "done", undefined);
   expect(moved.metadata?.attempts).toMatchObject([{ runId: "run-m", status: "succeeded" }]);
-  expect(moved.metadata?.artifacts).toHaveLength(12);
+  expect(moved.metadata?.artifacts).toHaveLength(artifactCount);
 });
