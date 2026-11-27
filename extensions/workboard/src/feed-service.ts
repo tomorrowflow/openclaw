@@ -110,11 +110,12 @@ function readPress(ctx: unknown): HeldMergePress | undefined {
  */
 /** Settles with `work`, or rejects once `signal` aborts so a stop never waits on it. */
 function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  const stopped = () => new Error("workboard feed stopped", { cause: signal.reason });
   if (signal.aborted) {
-    return Promise.reject(signal.reason);
+    return Promise.reject(stopped());
   }
   return new Promise<T>((resolve, reject) => {
-    const abort = () => reject(signal.reason);
+    const abort = () => reject(stopped());
     signal.addEventListener("abort", abort, { once: true });
     work.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
   });

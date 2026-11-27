@@ -81,7 +81,7 @@ it.each(["dismiss", "expire"])("keeps %s results dismissed", async (action) => {
 
 it("copies an error message and falls back to selecting it", async () => {
   const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
-  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  vi.stubGlobal("navigator", Object.create(navigator, { clipboard: { value: { writeText } } }));
   const { toast, step } = mount({ message: "Dispatch failed: node offline", tone: "error" });
   const copy = expectDefined(toast.querySelector<HTMLButtonElement>("button.copy"), "copy");
   expect(copy.getAttribute("aria-label")).toBe("Copy");
