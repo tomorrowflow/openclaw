@@ -206,10 +206,7 @@ it.each(["openai-responses", "openai-completions"] as const)(
         sessionFile: target.sessionKey,
         workspaceDir,
         agentDir,
-        // The finalizer reopens the session through a byte cap derived from this
-        // budget. Sized for a fresh turn, that view cannot hold the settled tool
-        // batch; the finalizer must answer from the settled snapshot instead.
-        contextTokenBudget: 128,
+        contextTokenBudget: model.contextWindow,
         authProfileStore: { version: 1, profiles: {} },
       });
       input.finalization.harness = createOpenClawAgentHarness();
@@ -221,7 +218,7 @@ it.each(["openai-responses", "openai-completions"] as const)(
       const serialized = JSON.stringify(requests[0]);
       expect(serialized).toContain("Write the note");
       expect(serialized).toContain("Note saved to notes.md");
-      expect(serialized).toContain("did not produce a user-visible answer");
+      expect(serialized).toContain("Your turn ended without a final reply.");
       expect(result.prepared.payloadsWithToolMedia).toEqual([
         expect.objectContaining({ text: "Note saved once." }),
       ]);
