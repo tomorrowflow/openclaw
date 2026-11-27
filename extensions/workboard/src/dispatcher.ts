@@ -25,6 +25,7 @@ import {
   nodeTicketDependencyWait,
   type NodeTicketStartWait,
   nodeTicketStartWaitRefusal,
+  nodeTicketUsageLimits,
   queueMergeWaits,
   queueNodeTicketStart,
 } from "./node-ticket-start-queue.js";
@@ -173,6 +174,7 @@ function selectStartableCards(
       runningOwners.add(workboardCardSlotOwner(card));
     }
   }
+  const usageLimits = nodeTicketUsageLimits(cards, now);
   const selected: WorkboardCard[] = [];
   const fallback: WorkboardCard[] = [];
   const selectedOwners = new Set<string>();
@@ -183,6 +185,8 @@ function selectStartableCards(
     const placement =
       nodeTicketSlot && workboardSlotPlacement(nodeTicketOccupants, nodeTicketSlot, now);
     const nodeTicketFull = placement?.full;
+    const nodeId = nodeTicketSlot && (placement?.target ?? nodeTicketTarget(card))?.nodeId;
+    const resetsAt = nodeId ? usageLimits.get(nodeId) : undefined;
     const claimRefusal = mode === "exact" ? workboardClaimRefusal(card, false) : undefined;
     const parentsWait =
       nodeTicketSlot &&
@@ -217,9 +221,11 @@ function selectStartableCards(
       cardRefusal !== undefined
         ? undefined
         : (parentsWait ??
-          (nodeTicketSlot && nodeTicketFull
-            ? { kind: "slot", slot: nodeTicketSlot, full: nodeTicketFull }
-            : undefined));
+          (nodeId && resetsAt !== undefined
+            ? { kind: "usage_limit", nodeId, resetsAt }
+            : nodeTicketSlot && nodeTicketFull
+              ? { kind: "slot", slot: nodeTicketSlot, full: nodeTicketFull }
+              : undefined));
     const rejection =
       cardRefusal ??
       (wait

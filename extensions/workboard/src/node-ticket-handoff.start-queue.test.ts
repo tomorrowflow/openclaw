@@ -1,6 +1,8 @@
 // Workboard tests cover queued node-ticket starts draining as parents finish and route slots free up.
 import { describe, expect, it, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
+import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
+import { runSessionSweep } from "./lifecycle-sync.test-support.js";
 import { createNodeTicketHandoffs } from "./node-ticket-handoff.js";
 import { createNodeGateway, NODE_TARGET } from "./node-ticket.test-support.js";
 import { createWorkboardSqliteTestStore } from "./test/sqlite-store.js";
@@ -143,6 +145,66 @@ describe("node ticket start queue", () => {
       const waiting = await store.get(ios.id);
       expect(waiting?.status).toBe("todo");
       expect(waiting?.metadata?.automation?.startRequest).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("queues a ticket whose node hit its usage limit and starts nothing there until the reset", async () => {
+    // 22:50 in Berlin; the Claude CLI's limit resets at 23:10 there.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-11-25T21:50:00Z") });
+    try {
+      const { store, start, handoffs, create, runningIos, runningServer, toReview } =
+        await fullRoutes();
+      const running = await store.get(runningIos.id);
+      const sessionKey = running?.execution?.sessionKey ?? "";
+      const runId = running?.execution?.runId;
+      const limit = "You've hit your session limit · resets 11:10pm (Europe/Berlin)";
+      // agent_end carries the error while the session still runs; the sweep then sees it fail.
+      await syncWorkboardAgentEnded({
+        store,
+        event: { runId, success: false, error: limit, messages: [] },
+        context: { runId, sessionKey },
+        readSessions: async () => ({
+          sessions: [{ key: sessionKey, status: "running" as const, hasActiveRun: true }],
+          complete: true,
+        }),
+      });
+      await runSessionSweep({
+        store,
+        sessions: [
+          { key: sessionKey, status: "failed", hasActiveRun: false, updatedAt: Date.now() + 1 },
+        ],
+      });
+
+      const resetsAt = Date.parse("2026-11-25T22:10:00Z");
+      const requeued = await store.get(runningIos.id);
+      expect(requeued?.status).toBe("todo");
+      expect(requeued?.metadata?.automation?.startRequest?.usageLimitResetsAt).toBe(resetsAt);
+      expect(requeued?.metadata?.comments?.at(-1)?.body).toBe(
+        `The model login on node mac-factory hit its usage limit (${limit}). This ticket is queued again and starts after the reset at 2026-11-25 22:10 UTC; until then nothing else starts on that node.`,
+      );
+
+      // The route has a free slot, but the operator's Start queues on the limited node.
+      const next = await create("Fix the badge", "class:ios-ui");
+      const requested = await start(next.id, "request");
+      expect(requested.started).toEqual([]);
+      expect(requested.queued?.metadata?.comments?.at(-1)?.body).toBe(
+        "This ticket waits for the model login on node mac-factory, which hit its usage limit; it starts after the reset at 2026-11-25 22:10 UTC.",
+      );
+      await handoffs.resume(vi.fn());
+      expect((await store.get(runningIos.id))?.status).toBe("todo");
+      expect((await store.get(next.id))?.status).toBe("todo");
+      // Another node keeps starting.
+      await toReview(runningServer.id);
+      const server = await create("Fix the retry", "class:server-fix");
+      expect((await start(server.id, "request")).started).toHaveLength(1);
+
+      vi.setSystemTime(resetsAt + 60_000);
+      await handoffs.resume(vi.fn());
+
+      expect((await store.get(runningIos.id))?.status).toBe("running");
+      expect((await store.get(next.id))?.status).toBe("todo");
     } finally {
       vi.useRealTimers();
     }
