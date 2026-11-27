@@ -122,15 +122,23 @@ describe("Workboard node ticket lifecycle", () => {
       comment:
         "The ticket session failed. The ticket session ended without a workboard-report block.",
     },
-  ])("maps node ticket endings: $name", async ({ success, messages, status, comment }) => {
+    {
+      name: "a failed run's error is the block's comment",
+      success: false,
+      error: "Claude CLI exited with code 1",
+      messages: [],
+      status: "blocked",
+      comment: "The run failed: Claude CLI exited with code 1",
+    },
+  ])("maps node ticket endings: $name", async ({ success, error, messages, status, comment }) => {
     const store = createWorkboardSqliteTestStore();
     const { card, sessionKey, runId } = await startNodeCard(store);
 
     await syncWorkboardAgentEnded({
       store,
-      event: { runId, success, messages },
+      event: { runId, success, error, messages },
       context: { runId, sessionKey },
-      readSessions: endedSession(),
+      readSessions: endedSession(success),
     });
 
     const stored = await store.get(card.id);
@@ -673,10 +681,10 @@ describe("Workboard node ticket lifecycle", () => {
     const nodeTickets = createNodeGateway();
     const { card, sessionKey, runId } = await startNodeCard(store, nodeTickets);
     // The CLI runner failed; agent_end fires while fallback may still continue.
-    const quota = "You've hit your session limit · resets 2:20am (Europe/Berlin)";
+    const error = "CLI failed.";
     await syncWorkboardAgentEnded({
       store,
-      event: { runId, success: false, error: quota, messages: [] },
+      event: { runId, success: false, error, messages: [] },
       context: { runId, sessionKey },
       readSessions: async () => ({
         sessions: [{ key: sessionKey, status: "running" as const, hasActiveRun: true }],
@@ -692,12 +700,8 @@ describe("Workboard node ticket lifecycle", () => {
     const failed = await store.get(card.id);
     expect(failed?.status).toBe("blocked");
     expect(failed?.metadata?.claim).toBeUndefined();
-    // The provider's error is the only record of why the card blocked.
-    expect(failed?.metadata?.attempts?.at(-1)).toMatchObject({
-      runId,
-      status: "blocked",
-      error: quota,
-    });
+    expect(failed?.metadata?.attempts?.at(-1)).toMatchObject({ runId, status: "blocked", error });
+    expect(failed?.metadata?.comments?.at(-1)?.body).toBe("The run failed: CLI failed.");
 
     await store.move(card.id, "todo", undefined);
     const restarted = await dispatchAndStartWorkboardCards({
