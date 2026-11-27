@@ -133,7 +133,9 @@ prepare-source_one() {
     corepack pnpm install --frozen-lockfile --reporter=silent
     # A killed deploy leaves the build lock behind on this node too.
     node scripts/release-stale-dist-lock.mjs
-    corepack pnpm build >/dev/null
+    # Like the host deploy build: the node runs JS only, and the declaration
+    # pass carries the published plugin-SDK size budget that fork additions exceed.
+    OPENCLAW_RUN_NODE_SKIP_DTS_BUILD=1 corepack pnpm build >/dev/null
     node scripts/prepare-global-install-package-json.mjs
     trap 'node scripts/prepare-global-install-package-json.mjs --restore' EXIT
     rm -rf \$HOME/.local/openclaw.next
