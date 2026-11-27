@@ -3,7 +3,6 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -11,8 +10,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { userInfo } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { listDirectoryTreeStrictSync } from "../../src/infra/directory-walk.js";
 import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 
 const tempDirs = useAutoCleanupTempDirTracker((cleanup) => afterEach(cleanup));
@@ -53,9 +53,9 @@ function write(path: string, body = path) {
 }
 
 function listFiles(dir: string): string[] {
-  return readdirSync(dir, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => relative(dir, join(entry.parentPath, entry.name)))
+  return listDirectoryTreeStrictSync(dir)
+    .filter((entry) => entry.dirent.isFile())
+    .map((entry) => entry.relativePath)
     .toSorted();
 }
 

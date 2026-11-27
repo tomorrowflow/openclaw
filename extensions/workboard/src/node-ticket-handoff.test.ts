@@ -155,12 +155,12 @@ describe("node ticket handoff", () => {
     // main gains a file the ticket must not answer for: its whitespace would
     // fail the import check, and its path would land in the round's changes.
     const { store, card, repos, worktree, handoffs, warn } = await finishNodeTicket({
-      beforeCommit: (worktree, repos) => {
-        writeFileSync(path.join(repos.origin, "upstream.md"), "merged elsewhere  \n");
-        git(repos.origin, "add", "-A");
-        git(repos.origin, "commit", "-q", "-m", "another ticket");
-        git(worktree, "fetch", "-q", "origin");
-        git(worktree, "merge", "-q", "--ff-only", "origin/main");
+      beforeCommit: (checkout, ticketRepos) => {
+        writeFileSync(path.join(ticketRepos.origin, "upstream.md"), "merged elsewhere  \n");
+        git(ticketRepos.origin, "add", "-A");
+        git(ticketRepos.origin, "commit", "-q", "-m", "another ticket");
+        git(checkout, "fetch", "-q", "origin");
+        git(checkout, "merge", "-q", "--ff-only", "origin/main");
       },
     });
     const pulled = git(repos.origin, "rev-parse", "main");

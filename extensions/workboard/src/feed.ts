@@ -66,7 +66,7 @@ const COMMENT_CHARS = 300;
 type FeedEventFields = {
   opened: { status: WorkboardStatus };
   started: { nodeId?: string };
-  handoff: Record<never, never>;
+  handoff: unknown;
   verdict: {
     check: "verification" | "crossVerification";
     verdict: WorkboardVerificationVerdict;
@@ -77,10 +77,10 @@ type FeedEventFields = {
   pr_held: { paths: string[]; headCommit: string };
   pr_merged: { url: string; auto: boolean };
   rework: { round: number };
-  needs_user: Record<never, never>;
-  blocked: Record<never, never>;
-  done: Record<never, never>;
-  archived: Record<never, never>;
+  needs_user: unknown;
+  blocked: unknown;
+  done: unknown;
+  archived: unknown;
   comment: { commentId: string; source?: WorkboardCommentSource; body: string };
 };
 

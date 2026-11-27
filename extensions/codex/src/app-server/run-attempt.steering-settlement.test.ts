@@ -2,12 +2,12 @@ import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { resolveActiveEmbeddedRunSessionId } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
-import { loadUserTurnTranscriptRecorderFactoryForTest } from "openclaw/plugin-sdk/plugin-test-runtime";
 import {
   createPluginRecord,
   createPluginRegistry,
   createPluginRuntimeMock,
   disposePluginRegistryInstances,
+  loadUserTurnTranscriptRecorderFactoryForTest,
   setActivePluginRegistry,
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import {
