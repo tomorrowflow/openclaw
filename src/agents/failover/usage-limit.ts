@@ -11,11 +11,19 @@ const RESET_RE =
   /\bresets\s+(?:([a-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+(?:at\s+)?)?(\d{1,2})(?::(\d{2}))?\s*([ap]m)?\s*\(([a-z][\w+-]*(?:\/[\w+-]+)*)\)/i;
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const DAY_MS = 86_400_000;
+// Claude names the reset to the minute, so a retry started just after it can
+// still hit the limit; a reset that passed this recently means "retry soon",
+// not the same time a day or a year later.
+const JUST_RESET_MS = 15 * 60_000;
+const JUST_RESET_RETRY_MS = 5 * 60_000;
+// Longer than a weekly window; a farther result is a misread.
+const MAX_RESET_MS = 8 * DAY_MS;
 
 /**
  * Whether an error is a provider usage or rate limit, and the first instant
- * after `now` matching the reset time it names in its IANA zone. Undefined for
- * any other error.
+ * after `now` matching the reset time it names in its IANA zone, or a retry
+ * shortly after `now` when that time just passed. Undefined for any other
+ * error.
  */
 export function parseProviderUsageLimit(
   message: string,
@@ -68,9 +76,13 @@ function parseResetTime(message: string, now: number): number | undefined {
       zone,
     );
     const at = parsed.ok ? Date.parse(parsed.iso) : undefined;
-    if (at !== undefined && at > now) {
-      return at;
+    if (at === undefined || at <= now - JUST_RESET_MS) {
+      continue;
     }
+    if (at <= now) {
+      return now + JUST_RESET_RETRY_MS;
+    }
+    return at - now <= MAX_RESET_MS ? at : undefined;
   }
   return undefined;
 }

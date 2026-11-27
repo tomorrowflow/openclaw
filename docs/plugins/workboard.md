@@ -1868,10 +1868,12 @@ provider's usage or rate limit (for example `You've hit your session limit ·
 resets 11:10pm (Europe/Berlin)`) is not blocked. It goes back to `todo`,
 queued, with one comment quoting the error and naming the reset; the next run
 reuses its worktree. The reset is the time the error names, read in its time
-zone as the next such time, or 30 minutes later when the error names none.
+zone as the next such time (five minutes from now when that time passed in the
+last 15 minutes), or 30 minutes later when the error names none.
 Until the reset, nothing starts on that node: the queue skips its tickets, a
 scheduled pass leaves them in `ready`, and the operator's **Start** queues with
-a comment naming the reset. Other nodes keep starting. The lifecycle sweep
+a comment naming the reset. Tickets on other nodes keep starting, but a
+multi-node route waits while the node it would place on is paused. The lifecycle sweep
 runs every minute, so the queue starts again within a minute after the reset.
 Any other failed run blocks its card with the run's error as the comment.
 

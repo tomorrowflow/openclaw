@@ -255,8 +255,11 @@ export async function syncWorkboardAgentEnded(params: {
           card,
           messages: params.event.messages ?? [],
           success: params.event.success,
-          // Only a failed session's lifecycle write blocks the card after the report.
-          ...(observation?.state === "failed" ? { error: params.event.error } : {}),
+          // Only a failed session's lifecycle write blocks the card after the
+          // report, and it skips a stalled-turn retry's new run id.
+          ...(observation?.state === "failed" && workboardCardMatchesLifecycleLink(card, source)
+            ? { error: params.event.error }
+            : {}),
         });
         const current = await params.store.get(card.id);
         if (current && current.status !== "running") {

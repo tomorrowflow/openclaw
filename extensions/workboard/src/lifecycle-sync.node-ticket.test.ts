@@ -919,6 +919,33 @@ describe("Workboard node ticket lifecycle", () => {
     expect(stored?.events?.some((event) => event.toStatus === "blocked")).toBe(false);
   });
 
+  it("blocks the card when a stalled-turn retry under a new run id fails", async () => {
+    const store = createWorkboardSqliteTestStore();
+    const { card, sessionKey, runId } = await startNodeCard(store);
+    const claimedAt = expectDefined((await store.get(card.id))?.metadata?.claim, "claim").claimedAt;
+    const retryRunId = `${runId}-retry`;
+
+    await syncWorkboardAgentEnded({
+      store,
+      event: {
+        runId: retryRunId,
+        success: false,
+        error: "CLI failed.",
+        messages: [],
+        durationMs: 60_000,
+      },
+      context: { runId: retryRunId, sessionKey },
+      readSessions: endedSession(false),
+      now: claimedAt + 90_000,
+    });
+
+    const stored = await store.get(card.id);
+    expect(stored?.status).toBe("blocked");
+    expect(stored?.metadata?.comments?.at(-1)?.body).toBe(
+      "The ticket session failed. The ticket session ended without a workboard-report block.",
+    );
+  });
+
   it("still fences a run from before the current round's claim after a restart", async () => {
     const store = createWorkboardSqliteTestStore();
     const gateway = createNodeGateway();

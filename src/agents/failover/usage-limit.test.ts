@@ -17,7 +17,20 @@ describe("parseProviderUsageLimit", () => {
   });
 
   it.each([
+    // The retry right after a minute-truncated reset still hit the limit.
+    ["You've hit your session limit · resets 10:45pm (Europe/Berlin)", "2026-11-25T21:55:00Z"],
+    [
+      "You've hit your weekly limit · resets Nov 25, 10:40pm (Europe/Berlin)",
+      "2026-11-25T21:55:00Z",
+    ],
+  ])("retries soon after a reset that just passed: %s", (message, resetsAt) => {
+    expect(parseProviderUsageLimit(message, NOW)).toEqual({ resetsAt: Date.parse(resetsAt) });
+  });
+
+  it.each([
     "429 Too Many Requests",
+    // Long past this year, and next year's is no sane reset.
+    "You've hit your weekly limit · resets Nov 1, 9am (Europe/Berlin)",
     "You've hit your session limit · resets 5pm (Mars/Olympus)",
     "You've hit your session limit · resets 13pm (Europe/Berlin)",
   ])("reports a limit without a readable reset for %s", (message) => {
