@@ -351,6 +351,7 @@
   "provider-web-search-contract",
   "provider-web-search",
   "retry-runtime",
+  "provider-usage-limit",
   "run-command",
   "param-readers",
   "secret-input",

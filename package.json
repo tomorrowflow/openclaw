@@ -499,7 +499,8 @@
     "!dist/plugin-sdk/node-crypto-runtime.d.ts",
     "!dist/plugin-sdk/path-existence-runtime.d.ts",
     "!dist/plugin-sdk/provider-auth-markers.d.ts",
-    "!dist/plugin-sdk/terminal-safe-text.d.ts"
+    "!dist/plugin-sdk/terminal-safe-text.d.ts",
+    "!dist/plugin-sdk/provider-usage-limit.d.ts"
   ],
   "type": "module",
   "main": "dist/index.js",
@@ -1634,6 +1635,9 @@
     },
     "./plugin-sdk/retry-runtime": {
       "default": "./dist/plugin-sdk/retry-runtime.js"
+    },
+    "./plugin-sdk/provider-usage-limit": {
+      "default": "./dist/plugin-sdk/provider-usage-limit.js"
     },
     "./plugin-sdk/run-command": {
       "types": "./dist/plugin-sdk/run-command.d.ts",
