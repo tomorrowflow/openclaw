@@ -1,24 +1,103 @@
-import type { WorkboardCard } from "@openclaw/workboard-contract";
+import type { WorkboardCard, WorkboardStartRequest } from "@openclaw/workboard-contract";
 import { nodeTicketReopen, nodeTicketReopenSubject, nodeTicketTarget } from "./node-ticket.js";
-import { cardParentIds, workboardClaimRefusal } from "./store-card-helpers.js";
+import { appendComment, cardParentIds, workboardClaimRefusal } from "./store-card-helpers.js";
 import {
   type WorkboardNodeTicketSlot,
   type WorkboardSlotFull,
+  workboardNodeTicketStartQueueable,
   workboardRouteName,
   workboardRoutePinnedNode,
   workboardSlotBusyMessage,
 } from "./store-constants.js";
+import type { WorkboardOwnedCardPatch } from "./store-inputs.js";
 import type { WorkboardStore } from "./store.js";
 
 /**
  * Why an exact node-ticket start queues instead of refusing: its parents are
  * not done or their PRs are not merged, or an open ticket touches the same
- * paths, with the refusal a start without the queue gets; or its slot is full.
+ * paths, with the refusal a start without the queue gets; its node's login
+ * waits for a usage limit to reset; or its slot is full.
  */
 export type NodeTicketStartWait =
   | { kind: "dependencies"; refusal: string }
   | { kind: "touches"; tickets: OverlappingTicket[] }
+  | { kind: "usage_limit"; nodeId: string; resetsAt: number }
   | { kind: "slot"; slot: WorkboardNodeTicketSlot; full: WorkboardSlotFull };
+
+/**
+ * The write that queues a node ticket in `queued`'s status with `request`,
+ * or undefined when the card cannot hold a request. A reopened ticket's
+ * notice is noted on its handoff, once per round, so it never counts as
+ * review feedback. A reopen without review feedback is not queued; the D56
+ * handoff sends it back with the next step.
+ */
+export function nodeTicketStartRequestPatch(
+  queued: WorkboardCard,
+  request: WorkboardStartRequest,
+  notice: (card: WorkboardCard) => string,
+  now: number,
+): WorkboardOwnedCardPatch | undefined {
+  const automation = queued.metadata?.automation;
+  if (
+    !automation ||
+    !workboardNodeTicketStartQueueable(queued, now) ||
+    nodeTicketReopen(queued, now)?.reviewed === false
+  ) {
+    return undefined;
+  }
+  const worktree = automation.target?.worktree;
+  const handoff = worktree?.handoff;
+  const reopened =
+    handoff?.phase === "published" ||
+    handoff?.phase === "questions" ||
+    handoff?.phase === "grilling";
+  const noted = !reopened || handoff.slotWaitNotedAt === undefined;
+  return {
+    status: queued.status,
+    metadata: {
+      ...queued.metadata,
+      ...(noted ? { comments: appendComment(queued.metadata?.comments, notice(queued), now) } : {}),
+      automation: {
+        ...automation,
+        startRequest: request,
+        ...(reopened && noted && automation.target && worktree
+          ? {
+              target: {
+                ...automation.target,
+                worktree: { ...worktree, handoff: { ...handoff, slotWaitNotedAt: now } },
+              },
+            }
+          : {}),
+      },
+    },
+  };
+}
+
+/**
+ * The nodes whose login hit a provider usage limit, each with when it
+ * resets, read from the queued tickets that carry that reset. Nothing starts
+ * on such a node until then, since every run there would fail the same way.
+ */
+export function nodeTicketUsageLimits(
+  cards: readonly WorkboardCard[],
+  now: number,
+): Map<string, number> {
+  const limits = new Map<string, number>();
+  for (const card of cards) {
+    const resetsAt = card.metadata?.automation?.startRequest?.usageLimitResetsAt;
+    const nodeId = nodeTicketTarget(card)?.nodeId;
+    if (nodeId && resetsAt !== undefined && resetsAt > now && !card.metadata?.archivedAt) {
+      limits.set(nodeId, Math.max(resetsAt, limits.get(nodeId) ?? 0));
+    }
+  }
+  return limits;
+}
+
+/** A usage-limit reset as notices name it, in UTC. */
+export function formatUsageLimitReset(resetsAt: number): string {
+  const iso = new Date(resetsAt).toISOString();
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+}
 
 /**
  * The PRs of done node-ticket parents that are not merged yet: published and
@@ -109,6 +188,8 @@ export function nodeTicketStartWaitRefusal(wait: NodeTicketStartWait): string {
       return wait.refusal;
     case "touches":
       return `Card waits for open tickets touching the same paths to merge: ${overlapList(wait.tickets)}.`;
+    case "usage_limit":
+      return `The Claude login on node ${wait.nodeId} hit its usage limit; nothing starts there until it resets at ${formatUsageLimitReset(wait.resetsAt)}.`;
     default:
       return workboardSlotBusyMessage(wait.slot, wait.full);
   }
@@ -197,6 +278,9 @@ export function nodeTicketStartWaitNotice(
   const what = reopen ? nodeTicketReopenSubject(reopen) : "This ticket";
   if (wait.kind === "touches") {
     return `${what} waits for open tickets touching the same paths: ${overlapList(wait.tickets)}. It starts once their PRs are merged or closed (the board reads PR states from GitHub every 10 minutes) or they are archived, and a node-ticket slot is free.`;
+  }
+  if (wait.kind === "usage_limit") {
+    return `${what} waits for the Claude login on node ${wait.nodeId}, which hit its usage limit; it starts after the reset at ${formatUsageLimitReset(wait.resetsAt)}.`;
   }
   if (wait.kind === "dependencies") {
     const byId = new Map(cards.map((entry) => [entry.id, entry]));

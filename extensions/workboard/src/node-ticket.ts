@@ -482,6 +482,7 @@ export async function applyNodeTicketReport(params: {
   card: WorkboardCard;
   messages: readonly unknown[];
   success: boolean;
+  error?: string;
 }): Promise<void> {
   const { store, card } = params;
   const claim = card.metadata?.claim;
@@ -502,6 +503,12 @@ export async function applyNodeTicketReport(params: {
     // The operator's stop aborted the turn; a report that arrived before it applies below.
     if (worktree?.stopRequestedAt !== undefined) {
       await store.nodeTicketStop(card.id, { action: "settle", aborted: true });
+      return;
+    }
+    // The failed run's own error says more than the missing report; the
+    // lifecycle write after this blocks the card with it, or queues it again
+    // after a usage limit.
+    if (!params.success && params.error) {
       return;
     }
     await block(params.success ? parsed.reason : `The ticket session failed. ${parsed.reason}`);

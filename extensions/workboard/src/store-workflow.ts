@@ -14,6 +14,7 @@ import {
 } from "openclaw/plugin-sdk/number-runtime";
 import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
 import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { runFailurePatch } from "./run-failure.js";
 import {
   appendComment,
   assertCanMutateClaimedCard,
@@ -545,7 +546,8 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
 
   /**
    * Records a run's turn-end facts on the attempt with its run id; other attempts and cards are left alone.
-   * The error stays on the attempt through the lifecycle write that later closes it.
+   * The error stays on the attempt through the lifecycle write that later closes it;
+   * on a card that write already blocked, it settles the failure ({@link runFailurePatch}).
    */
   async recordAttemptEnd(
     id: string,
@@ -554,24 +556,29 @@ export class WorkboardWorkflowStore extends WorkboardPromoteStore {
   ): Promise<WorkboardCard | undefined> {
     const error = capText(end.error, MAX_ATTEMPT_ERROR_CHARS);
     return await this.enqueueMutation(async () => {
-      const result = await this.updateLatestCard(id, (card) => {
-        const attempts = [...(card.metadata?.attempts ?? [])];
-        const index = attempts.findIndex((attempt) => attempt.runId === runId);
-        const attempt = attempts[index];
-        if (!attempt) {
-          return undefined;
-        }
-        const next = {
-          ...attempt,
-          ...(end.contextTokens === undefined ? {} : { contextTokens: end.contextTokens }),
-          ...(error ? { error } : {}),
-        };
-        if (isDeepStrictEqual(next, attempt)) {
-          return undefined;
-        }
-        attempts[index] = next;
-        return { metadata: { ...card.metadata, attempts } };
-      });
+      const result = await this.updateLatestCard(
+        id,
+        (card) => {
+          const attempts = [...(card.metadata?.attempts ?? [])];
+          const index = attempts.findIndex((attempt) => attempt.runId === runId);
+          const attempt = attempts[index];
+          if (!attempt) {
+            return undefined;
+          }
+          const next = {
+            ...attempt,
+            ...(end.contextTokens === undefined ? {} : { contextTokens: end.contextTokens }),
+            ...(error ? { error } : {}),
+          };
+          if (isDeepStrictEqual(next, attempt)) {
+            return undefined;
+          }
+          attempts[index] = next;
+          const recorded = { ...card, metadata: { ...card.metadata, attempts } };
+          return runFailurePatch(recorded, Date.now()) ?? { metadata: recorded.metadata };
+        },
+        { allowAutomationLaunch: true },
+      );
       return result.updated ? result.card : undefined;
     });
   }
