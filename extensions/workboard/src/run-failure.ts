@@ -51,7 +51,7 @@ export function runFailurePatch(
           { ...card, status: "todo", metadata: { ...card.metadata, claim: undefined } },
           { requestedAt: now, usageLimitResetsAt: failure.resetsAt },
           () =>
-            `The Claude login on node ${nodeId} hit its usage limit (${failure.message}). This ticket is queued again and starts after the reset at ${formatUsageLimitReset(failure.resetsAt)}; until then nothing else starts on that node.`,
+            `The model login on node ${nodeId} hit its usage limit (${failure.message}). This ticket is queued again and starts after the reset at ${formatUsageLimitReset(failure.resetsAt)}; until then nothing else starts on that node.`,
           now,
         )
       : undefined;

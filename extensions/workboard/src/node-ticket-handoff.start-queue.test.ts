@@ -182,7 +182,7 @@ describe("node ticket start queue", () => {
       expect(requeued?.status).toBe("todo");
       expect(requeued?.metadata?.automation?.startRequest?.usageLimitResetsAt).toBe(resetsAt);
       expect(requeued?.metadata?.comments?.at(-1)?.body).toBe(
-        `The Claude login on node mac-factory hit its usage limit (${limit}). This ticket is queued again and starts after the reset at 2026-11-25 22:10 UTC; until then nothing else starts on that node.`,
+        `The model login on node mac-factory hit its usage limit (${limit}). This ticket is queued again and starts after the reset at 2026-11-25 22:10 UTC; until then nothing else starts on that node.`,
       );
 
       // The route has a free slot, but the operator's Start queues on the limited node.
@@ -190,7 +190,7 @@ describe("node ticket start queue", () => {
       const requested = await start(next.id, "request");
       expect(requested.started).toEqual([]);
       expect(requested.queued?.metadata?.comments?.at(-1)?.body).toBe(
-        "This ticket waits for the Claude login on node mac-factory, which hit its usage limit; it starts after the reset at 2026-11-25 22:10 UTC.",
+        "This ticket waits for the model login on node mac-factory, which hit its usage limit; it starts after the reset at 2026-11-25 22:10 UTC.",
       );
       await handoffs.resume(vi.fn());
       expect((await store.get(runningIos.id))?.status).toBe("todo");

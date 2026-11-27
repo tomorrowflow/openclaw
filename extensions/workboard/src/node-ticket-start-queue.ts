@@ -189,7 +189,7 @@ export function nodeTicketStartWaitRefusal(wait: NodeTicketStartWait): string {
     case "touches":
       return `Card waits for open tickets touching the same paths to merge: ${overlapList(wait.tickets)}.`;
     case "usage_limit":
-      return `The Claude login on node ${wait.nodeId} hit its usage limit; nothing starts there until it resets at ${formatUsageLimitReset(wait.resetsAt)}.`;
+      return `The model login on node ${wait.nodeId} hit its usage limit; nothing starts there until it resets at ${formatUsageLimitReset(wait.resetsAt)}.`;
     default:
       return workboardSlotBusyMessage(wait.slot, wait.full);
   }
@@ -280,7 +280,7 @@ export function nodeTicketStartWaitNotice(
     return `${what} waits for open tickets touching the same paths: ${overlapList(wait.tickets)}. It starts once their PRs are merged or closed (the board reads PR states from GitHub every 10 minutes) or they are archived, and a node-ticket slot is free.`;
   }
   if (wait.kind === "usage_limit") {
-    return `${what} waits for the Claude login on node ${wait.nodeId}, which hit its usage limit; it starts after the reset at ${formatUsageLimitReset(wait.resetsAt)}.`;
+    return `${what} waits for the model login on node ${wait.nodeId}, which hit its usage limit; it starts after the reset at ${formatUsageLimitReset(wait.resetsAt)}.`;
   }
   if (wait.kind === "dependencies") {
     const byId = new Map(cards.map((entry) => [entry.id, entry]));

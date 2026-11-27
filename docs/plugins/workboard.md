@@ -1863,7 +1863,7 @@ edited while its queued start reads it stays queued and is tried again on the
 next change. A queued start refused for another reason
 blocks the card with that reason.
 
-A node ticket whose run fails because the node's Claude login hit its
+A node ticket whose run fails because the node's model login hit its
 provider's usage or rate limit (for example `You've hit your session limit ·
 resets 11:10pm (Europe/Berlin)`) is not blocked. It goes back to `todo`,
 queued, with one comment quoting the error and naming the reset; the next run
