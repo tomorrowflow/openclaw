@@ -13,8 +13,7 @@ const { fetchWithSsrFGuardMock, upsertAuthProfileWithLockOrThrow, loggerWarnMock
   }),
 );
 
-vi.mock("../infra/net/fetch-guard.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../infra/net/fetch-guard.js")>()),
+vi.mock("../infra/net/fetch-guard.js", () => ({
   fetchWithSsrFGuard: fetchWithSsrFGuardMock,
 }));
 

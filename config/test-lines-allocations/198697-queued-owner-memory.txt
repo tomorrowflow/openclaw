@@ -1,2 +1,0 @@
-# Queued automation owner revocation through live profile and config publication, across both memory runtimes.
-60

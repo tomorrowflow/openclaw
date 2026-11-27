@@ -190,7 +190,6 @@ export async function runQaFlowSuiteCleanupPlan(params: {
   cleanupTransportAfterGatewayStop: () => Promise<void>;
   stopGateway: () => Promise<QaGatewayStopResult>;
   disposeAgentHarnesses: () => Promise<void>;
-  captureProviderArtifacts?: () => Promise<void>;
   stopProvider?: () => Promise<void>;
   finishLab: () => Promise<void>;
 }) {
@@ -220,9 +219,6 @@ export async function runQaFlowSuiteCleanupPlan(params: {
     // that the isolated runtime reached its terminal boundary.
     { phase: "transport after gateway stop", run: cleanupTransportAfterGatewayStop },
     { phase: "agent harnesses", run: params.disposeAgentHarnesses },
-    ...(params.captureProviderArtifacts
-      ? [{ phase: "provider artifacts", run: params.captureProviderArtifacts }]
-      : []),
     ...(params.stopProvider ? [{ phase: "provider stop", run: params.stopProvider }] : []),
     { phase: "lab finish", run: params.finishLab },
   ]);
@@ -344,28 +340,21 @@ export function buildQaSuiteRuntimeMetrics(params: {
       gatewayCpuCoreRatio: Math.round((gatewayProcessCpuMs / wallMs) * 1000) / 1000,
     });
   }
-  // Preserve observations independently; derived comparisons still require both endpoints.
-  if (params.gatewayProcessRssStartBytes !== null) {
-    metrics.gatewayProcessRssStartBytes = params.gatewayProcessRssStartBytes;
-  }
-  if (params.gatewayProcessRssEndBytes !== null) {
-    metrics.gatewayProcessRssEndBytes = params.gatewayProcessRssEndBytes;
-  }
-  const gatewayProcessRssSamples = params.gatewayProcessRssSamples ?? [];
-  if (gatewayProcessRssSamples.length > 0) {
-    metrics.gatewayProcessRssSamples = gatewayProcessRssSamples;
-  }
   if (params.gatewayProcessRssStartBytes !== null && params.gatewayProcessRssEndBytes !== null) {
+    const gatewayProcessRssSamples = params.gatewayProcessRssSamples ?? [];
     const gatewayProcessRssPeakBytes =
       gatewayProcessRssSamples.length > 0
         ? Math.max(...gatewayProcessRssSamples.map((sample) => sample.gatewayProcessRssBytes))
         : Math.max(params.gatewayProcessRssStartBytes, params.gatewayProcessRssEndBytes);
     Object.assign(metrics, {
+      gatewayProcessRssStartBytes: params.gatewayProcessRssStartBytes,
+      gatewayProcessRssEndBytes: params.gatewayProcessRssEndBytes,
       gatewayProcessRssDeltaBytes:
         params.gatewayProcessRssEndBytes - params.gatewayProcessRssStartBytes,
       gatewayProcessRssPeakBytes,
       gatewayProcessRssPeakDeltaBytes:
         gatewayProcessRssPeakBytes - params.gatewayProcessRssStartBytes,
+      ...(gatewayProcessRssSamples.length > 0 ? { gatewayProcessRssSamples } : {}),
     });
   }
   if (params.gatewayHeapSnapshots?.length) {

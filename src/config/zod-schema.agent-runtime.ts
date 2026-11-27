@@ -220,8 +220,12 @@ function createAllowAlsoAllowConflictValidator(message: string) {
   };
 }
 
+const ExecModeSchema = z.enum(["deny", "allowlist", "ask", "auto", "full"]);
+
 const ToolPolicyWithProfileSchema = ToolPolicyBaseSchema.extend({
   profile: ToolProfileSchema,
+  /** Exec ceiling for turns on this provider/model; it can tighten, never loosen. */
+  exec: z.strictObject({ mode: ExecModeSchema.optional() }).optional(),
 }).superRefine(
   createAllowAlsoAllowConflictValidator(
     "tools.byProvider policy cannot set both allow and alsoAllow in the same scope (merge alsoAllow into allow, or remove allow and use profile + alsoAllow)",
@@ -261,7 +265,7 @@ const ToolExecBaseShape = {
   /** Exec host routing (default: auto). */
   host: z.enum(["auto", "sandbox", "gateway", "node"]).optional(),
   /** Normalized exec policy mode. Prefer this over raw security/ask knobs. */
-  mode: z.enum(["deny", "allowlist", "ask", "auto", "full"]).optional(),
+  mode: ExecModeSchema.optional(),
   /** Legacy exec security mode retained when no canonical mode can preserve policy. */
   security: z.enum(["deny", "allowlist", "full"]).optional(),
   /** Legacy exec ask mode retained when no canonical mode can preserve policy. */
@@ -313,8 +317,8 @@ const ToolExecBaseShape = {
   /** Emit a system event and heartbeat when a backgrounded exec exits. */
   notifyOnExit: z.boolean().optional(),
   /**
-   * Also emit success exit notifications when a backgrounded exec has no output.
-   * Default false to reduce context noise.
+   * Also wake the session when a backgrounded exec succeeds with no output.
+   * Default true, so every exit of a wake-armed command reports back.
    */
   notifyOnExitEmptySuccess: z.boolean().optional(),
   applyPatch: ToolExecApplyPatchSchema,
@@ -362,7 +366,7 @@ const ToolFsSchema = z
 
 const ToolLoopDetectionSchema = z
   .strictObject({
-    /** Enable tool-loop protection (default: false). */
+    /** Enable the tool repeat guard (default: true). */
     enabled: z.boolean().optional(),
   })
   .optional();

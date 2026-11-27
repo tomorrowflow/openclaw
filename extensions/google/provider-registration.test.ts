@@ -1,4 +1,6 @@
 import type { Model } from "openclaw/plugin-sdk/llm";
+import { clearLiveCatalogCacheForTests } from "openclaw/plugin-sdk/provider-catalog-live-runtime";
+import * as ssrfRuntime from "openclaw/plugin-sdk/ssrf-runtime";
 import { assert, describe, expect, it, vi } from "vitest";
 import { buildGoogleStaticCatalogProvider } from "./provider-catalog.js";
 import { buildGoogleProvider } from "./provider-registration.js";
@@ -116,6 +118,49 @@ describe("buildGoogleProvider createStreamFn", () => {
     expect(normalized?.input).toEqual(["text", "image"]);
   });
 
+  it("publishes every listed model id, including hidden non-chat rows", async () => {
+    clearLiveCatalogCacheForTests();
+    const row = (id: string, methods: string[]) => ({
+      name: `models/${id}`,
+      inputTokenLimit: 1_048_576,
+      outputTokenLimit: 65_536,
+      supportedGenerationMethods: methods,
+    });
+    const fetchGuard = vi
+      .spyOn(ssrfRuntime, "fetchWithSsrFGuard")
+      .mockImplementation(async ({ url }) => ({
+        response: Response.json({
+          models: [
+            row("gemini-3.8-flash", ["generateContent"]),
+            row("gemini-embedding-001", ["embedContent"]),
+          ],
+        }),
+        finalUrl: url,
+        release: async () => undefined,
+      }));
+    try {
+      const result = await provider.catalog?.run({
+        providerIds: ["google"],
+        config: {},
+        env: {},
+        resolveProviderApiKey: () => ({ apiKey: "fixture-google-key", profileId: "google:key" }),
+        resolveProviderAuth: () => ({ apiKey: undefined, mode: "none", source: "none" }),
+      } as never);
+      assert(result && "providers" in result);
+      expect(result.providers.google?.models.map(({ id }) => id)).toEqual(["gemini-3.8-flash"]);
+      expect(result.outcomes).toEqual([
+        {
+          provider: "google",
+          profileId: "google:key",
+          status: "ready",
+          listedModelIds: ["gemini-3.8-flash", "gemini-embedding-001"],
+        },
+      ]);
+    } finally {
+      fetchGuard.mockRestore();
+    }
+  });
+
   it("does not resolve AI Studio credentials for Vertex-only catalog scope", async () => {
     const resolveProviderApiKey = vi.fn();
 
@@ -150,7 +195,7 @@ describe("Google catalog transport defaults", () => {
       ...apis.flatMap((api) =>
         ["provider", "model"]
           // Catalog routes admit a provider-wide API that matches the catalog row;
-          // AI Studio selects Interactions per model (or by the Flash default).
+          // AI Studio selects Interactions per model (or by the Gemini default).
           .filter(
             (scope) =>
               !(scope === "provider" && api === "google-interactions" && baseUrl === endpoints[0]),
@@ -189,5 +234,19 @@ describe("Google catalog transport defaults", () => {
       baseUrl,
       api: api ?? (baseUrl === endpoints[0] ? "google-interactions" : "google-generative-ai"),
     });
+  });
+
+  it.each([
+    ["gemini-4-argon", "google-interactions"],
+    ["gemini-3.1-pro-preview", "google-interactions"],
+    ["gemma-4-26b-a4b-it", "google-generative-ai"],
+  ] as const)("defaults %s on AI Studio to %s", (modelId, api) => {
+    const resolved = provider.normalizeResolvedModel?.({
+      provider: "google",
+      modelId,
+      model: { ...catalogModel, id: modelId, baseUrl: endpoints[0] },
+      config: {},
+    });
+    expect(resolved?.api).toBe(api);
   });
 });

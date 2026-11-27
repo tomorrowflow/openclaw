@@ -1,5 +1,6 @@
-import { createComponent, flush } from "solid-js";
 /* @vitest-environment jsdom */
+
+import { createComponent, flush } from "solid-js";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { prepareChatMessageRender } from "../../../lib/chat/message-display.ts";
 import { ApplicationProvider } from "../../../lib/reactive/context.ts";

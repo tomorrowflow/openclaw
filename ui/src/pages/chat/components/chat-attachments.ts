@@ -13,11 +13,8 @@ import type { ChatAttachmentControlsProps } from "./chat-attachment-controls.typ
 import { currentAttachments } from "./chat-attachment-draft.ts";
 import { dataImageClipboardFile } from "./chat-attachment-image.ts";
 import { ChatAttachmentReadLifecycle, readChatAttachmentFile } from "./chat-attachment-reads.ts";
-import { encodeTextAsDataUrl } from "./chat-attachment-text.ts";
 
 registerChatComposerEnglish();
-
-const LARGE_PASTE_TEXT_THRESHOLD = 1000;
 
 function isFileDrag(dataTransfer: DataTransfer | null): boolean {
   return Array.from(dataTransfer?.types ?? []).includes("Files");
@@ -63,14 +60,10 @@ export function stagedAttachmentBytes(
   );
 }
 
-function chatAttachmentFromFile(
-  file: File,
-  dataUrl: string,
-  origin: ChatAttachment["origin"] = "file",
-): ChatAttachment {
-  const attachment = {
+function chatAttachmentFromFile(file: File, dataUrl: string): ChatAttachment {
+  const attachment: ChatAttachment = {
     id: generateAttachmentId(),
-    origin,
+    origin: "file",
     mimeType: file.type || "application/octet-stream",
     fileName: file.name || undefined,
     sizeBytes: file.size,
@@ -100,14 +93,14 @@ export function appendChatAttachmentFiles(
     return 0;
   }
   if (!uploadsEnabled(props.uploadConfig)) {
-    showToast({ message: uploadsDisabledMessage() });
+    showToast({ severity: "error", message: uploadsDisabledMessage() });
     return 0;
   }
   const unsupported = props.imagesOnly
     ? candidates.filter((file) => !file.type.startsWith("image/"))
     : [];
   if (unsupported.length) {
-    showToast({ message: t("chat.attachments.imagesOnly") });
+    showToast({ severity: "error", message: t("chat.attachments.imagesOnly") });
   }
   const reads = props.attachmentReads ?? new ChatAttachmentReadLifecycle(() => {});
   const stagedBytes = stagedAttachmentBytes(props);
@@ -176,11 +169,7 @@ function recoverDroppedTextPaste(e: ClipboardEvent, text: string) {
   }, 0);
 }
 
-export function handleChatAttachmentPaste(
-  e: ClipboardEvent,
-  props: ChatAttachmentControlsProps,
-  options: { imagesOnly?: boolean } = {},
-) {
+export function handleChatAttachmentPaste(e: ClipboardEvent, props: ChatAttachmentControlsProps) {
   if (!e.clipboardData || !props.onAttachmentsChange) {
     return;
   }
@@ -189,10 +178,9 @@ export function handleChatAttachmentPaste(
       (item) => item.kind === "file" || item.type.startsWith("image/"),
     );
     const text = e.clipboardData.getData("text/plain");
-    const hasInlineImage = /^data:image\//i.test(text.trim());
-    if (hasFiles || hasInlineImage) {
+    if (hasFiles || /^data:image\//i.test(text.trim())) {
       e.preventDefault();
-      showToast({ message: uploadsDisabledMessage() });
+      showToast({ severity: "error", message: uploadsDisabledMessage() });
       return;
     }
     // Large text remains ordinary native paste instead of becoming a file.
@@ -209,24 +197,9 @@ export function handleChatAttachmentPaste(
     imageFiles.push(pasted.file);
   }
   if (imageFiles.length === 0) {
-    if (
-      options.imagesOnly ||
-      !text ||
-      text.length <= LARGE_PASTE_TEXT_THRESHOLD ||
-      !(props.getDraft?.() ?? props.draft ?? "")
-    ) {
-      recoverDroppedTextPaste(e, text ?? "");
-      return;
-    }
-    e.preventDefault();
-    const file = new File([text], `pasted-text-${Date.now()}.txt`, { type: "text/plain" });
-    const stagedBytes = stagedAttachmentBytes(props);
-    if (admitAttachmentFiles([file], props.attachmentLimits, stagedBytes).length === 0) {
-      // The rejection toast named the file; the clipboard still holds the text.
-      return;
-    }
-    const attachment = chatAttachmentFromFile(file, encodeTextAsDataUrl(text), "paste");
-    props.onAttachmentsChange([...currentAttachments(props), attachment]);
+    // Clipboard text is user input regardless of length; file conversion would
+    // route it through document extraction's untrusted external-content boundary.
+    recoverDroppedTextPaste(e, text ?? "");
     return;
   }
   e.preventDefault();

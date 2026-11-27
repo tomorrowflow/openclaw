@@ -16,24 +16,11 @@ export type OpenAIUltraWireObservation = {
 };
 
 export const OPENAI_ULTRA_NORMAL_EFFORT = "medium";
-// src/skills/workshop/review-run.ts runs background reviews with thinkLevel "low".
+// Skill Workshop reviews run as session forks, which src/agents/session-fork-run.ts runs with thinkLevel "low".
 const SKILL_WORKSHOP_REVIEW_EFFORT = "low";
 
 function logUltraProgress(message: string): void {
   writeSync(2, `[live] ${message}\n`);
-}
-
-// Decode before the caller checks live ownership; forward the original body unchanged.
-export async function readOpenAIUltraRequestBody(
-  body: RequestInit["body"],
-): Promise<string | undefined> {
-  if (typeof body === "string") {
-    return body;
-  }
-  if (body instanceof Blob) {
-    return await body.text();
-  }
-  return ArrayBuffer.isView(body) ? new TextDecoder().decode(body) : undefined;
 }
 
 export function assertOpenAIUltraWireEffort(params: {

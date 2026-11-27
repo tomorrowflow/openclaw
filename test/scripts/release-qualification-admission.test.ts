@@ -5,6 +5,7 @@ import {
   buildQualificationAdmissionRequest,
   resolveQualificationAdmissionDescriptor,
   revalidateQualificationAdmissionAuthority,
+  verifyReleaseQualificationOperators,
   semanticQualificationInputs,
   QUALIFICATION_ADMISSION_WORKFLOW,
 } from "../../scripts/release-qualification-admission.mjs";
@@ -14,6 +15,10 @@ import {
   request,
   fixture,
 } from "./release-qualification-admission.test-support.js";
+
+it("rejects a Q revision without its ledger", () => {
+  expect(() => fixture(false, { missingLedger: true })).toThrow("HTTP 404");
+});
 
 const envelope = (inputs = request().inputs) =>
   JSON.parse(expectDefined(inputs.trusted_workflow_json, "trusted workflow envelope"));
@@ -105,15 +110,16 @@ it.each([false, true])("authenticates P without Q main ancestry (protected=%s)",
   ).toEqual(f.descriptor);
 });
 
-it("admits independently selected Q while retaining C package and baseline identity", () => {
+it("admits off-main Q while retaining P authority and C package and baseline identity", () => {
   const q = "c".repeat(40);
   const f = fixture(true, { qualificationSha: q, transportRef: "release-ci/cccccccccccc-123" });
   expect(f.verify()).toEqual(f.receipt);
   expect(f.receipt.request).toMatchObject({ candidateSha, qualificationSha: q });
   expect(f.calls).toContain("repos/openclaw/openclaw/contents/package.json?ref=" + candidateSha);
   expect(f.calls).not.toContain("repos/openclaw/openclaw/contents/package.json?ref=" + q);
-  f.authority.qualificationAncestry = "behind";
-  expect(() => f.verify()).toThrow(/main/);
+  expect(f.calls.some((call) => call.includes("compare/" + q))).toBe(false);
+  f.authority.tagSha = q;
+  expect(() => f.verify()).toThrow(/protected release tooling tag/);
 });
 
 it("rejects mismatched Q in the reviewed workflow envelope", () => {
@@ -201,6 +207,26 @@ it("refuses changed archive bytes and UTF-8 archive adapters", () => {
     /archive bytes/,
   );
   expect(() => f.verify(f.selected.inputs, () => new Uint8Array(0))).toThrow(/archive bytes/);
+});
+
+it.each([false, true])("reads each distinct operator grant once (distinct=%s)", (distinct) => {
+  const actor = { id: 91, login: "release-operator", type: "User" };
+  const triggering = distinct ? { ...actor, id: 92, login: "release-trigger" } : { ...actor };
+  const calls: string[] = [];
+  const runGh = (args: string[]) => {
+    calls.push(args[1]!);
+    return JSON.stringify({
+      permission: "write",
+      user: args[1]!.includes("release-trigger") ? triggering : actor,
+    });
+  };
+  expect(
+    verifyReleaseQualificationOperators("openclaw/openclaw", actor, triggering, runGh),
+  ).toEqual({
+    operator: { id: actor.id, login: actor.login },
+    triggeringOperator: { id: triggering.id, login: triggering.login },
+  });
+  expect(calls).toHaveLength(distinct ? 2 : 1);
 });
 
 it("revalidates current authority without reacquiring immutable evidence (protected)", () => {

@@ -35,7 +35,11 @@ import {
   dockerPersistentTargetFromEngineTarget,
   dockerPersistentTargetToEngineTarget,
 } from "./docker-persistent-target.js";
-import { compareSandboxMountPlan, prepareSandboxMountPlan } from "./mount-plan.js";
+import {
+  compareSandboxMountPlan,
+  prepareSandboxMountPlan,
+  type SandboxMountPlan,
+} from "./mount-plan.js";
 import type { DockerPersistentExecTarget } from "./persistent-exec.types.js";
 import {
   assertPodmanSandboxTarget,
@@ -129,7 +133,26 @@ type EnsureSandboxContainerParams = {
   requireCurrentConfig?: boolean;
 };
 
-export async function ensureSandboxContainer(params: EnsureSandboxContainerParams) {
+type SandboxContainerAllocation = {
+  containerName: string;
+  containerId: string;
+  podmanTarget?: SandboxContainerEngineTarget;
+  configHash: string | null;
+  mountPlan: SandboxMountPlan;
+  currentConfig: boolean;
+};
+
+export function ensureSandboxContainer(
+  params: EnsureSandboxContainerParams,
+): Promise<SandboxContainerAllocation>;
+export function ensureSandboxContainer<T>(
+  params: EnsureSandboxContainerParams,
+  prepare: (allocation: SandboxContainerAllocation) => Promise<T>,
+): Promise<T>;
+export async function ensureSandboxContainer<T>(
+  params: EnsureSandboxContainerParams,
+  prepare?: (allocation: SandboxContainerAllocation) => Promise<T>,
+) {
   using phases = observeDiagnosticsTimelinePhases("attempt.setup.sandbox.backend.lifecycle_wait");
   const engine = params.engine;
   const slug = params.cfg.scope === "shared" ? "shared" : slugifySessionKey(params.scopeKey);
@@ -150,15 +173,21 @@ export async function ensureSandboxContainer(params: EnsureSandboxContainerParam
     params.cfg.scope === "shared" ? undefined : params.operatorAuthority,
     (source) => {
       phases[Symbol.dispose]();
-      return ensureSandboxContainerLifecycle({ ...params, assertCurrent }, containerName, source);
+      return ensureSandboxContainerLifecycle(
+        { ...params, assertCurrent },
+        containerName,
+        source,
+        prepare,
+      );
     },
   );
 }
 
-async function ensureSandboxContainerLifecycle(
+async function ensureSandboxContainerLifecycle<T>(
   params: EnsureSandboxContainerParams,
   containerName: string,
   source: ContainerSourceLease | undefined,
+  prepare?: (allocation: SandboxContainerAllocation) => Promise<T>,
 ) {
   using phases = observeDiagnosticsTimelinePhases("attempt.setup.sandbox.backend.runtime_info");
   const configuredEngine = params.engine;
@@ -168,8 +197,15 @@ async function ensureSandboxContainerLifecycle(
     assertPodmanSandboxTarget(params.podmanTarget, podmanRuntimeInfo.target);
   }
   const engine = podmanRuntimeInfo
-    ? bindPodmanSandboxEngine(podmanRuntimeInfo.target)
+    ? {
+        ...bindPodmanSandboxEngine(podmanRuntimeInfo.target),
+        stateGuard: configuredEngine.stateGuard,
+      }
     : configuredEngine;
+  const stateGuard = engine.stateGuard && {
+    assertHost: engine.stateGuard.assertHost,
+    stateOwnerPath: engine.stateGuard.stateOwnerPath,
+  };
   params.assertCurrent?.();
   phases.mark("attempt.setup.sandbox.backend.registry_read");
   let existingRegistryEntry = await readRegistryEntry(containerName);
@@ -217,7 +253,7 @@ async function ensureSandboxContainerLifecycle(
       // A removed or replaced Podman target can leave registry metadata behind.
       // Drop it only after the recorded target no longer exposes the runtime.
       phases.mark("attempt.setup.sandbox.backend.stale_registry_remove");
-      await removeRegistryEntry(containerName);
+      await removeRegistryEntry(containerName, {}, stateGuard);
       existingRegistryEntry = null;
     }
   }
@@ -361,6 +397,18 @@ async function ensureSandboxContainerLifecycle(
     configLabelKind: "Image" as const,
     configHash: expectedHash,
   };
+  const complete = async (configHash: string | null, currentConfig: boolean) => {
+    const allocation = {
+      containerName,
+      containerId,
+      ...(podmanRuntimeInfo ? { podmanTarget: podmanRuntimeInfo.target } : {}),
+      configHash,
+      mountPlan,
+      currentConfig,
+    };
+    // Backend inspection must finish before releasing the allocation's cleanup boundary.
+    return prepare ? await prepare(allocation) : allocation;
+  };
   if (!hasContainer) {
     // Preserve managed mount custody and unfinished one-time setup before any
     // provider allocation, including a crash or revocation before publication.
@@ -369,6 +417,7 @@ async function ensureSandboxContainerLifecycle(
       phases.mark("attempt.setup.sandbox.backend.registry_reserve");
       await updateRegistry(
         needsSetupReservation ? { ...readyEntry, runtimeState: "pending" } : readyEntry,
+        stateGuard,
       );
     }
     let allocated = false;
@@ -402,25 +451,23 @@ async function ensureSandboxContainerLifecycle(
         phases.mark("attempt.setup.sandbox.backend.setup_command");
         await execContainer(engine, ["exec", "-i", containerId, "/bin/sh", "-lc", setupCommand], {
           signal: params.operatorAuthority?.signal,
+          assertCurrent: params.assertCurrent,
         });
       }
       params.assertCurrent?.();
       readyEntry.lastUsedAtMs = Date.now();
       phases.mark("attempt.setup.sandbox.backend.registry_publish");
       if (needsSetupReservation) {
-        await completeSandboxRegistryReservation({ ...readyEntry, mounts: mountPlan.mounts });
+        await completeSandboxRegistryReservation(
+          { ...readyEntry, mounts: mountPlan.mounts },
+          false,
+          stateGuard,
+        );
       } else {
-        await updateRegistry({ ...readyEntry, mounts: mountPlan.mounts });
+        await updateRegistry({ ...readyEntry, mounts: mountPlan.mounts }, stateGuard);
       }
       params.assertCurrent?.();
-      return {
-        containerName,
-        containerId,
-        ...(podmanRuntimeInfo ? { podmanTarget: podmanRuntimeInfo.target } : {}),
-        configHash: expectedHash,
-        mountPlan,
-        currentConfig: true,
-      };
+      return await complete(expectedHash, true);
     } catch (creationError) {
       if (!allocated) {
         throw creationError;
@@ -430,7 +477,7 @@ async function ensureSandboxContainerLifecycle(
         // writable layer. Shared/unknown environments remain running.
         if (params.workspaceSource !== "managed-worktree" && !needsSetupReservation) {
           phases.mark("attempt.setup.sandbox.backend.cancelled_registry_publish");
-          await updateRegistry(readyEntry);
+          await updateRegistry(readyEntry, stateGuard);
         }
         throw creationError;
       }
@@ -464,18 +511,14 @@ async function ensureSandboxContainerLifecycle(
     }
   }
   phases.mark("attempt.setup.sandbox.backend.registry_publish");
-  await updateRegistry({
-    ...readyEntry,
-    lastUsedAtMs: Date.now(),
-    configHash: hashMismatch ? (currentHash ?? undefined) : expectedHash,
-  });
+  await updateRegistry(
+    {
+      ...readyEntry,
+      lastUsedAtMs: Date.now(),
+      configHash: hashMismatch ? (currentHash ?? undefined) : expectedHash,
+    },
+    stateGuard,
+  );
   params.assertCurrent?.();
-  return {
-    containerName,
-    containerId,
-    ...(podmanRuntimeInfo ? { podmanTarget: podmanRuntimeInfo.target } : {}),
-    configHash: hashMismatch ? currentHash : expectedHash,
-    mountPlan,
-    currentConfig: !hashMismatch,
-  };
+  return await complete(hashMismatch ? currentHash : expectedHash, !hashMismatch);
 }

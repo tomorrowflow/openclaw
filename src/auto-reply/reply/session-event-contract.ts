@@ -36,16 +36,19 @@ export type SessionEventOutcome = {
   status: "completed" | "failed" | "cancelled";
   executionStarted: boolean;
   delivered: boolean;
+  /** The settled answer was committed by the existing conversation-result writer. */
+  conversationResultCommitted?: true;
   summary?: string;
   nextCheckMs?: number;
   sourceDeliveryOutcome?: SourceDeliveryOutcome;
   automationResult?: CronRunTelemetry &
     Pick<CronRunOutcome, "replyDisposition" | "diagnostics" | "result">;
+  /** Recorded by the turn owner before delivery/cleanup can flatten its cause. */
+  terminalOutcome?: AgentRunTerminalOutcome;
   /** Recorded controller restart outcome, before the error is flattened. */
   interruptedByRestart?: boolean;
   error?: string;
-  terminalOutcome?: AgentRunTerminalOutcome;
-  /** Structured cause from the selected, settled runtime attempt. */
+  /** Structured provider cause from the selected, settled runtime attempt. */
   errorReason?: FailoverReason;
   /** Admission policy decides whether a durable producer may retry this refusal. */
   retryable?: boolean;
@@ -60,7 +63,7 @@ export type SessionEventReceipt = {
   id: string;
   cancel: () => boolean;
   /** Resolves after ordinary turn adoption or committed follow-up queue admission. */
-  accepted: Promise<{ ok: true } | { ok: false; error: string }>;
+  accepted: Promise<{ ok: true } | { ok: false; error: string; cause?: Error }>;
   settled: Promise<SessionEventOutcome>;
 };
 
@@ -95,7 +98,9 @@ export type SessionEventOptions = {
     | "plugin"
     // A yielded tool's result resuming its own conversation; hidden from chat display.
     | "tool_handoff"
-    | "cron";
+    | "cron"
+    // The scheduler's repair request for a failing job; hidden from chat display.
+    | "cron_failure_repair";
   contextKey?: string;
   /** Stable identity for durable host producers across restart handoffs. */
   sourceTurnId?: string;
@@ -117,6 +122,8 @@ export type SessionEventOptions = {
   preserveOccurrenceOnRejection?: true;
   /** An explicitly silent source records its result without transport delivery. */
   deliver?: boolean;
+  /** Host-owned: runtime error payloads stay in the transcript, out of chat delivery. */
+  suppressErrorDelivery?: true;
   /** Host-owned: the producer's prompt permits NO_REPLY; input provenance never selects it. */
   replyExpectation?: "optional";
   /** Host producer remains live through admission, execution and delivery. */
@@ -140,8 +147,8 @@ export type ScheduledSessionAutomation = {
     sessionModelOverrideSource?: "auto" | "user";
   };
   operatorAuthority?: AdmittedRunOperatorAuthority;
-  /** Original Control UI admin classification, revalidated by the restored operator source. */
-  controlUiAdmin?: true;
+  /** Original authenticated UI admin delegation, revalidated by the restored operator source. */
+  automationAdmin?: true;
   admissionSource: NonNullable<AdmittedRunContext["admissionSource"]>;
   executionIdentity?: import("../../cron/service/state.js").CronExecutionIdentityAdmission;
   deliveryAttemptFence?:

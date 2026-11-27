@@ -243,7 +243,6 @@ export async function navigateViaPlaywright(
   const navigationPolicy = withBrowserNavigationPolicy(opts.ssrfPolicy, {
     browserProxyMode: opts.browserProxyMode,
     assertNavigationCurrent: opts.assertNavigationCurrent,
-    standingSsrfPolicy: opts.standingSsrfPolicy,
   });
   await assertBrowserNavigationAllowed({
     url,
@@ -372,7 +371,6 @@ export async function navigateViaPlaywright(
         ssrfPolicy: opts.ssrfPolicy,
         browserProxyMode: opts.browserProxyMode,
         assertNavigationCurrent: opts.assertNavigationCurrent,
-        standingSsrfPolicy: opts.standingSsrfPolicy,
         targetId: currentTargetId,
         ...(opts.signal ? { signal: opts.signal } : {}),
       });

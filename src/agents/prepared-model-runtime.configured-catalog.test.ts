@@ -736,11 +736,9 @@ it.each([
   expect(rows[0]).toMatchObject({
     name: "Configured",
     baseUrl: custom ? "https://custom.fixture.invalid/v1" : "https://catalog.fixture.invalid/v1",
-    inference: custom ? { chat: false } : inference,
   });
-  if (custom) {
-    expect(rows[0]!.inference).not.toHaveProperty("decision");
-  }
+  // A different route loses Decision metadata but keeps an explicit chat veto.
+  expect(rows[0]!.inference).toEqual(custom ? (chat ? undefined : { chat: false }) : inference);
 });
 
 it("keeps typed-only manifest rows after live chat discovery acquires their provider", () => {
@@ -770,25 +768,17 @@ it("keeps typed-only manifest rows after live chat discovery acquires their prov
   const captured = captureRegistry(registry, config, metadata);
   const project = createPreparedModelCatalogProjection({
     agentFacts: {
-      input: { config, agentDir: "captured:agent" },
-      env: {},
-      authStore: { version: 1, profiles: {} },
-      templateAuthStorage: AuthStorage.inMemory({}),
-      providerIds: [],
+      input: { config },
       configuredModelRefs: [],
       configuredRuntimeModels: [],
       runtimeCapabilityModels: [],
-      configuredGeneratedCatalogPluginIds: [],
       credentials: {},
-    },
+    } as unknown as Parameters<typeof createPreparedModelCatalogProjection>[0]["agentFacts"],
     normalizeProvider: (provider) => provider,
     catalogFacts: captured,
     pluginGeneration: {
       pluginMetadataSnapshot: metadata,
-      remoteCatalog: null,
-      inlineProviderModels: [],
-      configuredCatalogEntries: [],
-    },
+    } as Parameters<typeof createPreparedModelCatalogProjection>[0]["pluginGeneration"],
   });
   // Live discovery succeeded and lists only conversational rows for this provider.
   const chat = { provider: "fixture", id: "chat", name: "Chat" };
@@ -798,7 +788,7 @@ it("keeps typed-only manifest rows after live chat discovery acquires their prov
       routeVariants: [chat],
       providerOutcomes: [{ provider: "fixture", status: "ready" }],
     },
-    providers: new Map([["fixture", { source: "fixture", credentials: "fixture" }]]),
+    providers: new Map([["fixture", {}]]) as never,
   });
   const rows = projected.entries.filter((entry) => entry.id === "typed");
   expect(rows).toHaveLength(1);

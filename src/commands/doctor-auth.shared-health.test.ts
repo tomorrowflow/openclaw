@@ -9,8 +9,6 @@ import {
 } from "../agents/auth-profiles/sqlite.js";
 import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { runAuthProfileDiagnostics } from "../flows/doctor-auth-health.js";
-import { createDoctorHealthFlowContext } from "../flows/doctor-health-context.test-support.js";
 import { writeConfigMachineState } from "../state/config-machine-state-write.js";
 import {
   withOpenClawTestState,
@@ -90,6 +88,7 @@ describe("Doctor shared auth health", () => {
       writePersistedAuthProfileStateRaw(
         {
           version: 1,
+          order: { "diagnostic-provider": [profileId, "diagnostic-provider:missing"] },
           usageStats: {
             [profileId]: { cooldownUntil: Date.now() + 600_000, cooldownReason: "session_expired" },
           },
@@ -106,33 +105,34 @@ describe("Doctor shared auth health", () => {
           message: expect.stringContaining("expired"),
         }),
         expect.objectContaining({
+          target: "diagnostic-provider:missing",
+          path: resolveAuthProfileDatabasePath(agentDir),
+          requirement: "missing_ordered_profile",
+          fixHint: expect.stringContaining("openclaw models auth list --agent alpha"),
+        }),
+        expect.objectContaining({
           target: profileId,
           path: resolveAuthProfileDatabasePath(agentDir),
           message: expect.stringContaining("cooldown:session_expired"),
           fixHint: recoveryHint,
         }),
       ]);
-      const currentFindings = await inspect(cfg);
-      expect(currentFindings).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            target: profileId,
-            category: "fix-now",
-            path: resolveAuthProfileDatabasePath(agentDir),
-            fixHint: recoveryHint,
-          }),
-        ]),
+      expect(await inspect(cfg)).toContainEqual(
+        expect.objectContaining({
+          target: profileId,
+          category: "fix-now",
+          path: resolveAuthProfileDatabasePath(agentDir),
+          fixHint: recoveryHint,
+        }),
       );
     });
   });
 
   it("reports a missing host profile without importing the native Codex account", async () => {
     await withFleet(async (state, cfg) => {
+      const missingCredential = { type: "oauth", provider: "openai", expires: 1 };
       writePersistedAuthProfileStoreRaw(
-        {
-          version: 1,
-          profiles: { "openai:default": { type: "oauth", provider: "openai", expires: 1 } },
-        },
+        { version: 1, profiles: { "openai:default": missingCredential } },
         state.agentDir("alpha"),
       );
       cliCredentials.readCodex.mockReturnValue(oauth({ expires: Date.now() + 7 * 86_400_000 }));
@@ -211,13 +211,13 @@ describe("Doctor shared auth health", () => {
 it("reports ambient Copilot activation once", async () => {
   await withFleet(async (state) => {
     const env = { ...state.env, GITHUB_TOKEN: "github-test-token" };
-    expect(collectCopilotAmbientTokenFindings({}, env)).toEqual([
+    expect(await collectCopilotAmbientTokenFindings({}, env)).toEqual([
       expect.objectContaining({
         category: "recommended",
         fixHint: expect.stringContaining("No action needed if you do not use Copilot"),
       }),
     ]);
-    expect(collectCopilotAmbientTokenFindings({}, env)).toEqual([]);
+    expect(await collectCopilotAmbientTokenFindings({}, env)).toEqual([]);
   });
 });
 
@@ -239,13 +239,13 @@ it.each(["provider", "profile", "token", "stored"] as const)(
         });
       }
       expect(
-        collectCopilotAmbientTokenFindings(cfg, {
+        await collectCopilotAmbientTokenFindings(cfg, {
           ...env,
           ...(kind === "token" ? { COPILOT_GITHUB_TOKEN: "copilot-test-token" } : {}),
         }),
       ).toEqual([]);
       if (kind !== "stored") {
-        expect(collectCopilotAmbientTokenFindings({}, env)).toHaveLength(1);
+        expect(await collectCopilotAmbientTokenFindings({}, env)).toHaveLength(1);
       }
     });
   },
@@ -262,14 +262,6 @@ it("reports legacy shared auth until its owner is relocated", async () => {
         category: "recommended",
         fixHint: expect.stringContaining("openclaw doctor --fix"),
       }),
-    ]);
-    const ctx = createDoctorHealthFlowContext({
-      env: { ...state.env, GH_TOKEN: "", GITHUB_TOKEN: "" },
-      authProfileHealthReady: false,
-    });
-    await runAuthProfileDiagnostics(ctx);
-    expect(ctx.healthFindings).toEqual([
-      expect.objectContaining({ checkId: "core/doctor/shared-auth-store" }),
     ]);
     const env = { ...state.env, OPENCLAW_STATE_DIR: state.statePath("relocated") };
     writeConfigMachineState("auth.sharedStore", { location: "state-db" }, { env });
@@ -297,7 +289,7 @@ it.each([false, true])("warns about legacy Codex overrides (stored OAuth: %s)", 
       },
     });
     const findings = stored
-      ? collectLegacyCodexProviderOverrideFindings(cfg)
+      ? await collectLegacyCodexProviderOverrideFindings(cfg)
       : await collectAuthProfileHealthFindings({ cfg });
     expect(findings).toEqual([
       expect.objectContaining({

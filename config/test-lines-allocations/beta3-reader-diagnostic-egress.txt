@@ -1,2 +1,0 @@
-# One bounded reader-geometry projection regression; preserves private capture redaction and rejects malformed/oversized input.
-61

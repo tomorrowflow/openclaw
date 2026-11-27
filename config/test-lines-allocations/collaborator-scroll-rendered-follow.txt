@@ -1,2 +1,0 @@
-17
-# Rendered-text and settled-scroll preconditions at the two existing collaborator-follow E2E call sites.

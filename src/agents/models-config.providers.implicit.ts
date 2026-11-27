@@ -28,6 +28,7 @@ import {
 import { matchesProviderPluginRef } from "../plugins/provider-registry-shared.js";
 import { prepareProviderExternalAuthWithPlugin } from "../plugins/provider-runtime.js";
 import { getPluginRuntimeGenerationRegistry } from "../plugins/runtime/generation-scope.js";
+import { getPluginRuntimeLoadContextState } from "../plugins/runtime/load-context-state.js";
 import { resolveManifestSyntheticAuthProviderRefState } from "../plugins/synthetic-auth.runtime.js";
 import { resolveNonEnvSecretRefApiKeyMarker } from "../secrets/provider-credential-values.js";
 import { runTasksWithConcurrency } from "../utils/run-with-concurrency.js";
@@ -71,7 +72,8 @@ type ImplicitProviderParams = {
   env?: NodeJS.ProcessEnv;
   workspaceDir?: string;
   explicitProviders?: Record<string, ProviderConfig> | null;
-  pluginMetadataSnapshot?: Pick<PluginMetadataSnapshot, "index" | "manifestRegistry" | "owners">;
+  pluginMetadataSnapshot?: Pick<PluginMetadataSnapshot, "index" | "manifestRegistry" | "owners"> &
+    Partial<Pick<PluginMetadataSnapshot, "normalizePluginId">>;
   preparedStaticProviderCatalog?: PreparedProviderStaticCatalog;
   providerDiscoveryProviderIds?: readonly string[];
   staticCatalogProviderIds?: readonly string[];
@@ -90,7 +92,6 @@ type ImplicitProviderContext = ImplicitProviderParams & {
   resolveProviderApiKey: ProviderApiKeyResolver;
   resolveProviderAuth: ProviderAuthResolver;
   normalizeProviderForScope: (provider: string) => string;
-  failedSyntheticProviders: ReadonlySet<import("../plugins/types.js").ProviderPlugin>;
 };
 
 function resolveLiveProviderCatalogTimeoutMs(env: NodeJS.ProcessEnv): number | null {
@@ -198,17 +199,6 @@ async function resolvePluginImplicitProviders(
           (providerIds === undefined && !catalogProviderRefs.some(canDiscoverProvider))
         ) {
           return undefined;
-        }
-        if (ctx.failedSyntheticProviders.has(provider)) {
-          return {
-            provider,
-            normalizedResult: undefined,
-            includeProvider,
-            outcomes: (providerIds ?? [provider.id]).map((id) => ({
-              provider: id,
-              status: "unavailable" as const,
-            })),
-          };
         }
         const catalogConfig = buildPluginCatalogConfig(ctx, provider);
         const resolveCatalogProviderApiKey = (providerId?: string) => {
@@ -447,6 +437,8 @@ export async function prepareImplicitProviderStaticCatalog(
   params.signal?.throwIfAborted();
   const env = params.env ?? process.env;
   const discoveryScope = resolveImplicitProviderDiscoveryScope(params);
+  const registry = getPluginRuntimeGenerationRegistry();
+  const loadContext = getPluginRuntimeLoadContextState(registry);
   const providers = await resolveRuntimePluginDiscoveryProviders({
     config: params.config,
     workspaceDir: params.workspaceDir,
@@ -455,7 +447,7 @@ export async function prepareImplicitProviderStaticCatalog(
     ...(params.pluginMetadataSnapshot
       ? { pluginMetadataSnapshot: params.pluginMetadataSnapshot }
       : {}),
-    discoveryEntriesOnly: !getPluginRuntimeGenerationRegistry(),
+    discoveryEntriesOnly: !registry,
     includeSyntheticAuthProviders: true,
   });
   const staticCatalogProviderIds = params.staticCatalogProviderIds
@@ -511,6 +503,16 @@ export async function prepareImplicitProviderStaticCatalog(
   // be narrower because startup only executes hooks for unresolved configured model refs.
   return Object.freeze({
     providers: Object.freeze(providers),
+    // Capture before discovery awaits. Rebinding a retained registry invalidates these handles;
+    // weak provenance must not extend the registry or its old config/environment lifetime.
+    ...(registry && loadContext
+      ? {
+          runtimeProvenance: Object.freeze({
+            registry: new WeakRef(registry),
+            loadContext: new WeakRef(loadContext),
+          }),
+        }
+      : {}),
     // Record excluded hooks as empty so later static consumers cannot execute them again.
     entries: Object.freeze([
       ...prepared.entries.map((entry) => {
@@ -559,9 +561,25 @@ export async function resolveImplicitProviders(
         inDiscoveryScope(provider),
       )
     : undefined;
+  const provenance = params.preparedStaticProviderCatalog?.runtimeProvenance;
+  const registry = getPluginRuntimeGenerationRegistry();
+  const loadContext = getPluginRuntimeLoadContextState(registry);
+  const reuseRuntimeProviders =
+    registry !== undefined &&
+    loadContext !== undefined &&
+    provenance?.registry.deref() === registry &&
+    provenance.loadContext.deref() === loadContext;
   const preparedProviders =
-    params.providerDiscoveryEntriesOnly === true && params.preparedStaticProviderCatalog?.providers
-      ? params.preparedStaticProviderCatalog.providers.filter(inDiscoveryScope)
+    (params.providerDiscoveryEntriesOnly === true || reuseRuntimeProviders) &&
+    params.preparedStaticProviderCatalog?.providers
+      ? params.preparedStaticProviderCatalog.providers.filter(
+          (provider) =>
+            inDiscoveryScope(provider) &&
+            // Preparation also retains auth-only siblings; they must not replace catalogs
+            // with the same identity or enter live catalog credential preparation.
+            (params.providerDiscoveryEntriesOnly === true ||
+              (provider.catalog ?? provider.staticCatalog)),
+        )
       : [];
   const preparedPluginIds = new Set(
     preparedProviders.flatMap((provider) => (provider.pluginId ? [provider.pluginId] : [])),
@@ -609,48 +627,26 @@ export async function resolveImplicitProviders(
       : [],
   );
   const scopedRefs = discoveryScope ? new Set([...discoveryScope.values()].flat()) : undefined;
-  const failedSyntheticProviders = new Set<(typeof discoveryProviders)[number]>();
   // Prepare declared native refs and their configured API aliases without reopening
   // unrelated discovery. Already-resolved descriptors retain hook-alias matching.
   for (const provider of new Set([...syntheticRefs, ...configuredSyntheticRefs])) {
     if (scopedRefs && !scopedRefs.has(provider)) {
       continue;
     }
-    const api = findNormalizedProviderValue(discoveryAuthConfig?.models?.providers, provider)?.api;
-    const owners = syntheticProviders.filter(
-      (candidate) =>
-        matchesProviderPluginRef(candidate, provider) ||
-        (api !== undefined && matchesProviderPluginRef(candidate, api)),
-    );
-    if (owners.some((owner) => failedSyntheticProviders.has(owner))) {
-      continue;
-    }
-    try {
-      await prepareProviderExternalAuthWithPlugin({
+    await prepareProviderExternalAuthWithPlugin({
+      config: discoveryAuthConfig,
+      env: discoveryAuthEnv,
+      workspaceDir: params.workspaceDir,
+      provider,
+      context: {
         config: discoveryAuthConfig,
-        env: discoveryAuthEnv,
-        workspaceDir: params.workspaceDir,
         provider,
-        context: {
-          config: discoveryAuthConfig,
+        providerConfig: findNormalizedProviderValue(
+          discoveryAuthConfig?.models?.providers,
           provider,
-          providerConfig: findNormalizedProviderValue(
-            discoveryAuthConfig?.models?.providers,
-            provider,
-          ),
-        },
-      });
-    } catch (error) {
-      skipFailedProvider(error, { providerIds: [provider], stage: "synthetic auth preparation" });
-      // Failure is not a successful empty credential. Do not retry this descriptor's
-      // aliases or run its catalog/fallback with partially prepared auth.
-      for (const owner of owners) {
-        failedSyntheticProviders.add(owner);
-      }
-      if (owners.length === 0) {
-        params.onProviderCatalogOutcome?.({ provider, status: "unavailable" });
-      }
-    }
+        ),
+      },
+    });
   }
   const authStore =
     params.authStore ??
@@ -671,7 +667,6 @@ export async function resolveImplicitProviders(
   const metadata = params.pluginMetadataSnapshot;
   const context: ImplicitProviderContext = {
     ...params,
-    failedSyntheticProviders,
     normalizeProviderForScope:
       discoveryScope && metadata
         ? createPreparedModelCatalogProviderNormalizer(

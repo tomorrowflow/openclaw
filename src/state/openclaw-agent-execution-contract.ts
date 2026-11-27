@@ -61,7 +61,9 @@ export type AgentDatabaseFileExecutionOwner = {
   readonly agentId: string;
   readonly sharedDatabaseKey: string;
   readonly creationIdentity?: DatabasePathIdentity;
+  readonly fileIdentity?: AgentDatabaseExecutionFileIdentity;
   getPendingPreparation(): Promise<void> | undefined;
+  getOpeningIdentity(): Readonly<DatabasePathIdentity> | undefined;
   borrow(
     pathname: string,
     expectedIdentity?: AgentDatabaseExecutionFileIdentity,
@@ -112,4 +114,11 @@ export type AgentDatabaseOperations = AgentDatabaseDomainOperations &
   RegisteredAgentWorkerOperations & {
     "database.walMaintenance": { input: SqliteWalPeriodicRequest; output: SqliteWalPeriodicResult };
     "database.prepareWrite": { input: undefined; output: void };
+    "database.integrityVerified": { input: { verifiedAt: number }; output: void };
   };
+
+export type AgentDatabaseExecutionState = {
+  owners: Map<string, AgentDatabaseFileExecutionOwner>;
+  // LRU entries keep their slots during eviction and after failed cleanup.
+  idle: Set<AgentDatabaseFileExecutionOwner>;
+};

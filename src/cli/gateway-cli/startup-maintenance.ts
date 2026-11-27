@@ -3,21 +3,20 @@ import { isInvalidConfigError } from "../../config/io.invalid-config.js";
 import { isGatewayEffectiveConfigConflictError } from "../../gateway/server-runtime-config.js";
 import { hasErrnoCode } from "../../infra/errno.js";
 import { collectNestedErrorCandidates } from "../../infra/error-graph-internal.js";
-import { formatErrorMessage } from "../../infra/errors.js";
-import type { GatewayLockError } from "../../infra/gateway-lock.js";
+import { formatErrorMessage, readErrorName } from "../../infra/errors.js";
+import { GatewayLockError } from "../../infra/gateway-lock.js";
 import { classifyGatewayStorageFailure } from "../../infra/sqlite-error-diagnostics.js";
 import { findStartupMaintenanceRequiredError } from "../../infra/startup-maintenance-required.js";
 import { isTailscaleRouteOwnershipConflictError } from "../../infra/tailscale-route-ownership-error.js";
-import { writeRootConsoleLine } from "../../logging/console.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { defaultRuntime } from "../../runtime.js";
 import { OpenClawDatabaseSchemaPreflightError } from "../../state/openclaw-database-preflight.messages.js";
 import { formatCliCommand } from "../command-format.js";
 
-function reportStartupMaintenance(message: string): void {
-  // Admission may have refused this profile; diagnostics must not create its file sink.
-  if (!writeRootConsoleLine("error", message)) {
-    defaultRuntime.error(message);
-  }
+const gatewayLog = createSubsystemLogger("gateway");
+
+export function isGatewayLockError(err: unknown): err is GatewayLockError {
+  return err instanceof GatewayLockError || readErrorName(err) === "GatewayLockError";
 }
 
 export function resolveGatewayStartupFailureExitCode(err: unknown): number {
@@ -68,18 +67,18 @@ export async function handleGatewayStartupMaintenance(error: unknown): Promise<b
     const { parkCurrentLaunchAgentForMaintenance } = await import("../../daemon/launchd.js");
     parked = await parkCurrentLaunchAgentForMaintenance();
   } catch (parkError) {
-    reportStartupMaintenance(
-      `failed to park the managed LaunchAgent: ${formatErrorMessage(parkError)}`,
-    );
+    gatewayLog.error(`failed to park the managed LaunchAgent: ${formatErrorMessage(parkError)}`);
   }
   if (refusal instanceof OpenClawDatabaseSchemaPreflightError) {
-    reportStartupMaintenance(
-      `Gateway failed to start: ${formatErrorMessage(refusal)}${parked ? " Parked the managed LaunchAgent." : ""}`,
+    gatewayLog.error(
+      `${formatErrorMessage(refusal)}${parked ? " Parked the managed LaunchAgent." : ""}`,
     );
+    defaultRuntime.error(`Gateway failed to start: ${formatErrorMessage(refusal)}`);
   } else {
-    reportStartupMaintenance(
-      `Gateway failed to start: ${formatErrorMessage(error)}.${parked ? " Parked the managed LaunchAgent." : ""} ${guidance}`,
+    gatewayLog.error(
+      `gateway requires ${reason}${parked ? "; parked the managed LaunchAgent" : ""}. ${guidance}`,
     );
+    defaultRuntime.error(`Gateway failed to start: ${formatErrorMessage(error)}. ${guidance}`);
   }
   // systemd's RestartPreventExitStatus already treats EX_CONFIG as terminal.
   defaultRuntime.exit(78);

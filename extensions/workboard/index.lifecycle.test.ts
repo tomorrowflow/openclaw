@@ -48,6 +48,7 @@ function registerGeneration(
   const registerTool = vi.fn<OpenClawPluginApi["registerTool"]>();
   const { registerGatewayMethod, invoke: rpc } = createGatewayMethodCapture();
   let gatewayStart: Parameters<typeof captured.api.on<"gateway_start">>[1] = () => {};
+  let agentEnd: Parameters<typeof captured.api.on<"agent_end">>[1] = () => {};
   let gatewayStop: Parameters<typeof captured.api.on<"gateway_stop">>[1] = () => {};
   register({
     ...captured.api,
@@ -58,6 +59,8 @@ function registerGeneration(
     on: (name, handler) => {
       if (name === "gateway_start") {
         gatewayStart = handler as typeof gatewayStart;
+      } else if (name === "agent_end") {
+        agentEnd = handler as typeof agentEnd;
       } else if (name === "gateway_stop") {
         gatewayStop = handler as typeof gatewayStop;
       }
@@ -72,7 +75,10 @@ function registerGeneration(
   };
   const start = async () => {
     for (const [service] of registerService.mock.calls) {
-      assert(service.apiVersion !== 2, "Workboard uses v1 services without a host scheduler");
+      assert(
+        service.apiVersion !== 2 && service.apiVersion !== 3,
+        "Workboard uses v1 services without a host scheduler",
+      );
       await service.start(serviceContext);
     }
     void gatewayStart({ port: 0 }, {});
@@ -100,7 +106,15 @@ function registerGeneration(
     });
   };
   return Object.assign(
-    { cleanup: retire, start, ...mocks, expectCall, expectCards },
+    {
+      cleanup: retire,
+      start,
+      ...mocks,
+      expectCall,
+      expectCards,
+      agentEnd,
+      subscriptions: captured.agentEventSubscriptions,
+    },
     {
       tools: () =>
         registerTool.mock.calls.flatMap(

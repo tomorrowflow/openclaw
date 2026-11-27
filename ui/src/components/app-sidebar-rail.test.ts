@@ -8,8 +8,8 @@ import { normalizeSidebarEntries } from "../app-navigation.ts";
 import { setAvatarGatewayOrigin } from "../lib/identity-avatar-context.ts";
 import { ApplicationProvider } from "../lib/reactive/context.ts";
 import * as toast from "../lib/toast.ts";
-import { selectSessionMenuValue } from "../test-helpers/app-sidebar-menu.ts";
 import { createFrameClock } from "../test-helpers/animation-frame-clock.ts";
+import { selectSessionMenuValue } from "../test-helpers/app-sidebar-menu.ts";
 import {
   createContext,
   createGatewayHarness,
@@ -328,6 +328,19 @@ describe("personal navigation rail", () => {
       expect(artwork.text(".session-glyph__emoji")).toBe(icon);
     }
     expect(artwork.present("svg", ".session-owner-chip")).toEqual([false, false]);
+  });
+
+  it("keeps persistent child background work off a shortcut's leading ring", async () => {
+    const { sidebar, append } = await fixture({ sidebarEntries: ["session-rail:agent:main:mine"] });
+    append({
+      key: "agent:main:check",
+      parentSessionKey: "agent:main:mine",
+      backgroundProcessCount: 1,
+    });
+    await sidebar.updateComplete;
+    expect(
+      rail(sidebar, "session-rail:agent:main:mine")!.querySelector(".session-glyph__ring"),
+    ).toBeNull();
   });
 
   it("keeps a session shortcut's identity with only running and unread decorations", async () => {
@@ -702,7 +715,8 @@ describe("personal navigation rail", () => {
   });
 
   it("reorders a descriptor-only personal pin without requiring a loaded roster row", async () => {
-    const { sidebar, gateway, sessions, result, key, pending, read, dom } = await pinLookup();
+    const { sidebar, gateway, sessions, result, key, pending, read, dom } =
+      await pinLookup("agent:main:unloaded");
     gateway.publish({
       hello: gatewayHelloForMethods(["sessions.describe"], ["operator.sessions.read"]),
     });

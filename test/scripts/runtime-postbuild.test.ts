@@ -601,6 +601,19 @@ describe("runtime postbuild static assets", () => {
     );
   });
 
+  it.each(["//#region ", "// ", "//!"])(
+    "does not treat source-owned implementations as runtime wrappers (%s)",
+    async (label) => {
+      const f = await runtimeFixture({
+        "owner.runtime-Impl123.mjs": `import { value } from "./owner.runtime-Other456.mjs";\n${label}src/infra/owner.ts\nexport const current = value;\n`,
+        "owner.runtime-Other456.mjs": "export const value = true;\n",
+        "owner.runtime.js": 'export * from "./owner.runtime-Stale.js";\n',
+      });
+      f.aliases();
+      await expectPathMissing(f.file("owner.runtime.js"));
+    },
+  );
+
   it("ignores legacy wrappers to the stable runtime alias when choosing the implementation", async () => {
     const f = await runtimeFixture({
       "runtime-plugins.runtime-NewHash.mjs": "export const ready = true;\n",
@@ -730,11 +743,8 @@ describe("runtime postbuild static assets", () => {
         const loaded = await load(rootDir, `dist/${chunk.path}`);
         for (const { exported, origin } of chunk.exports) {
           expect(await loaded[exported](), `${release.version}: ${chunk.path}:${exported}`).toBe(
-            // 2026.9.37 deliberately denied leased-handoff authority; its implementation
-            // is inline rather than one of the fixture's named runtime exports.
-            release.version === "2026.9.37" &&
-              chunk.path === "update-managed-service-handoff-current-E5XsvJxw.mjs" &&
-              exported === "isCurrentManagedServiceUpdateHandoffProcess"
+            origin.module === "src/infra/update-managed-service-handoff-current.ts" &&
+              origin.symbol === "isImmutableManagedServiceUpdateHandoffProcess"
               ? false
               : origin.symbol,
           );
@@ -908,6 +918,29 @@ describe("previous release update compatibility", () => {
     };
     return { root, inventory };
   }
+
+  it("records deferred plugin migration imports that a shipped updater can execute after swap", () => {
+    const { inventory } = recordImportedFixture(
+      '(await import("./state-worker-abcdefgh.mjs")).runOpenClawStateWorkerOperation',
+      {
+        "state-worker-abcdefgh.mjs":
+          "//#region src/state/openclaw-state-worker-store.ts\nexport function runOpenClawStateWorkerOperation() {}\n",
+      },
+      undefined,
+      "src/infra/deferred-plugin-migrations.ts",
+    );
+    expect(inventory.releases[0]?.chunks).toMatchObject([
+      {
+        path: "state-worker-abcdefgh.mjs",
+        imports: [
+          {
+            owner: "src/infra/deferred-plugin-migrations.ts",
+            exports: ["runOpenClawStateWorkerOperation"],
+          },
+        ],
+      },
+    ]);
+  });
 
   it.each([
     "generated",
@@ -1318,10 +1351,7 @@ describe("previous release update compatibility", () => {
     return output;
   }
 
-  function serveTarball(
-    archive: string,
-    failFirstRequests = 0,
-  ): { child: childProcess.ChildProcess; url: string } {
+  function serveTarball(archive: string, failFirstRequests = 0) {
     const root = createTempDir("update-compat-registry-");
     const portFile = path.join(root, "port");
     const server = path.join(root, "server.cjs");
@@ -1343,7 +1373,8 @@ describe("previous release update compatibility", () => {
         "  fs.createReadStream(archive).pipe(response);",
         "});",
         'instance.listen(0, "127.0.0.1", () => {',
-        "  fs.writeFileSync(portFile, String(instance.address().port));",
+        '  fs.writeFileSync(portFile + ".tmp", String(instance.address().port));',
+        '  fs.renameSync(portFile + ".tmp", portFile);',
         "});",
       ].join("\n"),
     );

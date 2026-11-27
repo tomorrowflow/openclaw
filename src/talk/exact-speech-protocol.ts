@@ -4,7 +4,7 @@ import {
   parseRealtimeVoiceAgentConsultArgs,
 } from "./agent-consult-tool.js";
 
-type RealtimeVoiceConsultToolCallOutcome =
+export type RealtimeVoiceConsultToolCallOutcome =
   | { kind: "exact-speech-echo"; text: string }
   | { kind: "consult"; message: string }
   | { kind: "malformed"; error: string };

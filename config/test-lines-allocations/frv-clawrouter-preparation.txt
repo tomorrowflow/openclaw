@@ -1,2 +1,0 @@
-3
-# Align ClawRouter test preparation with the production runtime purpose and agent workspace.

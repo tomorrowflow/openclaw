@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
-import { resolveVitestNodeArgs } from "../../../scripts/lib/vitest-process-env.mts";
+import { resolveNodeCompilerArgs } from "../../../scripts/lib/vitest-node-args.mts";
 import { createFixtureLifetime } from "../../../test/helpers/fixture-lifetime.js";
 import {
   assertManagedHandoffTestConsumer,
@@ -131,7 +131,7 @@ it.skipIf(process.platform === "win32").for([
     const { runCliWithExitFinalization } = await import(${JSON.stringify(resolveRuntimeWorkerUrl(native.oneShotExit).href)});
     const opts = {};
     if (mode === 'inherited') process.env.OPENCLAW_UPDATE_RUN_ID = createUpdateRun({trigger:'cli'}).runId;
-    const run = await admitUpdateCommandRun({opts, root:installRoot});
+    const run = await admitUpdateCommandRun({ env: process.env,opts, root:installRoot});
     const currentOptions = {...opts, run};
     let executorDatabasePath;
     const enter = async (executor) => {
@@ -276,7 +276,7 @@ it.skipIf(process.platform === "win32").for([
         const child = spawn(
           resolveTestNodeExecPath(),
           [
-            ...resolveVitestNodeArgs(),
+            ...resolveNodeCompilerArgs(),
             ...(mode.endsWith("-compensation") ? ["--experimental-test-module-mocks"] : []),
             ...sourceImportArgs,
             binding.nodeOption,
@@ -371,16 +371,9 @@ it.skipIf(process.platform === "win32").for([
           }
           if (publicationMode) {
             expect(service?.transitions).toEqual(["stopped"]);
-            // Proxied environments can return an HTTP error for a stopped listener.
-            const ready = await readyz().then(
-              (response) => response.ok,
-              () => false,
-            );
-            expect(ready, childDiagnostics()).toBe(false);
+            await expect(readyz()).rejects.toThrow();
             if (mode === "publishing-compensation") {
-              expect(JSON.parse(read(installRoot, "package.json"))).toMatchObject({
-                version: "2.0.0",
-              });
+              expect(fs.existsSync(installRoot)).toBe(false);
             } else {
               expect(JSON.parse(read(installRoot, "package.json"))).toMatchObject({
                 version: "1.0.0",

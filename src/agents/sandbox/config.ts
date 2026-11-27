@@ -93,9 +93,7 @@ function resolveSandboxDockerConfig(
     ).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
   );
 
-  const ulimits = agentDocker?.ulimits
-    ? { ...globalDocker?.ulimits, ...agentDocker.ulimits }
-    : globalDocker?.ulimits;
+  const ulimits = { core: "0", ...globalDocker?.ulimits, ...agentDocker?.ulimits };
 
   const binds = [...(globalDocker?.binds ?? []), ...(agentDocker?.binds ?? [])];
 

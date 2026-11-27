@@ -1,2 +1,0 @@
-# Actual touch navigation and team-grid spacing at desktop and phone widths; prevents link interception and double action reservation.
-41

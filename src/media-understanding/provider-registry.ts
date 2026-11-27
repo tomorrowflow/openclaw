@@ -5,8 +5,8 @@ import {
   listImageCapableConfiguredProviders,
   resolveConfiguredMediaProviderCapabilities,
 } from "./config-provider-models.js";
+import type { MediaUnderstandingProvider } from "./provider-types.js";
 import { whisperAsrProvider } from "./providers/whisper-asr/index.js";
-import type { MediaUnderstandingProvider } from "./types.js";
 
 /** Built-in providers that are always available (not plugin-provided). */
 const BUILTIN_PROVIDERS: MediaUnderstandingProvider[] = [whisperAsrProvider];

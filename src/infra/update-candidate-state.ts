@@ -27,7 +27,6 @@ import {
   withPreparedSqliteSnapshot,
 } from "./sqlite-readonly-location-cleanup.js";
 import {
-  inspectSqliteSchemaHeaderInProcess,
   prepareSqliteReadOnlyLocationInProcess,
   prepareSqliteReadOnlyLocationSyncInProcess,
 } from "./sqlite-readonly-location.js";
@@ -282,6 +281,8 @@ export async function discoverUpdateStateSchemaInspectionInProcess(
     stagingRoot: string;
     onProgress?: (progress: UpdateStateInspectionProgress) => void;
     preserveSourceArtifacts?: boolean;
+    /** The stopped backup owner already captured this generation and verifies source stability. */
+    sharedDatabaseImage?: string;
   },
 ): Promise<UpdateStateSchemaInspectionPlan> {
   const shared = path.resolve(input.stateDir, "state", "openclaw.sqlite");
@@ -298,16 +299,19 @@ export async function discoverUpdateStateSchemaInspectionInProcess(
     const result = await readUpdatePostgresState(input, files);
     return { files: result.files, sharedVersion: { path: shared, ...result.version } };
   }
-  const sharedVersion = await withStateDatabaseSnapshot(
-    shared,
-    async (location) => ({
-      path: shared,
-      ...(await readSharedDatabaseVersion(location, shared, files, input)),
-    }),
-    input.stagingRoot,
-    input.onProgress,
-    input.preserveSourceArtifacts,
-  );
+  const read = async (location: string) => ({
+    path: shared,
+    ...(await readSharedDatabaseVersion(location, shared, files, input)),
+  });
+  const sharedVersion = input.sharedDatabaseImage
+    ? await read(input.sharedDatabaseImage)
+    : await withStateDatabaseSnapshot(
+        shared,
+        read,
+        input.stagingRoot,
+        input.onProgress,
+        input.preserveSourceArtifacts,
+      );
   return { files: [...files], sharedVersion };
 }
 
@@ -321,21 +325,16 @@ export async function readUpdateStateSchemaVersionsInProcess(
   },
 ): Promise<UpdateStateSchemaVersion[]> {
   const shared = path.resolve(input.stateDir, "state", "openclaw.sqlite");
-  // Released drivers such as 2026.9.37 strip ownership fields while parsing discovery.
-  // Rebuild their inventory through the existing source reader; treating those stripped
-  // rows as supplemental would hide both shared state and registered agent schemas.
-  const inspectionPlan =
-    input.includeLocalStoreVersions === false ? undefined : input.inspectionPlan;
-  const files = inspectionPlan
-    ? new Map(inspectionPlan.files)
+  const files = input.inspectionPlan
+    ? new Map(input.inspectionPlan.files)
     : await collectSupplementalStateDatabasePaths(input, await collectStateDatabasePaths(input));
   const sharedIdentity = resolveUpdateCandidateStateIdentity(input.stateDir, shared);
   // Inspect each identity once, then publish every spelling for released rollback baselines.
   const inspected = new Map<string, Omit<UpdateStateSchemaVersion, "path">>();
   for (const [identity, discovery] of files) {
     const file = discovery.spellings[0];
-    if (identity === sharedIdentity && inspectionPlan) {
-      const { path: _path, ...version } = inspectionPlan.sharedVersion;
+    if (identity === sharedIdentity && input.inspectionPlan) {
+      const { path: _path, ...version } = input.inspectionPlan.sharedVersion;
       inspected.set(identity, version);
       continue;
     }
@@ -542,6 +541,8 @@ export async function snapshotUpdateCandidateState(
     onProgress?: (progress: UpdateStateInspectionProgress) => void;
   },
 ): Promise<z.infer<typeof UpdateCandidateStateSnapshotSchema>> {
+  const { inspectSqliteSchemaHeaderInProcess } =
+    await import("./sqlite-schema-header-inspection.js");
   const { createVerifiedSqliteSnapshot } = await import("./sqlite-snapshot.js");
   const coldArchives = await import("./update-candidate-cold-archives.worker.js");
   const { AGENT_FTS_SCHEMAS } = await import("../state/openclaw-agent-fts-schema.js");
@@ -609,7 +610,13 @@ export async function snapshotUpdateCandidateState(
     let snapshotSource = file;
     const { capturePostgresBackup, readBackupEngine } =
       await import("../snapshot/database-backup.js");
-    const { userVersion } = await inspectSqliteSchemaHeaderInProcess(file, input.targetStateDir);
+    const { userVersion } = await inspectSqliteSchemaHeaderInProcess(
+      file,
+      input.targetStateDir,
+      undefined,
+      false,
+      { cleanupFailure: "warn" },
+    );
     // PostgreSQL anchors have header version zero; versioned SQLite uses online backup directly.
     const engine = userVersion === 0 ? readBackupEngine(file) : undefined;
     if (engine?.engine === "postgres") {

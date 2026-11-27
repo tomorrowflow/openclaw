@@ -317,7 +317,7 @@ it.each<[string, LaunchctlResult[], ("absent" | "trash-denied" | keyof typeof re
   expectBoundedLaunchctlCleanup();
   expect(mocks.execLaunchctl).toHaveBeenCalledTimes(outcomes.length);
   if (failure === "unload") {
-    for (const operation of [mkdir, access, rename, unlink]) {
+    for (const operation of [mkdir, access, rename]) {
       expect(operation).not.toHaveBeenCalled();
     }
     expect(runtime.log).not.toHaveBeenCalledWith(

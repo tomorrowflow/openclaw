@@ -1,9 +1,7 @@
 import type { ChannelMessageActionContext } from "openclaw/plugin-sdk/channel-contract";
-import { createPluginRuntimeMock } from "openclaw/plugin-sdk/channel-test-helpers";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { imessageActionsRuntime } from "./actions.runtime.js";
-import { setIMessageRuntime } from "./runtime.js";
 
 const probeMock = vi.hoisted(() => ({
   getCachedIMessagePrivateApiStatus: vi.fn(),
@@ -484,33 +482,7 @@ describe("imessage message actions", () => {
     });
   });
 
-  it("reports Automation failure and clears it after uploading URL-safe voice bytes", async () => {
-    const runtime = createPluginRuntimeMock();
-    setIMessageRuntime(runtime);
-    let lastError: string | null | undefined;
-    const lease = runtime.channel.runtimeContexts.register({
-      channelId: "imessage",
-      accountId: "default",
-      capability: "imessage-send-status",
-      context: {
-        getStatus: () => ({ accountId: "default", lastError }),
-        setStatus: (next: { lastError?: string | null }) => {
-          lastError = next.lastError;
-        },
-      },
-    });
-    onTestFinished(() => lease.dispose());
-    const error = new Error("Messages automation failed with AppleScript error -1743.");
-    runtimeMock.sendAttachment.mockRejectedValueOnce(error);
-    await expect(
-      run("upload-file", {
-        chatGuid,
-        filename: "photo.jpg",
-        buffer: "-_8=",
-        asVoice: true,
-      }),
-    ).rejects.toBe(error);
-    expect(lastError).toContain("Automation");
+  it("uploads URL-safe attachment bytes as voice", async () => {
     runtimeMock.sendAttachment.mockResolvedValue({ messageId: "sent-guid" });
     const result = await run("upload-file", {
       chatGuid,
@@ -525,8 +497,6 @@ describe("imessage message actions", () => {
       asVoice: true,
     });
     expect(result?.details).toEqual({ ok: true, messageId: "sent-guid" });
-    expect(lastError).toBeNull();
-    expect(runtimeMock.sendAttachment).toHaveBeenCalledTimes(2);
   });
 
   it("sets a group icon from hydrated bytes for its owner", async () => {

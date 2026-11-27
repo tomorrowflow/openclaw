@@ -5,7 +5,6 @@ import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import * as tar from "tar";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as backupResourceInventory from "../commands/backup-resource-inventory.js";
 import { backupRestoreCommand } from "../commands/backup-restore.js";
 import { backupVerifyCommand, verifyBackupArchive } from "../commands/backup-verify.js";
 import { backupCreateCommand } from "../commands/backup.js";
@@ -37,6 +36,7 @@ import {
   isolatedBackupCase as backupCase,
   withIsolatedBackupState as withOpenClawTestState,
 } from "./backup-create.test-support.js";
+import type { BackupProgressEvent } from "./backup-progress.js";
 import { classifyBackupSqliteSource } from "./backup-sqlite-snapshot.js";
 import { writeTarArchiveWithRetry } from "./backup-tar-retry.js";
 import * as backupTarWalk from "./backup-tar-walk.js";
@@ -741,6 +741,44 @@ describe("createBackupArchive", () => {
   );
 
   it(
+    "reports bounded backup stages through real SQLite capture and archive verification",
+    withState(async (state) => {
+      openOpenClawStateDatabase({ env: state.env });
+      closeOpenClawStateDatabase();
+      const events: BackupProgressEvent[] = [];
+      const archive = await createBackupArchive({
+        output: state.path("backup.tar.gz"),
+        includeWorkspace: false,
+        onProgress: (event) => events.push(event),
+      });
+      await verifyBackupArchive(archive.archivePath, [], (event) => events.push(event));
+
+      for (const stage of [
+        "plan",
+        "sqlite-source-integrity",
+        "sqlite-online-copy",
+        "sqlite-vacuum",
+        "sqlite-hash",
+        "sqlite-published-integrity",
+        "archive-write",
+        "verify-archive-read",
+        "verify-sqlite-integrity",
+      ] as const) {
+        expect(events).toContainEqual(expect.objectContaining({ stage, phase: "start" }));
+        expect(events).toContainEqual(expect.objectContaining({ stage, phase: "done" }));
+      }
+      expect(
+        events.every((event) =>
+          Object.values(event).every(
+            (value) => typeof value !== "number" || Number.isFinite(value),
+          ),
+        ),
+      ).toBe(true);
+      expect(JSON.stringify(events)).not.toContain(state.root);
+    }),
+  );
+
+  it(
     "rejects stale secondary indexes before creating a backup archive",
     withState(async (state) => {
       const outputDir = state.path("backups");
@@ -1001,25 +1039,17 @@ describe("createBackupArchive", () => {
       });
       await fs.symlink(firstDbPath, canonicalDbPath);
 
-      const sealInventory = backupResourceInventory.sealBackupResourceInventory;
+      const originalRealpath = fs.realpath.bind(fs);
       let retargeted = false;
-      const inventorySpy = vi
-        .spyOn(backupResourceInventory, "sealBackupResourceInventory")
-        .mockImplementation((...args) => {
-          const inventory = sealInventory(...args);
-          // Earlier state reads also resolve this link; mutate only after backup owns its identity.
-          if (
-            !retargeted &&
-            inventory.coreDatabases.some(
-              (source) => source.sourcePath === canonicalDbPath && source.identity,
-            )
-          ) {
-            retargeted = true;
-            fsSync.unlinkSync(canonicalDbPath);
-            fsSync.symlinkSync(secondDbPath, canonicalDbPath);
-          }
-          return inventory;
-        });
+      const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (target) => {
+        const resolved = await originalRealpath(target);
+        if (!retargeted && path.resolve(String(target)) === path.resolve(canonicalDbPath)) {
+          retargeted = true;
+          await fs.unlink(canonicalDbPath);
+          await fs.symlink(secondDbPath, canonicalDbPath);
+        }
+        return resolved;
+      });
 
       try {
         await expect(createStateArchive(outputDir)).rejects.toThrow(
@@ -1028,7 +1058,7 @@ describe("createBackupArchive", () => {
         expect(retargeted).toBe(true);
         expect(await fs.readdir(outputDir)).toEqual([]);
       } finally {
-        inventorySpy.mockRestore();
+        realpathSpy.mockRestore();
       }
     }),
   );

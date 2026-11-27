@@ -1,2 +1,0 @@
-28
-# Session selection uses its admitted auth-source identity without reverse filesystem discovery.

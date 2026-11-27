@@ -1,6 +1,5 @@
 import { runWithCliHistoryWriter } from "../config/sessions/cli-history-boundary.js";
-import { prepareCronRootSessionGeneration } from "../config/sessions/session-delivery-generation.js";
-import { buildGenericCliContextEngineHostSupport } from "../context-engine/host-compat.js";
+import { acquireCronRootTranscriptLease } from "../config/sessions/transcript-lease.js";
 import { assertAgentRunLifecycleGenerationCurrent } from "../infra/agent-events.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import type { ImageContent } from "../llm/types.js";
@@ -11,8 +10,12 @@ import {
   buildAgentHookContextIdentityFields,
 } from "../plugins/hook-agent-context.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
+import { chatRef } from "../sessions/chat-ref.js";
 import { sleep } from "../utils/sleep.js";
-import { hasCompletionMessageSessionSpawn } from "./accepted-session-spawn.js";
+import {
+  hasAcceptedSessionSpawn,
+  hasCompletionMessageSessionSpawn,
+} from "./accepted-session-spawn.js";
 import { bindOperatorModelExecution, readRunOperatorAuthority } from "./admitted-run-context.js";
 import type { CliOutput } from "./cli-output-contracts.js";
 import { runCliBeforeAgentReply } from "./cli-runner/before-agent-reply.js";
@@ -33,6 +36,7 @@ import {
   settleCliPreparationError,
 } from "./cli-runner/cli-run-settlement.js";
 import {
+  buildCliAssistantTranscriptUsage,
   buildCliHookAssistantMessage,
   buildCliHookUserMessage,
   finalizeCliContextEngineTurn,
@@ -42,22 +46,16 @@ import {
   resolveCliAssistantStopReason,
   runCliAgentEndHook,
 } from "./cli-runner/cli-run-transcript.js";
+import { startCliContextEngineTurn } from "./cli-runner/context-engine-turn.js";
 import {
   attachCliMessagingDeliveryEvidence,
   getCliMessagingDeliveryEvidence,
 } from "./cli-runner/delivery-evidence.js";
-import {
-  createCliFailoverError,
-  readCliStreamRefusalOutput,
-  stopFallbackAfterToolEffects,
-} from "./cli-runner/exit-error.js";
+import { createCliFailoverError, readCliStreamRefusalOutput } from "./cli-runner/exit-error.js";
 import { loadCliPromptImages } from "./cli-runner/helpers.js";
 import { cliBackendLog } from "./cli-runner/log.js";
 import type { ClaudeCliRunDiagnosticLifecycle } from "./cli-runner/run-diagnostics.js";
-import {
-  loadCliSessionContextEngineMessages,
-  loadCliSessionHistoryMessages,
-} from "./cli-runner/session-history.js";
+import { loadCliSessionHistoryMessages } from "./cli-runner/session-history.js";
 import { prepareCliRunTerminalReply } from "./cli-runner/terminal-reply.js";
 import { settlePreparedCliRunWithTrajectory } from "./cli-runner/trajectory.js";
 import { runWithCliTurn } from "./cli-runner/turn-admission.js";
@@ -65,9 +63,8 @@ import type { PreparedCliRunContext, RunCliAgentParams } from "./cli-runner/type
 import { claudeCliSessionTranscriptHasContent } from "./command/attempt-execution.helpers.js";
 import type { EmbeddedAgentRunResult } from "./embedded-agent-runner.js";
 import { resolveSourceReplyDelivery } from "./embedded-agent-runner/delivery-evidence.js";
-import { coerceToFailoverError } from "./failover-error.js";
+import { coerceToFailoverError, recordModelFallbackStop } from "./failover-error.js";
 import { runBeforeAgentRunGate } from "./harness/before-agent-run.js";
-import { bootstrapHarnessContextEngine } from "./harness/context-engine-lifecycle.js";
 import { buildAgentHookContext } from "./harness/hook-context.js";
 import { buildAgentHookConversationMessages } from "./harness/hook-history.js";
 import {
@@ -82,6 +79,18 @@ import {
 } from "./tools/gateway-caller-context.js";
 
 const log = createSubsystemLogger("agents/cli-runner");
+
+// A turn that ends without a final answer cannot authorize replaying the tool effects it completed.
+function stopFallbackAfterToolEffects(
+  error: unknown,
+  output: Pick<CliOutput, "toolSummary" | "acceptedSessionSpawns">,
+): void {
+  const completedToolEffects =
+    (output.toolSummary?.calls ?? 0) > 0 || hasAcceptedSessionSpawn(output.acceptedSessionSpawns);
+  if (completedToolEffects && error instanceof Error) {
+    recordModelFallbackStop(error);
+  }
+}
 
 /** Checks whether a Claude CLI session binding has reached its transcript file. */
 export async function isCliBindingFlushed(
@@ -127,7 +136,7 @@ async function runCliAgentInternal(
   assertAgentRunLifecycleGenerationCurrent(params.lifecycleGeneration!);
   let modelExecution: ReturnType<typeof bindOperatorModelExecution>;
   const generationAbortController = new AbortController();
-  let generation: Awaited<ReturnType<typeof prepareCronRootSessionGeneration>>;
+  let generation: Awaited<ReturnType<typeof acquireCronRootTranscriptLease>>;
   const assertCurrent = () => {
     params.abortSignal?.throwIfAborted();
     params.assertCurrent?.();
@@ -139,10 +148,9 @@ async function runCliAgentInternal(
     const target = params.sessionTarget;
     generation =
       target && !params.sessionManager && !params.isolatedCompletion
-        ? await prepareCronRootSessionGeneration(
+        ? await acquireCronRootTranscriptLease(
+            chatRef({ ...target, sessionKey: params.sessionKey ?? target.sessionKey }),
             {
-              ...target,
-              sessionKey: params.sessionKey ?? target.sessionKey,
               sessionId: params.sessionId,
               lifecycleRevision:
                 params.expectedLifecycleRevision ?? params.sessionEntry?.lifecycleRevision,
@@ -273,6 +281,7 @@ async function runPreparedCliAgentOwned(
     agentId: params.agentId,
     sessionKey: params.sessionKey,
     sessionId: params.sessionId,
+    ...(context.memoryAudience ? { memoryAudience: context.memoryAudience } : {}),
     workspaceDir: params.workspaceDir,
     trigger: params.trigger,
     ...(params.config ? { config: params.config } : {}),
@@ -542,30 +551,7 @@ async function runPreparedCliAgentOwned(
         userTurnHandled,
       });
     }
-    await bootstrapHarnessContextEngine({
-      admittedRunContext: params.admittedRunContext,
-      preparedRunAdmission: params.preparedRunAdmission,
-      hadSessionFile: context.hadSessionFile,
-      contextEngine: context.contextEngine,
-      sessionId: params.sessionId,
-      sessionKey: params.sessionKey,
-      sessionTarget: params.sessionTarget,
-      sessionFile: params.sessionFile,
-      sessionManager: params.sessionManager,
-      transcriptReadFence: params.sessionManager
-        ? undefined
-        : params.userTurnTranscriptRecorder?.getAdmissionReceipt(),
-      config: context.contextEngineConfig,
-      contextEngineHostSupport: buildGenericCliContextEngineHostSupport({
-        backendId: context.backendResolved.id,
-      }),
-      providerId: params.provider,
-      modelId: context.modelId,
-      warn: (message) => log.warn(message),
-    });
-    const contextEngineHistoryMessages = context.contextEngine
-      ? await loadCliSessionContextEngineMessages(params)
-      : [];
+    const contextEngineHistoryMessages = await startCliContextEngineTurn(context);
     const finishCliAttempt = async (
       result: Awaited<ReturnType<typeof executeCliAttempt>>,
       fallbackCliSessionId?: string,
@@ -613,6 +599,13 @@ async function runPreparedCliAgentOwned(
                 },
               }
             : undefined;
+        const pricedUsage = await buildCliAssistantTranscriptUsage({
+          runParams: params,
+          modelId: context.modelId,
+          agentDir: context.agentDir,
+          usage: output.usage,
+          turnUsage: output.diagnosticUsage,
+        });
         const assistantTranscript = await persistCliAssistantTranscript({
           runParams: params,
           // Dispatch owns source-reply transcript mirrors and their idempotency keys.
@@ -622,13 +615,16 @@ async function runPreparedCliAgentOwned(
             ? { nativeIdentity: nativeFinal.identity, interimReplies: output.interimNativeReplies }
             : {}),
           modelId: context.modelId,
-          usage: output.usage,
-          turnUsage: output.diagnosticUsage,
+          usage: pricedUsage.usage,
           stopReason: resolveCliAssistantStopReason(output),
           yielded: output.yielded,
         });
         const runResult = buildCliRunResult({
           ...resultContext,
+          preparedContextAgentMeta: {
+            ...resultContext.preparedContextAgentMeta,
+            ...(pricedUsage.costUsd !== undefined ? { costUsd: pricedUsage.costUsd } : {}),
+          },
           output,
           preparedReply,
           effectiveCliSessionId,

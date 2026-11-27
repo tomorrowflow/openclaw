@@ -152,7 +152,6 @@ export class TelegramUserbotDriver {
 
   private constructor(
     private readonly child: ChildProcessWithoutNullStreams,
-    private readonly role: "primary" | "participant",
     private readonly onUpdate: (update: TelegramUserbotUpdate) => Promise<void> | void,
     private readonly leaseHealth: {
       assertHealthy(): void;
@@ -180,14 +179,13 @@ export class TelegramUserbotDriver {
       const detail = this.stderr.trim();
       this.fail(
         new Error(
-          `Telegram userbot (role=${this.role}) exited before cleanup (${signal ?? code ?? "unknown"})${detail ? `: ${detail}` : ""}`,
+          `Telegram userbot exited before cleanup (${signal ?? code ?? "unknown"})${detail ? `: ${detail}` : ""}`,
         ),
       );
     });
   }
 
   static async start(params: {
-    role: "primary" | "participant";
     chatId: string;
     observeChatIds?: string[];
     expectedUserId?: string;
@@ -213,15 +211,11 @@ export class TelegramUserbotDriver {
     );
     const driver = new TelegramUserbotDriver(
       child,
-      params.role,
       (update) => params.onUpdate(update),
       params.leaseHealth,
     );
     const timer = setTimeout(
-      () =>
-        driver.fail(
-          new Error(`Telegram userbot (role=${params.role}) did not become ready within 120000ms.`),
-        ),
+      () => driver.fail(new Error("Telegram userbot did not become ready within 120000ms.")),
       120_000,
     );
     timer.unref?.();

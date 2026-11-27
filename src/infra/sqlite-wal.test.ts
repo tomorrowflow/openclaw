@@ -76,7 +76,7 @@ function mockMountCommand(output: string): void {
     throw new Error("no proc mountinfo");
   });
   vi.spyOn(childProcess, "execFileSync").mockReturnValue(Buffer.from(output));
-  // The mount listing is the only filesystem fact; the native probe must not see the host disk.
+  // Mount fixtures describe non-APFS volumes even when the temp directory is on APFS.
   vi.mocked(probeTreeClone).mockReturnValue(undefined);
 }
 
@@ -258,23 +258,6 @@ describe("sqlite WAL maintenance", () => {
       ).toThrow(/SSHFS.*refusing to open/);
     },
   );
-
-  it("preserves WAL policy when mount classification fails without timing out", () => {
-    const tempDir = tempDirs.make("openclaw-sqlite-mount-error-");
-    const db = createMockDb();
-    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
-    vi.spyOn(fs, "statfsSync").mockReturnValue(statfsFixture(0));
-    vi.spyOn(fs, "readFileSync").mockImplementation(() => {
-      throw new Error("no proc mountinfo");
-    });
-    vi.spyOn(childProcess, "execFileSync").mockImplementation(() => {
-      throw Object.assign(new Error("spawnSync mount ENOENT"), { code: "ENOENT" });
-    });
-
-    configure(db, { databasePath: path.join(tempDir, "openclaw.sqlite") });
-
-    expect(db["prepare"]).toHaveBeenCalledWith("PRAGMA journal_mode = WAL;");
-  });
 
   it.each([
     ["darwin", "smbfs", "//server/share", "DELETE"],
@@ -1038,3 +1021,49 @@ describe("SQLite connection pragma acquisition", () => {
     expect(db.isOpen).toBe(true);
   });
 });
+
+it.runIf(process.platform !== "win32").each(["apfs", "unknown", "failed", "aliased"])(
+  "preserves a WAL peer through a mount timeout only with canonical APFS evidence: %s",
+  (classification) => {
+    const root = fs.realpathSync(tempDirs.make("openclaw-wal-mount-timeout-"));
+    const directory = path.join(root, "database");
+    fs.mkdirSync(directory);
+    const alias = path.join(root, "alias");
+    if (classification === "aliased") {
+      fs.symlinkSync(directory, alias);
+    }
+    const databasePath = path.join(
+      classification === "aliased" ? alias : directory,
+      "state.sqlite",
+    );
+    const first = resources.open(databasePath);
+    first.exec("PRAGMA journal_mode=WAL; CREATE TABLE records(value TEXT);");
+    const second = resources.open(databasePath);
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+    vi.spyOn(fs, "readFileSync").mockImplementation(() => {
+      throw new Error("no proc mountinfo");
+    });
+    vi.spyOn(childProcess, "execFileSync").mockImplementation(() => {
+      throw Object.assign(new Error("mount classification timed out"), { code: "ETIMEDOUT" });
+    });
+    vi.mocked(probeTreeClone).mockImplementation(() => {
+      if (classification === "failed") {
+        throw new Error("native filesystem inspection failed");
+      }
+      return classification === "unknown" ? undefined : "apfs";
+    });
+    const configureSecond = () =>
+      resources.maintain(second, { databasePath, checkpointIntervalMs: 0 });
+    if (classification === "apfs") {
+      configureSecond();
+      second.exec("INSERT INTO records VALUES ('second');");
+    } else {
+      expect(configureSecond).toThrow(/database is locked/);
+    }
+    first.exec("INSERT INTO records VALUES ('first');");
+    expect(first.prepare("PRAGMA journal_mode;").get()).toEqual({ journal_mode: "wal" });
+    expect(first.prepare("SELECT value FROM records ORDER BY value").all()).toEqual(
+      classification === "apfs" ? [{ value: "first" }, { value: "second" }] : [{ value: "first" }],
+    );
+  },
+);

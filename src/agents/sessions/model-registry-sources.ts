@@ -1,5 +1,6 @@
 import { dirname } from "node:path";
 import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
+import type { ModelCompatConfig } from "../../config/types.models.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { canAccess } from "../../infra/path-existence.js";
 import type { ModelRequestHeaders } from "../../llm/types.js";
@@ -48,6 +49,20 @@ export function captureProviderSource(
 
 export function cloneMapValues<T extends object>(source: ReadonlyMap<string, T>): Map<string, T> {
   return new Map([...source].map(([key, value]) => [key, { ...value }]));
+}
+
+export function storeModelHeaders(
+  target: Map<string, Record<string, string>>,
+  providerName: string,
+  modelId: string,
+  headers?: Record<string, string>,
+): void {
+  const key = JSON.stringify([providerName, modelId]);
+  if (!headers || Object.keys(headers).length === 0) {
+    target.delete(key);
+    return;
+  }
+  target.set(key, headers);
 }
 
 function mergeCompat(
@@ -169,8 +184,9 @@ export function projectProviderRequestConfig(config: {
  * row, the catalog owns the metadata field by field. Generated rows carry no marker separating a
  * provider-reported value from a discovery default (128k context, a $0 cost placeholder), so this
  * applies the rule live discovery already applies to a plugin's own static rows: the catalog value
- * wins and a discovered value fills only what the catalog omits. The row keeps its ID, route,
- * declared non-chat kind, and explicit account-specific reasoning effort list.
+ * wins and a discovered value fills only what the catalog omits. The row keeps its ID, route and a
+ * declared non-chat kind. Explicitly reported reasoning effort lists also remain authoritative,
+ * including an empty list: catalog defaults must not widen account capabilities.
  */
 export function readGeneratedPluginModelCatalogProviders<
   T extends {
@@ -178,7 +194,7 @@ export function readGeneratedPluginModelCatalogProviders<
       id: string;
       cost?: unknown;
       inference?: { chat?: boolean };
-      compat?: ProviderModelCatalog["compat"];
+      compat?: ModelCompatConfig;
     }[];
   },
 >(params: Parameters<typeof filterGeneratedPluginModelCatalogProviders<T>>[0]): Record<string, T> {
@@ -217,7 +233,6 @@ export function readGeneratedPluginModelCatalogProviders<
         return {
           ...discovered,
           ...metadata,
-          // A general catalog ladder cannot widen the selected account's explicit controls.
           ...(model.compat?.supportedReasoningEfforts !== undefined
             ? {
                 compat: {

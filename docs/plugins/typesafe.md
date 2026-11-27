@@ -217,9 +217,8 @@ Supply the origin, without `/v1`, credentials, query, or fragment; the plugin
 appends `/v1/systemone`. Hostnames other than `localhost` and public addresses
 are not accepted, and evidence sent to a private address leaves this machine.
 For a named inference host or reverse proxy, use the standard model-provider
-configuration below. Ordinary ambient HTTP proxy variables are not used for
-configured endpoints; explicitly enabled managed proxy policy still applies.
-`localhost` stays pinned to loopback, independently of system DNS.
+configuration below. Requests use the shared Decision HTTP executor, so ambient
+HTTP proxy variables and `NO_PROXY` apply as they do for other providers.
 
 ### Ollama decision models
 

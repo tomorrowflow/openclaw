@@ -64,18 +64,18 @@ validation even when first published to beta.
   same Release SHA at most twice. Never re-cut, change tooling, or restart FRV
   solely to clear a flake. An intentional
   [release-tooling waiver](/reference/full-release-validation/evidence#release-tooling-waivers)
-  is reviewed policy requiring validation with new pinned tooling, unchanged candidate.
+  is operator-approved Q grant data requiring a new qualification request with
+  pinned Q, unchanged candidate, and reevaluation of eligible raw receipts.
 - Blocking coverage: CI coverage gate, seal/evidence, Build Artifacts, install
   smoke, survivor lanes, `update-first-hop-compat*`, pack/npm qualification,
   package integrity, and all Linux/Windows/macOS Gateway checks, including
   Windows packaged install/upgrade in Release Checks. All-group qualification
   includes all nine Gateway install/upgrade combinations.
-- Selected `openclaw/ci-gate` must succeed unless checked-in exact-job grants
-  cover every failed cause. Missing, skipped, or cancelled required coverage
-  blocks. Exact failed live-provider/Telegram leaves and operator-accepted
-  `2026.11.5-beta.3`/candidate-bound `2026.11.4` jobs may use that policy;
-  candidate, job, version, and attempt restrictions still apply. **FRV must
-  conclude success; publishers cannot waive it.**
+- Selected `openclaw/ci-gate` must succeed unless it is itself waived. A matching
+  job waiver does not require a run; omit `jobName` to waive the entire child
+  role and all descendants without a run or receipt. Optional `step` limits a
+  job waiver to the first incomplete or failed step. Unwaived gaps block, and
+  waived is not passed. **FRV must conclude success.**
 - Coverage spans source CI, packages, plugins, Gateway installs/upgrades, and
   selected app, UI, Telegram, QA, and live-provider checks. Inspect recorded
   profile/OS coverage; skipped or deferred is not passed.
@@ -206,16 +206,21 @@ changed bytes. This change authorizes no dispatch/publication.
 `release-ci-summary.mjs` authenticates qualification once for all consumers;
 `validate-full-release-validation-evidence.mjs` checks the release tag and
 publication selection, including plugin subsets, and rechecks live authority.
-Recovery preserves the original admission, candidate, artifacts, and coverage.
-Existing waiver, historical-evidence, profile, soak, and performance rules apply.
+Only authenticated direct admission qualifies evidence for publication.
+Unadmitted historical manifests, including v3, require new admitted
+qualification; ancestry alone is not admission. Receipt-backed aggregate recovery
+is retired for every profile, including beta. Normal authenticated qualification
+and reuse remain available, and C, Q, and P may remain independent. Existing
+waiver, profile, soak, and performance rules apply. Historical manifest parsing
+remains available for diagnostic summaries, not qualification or publication.
 
 ### Frozen qualification identity
 
 | Identity                | Owns                                                                                                                                                                                                      |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **C — candidate**       | Exact tested/published commit, package bytes, version, upgrade baselines.                                                                                                                                 |
-| **Q — qualification**   | Complete workflow/reusable-workflow/action/script/planner/contract/coverage closure; defaults to C. An independent Q requires review and verified main ancestry.                                          |
-| **P — trusted tooling** | Admission, aggregate validation, verification, publication, checked-in waivers, FRV verdict; independently trusted main revision or protected publication tag. May differ from C/Q; C need not precede P. |
+| **Q — qualification**   | Complete qualification closure and pinned grant ledger; defaults to C. Executable tooling requires review and verified lineage; authorized grants are committed directly to Q.                            |
+| **P — trusted tooling** | Admission, aggregate validation, verification, publication, Q-grant evaluation, FRV verdict; independently trusted main revision or protected publication tag. May differ from C/Q; C need not precede P. |
 
 [Dispatch](/reference/full-release-validation/dispatch) defines P's immutable
 operator-attestation/input/coverage admission before Q's `release-ci/*` dispatch.
@@ -241,6 +246,9 @@ diagnostics. Local Parallels uses isolated Q harness/frozen dependencies against
 exact validated C tarballs when Q differs.
 
 Reuse preserves producer/consumer identities, inputs, coverage, and provenance.
+[Child evidence reuse](/reference/full-release-validation/stages) can cross Q with
+an authenticated producer and reevaluation under current Q grants. Tooling
+changes alone do not force fresh runs; whole-parent reuse still requires exact Q/P.
 [Root-request recovery](/reference/full-release-validation/dispatch#retain-and-reconcile-the-root-request)
 owns read-only reconciliation and explicit pre-POST resume: intended Q, empty
 uncertain-ref inventory, revalidated admission/signer, final ref verification.

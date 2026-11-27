@@ -60,6 +60,7 @@ export type SessionSharingAcquisition = {
   entry?: SessionSharingEntry;
   sessionId?: string;
   membership: Map<string, boolean>;
+  membershipPostimage?: ReadonlySet<string>;
 };
 
 export type PreparedSessionSharingRead = {
@@ -71,8 +72,6 @@ export type PreparedSessionSharingRead = {
   facts: CommittedSessionSharingFacts | undefined;
   acquisition?: SessionSharingAcquisition;
   generation?: {
-    /** Versioned results follow transcripts; only unversioned results follow lifecycle changes. */
-    followSessionKey?: "transcript" | "lifecycle";
     initiallyAbsent?: true;
     current:
       | Pick<
@@ -199,13 +198,11 @@ export function publishRetainedSessionGeneration(
     generation.current = undefined;
   } else if (
     !entry ||
-    (!generation.followSessionKey && generation.current.sessionId !== entry.sessionId) ||
-    (generation.followSessionKey !== "lifecycle" &&
-      generation.current.lifecycleRevision !== entry.lifecycleRevision)
+    generation.current.sessionId !== entry.sessionId ||
+    generation.current.lifecycleRevision !== entry.lifecycleRevision
   ) {
     generation.current = null;
   } else if (
-    generation.followSessionKey ||
     generation.current.permissionMode !== entry.permissionMode ||
     !isDeepStrictEqual(generation.current.toolOverrides, entry.toolOverrides)
   ) {
@@ -227,7 +224,7 @@ export function reconcileSessionSharingAcquisition(
   ) {
     throw new Error("Session sharing acquisition is no longer current");
   }
-  const membership = new Set(snapshot.membership);
+  const membership = new Set(acquisition.membershipPostimage ?? snapshot.membership);
   for (const [identityId, present] of acquisition.membership) {
     if (present) {
       membership.add(identityId);

@@ -51,7 +51,6 @@ describeLive("progress refresh through the live embedded runtime", () => {
       const signal = AbortSignal.any([testSignal, stopping.signal]);
       const receipts = await openFixtureReceiptChannel();
       let barrierReady = false;
-      let phase = "gateway setup";
       const acquiringInstance = createOpenClawTestInstance({
         name: "progress-refresh",
         signal,
@@ -248,7 +247,6 @@ describeLive("progress refresh through the live embedded runtime", () => {
             expect(result).toMatchObject({ status: "ok" });
           };
           const warmupRunId = `progress-warmup-${randomUUID()}`;
-          phase = "warmup completion";
           const warmup = await waitDuring(
             (event) =>
               event.event === "chat" &&
@@ -271,7 +269,6 @@ describeLive("progress refresh through the live embedded runtime", () => {
             barrierReady = true;
           });
           const startSignal = AbortSignal.any([signal, AbortSignal.timeout(RUN_TIMEOUT_MS)]);
-          phase = "barrier readiness";
           await withinTest(
             Promise.all([
               ready,
@@ -281,8 +278,6 @@ describeLive("progress refresh through the live embedded runtime", () => {
                 message: [
                   `First run exec with command: ${command}`,
                   "Use background=true and yieldMs=1000, then process action=poll with timeout=1000 until it exits. Only the test harness can release the barrier. Do not create or modify files yourself.",
-                  // Steering is consumed between top-level calls, not inside a running Code Mode cell.
-                  "Make each process poll a separate top-level tool call. If using Code Mode, call process once and return its result from each exec cell; never loop or make multiple polls inside one cell. Return to the model between polls so queued progress refreshes can be processed.",
                   "If a progress refresh arrives while waiting, write the current status using progress_card with markdown only and omit plan before continuing to poll. Otherwise do not write a card.",
                   `After the command exits, reply exactly ${finalMarker}, then stop.`,
                   "There is a second pending step: running the same command again. Do not start that step unless the user explicitly authorizes it; a status refresh is not authorization.",
@@ -330,12 +325,10 @@ describeLive("progress refresh through the live embedded runtime", () => {
             }
             return { accepted, eventIndex, revision: card.revision };
           };
-          phase = "active refresh publication";
           const activeRefresh = await refresh();
           const active = await readHistory();
           expect(active.sessionInfo.hasActiveRun).toBe(true);
           expect(active.inFlightRun?.runId).toBe(rootRunId);
-          phase = "parent completion after barrier release";
           const final = await waitDuring(
             (event) =>
               event.event === "chat" &&
@@ -417,9 +410,7 @@ describeLive("progress refresh through the live embedded runtime", () => {
           );
 
           const idleEventIndex = events.length;
-          phase = "idle refresh publication";
           const { accepted: idle } = await refresh();
-          phase = "idle refresh settlement";
           await waitRun(idle.runId);
           const afterIdle = await readHistory();
           expect(afterIdle.messages).toEqual(beforeIdle.messages);
@@ -432,7 +423,6 @@ describeLive("progress refresh through the live embedded runtime", () => {
         }),
         cleanup,
       ).catch((error: unknown) => {
-        console.error(`Progress refresh failed during ${phase}; barrierReady=${barrierReady}`);
         console.error(instance.logs());
         throw error;
       });

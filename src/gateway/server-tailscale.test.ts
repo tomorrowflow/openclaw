@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { mocks, makeClaim } = vi.hoisted(() => {
   const stopRouteClaim = vi.fn<() => Promise<void>>(async () => undefined);
   const stopSandboxClaim = vi.fn<() => Promise<void>>(async () => undefined);
-  const claimFixture = (exited = new Promise<void>(() => {}), active = true) => ({
+  const claimFixture = (exited = new Promise<string>(() => {}), active = true) => ({
     exited,
     isActive: () => active,
     stop: stopRouteClaim,
@@ -12,7 +12,7 @@ const { mocks, makeClaim } = vi.hoisted(() => {
     stopRouteClaim,
     stopSandboxClaim,
     claimTailscaleServePort: vi.fn(async (_port: number, _target: number) => ({
-      exited: new Promise<void>(() => {}),
+      exited: new Promise<string>(() => {}),
       isActive: () => true,
       stop: stopSandboxClaim,
     })),
@@ -67,7 +67,7 @@ function expectNoControlUiIdentity() {
     resolveControlUiIdentity(
       { gateway: { publicOrigin: "https://unrelated.test", tailscale: { mode: "serve" } } },
       { mode: "token", allowTailscale: true },
-    ),
+    )?.url,
   ).toBeUndefined();
 }
 
@@ -93,7 +93,7 @@ afterEach(() => {
   mocks.stopRouteClaim.mockResolvedValue(undefined);
   mocks.stopSandboxClaim.mockResolvedValue(undefined);
   mocks.claimTailscaleServePort.mockImplementation(async () => ({
-    exited: new Promise<void>(() => {}),
+    exited: new Promise<string>(() => {}),
     isActive: () => true,
     stop: mocks.stopSandboxClaim,
   }));
@@ -168,7 +168,7 @@ describe("startGatewayTailscaleExposure", () => {
   });
 
   it("fails startup when the route owner exits after reporting readiness", async () => {
-    mocks.claimTailscaleRoute.mockResolvedValue(makeClaim(Promise.resolve(), false));
+    mocks.claimTailscaleRoute.mockResolvedValue(makeClaim(Promise.resolve("worker code 0"), false));
 
     await expect(startGatewayTailscaleExposure()).rejects.toThrow("claim exited during startup");
     expect(mocks.stopRouteClaim).toHaveBeenCalledOnce();
@@ -286,11 +286,11 @@ describe("managed Tailscale claim recovery", () => {
   afterEach(() => vi.useRealTimers());
 
   function recoverableClaim() {
-    const exited = createDeferred();
+    const exited = createDeferred<string>();
     let active = true;
     const exit = () => {
       active = false;
-      exited.resolve();
+      exited.resolve("worker code 0");
     };
     return {
       exited: exited.promise,

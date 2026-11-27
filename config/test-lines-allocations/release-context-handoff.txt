@@ -1,2 +1,0 @@
-# Verify validated destination propagation and detached local lint without weakening non-release checks.
-25

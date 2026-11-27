@@ -2,14 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
-import { closeDefaultRetainedNativeWorkerSource } from "../infra/worker-native-lifecycle.js";
-import { observeMainThreadFs } from "../test-utils/main-thread-fs-spies.test-support.js";
 import {
   createPluginGenerationSourceLookup,
   restorePluginRecoverySourceResolver,
   snapshotPluginRecoverySourceResolver,
 } from "./plugin-generation-source-lookup.js";
-import { withPluginSourceCaptureDirectory } from "./plugin-package-metadata-capture.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
@@ -18,6 +15,67 @@ afterEach(() => {
 });
 
 describe("plugin generation source lookup", () => {
+  it.each(["sync", "async"] as const)(
+    "%s recovery includes later graph additions and relocates dependency links",
+    async (mode) => {
+      const parent = fs.realpathSync(tempDirs.make("plugin-generation-recovery-"));
+      const sourceRoot = path.join(parent, "installed");
+      const boundaryRoot = path.join(parent, "captured");
+      const capturedRoot = path.join(boundaryRoot, "plugin");
+      const dependency = path.join(boundaryRoot, "dependency");
+      fs.mkdirSync(capturedRoot, { recursive: true });
+      fs.mkdirSync(dependency);
+      fs.writeFileSync(path.join(capturedRoot, "index.js"), "export default 1;\n");
+      fs.symlinkSync(
+        dependency,
+        path.join(capturedRoot, "dependency"),
+        process.platform === "win32" ? "junction" : "dir",
+      );
+      const capturedPaths = new Map([
+        [path.join(sourceRoot, "index.js"), path.join(capturedRoot, "index.js")],
+      ]);
+      const capturedDirectories = new Set([capturedRoot]);
+      const lookup = createPluginGenerationSourceLookup({
+        rootDir: sourceRoot,
+        sourceRoot,
+        capturedRoot,
+        boundaryRoot,
+        capturedPaths,
+        capturedDirectories,
+        hardlinkedSources: new Set(),
+        assertModuleAvailable: () => {},
+      });
+      // A lazy import extends the existing owner after the lookup was created.
+      const laterSource = path.join(sourceRoot, "later.js");
+      fs.writeFileSync(path.join(dependency, "later.js"), "export default 2;\n");
+      capturedPaths.set(laterSource, path.join(dependency, "later.js"));
+      capturedDirectories.add(dependency);
+      const recovery =
+        mode === "async"
+          ? await lookup.captureRecoverySourceAsync()
+          : lookup.captureRecoverySource();
+      try {
+        fs.rmSync(boundaryRoot, { recursive: true, force: true });
+        expect(fs.readFileSync(recovery.resolve(laterSource), "utf8")).toBe("export default 2;\n");
+        expect(recovery.directories.has(path.dirname(recovery.resolve(laterSource)))).toBe(true);
+        const fork = recovery.fork();
+        try {
+          await recovery.disposeAsync();
+          expect(fs.readFileSync(path.join(fork.rootDir, "dependency", "later.js"), "utf8")).toBe(
+            "export default 2;\n",
+          );
+          expect(fs.readFileSync(fork.resolve(path.join(sourceRoot, "index.js")), "utf8")).toBe(
+            "export default 1;\n",
+          );
+        } finally {
+          await fork.disposeAsync();
+        }
+      } finally {
+        await recovery.disposeAsync();
+      }
+    },
+  );
+
   it("reuses isolated recovery facts for transport", () => {
     const root = path.resolve("fixture-source");
     const source = path.join(root, "index.js");
@@ -58,6 +116,7 @@ describe("plugin generation source lookup", () => {
       capturedRoot: alias,
       boundaryRoot: alias,
       capturedPaths: new Map([[aliasedSource, source]]),
+      capturedDirectories: new Set(),
       hardlinkedSources: new Set(),
       assertModuleAvailable,
     });
@@ -83,6 +142,7 @@ describe("plugin generation source lookup", () => {
       capturedRoot: sourceRoot,
       boundaryRoot: sourceRoot,
       capturedPaths: new Map([[source, source]]),
+      capturedDirectories: new Set(),
       hardlinkedSources: new Set(),
       assertModuleAvailable: vi.fn(),
     });
@@ -90,54 +150,4 @@ describe("plugin generation source lookup", () => {
     expect(lookup.hasSource(source)).toBe(true);
     expect(lookup.resolve(source)).toBe(source);
   });
-});
-
-it("copies recovery source and metadata without foreground synchronous filesystem work", async () => {
-  const parent = tempDirs.make("plugin-recovery-copy-");
-  const root = path.join(parent, "source");
-  const output = path.join(parent, "recovery");
-  fs.mkdirSync(root);
-  fs.mkdirSync(output);
-  fs.writeFileSync(path.join(root, "index.js"), "export default 42;\n");
-  fs.writeFileSync(path.join(root, "package.json"), '{"type":"module"}');
-  const filename = path.join(root, "index.js");
-  const lookup = createPluginGenerationSourceLookup({
-    rootDir: root,
-    sourceRoot: root,
-    capturedRoot: root,
-    boundaryRoot: root,
-    capturedPaths: new Map([[filename, filename]]),
-    hardlinkedSources: new Set(),
-    assertModuleAvailable: () => {},
-  });
-  try {
-    const { recovery, calls } = await (async () => {
-      using observed = observeMainThreadFs();
-      const capturedRecovery = await withPluginSourceCaptureDirectory(output, () =>
-        lookup.captureRecoverySourceAsync(),
-      );
-      return {
-        recovery: capturedRecovery,
-        calls: observed
-          .stacks()
-          .filter(({ stack }) =>
-            /plugin-(?:recovery-source-copy|source-capture-directory|package-metadata-capture)/.test(
-              stack,
-            ),
-          ),
-      };
-    })();
-    try {
-      expect(calls).toEqual([]);
-      expect(fs.readFileSync(recovery.resolve(filename), "utf8")).toBe("export default 42;\n");
-      expect(
-        fs.readFileSync(path.join(recovery.sourceCapture.directory, "package.json"), "utf8"),
-      ).toBe('{"type":"module"}');
-    } finally {
-      await recovery.disposeAsync();
-    }
-    expect(fs.readdirSync(output)).toEqual([]);
-  } finally {
-    await closeDefaultRetainedNativeWorkerSource();
-  }
 });

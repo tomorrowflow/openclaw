@@ -241,8 +241,7 @@ before repair. Custom definitions remain operator-owned.
 
 If you append output redirection to the `gateway.cmd` launch line, quote the
 entire target, for example `>> "%USERPROFILE%\.openclaw\logs\gateway-stdout.log" 2>&1`.
-Generated launchers preserve trailing backslashes in quoted directory and command
-arguments. Complete trailing redirections are excluded from process ownership checks.
+Complete trailing redirections are excluded from process ownership checks.
 Unquoted environment expansions can leave filename fragments in the Gateway's
 arguments; OpenClaw preserves ambiguous launcher commands and refuses to terminate
 a listener whose ownership cannot be verified. Quote the target before retrying.
@@ -321,6 +320,8 @@ Doctor compares task definitions using Task Scheduler's defaults. An omitted
 `Enabled` element means `true` for both the task and its logon trigger, so XML
 export differences do not cause drift warnings or failed refresh verification.
 Explicitly disabled tasks and triggers are still reported.
+Status and Doctor also tolerate a scheduler-injected `UseUnifiedSchedulingEngine=true`.
+Replacement verification still protects that value from being silently discarded.
 
 The task check allows Windows PowerShell to inherit or create a console because
 some PowerShell 5.1 hosts fail inspection when console creation is disabled.

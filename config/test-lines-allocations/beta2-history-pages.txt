@@ -1,2 +1,0 @@
-149
-# Bidirectional oversized anchor paging and hidden-gap cursor advancement (#188450, #188483, #188557).

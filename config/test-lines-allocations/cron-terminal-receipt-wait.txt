@@ -1,2 +1,0 @@
-# Synchronize queued cancellation regression with the detached receipt transaction while preserving exact terminal-state assertions.
-3

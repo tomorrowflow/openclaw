@@ -1,4 +1,4 @@
-import { createControlUiChatHistoryMessage as chatHistoryMessage } from "./control-ui-session-fixtures.ts";
+import { createControlUiChatHistoryMessage as chatHistoryMessage } from "./control-ui-chat-history-fixtures.ts";
 
 export function buildWorkboardCardSessionHistories(
   baseTime: number,

@@ -1,3 +1,0 @@
-# Exact-version security regressions: bundled Discord parser, Zod 3 wrapper,
-# and patch allowlist rejection/acceptance. Node regression helper is not counted.
-228

@@ -25,7 +25,7 @@ Use this path only for a `.33+` Gateway distribution from the trailing
 completed month: the `openclaw` npm package, official npm plugins,
 and matching Docker Gateway images. Use
 `scripts/openclaw-npm-extended-stable-release.mjs` and the release workflows
-at Q=C by default for qualification; an explicit reviewed main-ancestor Q may
+at Q=C by default for qualification; an explicit reviewed exact Q may
 be admitted against unchanged C. Independently trusted P owns admission,
 verification, and publication. Missing Q contracts need a deliberate Q repair
 or candidate backport, never a moving-main fallback.
@@ -64,9 +64,9 @@ or candidate backport, never a moving-main fallback.
    `publish_openclaw_npm=true`, the saved
    preflight and Full Release Validation run IDs, and the saved validation run
    attempt. The parent derives `release_candidate_branch`, creates the draft,
-   publishes every official npm plugin and core under `extended-stable`,
-   attaches release evidence, skips ClawHub/native publication, publishes
-   Docker, and finalizes the release with `latest=false`.
+   successfully publishes every selected official npm plugin before core under
+   `extended-stable`, attaches release evidence, skips ClawHub/native publication,
+   publishes Docker, and finalizes the release with `latest=false`.
 7. If core npm already published, resume the parent from the same protected
    tooling tag with `openclaw_npm_resume_run_id` bound to the successful original core publish.
    It verifies the registry tarball against preflight before resuming evidence,

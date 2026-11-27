@@ -330,6 +330,10 @@ The session watchdog follows the request guard's current deadline with a recover
 margin derived from its warning interval. Request stalls therefore surface as
 transient timeouts for bounded retry and configured model fallback before the
 watchdog stops the whole reply. Explicit execution deadlines still apply.
+Every completed request retains that bounded recovery window for cleanup and
+retry admission, including an output-limit continuation after a long stream.
+Repeated cleanup does not extend it; if no continuation starts, the session
+watchdog can still stop the stalled reply when the window expires.
 
 The built-in OpenClaw harness publishes the current model attempt's execution
 deadline to the queue. When an attempt times out, configured fallback can start
@@ -382,6 +386,10 @@ Harness cleanup flushes trajectory events accepted before foreground work ended,
 including during restart cancellation. It cannot accept new events after that
 lifetime ends, or flush through a closed host, revoked admission, replaced run,
 or replaced recorder.
+
+Completed and aborted built-in attempts release their session transcript listeners
+even if transcript-owner cleanup fails. The cleanup error remains visible, while
+the global listener registry no longer retains the completed session's history.
 
 When a runtime reports a definitive timeout, the Gateway records its terminal
 status and error for the session sidebar immediately, without waiting for

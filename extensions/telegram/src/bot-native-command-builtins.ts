@@ -1,7 +1,5 @@
 import {
-  loadPreparedModelCatalog,
   resolveAgentConfig,
-  resolveAgentDir,
   resolveDefaultModelForAgent,
   resolveThinkingDefaultWithRuntimeCatalog,
 } from "openclaw/plugin-sdk/agent-runtime";
@@ -17,6 +15,7 @@ import {
   resolveFastModeState,
   resolveStoredModelOverrideAsync,
 } from "openclaw/plugin-sdk/command-auth-native";
+import { loadCommandArgMenuModelCatalog } from "openclaw/plugin-sdk/command-surface";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import {
   getSessionEntryAsync,
@@ -188,11 +187,9 @@ export async function executeTelegramBuiltinCommand(
   // Native /think must not wait on provider discovery; persisted rows retain its metadata.
   const menuModelCatalog =
     commandDefinition.key === "think" && menuNeedsModelContext
-      ? await loadPreparedModelCatalog({
-          config: dispatch.runtimeCfg,
+      ? await loadCommandArgMenuModelCatalog({
+          cfg: dispatch.runtimeCfg,
           agentId: dispatch.route.agentId,
-          agentDir: resolveAgentDir(dispatch.runtimeCfg, dispatch.route.agentId),
-          readOnly: true,
         })
       : undefined;
   const menu = await resolveCommandArgMenuAsync({

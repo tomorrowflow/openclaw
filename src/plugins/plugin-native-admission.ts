@@ -31,7 +31,6 @@ import {
   linkPluginNativeReference,
 } from "./plugin-native-reference.js";
 import { retainPluginNativeRoot } from "./plugin-native-root-lease.js";
-import type { PluginNativeCaptureRoot } from "./plugin-native-root.types.js";
 import { resolvePluginModulePackageRoot } from "./plugin-package-metadata-capture.js";
 import { getPluginSourceAdmissionPublisher } from "./plugin-source-admission-context.js";
 import type {
@@ -39,6 +38,7 @@ import type {
   PluginNativeNamespaceFact,
 } from "./plugin-source-admission.types.js";
 import {
+  type createPluginNativeCaptureRoot,
   isPluginSourceCaptureRetained,
   retainPluginNativeCapturePath,
 } from "./plugin-source-capture-directory.js";
@@ -50,7 +50,7 @@ import {
   pluginSourceStatIdentity,
 } from "./plugin-source-file.js";
 
-type NativeSnapshot = PluginNativeCaptureRoot;
+type NativeSnapshot = ReturnType<typeof createPluginNativeCaptureRoot>;
 type NativeReceipt = { signature: string; sourceDigest: string };
 export type PluginNativeRecovery = {
   receipt: NativeReceipt;

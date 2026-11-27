@@ -1,2 +1,0 @@
-8
-# Backport #200731: retained-runtime Bun prerequisite planner regression.

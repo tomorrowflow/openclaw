@@ -22,6 +22,8 @@ export type SandboxRegistryEntry = {
    * can already describe a container that has not been recreated yet.
    */
   mounts?: { hostPath: string; containerPath: string }[];
+  /** Last-use stamp whose container was stopped; later admissions invalidate this fact. */
+  idleStoppedAtLastUsedMs?: number;
   /** Provisioning and removal state for backends that retain unfinished allocations. */
   runtimeState?: "pending" | "ready" | "removing" | "removing-pending";
 };

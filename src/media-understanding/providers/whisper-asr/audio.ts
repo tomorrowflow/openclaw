@@ -1,10 +1,11 @@
+import type { AudioTranscriptionResult } from "../../../../packages/media-understanding-common/src/types.js";
 import {
   assertOkOrThrowHttpError,
   normalizeBaseUrl,
   postTranscriptionRequest,
   requireTranscriptionText,
 } from "../../shared.js";
-import type { AudioTranscriptionRequest, AudioTranscriptionResult } from "../../types.js";
+import type { AudioTranscriptionRequest } from "../../types.js";
 
 const DEFAULT_WHISPER_ASR_BASE_URL = "http://localhost:9009";
 const DEFAULT_FFMPEG_API_URL = "http://localhost:9008";

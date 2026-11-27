@@ -1,3 +1,0 @@
-94
-# Stable package publication: two live-path regressions plus recovery of a stopped journal exchange.
-# Existing two-move tests retain their original filesystem-failure contracts.

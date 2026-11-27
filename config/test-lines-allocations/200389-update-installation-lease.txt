@@ -1,2 +1,0 @@
-# Real installation observer holds a live update lease, then resumes self-restart after release.
-22

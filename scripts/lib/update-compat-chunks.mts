@@ -3,6 +3,7 @@ import path from "node:path";
 import * as ts from "typescript/ast";
 import { packageActivationRuntimeEntrypoint } from "../../src/infra/package-update-activation-runtime-assets.ts";
 import { managedHandoffRuntimeEntrypoint } from "../../src/infra/update-managed-service-handoff-runtime-assets.ts";
+import { bundledModuleRegions } from "./bundled-module-regions.mjs";
 import { createNativeTypeScriptParser } from "./native-typescript.mts";
 import { controlUiBuildSiblingPid } from "./output-root-guard.mjs";
 import { isRecord as object } from "./record-shared.mjs";
@@ -15,11 +16,16 @@ import {
   isUpdateCompatibilityChunk,
   UPDATE_COMPATIBILITY_CHUNK_HEADER,
 } from "./update-compat-contract.mjs";
-import { ModuleGraph, type UpdateCompatibilityOrigin } from "./update-compat-module-graph.mts";
+import {
+  ModuleGraph,
+  moduleSourceRegions,
+  type UpdateCompatibilityOrigin,
+} from "./update-compat-module-graph.mts";
 
 export { isUpdateCompatibilityChunk } from "./update-compat-contract.mjs";
 const HASHED_CHUNK = /-[A-Za-z0-9_-]{8}\.m?js$/;
-const POST_SWAP_OWNER = /^src\/(?:cli\/update-cli\/|daemon\/|cli\/runtime-cleanup(?:-scope)?\.ts$)/;
+const POST_SWAP_OWNER =
+  /^src\/(?:cli\/update-cli\/|daemon\/|cli\/runtime-cleanup(?:-scope)?\.ts$|infra\/deferred-plugin-migrations\.ts$)/;
 const STANDALONE_CHUNK_PREFIXES = Object.keys(standaloneRuntimeProcessBuildEntries).flatMap(
   (name) => {
     const { chunkFileNames } = getStandaloneRuntimeProcessOutputOptions(name);
@@ -133,13 +139,16 @@ function moduleFiles(root: string): string[] {
   return files.toSorted();
 }
 
-function ownerAt(source: string, offset: number): string | undefined {
+function ownerAt(
+  regions: ReturnType<typeof moduleSourceRegions>,
+  offset: number,
+): string | undefined {
   let owner: string | undefined;
-  for (const match of source.matchAll(/^\/\/#region (.+)$/gm)) {
+  for (const match of regions) {
     if (match.index > offset) {
       break;
     }
-    owner = match[1];
+    owner = match.owner;
   }
   return owner;
 }
@@ -307,15 +316,17 @@ export function recordUpdateCompatibilityRelease(params: {
     const source = fs.readFileSync(file, "utf8");
     if (
       !source.includes("import(") ||
-      ![...source.matchAll(/^\/\/#region (.+)$/gm)].some(
+      ![...bundledModuleRegions(source)].some(
         ([, owner]) => owner !== undefined && POST_SWAP_OWNER.test(owner),
       )
     ) {
       continue;
     }
+    const sourceFile = parser.parseSourceFile(file, source);
+    const regions = moduleSourceRegions(sourceFile);
     const visit = (node: ts.Node) => {
       if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
-        const owner = ownerAt(source, node.getStart());
+        const owner = ownerAt(regions, node.getStart());
         if (owner && POST_SWAP_OWNER.test(owner) && isPostSwapImport(owner, node)) {
           const specifier = node.arguments[0];
           if (!specifier || !ts.isStringLiteralLikeNode(specifier)) {
@@ -362,7 +373,7 @@ export function recordUpdateCompatibilityRelease(params: {
       }
       node.forEachChild(visit);
     };
-    visit(parser.parseSourceFile(file, source));
+    visit(sourceFile);
   }
   return {
     version: packageJson.version,
@@ -561,9 +572,9 @@ export function listUpdateCompatibilityChunkPaths(
   ].toSorted();
 }
 
-/** The 2026.9.37 immutable updater predates leased handoffs and always denied authority.
+/** The recorded immutable updater predates leased handoffs and always denied authority.
  * This export is emitted inline, not imported from the current runtime. Remove it when
- * 2026.9.37 leaves the supported first-hop upgrade window.
+ * that updater leaves the supported first-hop upgrade window.
  */
 export function isInlineUpdateCompatibilityExport(origin: UpdateCompatibilityOrigin): boolean {
   return (
@@ -573,7 +584,7 @@ export function isInlineUpdateCompatibilityExport(origin: UpdateCompatibilityOri
 }
 
 /** Follow the old owner's current lexical binding when its implementation moves. */
-function currentOrigin(
+export function resolveUpdateCompatibilityOrigin(
   origin: UpdateCompatibilityOrigin,
   sourceDir: string,
   graph: ModuleGraph,
@@ -589,6 +600,18 @@ function currentOrigin(
   const info = graph.info(file);
   if (info.imports.has(origin.symbol) || info.exports.has(origin.symbol)) {
     throw new Error(`Cannot resolve current source binding ${origin.module}:${origin.symbol}`);
+  }
+  // The published 9.36 lease dispatcher moved in 5b4fdfcb22cf without a runtime
+  // re-export, to keep storage independent of dispatch. Preserve its recorded ABI
+  // only while 9.36 remains in the supported first-hop inventory.
+  if (
+    origin.module === "src/state/openclaw-state-lease-worker-storage.ts" &&
+    origin.symbol === "runWithOpenClawStateLeaseWorker"
+  ) {
+    const operation = path.join(sourceDir, "src/state/openclaw-state-lease-worker-operation.ts");
+    if (fs.existsSync(operation)) {
+      return graph.origin(operation, origin.symbol) ?? origin;
+    }
   }
   return origin;
 }
@@ -608,7 +631,7 @@ export function writeUpdateCompatibilityChunks(params: {
   const origins = new Map<string, UpdateCompatibilityOrigin>();
   for (const chunk of required) {
     for (const entry of chunk.exports) {
-      const origin = currentOrigin(entry.origin, params.sourceDir, sourceGraph);
+      const origin = resolveUpdateCompatibilityOrigin(entry.origin, params.sourceDir, sourceGraph);
       origins.set(`${entry.origin.module}:${entry.origin.symbol}`, origin);
     }
   }
@@ -640,7 +663,7 @@ export function writeUpdateCompatibilityChunks(params: {
     const source = fs.readFileSync(file, "utf8");
     if (
       isUpdateCompatibilityChunk(source) ||
-      ![...source.matchAll(/^\/\/#region (.+)$/gm)].some(
+      ![...bundledModuleRegions(source)].some(
         ([, owner]) => owner !== undefined && ownerModules.has(owner),
       )
     ) {

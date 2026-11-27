@@ -1,2 +1,0 @@
-24
-# Preserve runtime-only steering carriers when publishing a suppressed envelope (#200156).

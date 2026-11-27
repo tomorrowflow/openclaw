@@ -1,2 +1,0 @@
-# Assert trusted ripgrep setup is present before npm source ratchets on hosted runners.
-6

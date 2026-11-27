@@ -170,7 +170,7 @@ export async function prepareChatHistorySessionRead({
   };
   if (requestedSessionId && !(await readTranscriptOwner())) {
     if (retainedSessionId) {
-      unavailable("retained transcript is no longer available");
+      unavailable("retained chat history is no longer available");
     } else {
       respond(
         false,
@@ -292,7 +292,7 @@ export async function prepareChatHistorySessionRead({
             });
             releaseFacts = facts.release;
             if (!(await publication.verify())) {
-              unavailable("retained transcript changed while reading history");
+              unavailable("retained chat history changed while reading");
               return;
             }
             signal?.throwIfAborted();

@@ -1,10 +1,7 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { DatabaseStoreDiagnostic } from "../infra/database-engine/diagnostics.js";
-import type {
-  BackupEngine,
-  DatabaseEngineFamily,
-  DatabaseEngineId,
-} from "../infra/database-engine/types.js";
+import type { BackupEngine } from "../infra/database-engine/physical-store.js";
+import type { DatabaseEngineFamily, DatabaseEngineId } from "../infra/database-engine/types.js";
 
 export type DoctorDatabaseEngineInspectionInput = {
   config: OpenClawConfig;

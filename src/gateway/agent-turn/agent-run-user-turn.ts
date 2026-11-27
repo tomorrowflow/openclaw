@@ -19,6 +19,7 @@ import {
   resolveRequesterPrincipalKey,
   type RequesterOrigin,
 } from "../../agents/requester-origin.js";
+import { isAgentRunRestartAbortReason } from "../../agents/run-termination.js";
 import { prepareCommandOwnerAuthority } from "../../auto-reply/command-auth.js";
 import type { InternalSessionEntry } from "../../config/sessions.js";
 import { readSessionSubmittedInput } from "../../config/sessions/session-accessor.pending-inputs.js";
@@ -41,6 +42,7 @@ import {
   type UserTurnInput,
   type UserTurnTranscriptRecorder,
 } from "../../sessions/user-turn-transcript.js";
+import type { SubagentCompletion } from "../../shared/subagent-completion.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel-constants.js";
 import {
   INLINE_IMAGE_DURABLE_OMISSION_MARKER,
@@ -56,7 +58,6 @@ import { resolveGatewayInputParticipant } from "../session-input-participant.js"
 import { readSessionSendDeliveryAdmission } from "../session-send-delivery.js";
 import { loadGatewaySessionEntryReadOnlyInWorker } from "../session-utils-store-worker.js";
 import { formatForLog } from "../ws-log.js";
-import type { RestoredCronContinuation } from "./agent-handler-helpers.js";
 import type { RequesterSettleWakeReplay } from "./internal-facade.types.js";
 import type { AgentTurnContext, AgentTurnIo, AgentTurnPrincipal } from "./types.js";
 
@@ -153,6 +154,7 @@ export async function prepareAgentRunUserTurn(params: {
   privateCompletion?: true;
   replyExpectation?: ReplyExpectation;
   settleWakeReplay?: RequesterSettleWakeReplay;
+  subagentCompletions?: readonly SubagentCompletion[];
   abortSignal?: AbortSignal;
   getAbortStopReason?: () => string;
   request: AgentRunRequest;
@@ -168,7 +170,6 @@ export async function prepareAgentRunUserTurn(params: {
   resolvedThreadId?: string | number;
   suppressVisibleSessionEffects: boolean;
   requestedPromptPersistenceSuppression: boolean;
-  restoredCronContinuation?: RestoredCronContinuation;
   canUseInternalRuntimeHandoff: boolean;
   execApprovalFollowupApprovalId?: string;
   message: string;
@@ -194,7 +195,7 @@ export async function prepareAgentRunUserTurn(params: {
         })
       : undefined;
   const resolveRuntimeSenderIsOwner = () =>
-    Boolean(params.restoredCronContinuation || hasGatewayAdminScope(params.client)) &&
+    hasGatewayAdminScope(params.client) &&
     (!requesterOrigin ||
       Boolean(requesterOrigin.operatorProfileId) ||
       ((!requesterOrigin.messageProvider ||
@@ -269,7 +270,10 @@ export async function prepareAgentRunUserTurn(params: {
         "Private completion requires an exact internal requester turn with delivery disabled",
       );
     }
-    const trackRequesterCompletion = params.privateCompletion || settleWakeReplay !== undefined;
+    const trackRequesterCompletion =
+      params.privateCompletion ||
+      settleWakeReplay !== undefined ||
+      Boolean(params.subagentCompletions?.length);
     const suppressPromptPersistence =
       !params.privateCompletion && params.requestedPromptPersistenceSuppression;
     if (
@@ -355,6 +359,7 @@ export async function prepareAgentRunUserTurn(params: {
         }
       }
       const input: UserTurnInput = {
+        subagentCompletions: params.subagentCompletions,
         ...(params.privateCompletion ||
         isCompletionReportInputProvenance(params.inputProvenance) ||
         isSubagentCoordinationInputProvenance(params.inputProvenance)
@@ -470,7 +475,9 @@ export async function prepareAgentRunUserTurn(params: {
     let releaseProcessingAbortObserver: (() => void) | undefined;
     if (trackRequesterCompletion && recorder && !recorder.getProcessingCompletion?.()) {
       const recordAbort = () => {
-        const stopReason = params.getAbortStopReason?.() ?? "rpc";
+        const stopReason = isAgentRunRestartAbortReason(params.abortSignal?.reason)
+          ? "restart"
+          : (params.getAbortStopReason?.() ?? "rpc");
         // Intentional Stop seals non-retry custody immediately. A timeout
         // retains its source until the producer publishes its actual terminal facts.
         if (stopReason === "timeout") {
@@ -577,10 +584,11 @@ export async function releasePreparedAgentRunUserTurn(
     | "execApprovalFollowupHandoffClaimId"
   >,
   disposition: "cancelled" | "interrupted" = "cancelled",
+  userInitiated?: true,
 ): Promise<void> {
   try {
     prepared.releaseProcessingAbortObserver?.();
-    prepared.recorder?.finishPendingInput?.(disposition);
+    prepared.recorder?.finishPendingInput?.(disposition, userInitiated);
   } finally {
     try {
       await prepared.recorder?.waitForPendingInputSettlement?.();

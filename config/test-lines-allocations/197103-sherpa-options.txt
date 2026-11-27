@@ -1,2 +1,0 @@
-# Executable argv validation prevents unintended TTS invocation and preserves valid paths/text.
-83

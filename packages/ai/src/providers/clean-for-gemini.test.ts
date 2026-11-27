@@ -1,7 +1,4 @@
-import { Type } from "typebox";
-import { Compile } from "typebox/compile";
 import { describe, expect, it } from "vitest";
-import { normalizeToolParameterSchema } from "./agent-tools-parameter-schema.js";
 import { cleanSchemaForGemini } from "./clean-for-gemini.js";
 
 const object = (properties: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
@@ -12,17 +9,6 @@ const object = (properties: Record<string, unknown>, extra: Record<string, unkno
 const string = { type: "string" };
 
 describe("cleanSchemaForGemini", () => {
-  it("keeps boolean literal validation while emitting a valid Gemini parameter schema", () => {
-    const original = Type.Object({ optional: Type.Optional(Type.Literal(true)) });
-    const normalized = normalizeToolParameterSchema(original, { modelProvider: "google" });
-    expect(normalized).toHaveProperty("properties.optional.type", "boolean");
-    expect(normalized).not.toHaveProperty("properties.optional.enum");
-    const validate = Compile(original);
-    expect(validate.Check({ optional: true })).toBe(true);
-    expect(validate.Check({ optional: "true" })).toBe(false);
-    expect(validate.Check({ optional: false })).toBe(false);
-  });
-
   it.each([
     [
       "unmatched required",

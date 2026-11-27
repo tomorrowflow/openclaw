@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import {
@@ -170,6 +170,115 @@ describe("release tooling identity", () => {
     expect(result.stderr).toContain("Invalid admission descriptor fields");
     expect(result.stderr).not.toContain("unsettled top-level await");
   });
+
+  it.each(["lineage", "authority", "recovery-authority", "mismatched-recovery-authority"])(
+    "loads npm publication %s without CLI deadlock",
+    (mode) => {
+      const root = tempDirs.make("npm-publication-cli-");
+      const manifestDir = join(root, "full-release-validation");
+      mkdirSync(manifestDir);
+      const manifestPath = join(manifestDir, "full-release-validation-manifest.json");
+      writeFileSync(
+        manifestPath,
+        JSON.stringify({
+          runId: RUN_ID,
+          runAttempt: 1,
+          targetSha: SHA,
+          ...(mode.includes("recovery")
+            ? { recovery: { producer: { runId: PARENT_RUN_ID, runAttempt: 2 } } }
+            : {}),
+          sourceAdmission: { qualificationAdmission: {} },
+        }),
+      );
+      const result = spawnSync(
+        process.execPath,
+        [
+          join(process.cwd(), "scripts/npm-preflight-tooling-identity.mjs"),
+          `--verify-publication-${mode === "lineage" ? "lineage" : "authority"}`,
+          ...Object.entries({
+            "full-release-manifest": manifestPath,
+            "publisher-full-ref": "invalid",
+            "source-sha": SHA,
+            "workflow-sha": SHA,
+          }).flatMap(([key, value]) => [`--${key}`, value]),
+        ],
+        {
+          cwd: root,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            GH_TOKEN: "",
+            GITHUB_TOKEN: "",
+            WORKFLOW_FULL_REF: "invalid",
+            FULL_RELEASE_VALIDATION_RUN_ID: mode === "recovery-authority" ? PARENT_RUN_ID : RUN_ID,
+            FULL_RELEASE_VALIDATION_RUN_ATTEMPT: mode === "recovery-authority" ? "2" : "1",
+            EXPECTED_RELEASE_SHA: SHA,
+            PREFLIGHT_WORKFLOW_SHA: SHA,
+          },
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        mode === "mismatched-recovery-authority"
+          ? "Full release publication authority differs"
+          : "trusted workflow full ref does not match its ref",
+      );
+      expect(result.stderr).not.toContain("unsettled top-level await");
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "retains GitHub failure diagnostics in the identity CLI",
+    () => {
+      const bin = tempDirs.make("release-tooling-gh-failure-");
+      const requests = join(bin, "requests");
+      writeFileSync(
+        join(bin, "gh"),
+        `#!/bin/sh
+printf '%s\n' "$@" > "$REQUESTS"
+printf 'sensitive-response-body\n'
+printf 'gh: API rate limit exceeded (HTTP 403)\nX-GitHub-Request-Id: RRI451-SYNTHETIC\nX-RateLimit-Reset: 1794910200\n' >&2
+exit 1
+`,
+        { mode: 0o755 },
+      );
+      const result = spawnSync(
+        process.execPath,
+        [
+          join(process.cwd(), "scripts/release-tooling-identity.mjs"),
+          "verify",
+          "--repository",
+          "openclaw/openclaw",
+          "--workflow-ref",
+          "release/2026.10.4",
+          "--workflow-full-ref",
+          "refs/heads/release/2026.10.4",
+          "--workflow-sha",
+          SHA,
+          "--allow-prevalidated-ref",
+        ],
+        { encoding: "utf8", env: { PATH: bin, REQUESTS: requests, GH_TOKEN: "synthetic-token" } },
+      );
+
+      expect(readFileSync(requests, "utf8").trim().split("\n")).toEqual([
+        "api",
+        "repos/openclaw/openclaw/git/ref/heads/release/2026.10.4",
+        "--method",
+        "GET",
+      ]);
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain(
+        "prevalidated release tooling branch is missing or unreadable",
+      );
+      expect(result.stderr).toContain("HTTP 403");
+      expect(result.stderr).toContain("X-GitHub-Request-Id: RRI451-SYNTHETIC");
+      expect(result.stderr).toContain("X-RateLimit-Reset: 1794910200");
+      expect(result.stderr).not.toContain("sensitive-response-body");
+      expect(result.stderr).not.toContain("synthetic-token");
+    },
+  );
 
   it("rejects a deleted tag", () => {
     expect(() =>
@@ -375,9 +484,18 @@ describe("historical npm preflight tooling", () => {
     });
   });
 
+  it("accepts a protected release-only producer outside main on the publisher ancestry", () => {
+    expect(
+      verifyReleasePreflightToolingIdentity(
+        proof({
+          ["compare/" + SHA + "...main"]: { status: "diverged" },
+        }),
+      ),
+    ).toMatchObject({ route: "protected-tag", sha: SHA });
+  });
+
   it.each([
     ["ambiguous branch", `git/matching-refs/heads/${REF}`, [{ ref: `refs/heads/${REF}` }]],
-    ["producer outside main", `compare/${SHA}...main`, { status: "diverged" }],
     ["unrelated publisher", `compare/${SHA}...${OTHER_SHA}`, { status: "diverged" }],
   ])("rejects %s", (_name, route, response) => {
     expect(() => verifyReleasePreflightToolingIdentity(proof({ [route]: response }))).toThrow();

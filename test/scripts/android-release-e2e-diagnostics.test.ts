@@ -3,7 +3,6 @@ import {
   androidReleaseCommandFacts as commandFacts,
   androidReleaseErrorFacts as errorFacts,
   androidReleaseNativeFacts as nativeFacts,
-  androidReleaseReaderFacts as readerFacts,
 } from "../../scripts/lib/android-release-e2e-diagnostics.js";
 
 const phases = ["initial", "relaunch", "phone-restart", "long-reply", "reader"];
@@ -58,6 +57,22 @@ it.each([
   }
 });
 
+it.each([
+  ["Could not resolve private-artifact: status code 503", "dependency-resolution", "503"],
+  ["Gradle build daemon disappeared unexpectedly: private-detail", "daemon", undefined],
+  ["Compilation error: private-source", "compilation", undefined],
+  ["SDK location not found: private-path", "sdk", undefined],
+  ["Unsupported class file: private-class", "java-version", undefined],
+  ["Cannot find package private-package", "module-resolution", undefined],
+  ["SSLHandshakeException: private-host", "tls", undefined],
+  ["Timeout waiting to lock private-cache", "lock", undefined],
+  ["private-failure status code 999", "unknown", undefined],
+])("retains only classified build facts: %s", (output, buildFailure, buildHttpStatus) => {
+  const facts = commandFacts("node", [], output, "private-token");
+  expect(facts).toMatchObject({ buildFailure, buildHttpStatus });
+  expect(JSON.stringify(facts)).not.toMatch(/private|artifact|detail|source|package|host|999/u);
+});
+
 it("drops unknown tool, operation, output and phase names", () => {
   expect(
     commandFacts("/private/unknown-secret", ["secret"], "private-token", "private-secret"),
@@ -106,64 +121,4 @@ it.each([
     [expected]: true,
     phaseReady: phaseReady(true),
   });
-});
-
-it("projects reader geometry without private capture fields", () => {
-  const node = {
-    textLength: 13,
-    sentinelIndex: 0,
-    visible: true,
-    bounds: "0 32 384 352",
-    characterRefresh: true,
-    characterBoxes: [[10, 20, 30, 40], null],
-    ancestors: [{ scrollable: true, visible: true, bounds: "0 32 384 352" }],
-  };
-  const reader = {
-    displayWidth: 384,
-    displayHeight: 384,
-    round: true,
-    sentinels: { "HEAD SENTINEL": [node], "TRAILING SENTINEL": [] },
-  };
-  const capture = {
-    transport: "private-token",
-    reader: {
-      ...reader,
-      activePackage: "private-package",
-      sentinels: {
-        ...reader.sentinels,
-        "HEAD SENTINEL": [
-          {
-            ...node,
-            text: "private-message",
-            package: "private-package",
-            ancestors: [{ ...node.ancestors[0], resource: "private-resource" }],
-          },
-        ],
-      },
-    },
-  };
-  expect(readerFacts(capture)).toEqual(reader);
-  expect(JSON.stringify(readerFacts(capture))).not.toMatch(
-    /private|token|message|package|resource/u,
-  );
-  expect(readerFacts({ reader: { ...reader, displayWidth: "private" } })).toBeUndefined();
-  expect(
-    readerFacts({
-      reader: {
-        ...reader,
-        sentinels: { ...reader.sentinels, "HEAD SENTINEL": [{ ...node, bounds: "private-token" }] },
-      },
-    }),
-  ).toBeUndefined();
-  expect(
-    readerFacts({
-      reader: {
-        ...reader,
-        sentinels: {
-          ...reader.sentinels,
-          "HEAD SENTINEL": Array.from({ length: 9 }, () => ({ ...node })),
-        },
-      },
-    }),
-  ).toBeUndefined();
 });

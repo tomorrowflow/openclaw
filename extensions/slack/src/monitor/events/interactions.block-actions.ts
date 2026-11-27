@@ -1,4 +1,5 @@
 import type { Block, KnownBlock } from "@slack/web-api";
+import { agentControlText } from "openclaw/plugin-sdk/agent-control-runtime";
 import {
   resolveApprovalOverGateway,
   type ApprovalResolveResult,
@@ -73,9 +74,11 @@ async function respondEphemeral(
     return;
   }
   try {
+    // Without replace_original: false, Slack's response_url replaces the source message.
     await respond({
       text,
       response_type: "ephemeral",
+      replace_original: false,
     });
   } catch {
     // Best-effort feedback only.
@@ -658,7 +661,7 @@ export function registerSlackBlockActionHandler(params: {
       normalizeOptionalString(parsed.typedActionWithText.action_ts) ?? parsed.typedBody.trigger_id,
     ].filter(Boolean);
     const accepted = await enqueueSlackInteractionEvent(
-      eventPayload,
+      agentControlText(pluginInteractionData) ?? eventPayload,
       route,
       {
         contextKey: contextParts.join(":"),

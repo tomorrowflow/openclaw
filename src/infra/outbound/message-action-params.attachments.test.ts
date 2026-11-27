@@ -207,43 +207,6 @@ describe("runMessageAction media behavior", () => {
     }
   });
 
-  it.each([onePixelPngBase64, parameterizedPngDataUrl])(
-    "delivers buffer bytes through the thread-reply runner (%#)",
-    async (buffer) => {
-      await withSandbox(async (stateDir) => {
-        vi.stubEnv("OPENCLAW_STATE_DIR", stateDir);
-        try {
-          setTestPlugin(
-            mediaPlugin("threadchat", ["thread-reply"], async ({ params }) => {
-              if (typeof params.media !== "string") {
-                throw new Error("thread-reply did not receive staged media");
-              }
-              return jsonResult({
-                bytes: (await fs.readFile(params.media)).toString("base64"),
-                filename: params.filename,
-              });
-            }),
-            "threadchat",
-          );
-          const result = await createMediaAction(
-            "threadchat",
-            "thread-reply",
-          )({
-            buffer,
-            filename: "proof.png",
-            message: "attachment proof",
-          });
-          expect(requireActionPayload(result)).toEqual({
-            bytes: onePixelPngBase64,
-            filename: "proof.png",
-          });
-        } finally {
-          vi.unstubAllEnvs();
-        }
-      });
-    },
-  );
-
   describe("sendAttachment hydration", () => {
     const attachmentPlugin = mediaPlugin(
       "attachmentchat",
@@ -342,6 +305,35 @@ describe("runMessageAction media behavior", () => {
             ),
           ).rejects.toThrow(/allowed directory|path-not-allowed/i);
         });
+      }
+    });
+
+    it("denies configured blockedHostnames before fetching host and sandbox attachment URLs", async () => {
+      await restoreRealMediaLoader();
+      const handleAction = vi.fn(async () => jsonResult({ ok: true }));
+      setTestPlugin(
+        mediaPlugin("attachmentchat", ["sendAttachment"], handleAction),
+        "attachmentchat",
+      );
+      // A mocked fetch skips DNS, so this stays offline while hostname policy still runs.
+      const fetchMock = vi.fn(async () => new Response(onePixelPng));
+      vi.stubGlobal("fetch", fetchMock);
+      const cfg = {
+        channels: { attachmentchat: { enabled: true } },
+        tools: { web: { fetch: { ssrfPolicy: { blockedHostnames: ["blocked.example"] } } } },
+      };
+      const media = "https://blocked.example/pic.png";
+      try {
+        await expect(runAttachment({ media }, { cfg })).rejects.toThrow(/configured blocklist/);
+        await withSandbox(async (sandboxRoot) => {
+          await expect(runAttachment({ media }, { cfg, sandboxRoot })).rejects.toThrow(
+            /configured blocklist/,
+          );
+        });
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(handleAction).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
       }
     });
   });

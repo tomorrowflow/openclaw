@@ -16,13 +16,13 @@ import {
   resetSlackSlashMocks,
 } from "./slash.test-harness.js";
 
-vi.mock("openclaw/plugin-sdk/agent-runtime", async () => {
-  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/agent-runtime")>(
-    "openclaw/plugin-sdk/agent-runtime",
+vi.mock("openclaw/plugin-sdk/command-surface", async () => {
+  const actual = await vi.importActual<typeof import("openclaw/plugin-sdk/command-surface")>(
+    "openclaw/plugin-sdk/command-surface",
   );
   return {
     ...actual,
-    loadPreparedModelCatalog: vi.fn(async () => []),
+    loadCommandArgMenuModelCatalog: vi.fn(async () => []),
   };
 });
 

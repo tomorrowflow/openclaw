@@ -20,21 +20,6 @@ import { assertValidParams } from "./validation.js";
 
 const MAX_CRON_HISTORY_BYTES = 4 * 1024 * 1024;
 
-// Only fixed owner diagnostics may reach logs; chat errors can contain hidden session keys.
-const SAFE_HISTORY_FAILURES = new Set([
-  "session rows are initializing; reload the conversation",
-  "retained transcript is no longer available",
-  "retained transcript changed while reading history",
-  "retained session changed while reading history",
-  "session access changed while reading history",
-  "session changed while reading history; reload the conversation",
-  "session history is rebuilding; retry shortly",
-  "session history window changed; reload the conversation",
-  "session history is busy; retry shortly",
-  "session history is temporarily unavailable; retry shortly",
-  "session history read timed out; retry shortly",
-]);
-
 export const cronHistoryHandler: GatewayRequestHandler = async (opts) => {
   const { params, respond, context, client } = opts;
   if (!assertValidParams(params, validateCronHistoryParams, "cron.history", respond)) {
@@ -48,15 +33,12 @@ export const cronHistoryHandler: GatewayRequestHandler = async (opts) => {
     );
     return;
   }
-  let phase = "run-selection";
-  const fail = (reason = phase) => {
-    context.logGateway.debug(`cron.history unavailable: ${reason}`);
+  const fail = () =>
     respondError(
       respond,
       ErrorCodes.UNAVAILABLE,
-      "The recorded cron transcript is unavailable. Refresh the run and try again.",
+      "The chat for this run is unavailable. Refresh the run and try again.",
     );
-  };
   const sessionVisibility = createCronSessionVisibility(client, context);
   const assertAllowed = (sessionKey?: string, agentId?: string) => {
     assertCronReadCurrent(opts);
@@ -78,7 +60,7 @@ export const cronHistoryHandler: GatewayRequestHandler = async (opts) => {
       throw new Error("Cron job not found");
     }
     if (sessionKey && visibility && !visibility(sessionKey, agentId)) {
-      throw new Error("Cron transcript not found");
+      throw new Error("Chat for this run not found");
     }
   };
   try {
@@ -128,7 +110,6 @@ export const cronHistoryHandler: GatewayRequestHandler = async (opts) => {
       }
       assertAllowed(transcriptSessionKey, agentId);
     };
-    phase = "transcript-binding";
     const physical = await readSessionHistoryPageInWorker(
       {
         kind: "transcript-binding",
@@ -144,7 +125,6 @@ export const cronHistoryHandler: GatewayRequestHandler = async (opts) => {
       fail();
       return;
     }
-    phase = "retained-history-read";
     const { handleChatHistoryRequest } = await import("./chat-history-handler.js");
     await handleChatHistoryRequest({
       ...opts,
@@ -164,13 +144,12 @@ export const cronHistoryHandler: GatewayRequestHandler = async (opts) => {
         offset,
         maxBytes: MAX_CRON_HISTORY_BYTES - 16_384,
       },
-      respond: (ok, payload, error) => {
+      respond: (ok, payload) => {
         if (!ok) {
-          // Keep both the public error and diagnostic independent of hidden session identities.
-          fail(error?.message && SAFE_HISTORY_FAILURES.has(error.message) ? error.message : phase);
+          // Chat errors may name the internally selected session, which the caller cannot see.
+          fail();
           return;
         }
-        phase = "retained-history-publication";
         const page = asOptionalRecord(payload);
         const result = {
           messages: page?.messages,
@@ -187,7 +166,7 @@ export const cronHistoryHandler: GatewayRequestHandler = async (opts) => {
           !Value.Check(CronHistoryResultSchema, result) ||
           Buffer.byteLength(JSON.stringify(result)) > MAX_CRON_HISTORY_BYTES
         ) {
-          throw new Error("Invalid cron transcript page");
+          throw new Error("Invalid run chat history page");
         }
         // The shared retained-transcript owner still holds current sharing facts here.
         assertCurrent(physical.sessionKey);

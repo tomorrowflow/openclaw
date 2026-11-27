@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
 import { createGatewayCronReconciliation } from "./server-cron-reconciled.js";
 
 type RunHook = Parameters<typeof createGatewayCronReconciliation>[0]["runHook"];
@@ -13,13 +12,14 @@ describe("gateway cron reconciliation lifecycle", () => {
   beforeEach(() => {
     runHook = vi.fn<RunHook>(async () => undefined);
     closing = false;
+    const config = {};
     reconciliation = createGatewayCronReconciliation({
-      getConfig: () => ({}),
-      getPluginRegistry: () => createEmptyPluginRegistry(),
-      logger: { warn() {} },
       port: 18789,
       workspaceDir: "/tmp/openclaw-workspace",
       isClosing: () => closing,
+      getConfig: () => config,
+      getPluginRegistry: () => undefined,
+      logger: { warn: vi.fn() },
       runHook,
     });
   });

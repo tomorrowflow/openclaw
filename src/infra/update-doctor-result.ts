@@ -167,6 +167,7 @@ export function normalizeUpdatePostInstallDoctorWarnings(warnings: readonly stri
           const prefix = value.slice(0, 498);
           const complete =
             prefix.match(/^[\s\S]*(?:[.!?](?=\s)|\r?\n)/u)?.[0] ??
+            prefix.match(/^[^\r\n]+:\s+\[[^\]\r\n]+\]/u)?.[0] ??
             prefix.match(/^[^\r\n]+:(?=\s)/u)?.[0];
           return complete
             ? `${complete.trimEnd()} …`
@@ -185,10 +186,13 @@ export type DoctorConfigCapture = {
   configChanges: UpdateDoctorConfigChange[];
   configWriteRefusal?: UpdateDoctorConfigWriteRefusal;
   deferredInspectionCheckIds?: string[];
+  warnings?: string[];
 };
 /** Runs a policy check under Doctor's held maintenance owner and its open scope. */
 type DoctorPolicyCustodyOwner = { assertCurrent(policy: () => void): void };
 export type UpdateDoctorWriteAuthority = {
+  /** An optional work profile; config preparation still proves eligibility. */
+  retirementOnly?: true;
   /** Parent Doctor phase deadline for nested managed-service inspection. */
   serviceInspectionDeadlineAtMs?: number;
   inputHash: string;
@@ -228,6 +232,7 @@ export function createUpdateDoctorDatabaseWriteCapture(
   let admitted = false;
   let unchanged = true;
   let receipt: UpdateDatabaseWriteReceipt | undefined;
+  let rebuiltIndexes: Record<string, string> = {};
   const openedSqlitePaths = new Set<string>();
   const historicalScans = createUpdateDoctorHistoricalScanCapture(options);
   const read = async () => {
@@ -257,7 +262,7 @@ export function createUpdateDoctorDatabaseWriteCapture(
     options.assertCurrent?.();
     return observation;
   };
-  const acceptEmptyReaderTransitions = (
+  const acceptNoWriteTransitions = (
     observation: import("./update-database-generations.js").UpdateDatabaseGenerationPair,
   ) => {
     // Share migration admission's no-write equivalence, from this same observation.
@@ -265,6 +270,25 @@ export function createUpdateDoctorDatabaseWriteCapture(
       const alternate = observation.emptyReaderAlternates[pathname];
       if (alternate !== undefined && expectedGenerations?.[pathname] === alternate) {
         expectedGenerations[pathname] = generation;
+      }
+    }
+    // A rebuilt index carries no alternate of its own; accept the one remembered from
+    // the previous admission before this observation is compared and rebound.
+    for (const [pathname, alternate] of Object.entries(rebuiltIndexes)) {
+      if (expectedGenerations && observation.committed[pathname] === alternate) {
+        expectedGenerations[pathname] = alternate;
+      }
+    }
+  };
+  // Outside readers can rebuild a retained index after this observation; only an index
+  // over the same frames, content, and file identity stays equivalent to it.
+  const bindRebuiltIndexes = (
+    observation: import("./update-database-generations.js").UpdateDatabaseGenerationPair,
+  ) => {
+    rebuiltIndexes = {};
+    for (const [pathname, alternate] of Object.entries(observation.rebuiltIndexAlternates)) {
+      if (expectedGenerations?.[pathname] === observation.committed[pathname]) {
+        rebuiltIndexes[pathname] = alternate;
       }
     }
   };
@@ -277,6 +301,7 @@ export function createUpdateDoctorDatabaseWriteCapture(
         {
           openedSqlitePaths,
           expected: (pathname) => expectedGenerations?.[pathname],
+          rebuiltIndex: (pathname) => rebuiltIndexes[pathname],
           assertCurrent: () => options.assertCurrent?.(),
           accept(pathname, before, after) {
             options.assertCurrent?.();
@@ -328,7 +353,7 @@ export function createUpdateDoctorDatabaseWriteCapture(
         const generations = observation.committed;
         historicalScans.admit(generations);
         const incoming = physical ? observation.physical : { ...expectedGenerations };
-        acceptEmptyReaderTransitions(observation);
+        acceptNoWriteTransitions(observation);
         const matches = isDeepStrictEqual(generations, expectedGenerations);
         fromGenerations ??= matches ? incoming : generations;
         // A changed rollback baseline stays ineligible after forward admission.
@@ -347,6 +372,7 @@ export function createUpdateDoctorDatabaseWriteCapture(
               : "Databases changed after the updater captured them; continuing Doctor with current state, but automatic database restoration is unavailable for this update.",
           );
         }
+        bindRebuiltIndexes(observation);
       }
     },
     async settle() {
@@ -367,7 +393,7 @@ export function createUpdateDoctorDatabaseWriteCapture(
             expectedGenerations[pathname] = generation;
           }
         }
-        acceptEmptyReaderTransitions(observation!);
+        acceptNoWriteTransitions(observation!);
         unchanged &&= isDeepStrictEqual(generations, expectedGenerations);
         receipt = {
           unchanged,
@@ -384,6 +410,10 @@ const doctorConfigWrites = new AsyncLocalStorage<{
   capture: DoctorConfigCapture;
   authority?: UpdateDoctorWriteAuthority;
 }>();
+
+export function getUpdateDoctorConfigCapture(): DoctorConfigCapture | undefined {
+  return doctorConfigWrites.getStore()?.capture;
+}
 
 /** Deferral requires an owned result channel, not just an inherited marker. */
 export function recordUpdateDoctorDeferredInspectionChecks(

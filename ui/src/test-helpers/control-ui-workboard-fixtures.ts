@@ -1,6 +1,6 @@
 import type { CronJob } from "../api/types.ts";
 import { createBoardWidget } from "../lib/board/widget.test-support.ts";
-import { createControlUiMockSessionRow as sessionRow } from "./control-ui-session-fixtures.ts";
+import { createControlUiMockSessionRow as sessionRow } from "./control-ui-mock-session-row.ts";
 import { buildWorkboardCardSessionHistories } from "./control-ui-workboard-history-fixture.ts";
 import {
   buildWorkboardOverviewFixture,

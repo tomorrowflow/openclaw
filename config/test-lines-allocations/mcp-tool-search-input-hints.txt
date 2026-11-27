@@ -1,3 +1,0 @@
-# MCP Tool Search input hints: real and hostile remote schemas, batch budget,
-# ranking/validation boundaries and Code Mode precompaction filtering.
-138

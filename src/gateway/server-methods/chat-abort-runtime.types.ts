@@ -25,11 +25,14 @@ export type ChatSessionAbortParams = {
   defaultAgentId?: string;
   abortOrigin: ChatAbortOrigin;
   stopReason?: string;
+  userInitiated?: boolean;
   stopSource: SessionStopSource;
   hookContext?: SessionStopHookContext;
   controllerTargets?: readonly SessionTarget[];
   requester: ChatAbortRequester;
   assertCurrent?: () => void;
+  /** Explicit user Stop: announce the stopped runs through `notifySessionRunStopped`. */
+  announceRunStopped?: true;
   preserveSideRuns?: boolean;
   cascadeDescendants?: true;
   /** Current session lifecycle owner; reporting only, never descendant selection. */

@@ -1,2 +1,0 @@
-172
-# Native snapshot coherence, bounded no-rescan preflight, no writer reservation, and retained prompt/output contract (#190182).

@@ -1,2 +1,0 @@
-# Optional indexes avoid unrelated scans and preserve historical catalogs.
-142

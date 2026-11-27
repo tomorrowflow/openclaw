@@ -1,5 +1,4 @@
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
-import { INTERNAL_WAKE_TRANSCRIPT_PROMPTS } from "../auto-reply/heartbeat.js";
 import {
   isSessionTranscriptProjectionUnavailableError,
   patchSessionEntryCore,
@@ -16,8 +15,10 @@ import {
   listExistingAgentDatabaseTargets,
   type ExistingAgentDatabaseTarget,
 } from "../infra/session-sqlite-migration-readers.js";
+import { prepareArtifactPreservingSqliteRead } from "../infra/sqlite-snapshot-source.js";
 import { isIncognitoSessionKey, isSubagentSessionKey } from "../routing/session-key.js";
 import { hasInterSessionUserProvenance } from "../sessions/input-provenance.js";
+import { getActiveOpenClawStateDatabaseReadSnapshotAsync } from "../state/openclaw-state-db-readonly.js";
 import { runDoctorAgentDatabaseOperation } from "./doctor-agent-database-operation.js";
 import type { DoctorSqliteMaintenanceAuthority } from "./doctor-sqlite-maintenance-lock.js";
 
@@ -61,7 +62,7 @@ function readLegacySessionTitle(
   }
 }
 
-/** Repair historical titles while Doctor owns session maintenance. */
+/** Derive missing historical titles while Doctor owns session maintenance. */
 export async function repairLegacySessionTitles(params: {
   cfg: OpenClawConfig;
   env: NodeJS.ProcessEnv;
@@ -86,35 +87,31 @@ export async function repairLegacySessionTitles(params: {
     scannedStores: 0,
     warnings,
   };
+  await getActiveOpenClawStateDatabaseReadSnapshotAsync({ env: params.env });
   for (const target of params.targets ?? listExistingAgentDatabaseTargets(params.cfg, params.env)) {
     if (params.apply) {
       assertRepairAuthority();
     }
     report.scannedStores++;
+    await prepareArtifactPreservingSqliteRead(target.sqlitePath);
     const scope = { agentId: target.agentId, storePath: target.storePath, env: params.env };
     const scan = runDoctorAgentDatabaseOperation({
       agentId: target.agentId,
       path: target.sqlitePath,
       run: () => {
-        const sessions: Array<{ sessionKey: string; sessionId: string; clearWakeTitle: boolean }> =
-          [];
+        const sessions: Array<{ sessionKey: string; sessionId: string }> = [];
         scanDoctorSessionEntriesTolerant(
           scope,
           ({ entry, sessionKey, recoveredFromProjections }) => {
-            // Older Doctor versions persisted these transcript markers as display names.
-            // Human labels and other naming fields still win; do not guess at similar text.
-            const clearWakeTitle = Object.values(INTERNAL_WAKE_TRANSCRIPT_PROMPTS).some(
-              (prompt) => entry.displayName === prompt,
-            );
             if (
               !recoveredFromProjections &&
               !entry.incognito &&
               !isIncognitoSessionKey(sessionKey) &&
               // Spawn owns child labels; its first user message is a runtime task envelope.
               !isSubagentSessionKey(sessionKey) &&
-              !hasExplicitSessionName(clearWakeTitle ? { ...entry, displayName: undefined } : entry)
+              !hasExplicitSessionName(entry)
             ) {
-              sessions.push({ sessionKey, sessionId: entry.sessionId, clearWakeTitle });
+              sessions.push({ sessionKey, sessionId: entry.sessionId });
             }
           },
         );
@@ -124,14 +121,14 @@ export async function repairLegacySessionTitles(params: {
     if (!scan.ok) {
       continue;
     }
-    for (const { sessionKey, sessionId, clearWakeTitle } of scan.value) {
+    for (const { sessionKey, sessionId } of scan.value) {
       if (params.apply) {
         assertRepairAuthority();
       }
       try {
         const session = { ...scope, sessionKey, sessionId };
         const title = readLegacySessionTitle(session);
-        if (!title && !clearWakeTitle) {
+        if (!title) {
           continue;
         }
         report.found++;

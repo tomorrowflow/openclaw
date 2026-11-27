@@ -126,6 +126,9 @@ function normalizeOrchestration(
   const autoDecomposePerDispatch =
     resolveOptionalIntegerOption(record.autoDecomposePerDispatch, { min: 1, max: 20 }) ??
     fallback?.autoDecomposePerDispatch;
+  const maxActivePerOwner =
+    resolveOptionalIntegerOption(record.maxActivePerOwner, { min: 1, max: 20 }) ??
+    fallback?.maxActivePerOwner;
   const defaultAssignee = normalizeBoundedString(
     record.defaultAssignee,
     fallback?.defaultAssignee,
@@ -177,6 +180,7 @@ function normalizeOrchestration(
   const next: WorkboardOrchestrationSettings = {
     ...(autoDecompose !== undefined ? { autoDecompose } : {}),
     ...(autoDecomposePerDispatch ? { autoDecomposePerDispatch } : {}),
+    ...(maxActivePerOwner ? { maxActivePerOwner } : {}),
     ...(defaultAssignee ? { defaultAssignee } : {}),
     ...(orchestratorProfile ? { orchestratorProfile } : {}),
     ...(key ? { key } : {}),

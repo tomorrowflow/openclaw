@@ -21,7 +21,11 @@ import type { ChatState } from "./chat-state-contract.ts";
 import { ChatAttachmentReadLifecycle } from "./components/chat-attachment-reads.ts";
 import { getChatSessionProjection, publishChatSessionProjection } from "./history-merge.ts";
 import { handleChatDraftChange } from "./input-history.ts";
-import { reconcileChatRunFromSessionRow, reconcileChatRunLifecycle } from "./run-lifecycle.ts";
+import {
+  dismissChatRunError,
+  reconcileChatRunFromSessionRow,
+  reconcileChatRunLifecycle,
+} from "./run-lifecycle.ts";
 import {
   cacheChatSessionSnapshot,
   readChatMessagesFromCache,
@@ -309,195 +313,6 @@ it.each([
   },
 );
 
-it("clears live projection ownership after history access is denied", async () => {
-  const state = createState({ messages: [] });
-  const scopeError = missingScopeErrorShape({
-    missingScope: "operator.read",
-    requiredScopes: ["operator.read"],
-  });
-  vi.spyOn(state.client!, "request")
-    .mockRejectedValueOnce(new GatewayRequestError(scopeError))
-    .mockResolvedValueOnce({ messages: [] });
-  publishLive(state, message("user", "private prompt", { id: "private", seq: 1 }));
-  await loadChatHistory(state);
-  expect(state.chatMessages).toEqual([]);
-  await loadChatHistory(state);
-  expect(state.chatMessages).toEqual([]);
-});
-
-it("materializes live commentary when history replaces active tool activity", async () => {
-  const result = { role: "toolResult", toolCallId: "call-1", content: "tool output", timestamp: 3 };
-  const state = createState({
-    ...activeHistory("run-live"),
-    messages: [{ role: "user", content: "do it", timestamp: 1 }, result],
-  });
-  state.chatRunId = "run-live";
-  state.settings = { ...state.settings, chatPersistCommentary: false };
-  state.chatStreamSegments = [{ text: "Checking the workspace", ts: 2, itemId: "preamble-live" }];
-  state.toolStreamOrder = ["call-1"];
-  state.toolStreamById.set("call-1", {
-    toolCallId: "call-1",
-    runId: "run-live",
-    name: "read",
-    startedAt: 2,
-    receivedAt: 2,
-    message: result,
-  });
-  state.chatToolMessages = [result];
-  await loadChatHistory(state);
-  expect(state.chatMessages).toContainEqual(
-    expect.objectContaining({
-      openclawStreamFallback: expect.objectContaining({ itemId: "preamble-live" }),
-    }),
-  );
-  expect(state.chatStreamSegments).toEqual([]);
-});
-
-describe("chat history run errors", () => {
-  const row = (overrides: Partial<GatewaySessionRow> = {}): GatewaySessionRow => ({
-    key: "main",
-    kind: "direct",
-    updatedAt: 2,
-    status: "failed",
-    hasActiveRun: false,
-    lastRunId: "run",
-    lastRunError: "Workspace preparation failed",
-    ...overrides,
-  });
-  const notice = (content: string, details = {}, customType = "run-failed-before-reply") => ({
-    role: "custom",
-    customType,
-    content,
-    details,
-    __openclaw: { id: "failure", seq: 1, runId: "run" },
-  });
-  function host(
-    history: ChatHistoryResult | (() => ChatHistoryResult | Promise<ChatHistoryResult>),
-  ) {
-    const state = makeChatHost({
-      sessionKey: "main",
-      requestHandlers: { "chat.history": history },
-    });
-    onTestFinished(() => reconcileChatRunLifecycle(state, { clearRunStatus: true }));
-    return state;
-  }
-  function emit(
-    state: ReturnType<typeof host>,
-    runId: string,
-    event: Omit<ChatEventPayload, "sessionKey" | "runId">,
-  ) {
-    handleChatGatewayEvent(state, { sessionKey: "main", runId, ...event });
-  }
-
-  it.each([
-    { snapshotStatus: "failed", newerState: "failed", requestOrder: "before" },
-    { snapshotStatus: "done", newerState: "completed", requestOrder: "after" },
-  ] as const)(
-    "keeps newer $newerState over $snapshotStatus history requested $requestOrder it",
-    async ({ snapshotStatus, newerState, requestOrder }) => {
-      const response = createDeferred<ChatHistoryResult>();
-      const state = host(() => response.promise);
-      emit(
-        state,
-        "2",
-        snapshotStatus === "done"
-          ? { state: "final", message: { role: "assistant", content: "Old reply" } }
-          : { state: "error", errorMessage: "Old failure" },
-      );
-      let loading = requestOrder === "before" ? loadChatHistory(state) : undefined;
-      emit(state, "1", { state: "delta", deltaText: "New reply" });
-      emit(
-        state,
-        "1",
-        newerState === "completed"
-          ? { state: "final", message: { role: "assistant", content: "New reply" } }
-          : { state: "error", errorMessage: "Current full diagnostic" },
-      );
-      const currentError = state.chatRunError;
-      loading ??= loadChatHistory(state);
-      response.resolve({
-        messages: [],
-        sessionInfo: row({
-          status: snapshotStatus,
-          lastRunId: "2",
-          lastRunError: snapshotStatus === "failed" ? "Old failure" : undefined,
-        }),
-      });
-      await loading;
-      expect(state.chatRunError).toEqual(currentError);
-      expect(state.chatRunId).toBeNull();
-    },
-  );
-
-  it("recovers a missed timeout after session publication settles the active run", async () => {
-    const sessionInfo = row({ status: "timeout" });
-    const state = host({ messages: [], sessionInfo });
-    emit(state, "run", { state: "delta", deltaText: "Working" });
-    reconcileChatRunFromSessionRow(state, sessionInfo, { publishRunStatus: false });
-    expect(state.chatRunId).toBeNull();
-    expect(state.chatRunError).toMatchObject({ runId: "run", summary: sessionInfo.lastRunError });
-    await loadChatHistory(state);
-    expect(state.chatRunError?.summary).toContain(sessionInfo.lastRunError);
-    expect(getChatSessionProjection(state).runs.run).toMatchObject({
-      status: "timeout",
-      errorMessage: sessionInfo.lastRunError,
-    });
-  });
-
-  it("preserves a same-run late diagnostic received during successful history", async () => {
-    const response = createDeferred<ChatHistoryResult>();
-    const state = host(() => response.promise);
-    emit(state, "run", { state: "delta" });
-    emit(state, "run", {
-      state: "final",
-      message: { role: "assistant", content: "Delivered answer" },
-    });
-    const loading = loadChatHistory(state);
-    emit(state, "run", { state: "error", errorMessage: "Full late diagnostic after delivery" });
-    const diagnostic = state.chatRunError;
-    expect(diagnostic?.summary).toContain("Full late diagnostic after delivery");
-    response.resolve({
-      messages: [],
-      sessionInfo: row({ status: "done", lastRunError: undefined }),
-    });
-    await loading;
-    expect(state.chatRunError).toEqual(diagnostic);
-    expect(state.chatRunId).toBeNull();
-  });
-
-  it("retains a newer-run diagnostic when a completed run delivers another final", () => {
-    const state = host({ messages: [] });
-    emit(state, "run", { state: "delta" });
-    emit(state, "run", { state: "final", message: { role: "assistant", content: "First answer" } });
-    emit(state, "newer-run", {
-      state: "error",
-      errorMessage: "Diagnostic that must remain visible",
-    });
-    const diagnostic = state.chatRunError;
-    expect(diagnostic?.summary).toContain("Diagnostic that must remain visible");
-    emit(state, "run", { state: "final", message: { role: "assistant", content: "Late answer" } });
-    expect(state.chatMessages).toContainEqual(expect.objectContaining({ content: "Late answer" }));
-    expect(state.chatRunId).toBeNull();
-    expect(state.chatRunError).toEqual(diagnostic);
-  });
-
-  it("restores contention diagnostics separately from transcript text", async () => {
-    const summary = "The turn was interrupted while the server was busy.";
-    const diagnostic = "State lifecycle acquisition remained busy.";
-    const state = host({
-      messages: [notice(summary, { errorKind: "state_contention", diagnostic })],
-      sessionInfo: row({ lastRunError: summary }),
-    });
-    await loadChatHistory(state);
-    expect(state.chatRunError).toMatchObject({
-      kind: "state_contention",
-      runId: "run",
-      summary: `${summary}\n\n${diagnostic}`,
-    });
-    expect(state.chatMessages).toContainEqual(expect.objectContaining({ content: summary }));
-  });
-});
-
 it("keeps an overlapping loaded history window when compaction advances its leaf", async () => {
   const prompt = message("user", "Keep the verified discussion visible.", {
     id: "prompt",
@@ -744,3 +559,359 @@ it.each(["unrelated tip", "sequence-only overlap", "window reset"])(
     expect(state.chatHistoryPagination).toMatchObject({ olderCursor: "older:next" });
   },
 );
+
+describe("full tail after a long live turn", () => {
+  const prompt = message("user", "opening prompt", { id: "prompt", seq: 1 });
+  const call = (seq: number) => message("assistant", `call ${seq}`, { id: `call-${seq}`, seq });
+  const result = (seq: number) => ({
+    role: "toolResult",
+    content: [{ type: "text", text: `result ${seq}` }],
+    __openclaw: { id: `result-${seq}`, seq },
+  });
+  const transcript = [prompt, call(2), result(3), call(4), result(5), call(6), call(7)];
+  const sessionInfo = { key: "main", kind: "direct" as const, updatedAt: 1, sessionId: "session" };
+  const tailFrom = (start: number, totalMessages = transcript.length) => ({
+    messages: transcript.slice(start),
+    hasMore: true,
+    olderCursor: "older:tail",
+    nextOffset: transcript.length - start,
+    totalMessages,
+    sessionInfo: { ...sessionInfo, hasActiveRun: false, status: "killed" as const },
+  });
+
+  async function loadAfterLiveTurn(
+    tail: ChatHistoryResult,
+    older: () => Promise<ChatHistoryResult>,
+    {
+      cursorReset = true,
+      initialEnd = 1,
+      previousLeaf,
+      supersedeFallback = false,
+    }: {
+      cursorReset?: boolean;
+      initialEnd?: number;
+      previousLeaf?: string;
+      supersedeFallback?: boolean;
+    } = {},
+  ) {
+    const state = createState(tail);
+    state.currentSessionId = "session";
+    state.chatDisplayedLeafEntryId = undefined;
+    const pages: ChatHistoryResult[] = [
+      {
+        messages: transcript.slice(0, initialEnd),
+        totalMessages: initialEnd,
+        deltaCursor: "before-stop",
+        sessionInfo: { ...sessionInfo, hasActiveRun: true, activeLeafEntryId: previousLeaf },
+      },
+      tail,
+      ...(supersedeFallback ? [tail] : []),
+    ];
+    const fallbackStarted = createDeferred();
+    const fallbackResponse = createDeferred<ChatHistoryResult>();
+    let deferFallback = supersedeFallback;
+    const request = vi
+      .spyOn(state.client!, "request")
+      .mockImplementation(async (_method, params) => {
+        const cursor = (params as { cursor?: string }).cursor;
+        if (cursor === "older:tail") {
+          return older();
+        }
+        // Stop persists an aborted reply, so the delta cursor resets to a bounded tail.
+        if (cursor === "before-stop" && cursorReset) {
+          return { kind: "reset" };
+        }
+        const page = pages.shift();
+        if (deferFallback && page === tail) {
+          deferFallback = false;
+          fallbackStarted.resolve();
+          return fallbackResponse.promise;
+        }
+        return page;
+      });
+    await loadChatHistory(state);
+    // Live rows carry assistant turns only; tool results arrive as activity.
+    const scope = {
+      sessionKey: state.sessionKey,
+      sessionId: "session",
+      activeLeafEntryId: previousLeaf ?? null,
+    };
+    for (const row of [call(2), call(4), call(6)]) {
+      publishLive(state, row, scope);
+    }
+    const loading = loadChatHistory(state);
+    if (supersedeFallback) {
+      await fallbackStarted.promise;
+      const refreshed = loadChatHistory(state, { supersedeInFlight: true });
+      fallbackResponse.resolve(tail);
+      await refreshed;
+    }
+    await loading;
+    return { state, request };
+  }
+
+  it.each([
+    ["after a row the pane never held", 2],
+    ["at a row the pane held live", 3],
+  ])("reads the gap when the tail starts %s", async (_case, start) => {
+    const { state, request } = await loadAfterLiveTurn(tailFrom(start), async () => ({
+      messages: transcript.slice(0, start),
+      totalMessages: transcript.length,
+      sessionInfo,
+    }));
+    expect(request).toHaveBeenCalledWith(
+      "chat.history",
+      expect.objectContaining({ cursor: "before-stop" }),
+      expect.anything(),
+    );
+    expect(request).toHaveBeenCalledWith(
+      "chat.history",
+      expect.objectContaining({ cursor: "older:tail" }),
+      expect.anything(),
+    );
+    expect(state.chatMessages).toEqual(transcript);
+    expect(state.chatHistoryPagination).toEqual({ hasMore: false, totalMessages: 7 });
+  });
+
+  it("restores the held prefix when Stop advances the leaf within the prior read", async () => {
+    const tail = tailFrom(2);
+    const older = vi.fn(async () => ({ messages: transcript.slice(0, 2), sessionInfo }));
+    const { state } = await loadAfterLiveTurn(
+      { ...tail, sessionInfo: { ...tail.sessionInfo, activeLeafEntryId: "stopped-leaf" } },
+      older,
+      { initialEnd: 4, previousLeaf: "running-leaf" },
+    );
+    expect(state.chatMessages).toEqual(transcript);
+    expect(older).toHaveBeenCalledOnce();
+    expect(state.chatHistoryPagination).toEqual({ hasMore: false, totalMessages: 7 });
+  });
+
+  it("restores the held prefix when a refresh supersedes the Stop fallback", async () => {
+    const tail = tailFrom(2);
+    const older = vi.fn(async () => ({ messages: transcript.slice(0, 2), sessionInfo }));
+    const { state } = await loadAfterLiveTurn(
+      { ...tail, sessionInfo: { ...tail.sessionInfo, activeLeafEntryId: "stopped-leaf" } },
+      older,
+      { initialEnd: 4, previousLeaf: "running-leaf", supersedeFallback: true },
+    );
+    expect(state.chatMessages).toEqual(transcript);
+    expect(older).toHaveBeenCalledOnce();
+    expect(state.chatHistoryPagination).toEqual({ hasMore: false, totalMessages: 7 });
+  });
+
+  it("keeps the retryable boundary when the gap read fails", async () => {
+    const { state } = await loadAfterLiveTurn(tailFrom(2), async () => {
+      throw new Error("offline");
+    });
+    expect(state.chatMessages).not.toContainEqual(prompt);
+    expect(state.chatHistoryPagination).toEqual({
+      hasMore: true,
+      olderCursor: "older:tail",
+      nextOffset: 5,
+      totalMessages: 7,
+    });
+    expect(state.lastError).toBeNull();
+  });
+
+  it.each([
+    ["the full read did not follow a cursor reset", tailFrom(2), { cursorReset: false }],
+    ["the gap exceeds one older page", tailFrom(2, 2000), {}],
+  ])("keeps the lazy boundary when %s", async (_case, tail, options) => {
+    const older = vi.fn(async () => ({ messages: transcript.slice(0, 2), sessionInfo }));
+    const { state } = await loadAfterLiveTurn(tail, older, options);
+    expect(older).not.toHaveBeenCalled();
+    expect(state.chatHistoryPagination).toMatchObject({ hasMore: true, olderCursor: "older:tail" });
+  });
+});
+
+it("clears live projection ownership after history access is denied", async () => {
+  const state = createState({ messages: [] });
+  const scopeError = missingScopeErrorShape({
+    missingScope: "operator.read",
+    requiredScopes: ["operator.read"],
+  });
+  vi.spyOn(state.client!, "request")
+    .mockRejectedValueOnce(new GatewayRequestError(scopeError))
+    .mockResolvedValueOnce({ messages: [] });
+  publishLive(state, message("user", "private prompt", { id: "private", seq: 1 }));
+  await loadChatHistory(state);
+  expect(state.chatMessages).toEqual([]);
+  await loadChatHistory(state);
+  expect(state.chatMessages).toEqual([]);
+});
+
+it("materializes live commentary when history replaces active tool activity", async () => {
+  const result = { role: "toolResult", toolCallId: "call-1", content: "tool output", timestamp: 3 };
+  const state = createState({
+    ...activeHistory("run-live"),
+    messages: [{ role: "user", content: "do it", timestamp: 1 }, result],
+  });
+  state.chatRunId = "run-live";
+  state.settings = { ...state.settings, chatPersistCommentary: false };
+  state.chatStreamSegments = [{ text: "Checking the workspace", ts: 2, itemId: "preamble-live" }];
+  state.toolStreamOrder = ["call-1"];
+  state.toolStreamById.set("call-1", {
+    toolCallId: "call-1",
+    runId: "run-live",
+    name: "read",
+    startedAt: 2,
+    receivedAt: 2,
+    message: result,
+  });
+  state.chatToolMessages = [result];
+  await loadChatHistory(state);
+  expect(state.chatMessages).toContainEqual(
+    expect.objectContaining({
+      openclawStreamFallback: expect.objectContaining({ itemId: "preamble-live" }),
+    }),
+  );
+  expect(state.chatStreamSegments).toEqual([]);
+});
+
+describe("chat history run errors", () => {
+  const row = (overrides: Partial<GatewaySessionRow> = {}): GatewaySessionRow => ({
+    key: "main",
+    kind: "direct",
+    updatedAt: 2,
+    status: "failed",
+    hasActiveRun: false,
+    lastRunId: "run",
+    lastRunError: "Workspace preparation failed",
+    ...overrides,
+  });
+  const notice = (content: string, details = {}, customType = "run-failed-before-reply") => ({
+    role: "custom",
+    customType,
+    content,
+    details,
+    __openclaw: { id: "failure", seq: 1, runId: "run" },
+  });
+  function host(
+    history: ChatHistoryResult | (() => ChatHistoryResult | Promise<ChatHistoryResult>),
+  ) {
+    const state = makeChatHost({
+      sessionKey: "main",
+      requestHandlers: { "chat.history": history },
+    });
+    onTestFinished(() => reconcileChatRunLifecycle(state, { clearRunStatus: true }));
+    return state;
+  }
+  function emit(
+    state: ReturnType<typeof host>,
+    runId: string,
+    event: Omit<ChatEventPayload, "sessionKey" | "runId">,
+  ) {
+    handleChatGatewayEvent(state, { sessionKey: "main", runId, ...event });
+  }
+
+  it.each([
+    { snapshotStatus: "failed", newerState: "failed", requestOrder: "before" },
+    { snapshotStatus: "done", newerState: "completed", requestOrder: "after" },
+  ] as const)(
+    "keeps newer $newerState over $snapshotStatus history requested $requestOrder it",
+    async ({ snapshotStatus, newerState, requestOrder }) => {
+      const response = createDeferred<ChatHistoryResult>();
+      const state = host(() => response.promise);
+      emit(
+        state,
+        "2",
+        snapshotStatus === "done"
+          ? { state: "final", message: { role: "assistant", content: "Old reply" } }
+          : { state: "error", errorMessage: "Old failure" },
+      );
+      let loading = requestOrder === "before" ? loadChatHistory(state) : undefined;
+      emit(state, "1", { state: "delta", deltaText: "New reply" });
+      emit(
+        state,
+        "1",
+        newerState === "completed"
+          ? { state: "final", message: { role: "assistant", content: "New reply" } }
+          : { state: "error", errorMessage: "Current full diagnostic" },
+      );
+      const currentError = state.chatRunError;
+      loading ??= loadChatHistory(state);
+      response.resolve({
+        messages: [],
+        sessionInfo: row({
+          status: snapshotStatus,
+          lastRunId: "2",
+          lastRunError: snapshotStatus === "failed" ? "Old failure" : undefined,
+        }),
+      });
+      await loading;
+      expect(state.chatRunError).toEqual(currentError);
+      expect(state.chatRunId).toBeNull();
+    },
+  );
+
+  it("recovers a missed timeout after session publication settles the active run", async () => {
+    const sessionInfo = row({ status: "timeout" });
+    const state = host({ messages: [], sessionInfo });
+    emit(state, "run", { state: "delta", deltaText: "Working" });
+    reconcileChatRunFromSessionRow(state, sessionInfo, { publishRunStatus: false });
+    expect(state.chatRunId).toBeNull();
+    expect(state.chatRunError).toMatchObject({ runId: "run", summary: sessionInfo.lastRunError });
+    await loadChatHistory(state);
+    expect(state.chatRunError?.summary).toContain(sessionInfo.lastRunError);
+    dismissChatRunError(state);
+    await loadChatHistory(state);
+    expect(state.chatRunError).toBeNull();
+    expect(getChatSessionProjection(state).runs.run).toMatchObject({
+      status: "timeout",
+      errorMessage: sessionInfo.lastRunError,
+    });
+  });
+
+  it("preserves a same-run late diagnostic received during successful history", async () => {
+    const response = createDeferred<ChatHistoryResult>();
+    const state = host(() => response.promise);
+    emit(state, "run", { state: "delta" });
+    emit(state, "run", {
+      state: "final",
+      message: { role: "assistant", content: "Delivered answer" },
+    });
+    const loading = loadChatHistory(state);
+    emit(state, "run", { state: "error", errorMessage: "Full late diagnostic after delivery" });
+    const diagnostic = state.chatRunError;
+    expect(diagnostic?.summary).toContain("Full late diagnostic after delivery");
+    response.resolve({
+      messages: [],
+      sessionInfo: row({ status: "done", lastRunError: undefined }),
+    });
+    await loading;
+    expect(state.chatRunError).toEqual(diagnostic);
+    expect(state.chatRunId).toBeNull();
+  });
+
+  it("retains a newer-run diagnostic when a completed run delivers another final", () => {
+    const state = host({ messages: [] });
+    emit(state, "run", { state: "delta" });
+    emit(state, "run", { state: "final", message: { role: "assistant", content: "First answer" } });
+    emit(state, "newer-run", {
+      state: "error",
+      errorMessage: "Diagnostic that must remain visible",
+    });
+    const diagnostic = state.chatRunError;
+    expect(diagnostic?.summary).toContain("Diagnostic that must remain visible");
+    emit(state, "run", { state: "final", message: { role: "assistant", content: "Late answer" } });
+    expect(state.chatMessages).toContainEqual(expect.objectContaining({ content: "Late answer" }));
+    expect(state.chatRunId).toBeNull();
+    expect(state.chatRunError).toEqual(diagnostic);
+  });
+
+  it("restores contention diagnostics separately from transcript text", async () => {
+    const summary = "The turn was interrupted while the server was busy.";
+    const diagnostic = "State lifecycle acquisition remained busy.";
+    const state = host({
+      messages: [notice(summary, { errorKind: "state_contention", diagnostic })],
+      sessionInfo: row({ lastRunError: summary }),
+    });
+    await loadChatHistory(state);
+    expect(state.chatRunError).toMatchObject({
+      kind: "state_contention",
+      runId: "run",
+      summary: `${summary}\n\n${diagnostic}`,
+    });
+    expect(state.chatMessages).toContainEqual(expect.objectContaining({ content: summary }));
+  });
+});

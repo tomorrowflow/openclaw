@@ -8,6 +8,7 @@ import { logWarn } from "../logger.js";
 import type { BundleMcpServerConfig } from "../plugins/bundle-mcp.types.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
+import type { McpToolCatalog } from "./agent-bundle-mcp-catalog.types.js";
 import { createCombinedSessionMcpRuntime } from "./agent-bundle-mcp-combined.js";
 import { createSessionMcpRuntimeManagerInstall } from "./agent-bundle-mcp-manager-install.js";
 import {
@@ -23,7 +24,6 @@ import {
   type CreateSessionMcpRuntime,
 } from "./agent-bundle-mcp-runtime-shared.js";
 import type {
-  McpToolCatalog,
   SessionMcpRuntime,
   SessionMcpRuntimeLease,
   SessionMcpRuntimeManager,
@@ -199,13 +199,15 @@ export function createSessionMcpRuntimeManager(opts: SessionMcpRuntimeManagerOpt
       params.agentId ?? parseAgentSessionKey(params.sessionKey ?? "")?.agentId,
       params.workspaceDir,
       params.agentDir,
-      loadSessionMcpConfig({
-        ...params,
-        loaded: fullConfig.loaded,
-        logDiagnostics: false,
-        redactConnectionServerNames: new Set(partition.requesterScopedServerNames),
-        safeServerNamesByServer,
-      }).fingerprint,
+      partition.requesterScopedServerNames.length === 0
+        ? fullConfig.fingerprint
+        : loadSessionMcpConfig({
+            ...params,
+            loaded: fullConfig.loaded,
+            logDiagnostics: false,
+            redactConnectionServerNames: new Set(partition.requesterScopedServerNames),
+            safeServerNamesByServer,
+          }).fingerprint,
     ]);
     // Static admissions can be projections; requester discovery owns this binding.
     if (scope === "requester" || (requester && partition.requesterScopedServerNames.length > 0)) {
@@ -338,16 +340,23 @@ export function createSessionMcpRuntimeManager(opts: SessionMcpRuntimeManagerOpt
       try {
         let staticLease: SessionMcpRuntimeLease;
         try {
+          const runtimeParams = {
+            ...params,
+            runtimeKey: params.sessionId,
+            configReloadAtAdmission,
+            excludeServerNames: new Set(requesterScopedServerNames),
+            safeServerNamesByServer,
+          };
           staticLease = leaseRuntime(
             await install.getOrCreateRuntimeEntry(
-              {
-                ...params,
-                runtimeKey: params.sessionId,
-                configReloadAtAdmission,
-                excludeServerNames: new Set(requesterScopedServerNames),
-                safeServerNamesByServer,
-              },
-              fullConfig.loaded,
+              runtimeParams,
+              requesterScopedServerNames.length === 0
+                ? fullConfig
+                : loadSessionMcpConfig({
+                    ...runtimeParams,
+                    loaded: fullConfig.loaded,
+                    logDiagnostics: false,
+                  }),
             ),
             params.sessionId,
           );

@@ -61,7 +61,7 @@ export function createSqliteWorkerBackend(
                 id,
                 replacement,
                 updatedAt,
-                { kind: "owner", ownerId: "slot-owner" },
+                { kind: "owner", ownerId: "slot-owner", limit: 1 },
                 3000,
               );
             });

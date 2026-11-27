@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -70,6 +70,19 @@ function shallowRelease(tag = "v2026.10.2") {
   return { root, origin, commit };
 }
 
+it("fetches a missing release tag without re-shallowing a linked checkout", () => {
+  const { root, origin, commit } = shallowRelease();
+  git(root, "fetch", "--unshallow", "--no-tags", "origin");
+  const linked = path.join(temps.make("desktop-linked-"), "checkout");
+  git(root, "worktree", "add", "--detach", linked);
+  vi.stubEnv("RELEASE_TAG", "v2026.10.2");
+  expect(desktopRuntimeReleaseTag(linked, "2026.10.2", commit)).toBe("v2026.10.2");
+  expect(git(root, "rev-parse", "--is-shallow-repository")).toBe("false");
+  expect(git(linked, "rev-list", "--count", "HEAD")).toBe(
+    git(origin, "rev-list", "--count", "HEAD"),
+  );
+});
+
 it.each([
   ["v2026.10.2", true, false],
   ["v2026.10.2", false, false],
@@ -133,6 +146,16 @@ it.each(["2026.10.2-beta.1", "2026.10.2-alpha.1", "2026.10.33"])(
     expect(desktopRuntimeReleaseTag(root, version, commit)).toBe(`v${version}`);
   },
 );
+
+it("plans when the script is run through a symlinked checkout path", () => {
+  const { root } = fixture();
+  const linked = path.join(temps.make("desktop-runtime-plugins-link-"), "lib");
+  symlinkSync(path.dirname(runtimeScript), linked);
+  const script = path.join(linked, path.basename(runtimeScript));
+  expect(JSON.parse(run(process.execPath, [script, "plan", root]))).toEqual(
+    planDesktopRuntimePlugins(root),
+  );
+});
 
 it("stamps official plugins only in the installed build", () => {
   const { root, commit } = fixture();

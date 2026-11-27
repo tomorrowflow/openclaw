@@ -361,7 +361,7 @@ export function registerWorkboardGatewayMethods(params: {
     if (CLI_OWNER_METHODS.has(method)) {
       api.registerGatewayMethod(
         `${method}.owner`,
-        (request) => {
+        async (request) => {
           if (
             typeof request.params?.expectedOwnerId !== "string" ||
             !request.params.expectedOwnerId.trim()
@@ -373,7 +373,7 @@ export function registerWorkboardGatewayMethods(params: {
             });
             return;
           }
-          return requestHandler(request);
+          await requestHandler(request);
         },
         { scope },
       );

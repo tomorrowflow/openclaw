@@ -65,33 +65,3 @@ export function emitTelegramMessageSentHooks(params: EmitMessageSentHookParams):
     );
   }
 }
-
-/** Keep plugin hook routing aligned with the actual Telegram delivery session. */
-export async function runTelegramMessageSendingHook(
-  hookRunner: ReturnType<typeof getGlobalHookRunner>,
-  params: {
-    chatId: string;
-    accountId?: string;
-    sessionKey?: string;
-    content: string;
-    replyToId?: number;
-    threadId?: number;
-    mediaUrls: string[];
-  },
-) {
-  return hookRunner?.runMessageSending(
-    {
-      to: params.chatId,
-      content: params.content,
-      replyToId: params.replyToId,
-      threadId: params.threadId,
-      metadata: { channel: "telegram", mediaUrls: params.mediaUrls, threadId: params.threadId },
-    },
-    {
-      channelId: "telegram",
-      accountId: params.accountId,
-      conversationId: params.chatId,
-      ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
-    },
-  );
-}

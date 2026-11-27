@@ -1,5 +1,6 @@
 import type {
   WorkboardAutomation,
+  WorkboardBoardMetadata,
   WorkboardCard,
   WorkboardClaim,
   WorkboardClassRung,
@@ -135,9 +136,11 @@ export function workboardClassRung(
 /**
  * D41: node tickets share one dispatcher-wide pool sized by plugin config,
  * and a capped route also limits its own share of it; every other card holds
- * its owner's single slot.
+ * one of its owner's slots, `maxActivePerOwner` per board.
  */
-export type WorkboardClaimSlot = { kind: "owner"; ownerId: string } | WorkboardNodeTicketSlot;
+export type WorkboardClaimSlot =
+  | { kind: "owner"; ownerId: string; limit: number }
+  | WorkboardNodeTicketSlot;
 
 export type WorkboardNodeTicketSlot = {
   kind: "node-tickets";
@@ -280,10 +283,12 @@ export function workboardSlotPlacement(
   | { full: WorkboardSlotFull; target?: undefined }
   | { full?: undefined; target?: WorkboardRouteTarget } {
   if (slot.kind === "owner") {
+    let held = 0;
     for (const card of occupants) {
       if (
         workboardCardConsumesOwnerSlot(card, now) &&
-        workboardCardSlotOwner(card) === slot.ownerId
+        workboardCardSlotOwner(card) === slot.ownerId &&
+        ++held >= slot.limit
       ) {
         return { full: "slot_busy" };
       }
@@ -387,6 +392,12 @@ export function assertWorkboardSlotClaimed<Result>(
   if (isWorkboardSlotFull(result)) {
     throw new WorkboardSlotFullError(slot, result);
   }
+}
+
+export function workboardBoardOwnerSlotLimit(
+  board: Pick<WorkboardBoardMetadata, "orchestration"> | undefined,
+): number {
+  return board?.orchestration?.maxActivePerOwner ?? 1;
 }
 
 export function workboardCardSlotOwner(card: WorkboardOwnerSlotCard, now?: number): string {
