@@ -10,7 +10,7 @@ import { resolveSettledTurnFinalizationRequest } from "./incomplete-turn-recover
 import { resolveEmbeddedRunAttemptTerminalState } from "./terminal-outcome.js";
 
 const SETTLED_TOOL_TERMINAL_CONTINUATION_INSTRUCTION =
-  "The previous assistant turn completed its tool calls but did not produce a user-visible answer. Continue from the current transcript and produce the final user-visible answer now. Do not repeat completed tool calls or restart from scratch. Tools are unavailable in this step: it is a text-only pass, so reply with plain text and do not attempt any tool call.";
+  "Your turn ended without a final reply. If the user still needs a reply, write it now. If your completed actions already answered the request, answer exactly NO_REPLY. Continue from the current transcript. Do not repeat completed tool calls or restart from scratch. Do not call tools in this step. Summarize the recorded results in plain text.";
 
 describe("resolveSettledTurnFinalizationRequest with a content-less post-tool stop", () => {
   // Observed on a heartbeat poll: the model settles its tool batch, then ends
@@ -39,8 +39,8 @@ describe("resolveSettledTurnFinalizationRequest with a content-less post-tool st
     currentAttemptReplayMetadata: { hadPotentialSideEffects: true, replaySafe: false },
   });
   const request = (runParams: {
-    trigger: "heartbeat" | "user";
-    terminalReplyExpectation?: "required";
+    trigger: "cron" | "user";
+    terminalReplyExpectation: "optional" | "required";
   }) =>
     resolveSettledTurnFinalizationRequest({
       runParams: {
@@ -62,7 +62,10 @@ describe("resolveSettledTurnFinalizationRequest with a content-less post-tool st
     });
 
   it("keeps a heartbeat's terminal stop silent even though a tool-use message owns the batch", () => {
-    expect(request({ trigger: "heartbeat" })).toBeNull();
+    // Heartbeats run as scheduled automations; both scheduled routes hand the
+    // runner an explicit optional expectation (isolated: run-prompt-executor;
+    // session target: resolveSourceReplyExpectation via get-reply).
+    expect(request({ trigger: "cron", terminalReplyExpectation: "optional" })).toBeNull();
   });
 
   it("still continues a required user turn that produced no visible answer", () => {
