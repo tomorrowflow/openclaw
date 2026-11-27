@@ -20,8 +20,14 @@ function normalizeLaunchTimestamp(value: unknown): number | undefined {
 }
 
 export function normalizeStartRequest(value: unknown): WorkboardStartRequest | undefined {
-  const requestedAt = isRecord(value) ? normalizeLaunchTimestamp(value.requestedAt) : undefined;
-  return requestedAt === undefined ? undefined : { requestedAt };
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const requestedAt = normalizeLaunchTimestamp(value.requestedAt);
+  const usageLimitResetsAt = normalizeLaunchTimestamp(value.usageLimitResetsAt);
+  return requestedAt === undefined
+    ? undefined
+    : { requestedAt, ...(usageLimitResetsAt === undefined ? {} : { usageLimitResetsAt }) };
 }
 
 /** A probe arm's name, as `probe:<arm>` labels and the probes listing show it. */

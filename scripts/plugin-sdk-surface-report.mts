@@ -324,7 +324,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // Decisions HTTP replaces the unshipped OpenAI executor: +3 net (#195641).
       // Gateway person principal and access-refresh classifier: +2 (#196276, #176886).
       // Fork +1: observeToolCallHumanInputWaits pauses Codex per-call watchdogs during plugin approvals.
-      3889,
+      // Fork +1: provider usage-limit check with reset time (#267).
+      3890,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -382,7 +383,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +7 net: the callable subset of the same source-audited feature-cut exports.
       // Harness +2, transcript replay +1, binding inspection +1, Decisions +1 net, Gateway +2.
       // Fork +1: observeToolCallHumanInputWaits pauses Codex per-call watchdogs during plugin approvals.
-      2244,
+      // Fork +1: provider usage-limit check with reset time (#267).
+      2245,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(

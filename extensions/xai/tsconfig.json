@@ -995,6 +995,9 @@
       ],
       "openclaw/plugin-sdk/agent-control-runtime": [
         "../../packages/plugin-sdk/dist/src/plugin-sdk/agent-control-runtime.d.ts"
+      ],
+      "openclaw/plugin-sdk/provider-usage-limit": [
+        "../../packages/plugin-sdk/dist/src/plugin-sdk/provider-usage-limit.d.ts"
       ]
     }
   }

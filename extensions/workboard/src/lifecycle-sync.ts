@@ -258,6 +258,11 @@ export async function syncWorkboardAgentEnded(params: {
           card,
           messages: params.event.messages ?? [],
           success: params.event.success,
+          // Only a failed session's lifecycle write blocks the card after the
+          // report, and it skips a stalled-turn retry's new run id.
+          ...(observation?.state === "failed" && workboardCardMatchesLifecycleLink(card, source)
+            ? { error: params.event.error }
+            : {}),
         });
         const current = await params.store.get(card.id);
         if (current && current.status !== "running") {
@@ -299,7 +304,7 @@ export async function syncWorkboardAgentEnded(params: {
   }
   // After any lifecycle write, which gives a session-linked attempt its run id.
   // A failed run's error (a provider quota, an auth refusal) is the only record of
-  // why its card blocked.
+  // why its card blocked, so the store turns it into the block's comment.
   const contextTokens = turnEndContextTokens(params.event.messages ?? []);
   const error = params.event.success ? undefined : params.event.error;
   if (source.runId && (contextTokens !== undefined || error)) {

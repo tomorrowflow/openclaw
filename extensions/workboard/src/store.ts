@@ -15,6 +15,7 @@ import {
 } from "@openclaw/workboard-contract";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 import { asNonArrayRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { runFailurePatch } from "./run-failure.js";
 import { createWorkboardSqliteStores } from "./sqlite-store.js";
 import {
   buildWorkerContext,
@@ -493,6 +494,11 @@ export class WorkboardStore extends WorkboardNodeProbeStore {
         }
         return Object.keys(patch).length === 0 ? undefined : patch;
       });
+      if (result.updated && result.card.status === "blocked") {
+        await this.updateLatestCard(id, (card) => runFailurePatch(card, input.now), {
+          allowAutomationLaunch: true,
+        });
+      }
       return result.updated;
     });
   }

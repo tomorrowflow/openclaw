@@ -200,6 +200,12 @@ readers use it without loading session storage, artifact cleanup, or archive
 compression. Filename parsing shares a pure grammar with the artifact helpers.
 Existing memory session facades retain these exports for installed plugin compatibility.
 
+The private-local `provider-usage-limit` exposes `parseProviderUsageLimit`,
+which tells whether a run's error is a provider usage or rate limit, using the
+failover classifier, and reads the reset time the message names (such as
+Claude's `resets 11:10pm (Europe/Berlin)`). Workboard uses it to queue a node
+ticket again after a usage limit instead of blocking it.
+
 The private official-plugin runtime `node-crypto-runtime` exposes `sha256Hex`
 for hashing strings or bytes without loading memory indexing helpers. It is a
 JavaScript-only host runtime export, not a typed public Plugin SDK entrypoint.

@@ -148,6 +148,7 @@
   "provider-tools",
   "provider-transport-runtime",
   "provider-usage",
+  "provider-usage-limit",
   "provider-web-fetch",
   "provider-web-fetch-contract",
   "provider-web-search",

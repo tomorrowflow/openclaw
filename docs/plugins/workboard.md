@@ -1913,7 +1913,7 @@ that change one file then land one by one instead of conflicting on each
 merge. The comment names each ticket and the shared path. Archiving the other
 ticket releases the wait, and a rework round never waits.
 Only unfinished parents, unmerged parent PRs, open tickets on the same paths,
-and a full slot queue a start: a
+a node waiting for a usage-limit reset, and a full slot queue a start: a
 blocked card, one
 scheduled for later, or one out of retries is refused with that reason and not
 queued. Queued is not the `scheduled` status, which holds a card until its
@@ -1930,10 +1930,24 @@ edited while its queued start reads it stays queued and is tried again on the
 next change. A queued start refused for another reason
 blocks the card with that reason.
 
+A node ticket whose run fails because the node's model login hit its
+provider's usage or rate limit (for example `You've hit your session limit ·
+resets 11:10pm (Europe/Berlin)`) is not blocked. It goes back to `todo`,
+queued, with one comment quoting the error and naming the reset; the next run
+reuses its worktree. The reset is the time the error names, read in its time
+zone as the next such time (five minutes from now when that time passed in the
+last 15 minutes), or 30 minutes later when the error names none.
+Until the reset, nothing starts on that node: the queue skips its tickets, a
+scheduled pass leaves them in `ready`, and the operator's **Start** queues with
+a comment naming the reset. Tickets on other nodes keep starting, but a
+multi-node route waits while the node it would place on is paused. The lifecycle sweep
+runs every minute, so the queue starts again within a minute after the reset.
+Any other failed run blocks its card with the run's error as the comment.
+
 The request is stored as `metadata.automation.startRequest`. Only the
-operator's start, a reviewed reopen and a scheduled pass waiting on parent PRs
-set it; card updates, agent tools, and
-creates cannot. To cancel a queued start, move the card to `backlog`. Moving it
+operator's start, a reviewed reopen, a scheduled pass waiting on parent PRs,
+and a run that hit a usage limit (which adds `usageLimitResetsAt`) set it;
+card updates, agent tools, and creates cannot. To cancel a queued start, move the card to `backlog`. Moving it
 away from `todo` or `ready`, archiving it, or a claim drops the request, and
 moving the card back does not restore it; start it again to requeue.
 
