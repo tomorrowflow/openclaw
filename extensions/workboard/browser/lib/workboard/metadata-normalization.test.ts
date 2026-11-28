@@ -88,3 +88,10 @@ describe("Workboard automation metadata boundary", () => {
     );
   });
 });
+
+it("keeps a queued start whose source a newer Gateway added", () => {
+  const startRequest = { requestedAt: 5, source: "dependency", usageLimitResetsAt: 9 };
+  expect(
+    normalizeCardPayload({ card: { id: "card", title: "Card", startRequest } }).startRequest,
+  ).toEqual({ requestedAt: 5, source: "migrated", usageLimitResetsAt: 9 });
+});

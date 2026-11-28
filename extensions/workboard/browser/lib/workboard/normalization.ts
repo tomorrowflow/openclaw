@@ -138,7 +138,8 @@ const diagnosticActionSchema = z.object({
 
 const workboardStartRequestSchema = z.object({
   requestedAt: z.number(),
-  source: z.enum(WORKBOARD_START_REQUEST_SOURCES),
+  // A newer Gateway may name a source this bundle predates; the card is still queued.
+  source: z.enum(WORKBOARD_START_REQUEST_SOURCES).catch("migrated"),
   usageLimitResetsAt: z.number().optional(),
 });
 
