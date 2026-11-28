@@ -1,4 +1,4 @@
-export const MANAGED_HANDOFF_RECOVERY_SOURCE = String.raw`async function restoreGatewayService(reason, decision = params.recovery, childStatus, previousGeneration = false, updaterStopped = false, beforeStart = () => {}) {
+export const MANAGED_HANDOFF_RECOVERY_SOURCE = String.raw`async function restoreGatewayService(reason, decision = params.recovery, childStatus, previousGeneration = false, updaterStopped = false, beforeStart = () => {}, requireHealthRpc = false) {
   if (managedUpdateLease?.action.kind !== "update" || !ownsManagedUpdateLease()) return false;
   let expectedRevision;
   const record = (restored) => recordManagedUpdateOutcome(
@@ -19,12 +19,14 @@ export const MANAGED_HANDOFF_RECOVERY_SOURCE = String.raw`async function restore
   let serviceRunning;
   let servicePid;
   const ownsRecovery = () => {
-    try { return ownsManagedUpdateLease() && fs.realpathSync(params.updateLeaseKey) === params.updateLeaseKey; }
+    try {
+      return ownsManagedUpdateLease() && fs.realpathSync(params.installLink ?? installedRoot) === installedRoot;
+    }
     catch { return false; }
   };
   const runOwned = (...args) => ownsRecovery()
     ? runServiceCommand(...args) : Promise.resolve({ code: 1, stdout: "", stderr: "recovery ownership lost" });
-  const restart = () => runOwnedUpdateCommand("recovery", params.recoveryCommandArgv,
+  const restart = () => runOwnedUpdateCommand("recovery", params.recoveryCommandArgv.map(installedPath),
     params.recoveryTimeoutMs, params.cwd, previousGeneration
       ? { ...process.env, OPENCLAW_ALLOW_OLDER_BINARY_DESTRUCTIVE_ACTIONS: "1" } : process.env);
   if (!ownsRecovery()) return false;
@@ -147,10 +149,16 @@ export const MANAGED_HANDOFF_RECOVERY_SOURCE = String.raw`async function restore
   });
   if (restored) {
     try {
-      const { waitForGatewayUpdateRecovery } = await import(pathToFileURL(params.recoveryModulePath).href);
+      const { waitForGatewayUpdateRecovery } = await import(pathToFileURL(installedPath(params.recoveryModulePath)).href);
       if (!ownsRecovery()) throw new Error("managed update recovery ownership was lost");
-      const health = await waitForGatewayUpdateRecovery(expectedVersion, expectedBuildId, params.recoveryTimeoutMs);
+      const health = await waitForGatewayUpdateRecovery(expectedVersion, expectedBuildId, params.recoveryTimeoutMs, requireHealthRpc);
+      // Main-based candidates predating the marker report the authenticated hello's boot ID.
+      // HTTP identity alone has no boot ID; an RPC refused after hello reports why.
+      const legacyAuthenticatedHealth = installedRoot !== params.updateLeaseKey &&
+        health.healthRpcVerified === undefined && Boolean(health.gatewayBootId) &&
+        !health.probeError && !health.authenticationError && !health.protocolMismatch && !health.operatorScopeWarning;
       restored = ownsRecovery() && health.healthy === true &&
+        (!requireHealthRpc || health.healthRpcVerified === true || legacyAuthenticatedHealth) &&
         health.runtime?.status === "running" && health.gatewayVersion === expectedVersion &&
         (!expectedBuildId || health.gatewayBuildId === expectedBuildId);
       if (restored && serviceStoppedAtMs !== undefined) serviceDowntimeMs = Math.max(0, Date.now() - serviceStoppedAtMs);
@@ -160,8 +168,8 @@ export const MANAGED_HANDOFF_RECOVERY_SOURCE = String.raw`async function restore
         runningVersion: health.gatewayVersion ?? undefined,
         runningBuildId: health.gatewayBuildId ?? undefined,
         versionMatch: health.gatewayVersion === expectedVersion && (!expectedBuildId || health.gatewayBuildId === expectedBuildId),
-        settled: health.healthy === true,
-        channelsReady: health.healthy === true && !health.channelProbeErrors?.length,
+        settled: restored,
+        channelsReady: restored && !health.channelProbeErrors?.length,
         pluginErrors: health.activatedPluginErrors?.map((error) => JSON.stringify(error)) ?? [],
       });
     } catch (error) {

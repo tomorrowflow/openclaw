@@ -52,20 +52,33 @@ export async function waitForGatewayUpdateRecovery(
   expectedVersion: string,
   expectedBuildId?: string,
   timeoutMs?: number,
+  requireHealthRpc?: boolean,
 ) {
   if (!expectedVersion?.trim()) {
     throw new Error("Recovery Gateway version is unavailable.");
   }
   const service = resolveGatewayService();
-  const { port, env } = await resolveGatewayLifecycleContext(service, true);
+  const { port, env, config, command } = await releasingHelperStateReaders(() =>
+    resolveGatewayLifecycleContext(service, true),
+  );
   return await waitForGatewayHealthyRestart({
-    service,
+    service: {
+      readCommand: async () => command ?? null,
+      readRuntime: (readEnv, options) =>
+        service.readRuntime(readEnv, {
+          ...options,
+          commandInspection: command ? { kind: "present", command } : { kind: "absent" },
+        }),
+    },
     port,
     env,
+    config: config ?? {},
     expectedVersion,
     expectedBuildId,
     timeoutMs,
     requireRunningService: true,
+    requireHealthRpc,
+    stateCustodyTransferred: true,
   });
 }
 
@@ -78,13 +91,10 @@ async function releasingHelperStateReaders<T>(check: () => Promise<T>): Promise<
   } catch (error) {
     outcome = { error };
   }
-  const [{ closeOpenClawStateDatabaseWorkersByPathAsync }, { resolveOpenClawStateSqlitePath }] =
-    await Promise.all([
-      import("../../state/openclaw-state-db-cache.js"),
-      import("../../state/openclaw-state-db.paths.js"),
-    ]);
   try {
-    await closeOpenClawStateDatabaseWorkersByPathAsync(resolveOpenClawStateSqlitePath());
+    const { releaseOpenClawStateDatabaseCustody } =
+      await import("../../state/openclaw-state-db-cache.js");
+    await releaseOpenClawStateDatabaseCustody();
   } catch (cleanupError) {
     throw "error" in outcome
       ? createSqliteLifecycleAggregateError(

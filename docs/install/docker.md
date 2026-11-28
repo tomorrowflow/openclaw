@@ -71,7 +71,7 @@ Hosting mutually untrusted users? Run a separate Gateway for each trust boundary
     - creates the legacy auth-profile secret key directory
     - starts the Gateway via Docker Compose
 
-    Pre-start onboarding and config writes run through `openclaw-gateway` directly (with `--no-deps --entrypoint node`), since `openclaw-cli` shares the Gateway's network namespace and only works once the Gateway container exists.
+    Pre-start onboarding and config writes run through `openclaw-gateway` directly (with `--no-deps --entrypoint node`), since `openclaw-cli` shares the Gateway's network and PID namespaces and only works once the Gateway container exists.
 
   </Step>
 
@@ -427,8 +427,8 @@ In Kubernetes, run the same command in a one-off Job or debug pod mounted to the
 same PVC. First scale the Gateway workload to zero and wait for its pods to
 terminate; in Swarm, scale the Gateway service to zero and wait for its tasks to
 stop. Keep the workload stopped until Doctor finishes, then restore one replica.
-If ownership is still refused after the old container has stopped, follow
-[Gateway lock recovery](/gateway/gateway-lock#recover-a-crashed-foreign-owner).
+If the old container stopped abruptly, allow up to 90 seconds from its last
+heartbeat for [automatic takeover](/gateway/gateway-lock#container-restarts-and-replacements).
 Do not delete lock files or repeatedly restart competing containers.
 
 After the container is running again, run the read-only deployment preflight
