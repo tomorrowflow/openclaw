@@ -19,8 +19,14 @@
 #
 # Overrides (for fixtures): WORKBOARD_CARDS_CMD, AGENTPLAY_DIGEST_CMD,
 # AGENTPLAY_DIGESTS (where the digest command writes), FACTORY_DIGEST_DEST,
-# FACTORY_DIGEST_INSTALL, FACTORY_REVIEW_REPO, FACTORY_REVIEW_CLONE. Output is
-# appended to $FACTORY_DIGEST_LOG.
+# FACTORY_DIGEST_INSTALL, FACTORY_REVIEW_REPO, FACTORY_REVIEW_CLONE,
+# CRON_RUNS_CMD. Output is appended to $FACTORY_DIGEST_LOG.
+#
+# It also writes cron-usage-latest.json: the dev agent's cron runs of the last
+# 7 days per job, with token totals and how many runs ended silent (NO_REPLY,
+# so delivery was suppressed). The weekly digest reports it, so a change to a
+# review job shows up as tokens per run. A failure here leaves the previous file
+# and does not fail the card digest.
 #
 # Runs nightly at 03:00, after the 02:30 transcript pull, from the systemd user
 # timer in scripts/systemd/:
@@ -37,6 +43,7 @@ INSTALL="${FACTORY_DIGEST_INSTALL:-sudo -n install -D -o openclaw -g openclaw -m
 REPO="${FACTORY_REVIEW_REPO:-tomorrowflow/voice-diary}"
 CLONE="${FACTORY_REVIEW_CLONE:-$HOME/factory-repos/${REPO##*/}}"
 LOG="${FACTORY_DIGEST_LOG:-$HOME/logs/factory-digest.log}"
+RUNS_CMD="${CRON_RUNS_CMD:-sudo -n -u openclaw -i openclaw cron runs --all --sort desc --limit 200 --json}"
 
 mkdir -p "$(dirname "$LOG")"
 exec >>"$LOG" 2>&1
@@ -57,3 +64,33 @@ for ext in md json; do
   $INSTALL "$DIGESTS/factory-latest.$ext" "$DEST/factory-latest.$ext"
 done
 echo "digest ok -> $DEST"
+
+# Pages newest first until a page reaches past the window. jq does the counting.
+# Called from an || list, where set -e is off, so each step returns on failure.
+cron_usage() {
+  local since=$(( ($(date +%s) - 7 * 86400) * 1000 )) offset=0 page out
+  out="$(mktemp)"
+  while :; do
+    # shellcheck disable=SC2086
+    page="$($RUNS_CMD --offset "$offset" </dev/null)" || return 1
+    jq -c '.entries[]' <<<"$page" >>"$out" || return 1
+    [ "$(jq -r '.hasMore' <<<"$page")" = true ] || break
+    [ "$(jq -r '[.entries[].ts] | min' <<<"$page")" -ge "$since" ] || break
+    offset="$(jq -r '.nextOffset' <<<"$page")"
+  done
+  jq -s --argjson since "$since" '
+    map(select(.ts >= $since and .action == "finished" and ((.sessionKey // "") | startswith("agent:dev:"))))
+    | {since: $since, until: (now * 1000 | floor), jobs: (group_by(.jobId) | map({
+        name: .[0].jobName,
+        runs: length,
+        silent: map(select(.deliverySuppressionReason == "silent")) | length,
+        errors: map(select(.status == "error")) | length,
+        totalTokens: map(.usage.total_tokens // 0) | add // 0,
+        freshTokens: map((.usage.input_tokens // 0) + (.usage.output_tokens // 0)) | add // 0,
+        silentTokens: map(select(.deliverySuppressionReason == "silent") | .usage.total_tokens // 0) | add // 0
+      }) | sort_by(-.totalTokens))}' "$out" >"$DIGESTS/cron-usage-latest.json" || return 1
+  rm -f "$out"
+  # shellcheck disable=SC2086
+  $INSTALL "$DIGESTS/cron-usage-latest.json" "$DEST/cron-usage-latest.json" || return 1
+}
+cron_usage && echo "cron usage ok" || echo "cron usage failed; previous file kept"
