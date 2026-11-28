@@ -278,6 +278,6 @@ describe("node ticket PR state sync", () => {
     expect(ticket.warn).not.toHaveBeenCalled();
     const started = await ticket.store.get(child.id);
     expect(started?.status).toBe("running");
-    expect(started?.metadata?.automation?.startRequest).toBeUndefined();
+    expect(started?.startRequest).toBeUndefined();
   });
 });

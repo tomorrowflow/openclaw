@@ -1944,12 +1944,22 @@ multi-node route waits while the node it would place on is paused. The lifecycle
 runs every minute, so the queue starts again within a minute after the reset.
 Any other failed run blocks its card with the run's error as the comment.
 
-The request is stored as `metadata.automation.startRequest`. Only the
+The request is a row in the Workboard database's `workboard_start_requests`
+table, and a card has at most one open row. Card reads return the open row as
+the card's `startRequest`, with its `requestedAt` and its `source`: `operator`,
+`reopen`, `merge_wait`, or `usage_limit_retry`. Only the
 operator's start, a reviewed reopen, a scheduled pass waiting on parent PRs,
 and a run that hit a usage limit (which adds `usageLimitResetsAt`) set it;
 card updates, agent tools, and creates cannot. To cancel a queued start, move the card to `backlog`. Moving it
-away from `todo` or `ready`, archiving it, or a claim drops the request, and
-moving the card back does not restore it; start it again to requeue.
+away from `todo` or `ready`, archiving it, or a claim closes the request, and
+moving the card back does not restore it; start it again to requeue. A closed
+row stays as `claimed` or `cancelled`; the table keeps the last 20 closed rows
+of each card.
+
+The first open of the database after an update moves each request stored in
+the earlier `metadata.automation.startRequest` field to an open row and
+removes the field. A moved request has the source `migrated`, or
+`usage_limit_retry` when it named a reset.
 
 #### Probes
 

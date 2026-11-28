@@ -976,7 +976,7 @@ describe("node ticket draft PR", () => {
 
     expect(result.queued).toBeUndefined();
     expect(result.startFailures[0]?.error).toContain("node ticket slots are in use");
-    expect((await store.get(card.id))?.metadata?.automation?.startRequest).toBeUndefined();
+    expect((await store.get(card.id))?.startRequest).toBeUndefined();
     await handoffs.resume(warn);
     expect((await store.get(card.id))?.status).toBe("backlog");
   });
@@ -1035,7 +1035,7 @@ describe("node ticket draft PR", () => {
       nodeTickets: gateway,
       options: { cardId: older.id, queue: "request" },
     });
-    const olderRequest = queued.queued?.metadata?.automation?.startRequest?.requestedAt ?? 0;
+    const olderRequest = queued.queued?.startRequest?.requestedAt ?? 0;
     expect(olderRequest).toBeGreaterThan(0);
 
     vi.useFakeTimers({ toFake: ["Date"], now: olderRequest + 1000 });
@@ -1050,7 +1050,7 @@ describe("node ticket draft PR", () => {
 
     const waiting = await store.get(card.id);
     expect(waiting?.status).toBe("todo");
-    expect(waiting?.metadata?.automation?.startRequest?.requestedAt).toBeGreaterThan(olderRequest);
+    expect(waiting?.startRequest?.requestedAt).toBeGreaterThan(olderRequest);
     expect(
       waiting?.metadata?.comments?.filter((comment) =>
         comment.body.startsWith("Rework round 1 waits for a node-ticket slot"),
@@ -1069,7 +1069,7 @@ describe("node ticket draft PR", () => {
 
     const started = await store.get(card.id);
     expect(started?.status).toBe("running");
-    expect(started?.metadata?.automation?.startRequest).toBeUndefined();
+    expect(started?.startRequest).toBeUndefined();
   });
 
   it("finishes on the merged PR that already holds the accepted commit, without pushing or opening one", async () => {

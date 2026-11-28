@@ -72,7 +72,6 @@ describe("Workboard automation metadata boundary", () => {
           hostRepoPath: "/host",
           model: "anthropic/claude-sonnet-5-5",
         },
-        startRequest: { requestedAt: 5 },
       },
     },
     {

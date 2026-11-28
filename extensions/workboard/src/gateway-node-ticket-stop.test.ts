@@ -133,7 +133,7 @@ describe("workboard.cards.start on a full node-ticket pool", () => {
     });
     const stored = await store.get(card.id);
     expect(stored?.status).toBe("todo");
-    const requestedAt = stored?.metadata?.automation?.startRequest?.requestedAt;
+    const requestedAt = stored?.startRequest?.requestedAt;
     expect(requestedAt).toBeTypeOf("number");
     expect(stored?.metadata?.comments?.map((comment) => comment.body)).toEqual([
       "This ticket waits for a node-ticket slot; it starts when a running node ticket reaches review.",
@@ -141,7 +141,7 @@ describe("workboard.cards.start on a full node-ticket pool", () => {
     // A second Start keeps the card's place in line and adds no notice.
     expect(second.mock.calls[0]?.[1]).toMatchObject({ queued: true });
     const again = await store.get(card.id);
-    expect(again?.metadata?.automation?.startRequest?.requestedAt).toBe(requestedAt);
+    expect(again?.startRequest?.requestedAt).toBe(requestedAt);
     expect(again?.metadata?.comments).toHaveLength(1);
     expect(gateway.respond).not.toHaveBeenCalledWith("sessions.create", expect.anything());
   });
@@ -159,10 +159,10 @@ describe("workboard.cards.start on a full node-ticket pool", () => {
     expect(respond.mock.calls[0]?.[1]).toMatchObject({ queued: true, card: { status: "todo" } });
     const stored = await store.get(card.id);
     expect(stored?.status).toBe("todo");
-    expect(stored?.metadata?.automation?.startRequest).toBeDefined();
+    expect(stored?.startRequest).toBeDefined();
     // Moving it back to backlog cancels the queued start.
     await store.move(card.id, "backlog", undefined);
-    expect((await store.get(card.id))?.metadata?.automation?.startRequest).toBeUndefined();
+    expect((await store.get(card.id))?.startRequest).toBeUndefined();
   });
 
   it("queues a card whose parents are not done on a free slot, naming them", async () => {
@@ -180,7 +180,7 @@ describe("workboard.cards.start on a full node-ticket pool", () => {
 
     expect(respond.mock.calls[0]?.[1]).toMatchObject({ queued: true, card: { status: "todo" } });
     const stored = await store.get(child.id);
-    expect(stored?.metadata?.automation?.startRequest).toBeDefined();
+    expect(stored?.startRequest).toBeDefined();
     expect(stored?.metadata?.comments?.map((comment) => comment.body)).toEqual([
       "This ticket waits for its dependencies: Design the grammar. It starts when they are done, their PRs are merged, and a node-ticket slot is free.",
     ]);
@@ -201,13 +201,13 @@ describe("workboard.cards.start on a full node-ticket pool", () => {
     expect(ok).toBe(false);
     expect((error as { message?: string } | undefined)?.message).toMatch(/scheduled/);
     const stored = await store.get(later.id);
-    expect(stored?.metadata?.automation?.startRequest).toBeUndefined();
+    expect(stored?.startRequest).toBeUndefined();
     expect(stored?.metadata?.comments ?? []).toEqual([]);
   });
 
   it("never lets an update or a create set the request", async () => {
     const { store, invoke, card } = await setup();
-    const startRequest = { requestedAt: 1 };
+    const startRequest = { requestedAt: 1, source: "operator" };
 
     const updated = await invoke("workboard.cards.update", {
       id: card.id,
@@ -224,6 +224,6 @@ describe("workboard.cards.start on a full node-ticket pool", () => {
     expect(cards.map((entry) => entry.title).toSorted()).toEqual(
       ["Fix the lexer", "Fix the parser", "Sneaky"].toSorted(),
     );
-    expect(cards.filter((entry) => entry.metadata?.automation?.startRequest)).toEqual([]);
+    expect(cards.filter((entry) => entry.startRequest)).toEqual([]);
   });
 });

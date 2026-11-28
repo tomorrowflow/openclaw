@@ -373,7 +373,7 @@ describe("projectWorkboardOverview", () => {
       }),
       card("queued", {
         node: true,
-        metadata: { automation: { startRequest: { requestedAt: NOW - 2 * HOUR } } },
+        startRequest: { requestedAt: NOW - 2 * HOUR, source: "operator" },
       }),
       card("plain-running", { status: "running" }),
     ]);

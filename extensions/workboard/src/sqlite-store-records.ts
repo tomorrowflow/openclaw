@@ -9,6 +9,7 @@ import type {
   WorkboardNotification,
   WorkboardProof,
   WorkboardRunAttempt,
+  WorkboardStartRequest,
   WorkboardWorkerLog,
 } from "@openclaw/workboard-contract";
 import {
@@ -18,6 +19,7 @@ import {
 } from "openclaw/plugin-sdk/sqlite-worker-runtime";
 import { definedFields } from "../record-fields.js";
 import type { WorkboardSqlConnection } from "./sqlite-store-schema.js";
+import { loadOpenStartRequests } from "./sqlite-store-start-requests.js";
 import { normalizeCommentSource } from "./store-value-normalizers.js";
 export type Row = Record<string, unknown>;
 
@@ -109,6 +111,7 @@ export type WorkboardCardDatabase = Record<
 type CardChildRows = {
   byTable: Map<string, Map<string, Row[]>>;
   workerProtocol: Map<string, Row>;
+  startRequests: Map<string, WorkboardStartRequest>;
 };
 
 function groupByCardId(rows: Iterable<Row>): Map<string, Row[]> {
@@ -157,7 +160,7 @@ export function loadCardChildRows(db: WorkboardSqlConnection, cardIds?: string[]
       workerProtocol.set(cardId, row);
     }
   }
-  return { byTable, workerProtocol };
+  return { byTable, workerProtocol, startRequests: loadOpenStartRequests(db, cardIds) };
 }
 
 function childRows(
@@ -432,5 +435,6 @@ export function readCard(
     completedAt: numberValue(row, "completed_at"),
     events,
     metadata,
+    startRequest: (preloaded?.startRequests ?? loadOpenStartRequests(db, [card.id])).get(card.id),
   });
 }

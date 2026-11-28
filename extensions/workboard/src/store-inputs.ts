@@ -6,6 +6,7 @@ import type {
   WorkboardExecutionTarget,
   WorkboardLaunchState,
   WorkboardResultEvidence,
+  WorkboardStartRequest,
   WorkboardWorkspace,
   WorkboardWorkspaceAccess,
 } from "@openclaw/workboard-contract";
@@ -53,14 +54,29 @@ export type WorkboardCardPatch = WorkboardCardInput;
 export type WorkboardOwnedCardPatch = WorkboardCardPatch & {
   ownedLaunch?: WorkboardLaunchState;
   ownedEvidence?: WorkboardResultEvidence[];
+  ownedStartRequest?: WorkboardStartRequest;
 };
+/** Splits a trusted builder's patch into the public patch and the options that carry its owned parts. */
+export function splitOwnedCardPatch(owned: WorkboardOwnedCardPatch) {
+  const { ownedLaunch, ownedEvidence, ownedStartRequest, ...patch } = owned;
+  return {
+    patch,
+    owned: {
+      automationLaunch: ownedLaunch,
+      automationEvidence: ownedEvidence,
+      startRequest: ownedStartRequest,
+    },
+  };
+}
 /** An agent tool mutation's author; mutations without one are the operator's or Workboard's own. */
 export type WorkboardAgentActor = `agent:${string}`;
 
 export type WorkboardUpdateCardOptions = {
   actor?: WorkboardAgentActor;
-  /** Trusted host writes may record host-owned automation state (node worktree, start request). */
+  /** Trusted host writes may record host-owned automation state (node worktree, probe). */
   allowAutomationLaunch?: boolean;
+  /** Queues the card's start; built only by Workboard's start paths. */
+  startRequest?: WorkboardStartRequest;
   automationLaunch?: WorkboardLaunchState;
   /** Replaces automation.evidence; built only by Workboard's evidence writers. */
   automationEvidence?: WorkboardResultEvidence[];

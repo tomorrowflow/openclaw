@@ -59,7 +59,7 @@ export function workboardCardStage(
   const target = nodeClaudeTarget(card);
   const worktree = target?.worktree;
   const handoff = worktree?.handoff;
-  const startRequest = card.metadata?.automation?.startRequest;
+  const startRequest = card.startRequest;
   if (card.status === "blocked") {
     return { kind: "blocked", ...since(enteredAt(card, "blocked")) };
   }

@@ -241,7 +241,7 @@ describe("workboard sqlite batch card persistence", () => {
         ? await store.addWorkerLog(card.id, { message: "Recorded progress" })
         : await store.addProof(card.id, { status: "passed", label: "Verified result" });
     const statements = sqliteStatements.executed.slice(before);
-    expect(statements.filter((sql) => /^select\b/i.test(sql.trimStart()))).toHaveLength(14);
+    expect(statements.filter((sql) => /^select\b/i.test(sql.trimStart()))).toHaveLength(15);
     expect(
       operation === "worker log"
         ? updated.metadata?.workerLogs?.[0]?.message

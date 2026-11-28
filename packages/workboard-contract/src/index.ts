@@ -17,6 +17,7 @@ import type {
 
 export * from "./card-vocabulary.js";
 export * from "./node-files.js";
+export * from "./start-request.js";
 export type * from "./preview.js";
 export type * from "./verification.js";
 export type * from "./card-sessions.js";
@@ -757,17 +758,6 @@ export type WorkboardLaunchState =
       reason: string;
     });
 
-/**
- * The operator's Start of a node ticket whose parents were not done or whose
- * slot was full. Only that start, a reviewed rework or answer reopen, and a
- * run that hit its provider's usage limit record it, and the card loses it
- * once it leaves todo or ready, is claimed, or is archived; queued tickets
- * start oldest first as parents finish and slots free. `usageLimitResetsAt`
- * is when that limit resets; until then no node ticket starts on the
- * ticket's node.
- */
-export type WorkboardStartRequest = { requestedAt: number; usageLimitResetsAt?: number };
-
 export type WorkboardAutomation = {
   tenant?: string;
   boardId?: string;
@@ -786,7 +776,6 @@ export type WorkboardAutomation = {
   maxRuntimeSeconds?: number;
   maxRetries?: number;
   scheduledAt?: number;
-  startRequest?: WorkboardStartRequest;
   probe?: WorkboardProbe;
   summary?: string;
   /** Owned by Workboard's evidence writers; raw metadata patches cannot add entries. */
@@ -998,6 +987,8 @@ export type WorkboardCard = {
   completedAt?: number;
   events?: WorkboardEvent[];
   metadata?: WorkboardMetadata;
+  /** Host-owned: only Workboard's own start paths set it; card updates, agent tools, and creates cannot. */
+  startRequest?: import("./start-request.js").WorkboardStartRequest;
 };
 
 /**

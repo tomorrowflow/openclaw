@@ -418,7 +418,7 @@ describe("Workboard board-scoped SQLite hydration", () => {
     expect(rowCount).toBeGreaterThan(0);
     expect(rowCount).toBeLessThanOrEqual(8);
     expect(queries).toBeGreaterThan(0);
-    expect(queries).toBeLessThanOrEqual(13);
+    expect(queries).toBeLessThanOrEqual(14);
     await expect(store.list({ boardId: "missing" })).resolves.toEqual([]);
     await expect(store.list({ boardId: "default" })).resolves.toEqual([
       expect.objectContaining({ title: "Default board" }),
@@ -559,7 +559,7 @@ describe("Workboard dependency status reads", () => {
     const expected = await store.get(child.id);
     const { value, queries, rowCount } = await captureRead(() => store.prepareStart(child.id));
     expect(value).toEqual(expected);
-    expect(queries).toBeLessThanOrEqual(14);
+    expect(queries).toBeLessThanOrEqual(15);
     expect(rowCount).toBeLessThanOrEqual(102);
     expect(queries).toBeGreaterThan(0);
     expect(rowCount).toBeGreaterThan(0);

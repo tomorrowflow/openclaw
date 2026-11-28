@@ -598,7 +598,7 @@ export function createNodeTicketHandoffs(params: {
         const probeEnd = probing ? nodeProbeEnd(card, probeVerifier) : undefined;
         // The queue drain below owns a queued reopen's start.
         const reopen =
-          item || publish || probeEnd || card.metadata?.automation?.startRequest
+          item || publish || probeEnd || card.startRequest
             ? undefined
             : nodeTicketReopen(card, now());
         const unanswered = probeEnd ? undefined : unansweredDone(card);
@@ -710,11 +710,10 @@ export function createNodeTicketHandoffs(params: {
       // the pass walks the queue goes to the oldest card waiting for it, on the
       // pass that change triggers, not to a later card this pass reaches first.
       const queue = (await params.store.list())
-        .filter((card) => card.metadata?.automation?.startRequest)
+        .filter((card) => card.startRequest)
         .toSorted(
           (left, right) =>
-            (left.metadata?.automation?.startRequest?.requestedAt ?? 0) -
-            (right.metadata?.automation?.startRequest?.requestedAt ?? 0),
+            (left.startRequest?.requestedAt ?? 0) - (right.startRequest?.requestedAt ?? 0),
         );
       const slots = await params.store.nodeTicketSlots(queue);
       const fullSlots = new Set<string>();

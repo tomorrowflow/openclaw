@@ -593,7 +593,7 @@ export function registerWorkboardGatewayMethods(params: {
       ...(model ? { model } : {}),
       ...(note ? { note } : {}),
     });
-    if (input.start !== true || card.status !== "todo" || card.metadata?.automation?.startRequest) {
+    if (input.start !== true || card.status !== "todo" || card.startRequest) {
       return { card: redactOperatorCard(card), created };
     }
     // The operator's Start: queued while the node-ticket slots are full.
