@@ -1,9 +1,11 @@
 // Workboard tests cover dispatching cards to paired-node Claude Code sessions.
 import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
+import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
 import { nodeTicketTarget } from "./node-ticket.js";
 import {
   BASE_COMMIT,
@@ -11,6 +13,7 @@ import {
   createNodeCard,
   createNodeGateway,
   createNodeRepos,
+  endedSession,
   git,
   NODE_TARGET as TARGET,
   removeTempRoots,
@@ -667,5 +670,46 @@ describe("dispatchAndStartWorkboardCards node-claude target", () => {
         },
       },
     });
+  });
+  it("briefs a retried round on how its last run ended and the work it left", async () => {
+    const repos = createNodeRepos(tempRoot("workboard-retry-brief-"));
+    const store = createWorkboardSqliteTestStore();
+    const nodeTickets = createLocalNodeGateway();
+    const briefs = () =>
+      nodeTickets.respond.mock.calls.flatMap(([method, params]) =>
+        method === "sessions.create" ? [String(params?.message)] : [],
+      );
+    const { card, sessionKey, runId } = await startNodeCard(store, nodeTickets, repos.target);
+    expect(briefs()[0]).not.toContain("## Previous attempt");
+    const worktree = path.join(repos.target.worktreesRoot, `wb-${card.id}`);
+    writeFileSync(path.join(worktree, "parser.ts"), "export {};\n");
+    git(worktree, "add", "parser.ts");
+    git(worktree, "commit", "-q", "-m", "Half the parser");
+    writeFileSync(path.join(worktree, "notes.md"), "todo\n");
+    await syncWorkboardAgentEnded({
+      store,
+      event: { runId, success: false, error: "CLI failed.", messages: [] },
+      context: { runId, sessionKey },
+      readSessions: endedSession(false),
+    });
+    await store.move(card.id, "ready", undefined);
+
+    const retried = await dispatchAndStartWorkboardCards({
+      store,
+      subagent: { run: vi.fn() },
+      nodeTickets,
+      options: { now: Date.now(), maxStarts: 1 },
+    });
+
+    expect(retried.startFailures).toEqual([]);
+    const base = nodeTicketTarget(expectDefined(await store.get(card.id), "card"))?.worktree
+      ?.baseCommit;
+    const brief = expectDefined(briefs()[1], "retry brief");
+    const section = brief.split("## Previous attempt")[1]?.split("## Turn contract")[0];
+    expect(section).toContain("An earlier run of this round failed with this error:");
+    expect(section).toContain(
+      `HEAD ${git(worktree, "rev-parse", "HEAD")}, 1 commit(s) since the base ${base}, and 1 uncommitted path(s):\n- \`notes.md\``,
+    );
+    expect(section).toContain("continue from it");
   });
 });
