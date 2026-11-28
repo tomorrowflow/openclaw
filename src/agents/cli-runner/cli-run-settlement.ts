@@ -27,7 +27,6 @@ import {
 import { resolveAuthProfileFailureReason } from "../embedded-agent-runner/run/auth-profile-failure-policy.js";
 import { mergeAttemptToolMediaPayloads } from "../embedded-agent-runner/run/tool-media-payloads.js";
 import { isFailoverError } from "../failover-error.js";
-import { resolveRetryAfterMs } from "../failover/retry-evidence.js";
 import {
   createMissingReplyNotice,
   MISSING_REPLY_NOTICE_TEXT,
@@ -38,6 +37,7 @@ import {
 import { recordAgentCleanupFailure } from "../run-cleanup-timeout.js";
 import { CliAuthProfilePreparationError } from "./auth-profile-preparation-error.js";
 import { preserveCliRequiredCleanupStop, runCliCleanup } from "./cleanup.js";
+import { resolveCliRetryAfterMs } from "./cli-retry-after.js";
 import { resolveCliSessionId } from "./cli-run-recovery.js";
 import { projectCliMessagingDeliveryEvidence } from "./delivery-evidence.js";
 import { hashCliReseedPrompt } from "./reseed-envelope.js";
@@ -168,7 +168,7 @@ async function settleCliAuthProfile(params: {
         agentDir: params.agentDir,
         runId: params.terminal.runId,
         modelId: params.terminal.modelId,
-        retryAfterMs: resolveRetryAfterMs(formatErrorMessage(error), Date.now(), error),
+        retryAfterMs: resolveCliRetryAfterMs(error),
       });
     }
   } catch (error) {

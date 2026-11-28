@@ -445,6 +445,34 @@ describe("runCliAgent before_agent_reply seam", () => {
     );
   });
 
+  it("cools a Claude account down until the usage-limit reset it names", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-11-25T21:50:00Z") });
+    try {
+      const { profileId, store } = prepareProfile("claude-cli");
+      executeMock.mockRejectedValueOnce(
+        new FailoverError("You've hit your session limit · resets 11:10pm (Europe/Berlin)", {
+          reason: "rate_limit",
+          provider: "claude-cli",
+        }),
+      );
+
+      await expect(runCliAgent({ provider: "claude-cli" })).rejects.toMatchObject({
+        reason: "rate_limit",
+      });
+
+      expect(authFailureMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          store,
+          profileId,
+          reason: "rate_limit",
+          retryAfterMs: Date.parse("2026-11-25T22:10:00Z") - Date.now(),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("records only success when fresh-session recovery succeeds and clears stale health", async () => {
     const profileId = "google-gemini-cli:selected";
     const store = {
