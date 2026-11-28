@@ -52,13 +52,22 @@ function ensureColumn(db: DatabaseSync, tableName: string, columnName: string, d
   db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
 }
 
+const CARD_KINDS_MIGRATION_ID = "card-kinds-from-class-labels";
+
+/**
+ * Data-move markers this store records beside its `schema-N` markers. They
+ * change no schema, so a database port accepts them without a version.
+ */
+export const WORKBOARD_DATA_MIGRATION_IDS: ReadonlySet<string> = new Set([CARD_KINDS_MIGRATION_ID]);
+
 // Before card kinds, spec and prototype cards were told apart only by their
 // `class:spec` / `class:prototype` label. The labels stay; the kind is read
 // from them once.
 function migrateCardKindsFromClassLabels(db: DatabaseSync): void {
-  const migrationId = "card-kinds-from-class-labels";
   if (
-    db.prepare("SELECT 1 AS found FROM workboard_schema_migrations WHERE id = ?").get(migrationId)
+    db
+      .prepare("SELECT 1 AS found FROM workboard_schema_migrations WHERE id = ?")
+      .get(CARD_KINDS_MIGRATION_ID)
   ) {
     return;
   }
@@ -70,7 +79,7 @@ function migrateCardKindsFromClassLabels(db: DatabaseSync): void {
   setKind.run("prototype", "class:prototype");
   db.prepare(
     "INSERT OR IGNORE INTO workboard_schema_migrations (id, applied_at) VALUES (?, ?)",
-  ).run(migrationId, Date.now());
+  ).run(CARD_KINDS_MIGRATION_ID, Date.now());
 }
 
 function ensureWorkboardSchema(db: DatabaseSync): void {
