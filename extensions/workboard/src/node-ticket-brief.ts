@@ -5,12 +5,15 @@ import type {
   WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
 import { grillEndFromLog } from "./node-ticket-grill.js";
-import { REPORT_FENCE } from "./node-ticket-report.js";
+import { cutReportText, REPORT_FENCE } from "./node-ticket-report.js";
 import { nodeTicketReviewComments, nodeTicketTarget } from "./node-ticket.js";
 import { reviewVerdictOf } from "./review-readiness.js";
 
 // Comments are capped at 8000 chars on write, so this bounds the brief's feedback section.
 const REWORK_FEEDBACK_MAX_ENTRIES = 5;
+
+// A run error is a system message; the brief quotes this much of it.
+const PREVIOUS_ERROR_MAX_CHARS = 300;
 
 // Cards whose deliverable is a document, not code, so they skip the code self-review.
 const DOCUMENT_KINDS: ReadonlySet<WorkboardCardKind> = new Set(["spec", "prototype", "research"]);
@@ -62,6 +65,44 @@ function reworkVerdictSection(card: WorkboardCard, worktree: WorkboardNodeWorktr
     "The board's reviewer posted this on the round you are reworking. Where the review feedback says otherwise, follow the feedback.",
     "",
     verdict.body.trim(),
+    "",
+  ];
+}
+
+/**
+ * How the earlier launch of a retried round ended and what it left in the
+ * worktree this run continues in. Only a retry records `reusedFrom`; a planned
+ * resume (answers, grilling result) has its own section above.
+ */
+function previousAttemptSection(card: WorkboardCard, worktree: WorkboardNodeWorktree): string[] {
+  const reused = worktree.reusedFrom;
+  if (!reused) {
+    return [];
+  }
+  const attempt = card.metadata?.attempts?.at(-1);
+  const error = attempt?.error?.replace(/\s+/g, " ").trim();
+  const ended =
+    attempt?.status === "stopped"
+      ? ["An earlier run of this round was stopped."]
+      : attempt?.status === "failed" || attempt?.status === "blocked"
+        ? error
+          ? [
+              "An earlier run of this round failed with this error:",
+              "",
+              `> ${cutReportText(error, PREVIOUS_ERROR_MAX_CHARS)}`,
+            ]
+          : ["An earlier run of this round failed."]
+        : ["An earlier run of this round ended before its work was imported."];
+  const more = reused.dirtyCount - reused.dirtyPaths.length;
+  return [
+    "## Previous attempt",
+    ...ended,
+    "",
+    `This run continues in the worktree it left: HEAD ${reused.headCommit}, ${reused.commitsSinceBase} commit(s) since the base ${worktree.baseCommit}, and ${reused.dirtyCount === 0 ? "no uncommitted changes." : `${reused.dirtyCount} uncommitted path(s):`}`,
+    ...reused.dirtyPaths.map((dirtyPath) => `- \`${dirtyPath}\``),
+    ...(more > 0 ? [`- and ${more} more`] : []),
+    "",
+    `Inspect that work first (\`git log ${worktree.baseCommit}..HEAD\`, \`git status\`, \`git diff\`) and continue from it. Do not start over or discard it unless it is wrong for the ticket.`,
     "",
   ];
 }
@@ -149,6 +190,7 @@ export function buildNodeTicketMessage(params: {
           ...reworkVerdictSection(params.card, params.worktree),
         ]
       : []),
+    ...previousAttemptSection(params.card, params.worktree),
     ...projectEnvSection(
       params.projectEnv,
       "They are already set in this session's environment (the worktree's git-ignored `.claude/workboard.env`, loaded when the session starts), so run commands without a variable prefix.",

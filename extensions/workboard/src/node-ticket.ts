@@ -7,6 +7,7 @@ import {
   type WorkboardExecutionTarget,
   type WorkboardNodeFeedback,
   type WorkboardNodeQuestions,
+  type WorkboardNodeReusedWorktree,
   type WorkboardNodeRework,
   type WorkboardNodeWorktree,
 } from "@openclaw/workboard-contract";
@@ -246,6 +247,39 @@ function answeredQuestions(
   };
 }
 
+// The retry brief lists at most this many uncommitted paths.
+const MAX_REUSED_DIRTY_PATHS = 50;
+
+/**
+ * What a retried launch finds in the worktree an earlier launch left. Best
+ * effort: when the node cannot say, the retry starts without the note.
+ */
+async function inspectReusedWorktree(
+  git: (...args: string[]) => Promise<string>,
+  baseCommit: string,
+): Promise<WorkboardNodeReusedWorktree | undefined> {
+  try {
+    const headCommit = await git("rev-parse", "HEAD");
+    const commitsSinceBase = Number(await git("rev-list", "--count", `${baseCommit}..HEAD`));
+    if (!COMMIT_ID.test(headCommit) || !Number.isInteger(commitsSinceBase)) {
+      return undefined;
+    }
+    // The node trims stdout, so the first line may have lost its leading status column.
+    const dirty = (await git("status", "--porcelain"))
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => line.replace(/^[ MADRCTU?!]{1,2} /, ""));
+    return {
+      headCommit,
+      commitsSinceBase,
+      dirtyPaths: dirty.slice(0, MAX_REUSED_DIRTY_PATHS),
+      dirtyCount: dirty.length,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Creates the card's worktree in the node's own clone; the branch name is what
  * D40 bundles back. A published ticket reopened for review rework (D54)
@@ -372,12 +406,23 @@ export async function createNodeTicketWorktree(params: {
     // A re-run after earlier commits must bundle from the original base, not the branch tip.
     if (previous?.path === worktreePath) {
       const keptRework = rework ?? previous.rework;
+      // Answers and a grilling result resume the worktree by design; anything
+      // else here retries a launch that ended early, and its brief says so.
+      const reusedFrom =
+        asked || grilled
+          ? undefined
+          : await inspectReusedWorktree(
+              (...args) =>
+                runNodeCommand(runtime, target.nodeId, ["git", "-C", worktreePath, ...args]),
+              previous.baseCommit,
+            );
       return {
         path: worktreePath,
         branch,
         baseCommit: previous.baseCommit,
         ...(keptRework ? { rework: keptRework } : {}),
         ...kept,
+        ...(reusedFrom ? { reusedFrom } : {}),
       };
     }
   }

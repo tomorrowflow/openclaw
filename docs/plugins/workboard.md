@@ -1126,7 +1126,13 @@ model on its own, so a verdict always comes from a model the board names
 
 1. **Start:** the dispatcher fetches `origin` in the node clone, creates branch
    `factory/<cardId>` at `baseRef` (default `origin/HEAD`) in
-   `<worktreesRoot>/wb-<cardId>`, and starts the session there.
+   `<worktreesRoot>/wb-<cardId>`, and starts the session there. A retried
+   start (after a failed, stopped, or usage-limited run) continues in the
+   worktree the earlier launch left, from the original base. It records what it
+   found as `reusedFrom` on the worktree (HEAD, commits since the base, up to 50
+   uncommitted paths), and the brief's **Previous attempt** section names how
+   the last run ended, with its error cut to 300 characters, and tells the
+   session to inspect that work and continue instead of starting over.
 2. **Report:** the session ends with a `workboard-report` block whose text
    fields are Markdown. A retry turn the Gateway runs in the same session
    after a stuck-session abort reports for the same round. A `done` report
