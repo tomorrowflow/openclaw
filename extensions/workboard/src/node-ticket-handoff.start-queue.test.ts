@@ -1,4 +1,5 @@
 // Workboard tests cover queued node-ticket starts draining as parents finish and route slots free up.
+import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it, vi } from "vitest";
 import { dispatchAndStartWorkboardCards } from "./dispatcher.js";
 import { syncWorkboardAgentEnded } from "./lifecycle-sync.js";
@@ -11,7 +12,7 @@ describe("node ticket start queue", () => {
   const LINUX = { ...NODE_TARGET, nodeId: "linux-factory" };
 
   /** A board whose iOS and server routes each run one ticket at a time, both running one. */
-  async function fullRoutes() {
+  async function fullRoutes(spareAccountFor: string[] = []) {
     const store = createWorkboardSqliteTestStore();
     store.nodeTicketConcurrency = 4;
     await store.upsertBoard({
@@ -30,6 +31,9 @@ describe("node ticket start queue", () => {
         store,
         subagent: { run: vi.fn() },
         nodeTickets: gateway,
+        modelAccounts: {
+          hasUsableAccount: async (_config, agentId) => spareAccountFor.includes(agentId),
+        },
         options: { cardId, maxStarts: 1, ...(queue ? { queue } : {}) },
       });
     const handoffs = createNodeTicketHandoffs({
@@ -182,7 +186,7 @@ describe("node ticket start queue", () => {
       expect(requeued?.status).toBe("todo");
       expect(requeued?.startRequest?.usageLimitResetsAt).toBe(resetsAt);
       expect(requeued?.metadata?.comments?.at(-1)?.body).toBe(
-        `The model login on node mac-factory hit its usage limit (${limit}). This ticket is queued again and starts after the reset at 2026-11-25 22:10 UTC; until then nothing else starts on that node.`,
+        `The model login on node mac-factory hit its usage limit (${limit}). This ticket is queued again. It starts on the agent's next model account when one is free; otherwise it starts after the reset at 2026-11-25 22:10 UTC, and nothing else starts on that node until then.`,
       );
 
       // The route has a free slot, but the operator's Start queues on the limited node.
@@ -205,6 +209,59 @@ describe("node ticket start queue", () => {
 
       expect((await store.get(runningIos.id))?.status).toBe("running");
       expect((await store.get(next.id))?.status).toBe("todo");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("starts a usage-limited ticket on the agent's next account, holding it once that fails too", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.parse("2026-11-25T21:50:00Z") });
+    try {
+      const { store, gateway, handoffs, runningIos } = await fullRoutes(["dev"]);
+      // Each start is its own Gateway run, so its agent_end names a new run id.
+      const reply = expectDefined(gateway.respond.getMockImplementation(), "gateway fake");
+      let retries = 0;
+      gateway.respond.mockImplementation((method, params) => {
+        const answer = reply(method, params);
+        return method === "sessions.create"
+          ? { ...(answer as object), runId: `run-node-retry-${++retries}` }
+          : answer;
+      });
+      const hitLimit = async () => {
+        const running = await store.get(runningIos.id);
+        const sessionKey = running?.execution?.sessionKey ?? "";
+        const runId = running?.execution?.runId;
+        await syncWorkboardAgentEnded({
+          store,
+          event: {
+            runId,
+            success: false,
+            error: "You've hit your session limit · resets 11:10pm (Europe/Berlin)",
+            messages: [],
+          },
+          context: { runId, sessionKey },
+          readSessions: async () => ({
+            sessions: [{ key: sessionKey, status: "running" as const, hasActiveRun: true }],
+            complete: true,
+          }),
+        });
+        await runSessionSweep({
+          store,
+          sessions: [
+            { key: sessionKey, status: "failed", hasActiveRun: false, updatedAt: Date.now() + 1 },
+          ],
+        });
+        expect((await store.get(runningIos.id))?.status).toBe("todo");
+      };
+
+      await hitLimit();
+      await handoffs.resume(vi.fn());
+      expect((await store.get(runningIos.id))?.status).toBe("running");
+
+      vi.setSystemTime(Date.now() + 60_000);
+      await hitLimit();
+      await handoffs.resume(vi.fn());
+      expect((await store.get(runningIos.id))?.status).toBe("todo");
     } finally {
       vi.useRealTimers();
     }

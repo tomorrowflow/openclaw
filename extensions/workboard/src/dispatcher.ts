@@ -19,13 +19,17 @@ import {
   type WorkboardWorktreeRuntime,
   type ResolveAgentWorkspaceRuntime,
 } from "./dispatcher-workspace.js";
+import {
+  gatewayModelAccounts,
+  nodeUsageLimitHolds,
+  type WorkboardModelAccounts,
+} from "./node-ticket-accounts.js";
 import { buildNodeTicketMessage } from "./node-ticket-brief.js";
 import { writeNodeProjectEnv } from "./node-ticket-project-env.js";
 import {
   nodeTicketDependencyWait,
   type NodeTicketStartWait,
   nodeTicketStartWaitRefusal,
-  nodeTicketUsageLimits,
   queueMergeWaits,
   queueNodeTicketStart,
 } from "./node-ticket-start-queue.js";
@@ -124,6 +128,8 @@ type WorkboardDispatchStartParams = {
   worktrees?: WorkboardWorktreeRuntime;
   /** Gateway access for cards whose execution target is a paired node. */
   nodeTickets?: WorkboardNodeTicketRuntime;
+  /** Which agents the Gateway can still run on another model account. */
+  modelAccounts?: WorkboardModelAccounts;
   options?: WorkboardDispatchStartOptions;
 };
 
@@ -156,6 +162,7 @@ function selectStartableCards(
   now: number,
   mode: "scheduled" | "exact",
   nodeTicketSlots: ReadonlyMap<string, WorkboardNodeTicketSlot>,
+  usageLimits: ReadonlyMap<string, number>,
   ownerSlots: {
     active: ReadonlyMap<string, number>;
     limit: (card: WorkboardCard) => number;
@@ -173,7 +180,6 @@ function selectStartableCards(
   const nodeTicketOccupants = cards.filter((card) =>
     workboardCardConsumesNodeTicketSlot(card, now),
   );
-  const usageLimits = nodeTicketUsageLimits(cards, now);
   const selected: WorkboardCard[] = [];
   const fallback: WorkboardCard[] = [];
   const selectedOwners = new Set<string>();
@@ -361,6 +367,12 @@ async function runWorkboardDispatch(
     now,
     directCardId ? "exact" : "scheduled",
     nodeTicketSlots,
+    await nodeUsageLimitHolds(
+      cards,
+      now,
+      params.modelAccounts ?? gatewayModelAccounts,
+      assertOwnerCurrent,
+    ),
     { active: activeByOwner, limit: ownerSlotLimit },
   );
   // An exact start queues only on request, below.

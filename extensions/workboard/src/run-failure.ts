@@ -51,7 +51,7 @@ export function runFailurePatch(
           { ...card, status: "todo", metadata: { ...card.metadata, claim: undefined } },
           { requestedAt: now, source: "usage_limit_retry", usageLimitResetsAt: failure.resetsAt },
           () =>
-            `The model login on node ${nodeId} hit its usage limit (${failure.message}). This ticket is queued again and starts after the reset at ${formatUsageLimitReset(failure.resetsAt)}; until then nothing else starts on that node.`,
+            `The model login on node ${nodeId} hit its usage limit (${failure.message}). This ticket is queued again. It starts on the agent's next model account when one is free; otherwise it starts after the reset at ${formatUsageLimitReset(failure.resetsAt)}, and nothing else starts on that node until then.`,
           now,
         )
       : undefined;
