@@ -289,6 +289,17 @@ it("inspects without writing and refuses changed canonical SQLite data", async (
   expect(await hash(sourcePath)).toBe(original);
 });
 
+it("inspects a source carrying the Workboard store's card-kinds data migration marker", async () => {
+  const { sourcePath } = fixture(
+    "INSERT INTO workboard_schema_migrations VALUES ('card-kinds-from-class-labels', 17)",
+  );
+  await expect(inspect(sourcePath)).resolves.toMatchObject({
+    family: "workboard",
+    version: metadata.version,
+    migrationRequired: false,
+  });
+});
+
 it.each([
   ["schema version 99", "PRAGMA user_version = 99"],
   [
