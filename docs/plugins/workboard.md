@@ -995,9 +995,12 @@ Its optional `fallbacks` (up to 5 `provider/model` entries, each different
 from `model` and from the others) start the session, in order, when the
 Gateway refuses `model`, for example while its account is in a rate-limit
 cooldown: `{ agentId: "verifier", model: "openai/gpt-6-sol", fallbacks:
-["ollama/kimi-k3:cloud"] }`. The verification records and its comment names
-the model that ran; when every model is refused, the `error` verdict lists
-each refusal. Saving refuses an empty `agentId` or a model that is not
+["ollama/kimi-k3:cloud"] }`. A model whose session starts but whose run
+fails before doing any work (a provider error such as a 429 usage limit,
+with no tool result) also moves on: the verification starts a fresh session
+on the next model. The verification records and its comment names the model
+that ran; when every model is refused or fails that way, the verification
+did not run (see **Verification** below). Saving refuses an empty `agentId` or a model that is not
 `provider/model`; `verifier: null` removes it. Without it no round is verified.
 
 A board's `orchestration.crossVerifier`, the same shape, adds a second,
@@ -1352,7 +1355,24 @@ model on its own, so a verdict always comes from a model the board names
    `**Verification:** pass|fail|error (<model>)` followed by the summary and
    findings, and only then nudges the automation. A session that cannot be
    created records `error` right away, so the card is never held by a
-   verifier that cannot run. A record whose head or round is not the imported
+   verifier that cannot run.
+   **Model fallthrough:** a session whose run ended on a model or provider
+   error before doing any work (its history has no tool result, and its last
+   reply is the run's failure notice or an assistant message that stopped on
+   `error`) does not settle while the round still waits in review: the pass
+   starts a fresh session on the verifier's next configured model, with the
+   same brief and verify worktree and the key suffix `-f<n>` (`n` counts the
+   models that failed). The running record lists the models tried before it
+   as `failedModels` (`{model, error}`, refusals included).
+   **Did not run:** when no model is left, the record is an `error` with
+   `notRun: true` and a summary that starts `Verification did not run:` and
+   names each model with its error. Unlike an `error` from a verifier that ran
+   but could not finish the proof, a not-run round cannot be accepted until
+   `workboard.cards.verify` re-runs it: the operator's move to `done` is
+   refused ("This round's verification did not run: no verifier model could
+   do its work. Re-run it with workboard.cards.verify once a verifier model is
+   available, then decide."), also past the 30-minute readiness deadline. A
+   move to `todo` or `ready` to rework it is not gated. A record whose head or round is not the imported
    round's is stale: it gates nothing and the next import replaces it.
    **Cross-verification:** on a board with an `orchestration.crossVerifier`,
    the import of a rung c round in its sample (see the setting above) also
@@ -1376,7 +1396,9 @@ model on its own, so a verdict always comes from a model the board names
    blind like the shadow verdict (see [Trust KPIs](#trust-kpis)): operator
    reads replace every verification comment since the import with a notice
    and leave the finished record out until the round is decided; a running
-   record stays visible, and agents read the card whole. The verifier session
+   record stays visible, and agents read the card whole. A record that did not
+   run carries no result, so operator reads show it and its comment at every
+   rung. The verifier session
    itself is listed in the Gateway's sessions under the **Verification**
    group and is readable there, so an operator who wants a blind decision at
    rung a does not open it before deciding.
@@ -1426,9 +1448,11 @@ model on its own, so a verdict always comes from a model the board names
    `verifier`, an accept also needs the round's verification to have passed:
    the move is refused while it runs ("The verification is still running; wait
    for its comment."), after a `fail` ("The verification failed: <summary>.
-   Post `Verdict: rework: …` and rework it."), and after an `error` ("The
+   Post `Verdict: rework: …` and rework it."), after an `error` ("The
    verification could not finish (<summary>). Leave the card in review; the
-   operator decides or re-runs it."). A round whose import stamped
+   operator decides or re-runs it."), and after a verification that did not
+   run ("The verification did not run (<summary>). Leave the card in review;
+   the operator re-runs it."). A round whose import stamped
    `crossVerify`, while the board still has a `crossVerifier`, also needs its
    cross-verification to have passed, with the same refusals naming the
    cross-verification. An accept of a pull request that adds, changes, or
@@ -1439,7 +1463,7 @@ model on its own, so a verdict always comes from a model the board names
    the default branch, so a flow report from an earlier round still counts
    after a rework round that left it alone; a pull request that cannot be
    checked is refused the same way. A rework verdict and
-   an operator's move are never gated; the operator's move waits for the
+   an operator's move are never gated by these checks; the operator's move waits for the
    cross-verification as it waits for the verification. Otherwise the move fails and
    names the next step: at rung a, post the verdict and let the operator
    decide. The move records `decidedBy` on the imported handoff; any later

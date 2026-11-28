@@ -7,6 +7,7 @@ import type {
   WorkboardNodeVisualRead,
   WorkboardNodeWorktree,
   WorkboardOrchestrationSettings,
+  WorkboardVerificationModelFailure,
   WorkboardVerificationVerdict,
   WorkboardVerifierSettings,
 } from "@openclaw/workboard-contract";
@@ -218,13 +219,17 @@ function verificationSessionKey(
   round: ImportedReviewRound,
   slot: VerificationSlot,
   verifier: WorkboardVerifierSettings,
+  failedModels: number,
 ): string {
   const runs = (card.metadata?.comments ?? []).filter(
     (comment) => comment.createdAt >= round.handoff.importedAt && isVerificationComment(comment),
   ).length;
   const agent = sanitizeSessionSegment(verifier.agentId, "agent");
   const run = slot === "crossVerification" ? "x" : "v";
-  return `agent:${agent}:${verificationName(card, round.round)}-${run}${runs}`;
+  // A run that falls through to the next model gets a fresh session: `-f<n>` counts the models
+  // that failed before it, which only grows, so a crash before the record computes the same key.
+  const fallthrough = failedModels > 0 ? `-f${failedModels}` : "";
+  return `agent:${agent}:${verificationName(card, round.round)}-${run}${runs}${fallthrough}`;
 }
 
 export function verificationMessage(params: {
@@ -373,22 +378,30 @@ export async function checkoutDetachedWorktree(
   await git("worktree", "add", "--detach", worktreePath, headCommit);
 }
 
+/** Every model the verification could run on refused its session. */
+class VerificationModelsRefused extends Error {
+  constructor(readonly refusals: WorkboardVerificationModelFailure[]) {
+    super(refusals.map((refusal) => `${refusal.model}: ${refusal.error}`).join("; "));
+  }
+}
+
 async function createVerificationSession(params: {
   runtime: WorkboardNodeTicketRuntime;
   card: WorkboardCard;
   round: ImportedReviewRound;
-  verifier: WorkboardVerifierSettings;
+  agentId: string;
+  models: readonly string[];
   key: string;
   verifyPath: string;
   projectEnv: Record<string, string> | undefined;
-}): Promise<{ sessionKey: string; model: string }> {
-  const { card, round, verifier, key, verifyPath, projectEnv } = params;
+}): Promise<{ sessionKey: string; model: string; refusals: WorkboardVerificationModelFailure[] }> {
+  const { card, round, models, key, verifyPath, projectEnv } = params;
   const create = (model: string) =>
     params.runtime.request(
       "sessions.create",
       {
         key,
-        agentId: verifier.agentId,
+        agentId: params.agentId,
         model,
         // Binds the session's exec host to the node: its shell commands run in the verify worktree.
         execNode: round.target.nodeId,
@@ -403,23 +416,20 @@ async function createVerificationSession(params: {
   // whose run then fails to start stays on its model and ends the verification below. Accepted
   // edge: a transport failure after the Gateway committed the create also moves on to the next
   // model, which then takes over that session.
-  const models = [verifier.model, ...(verifier.fallbacks ?? [])];
-  const refusals: string[] = [];
+  const refusals: WorkboardVerificationModelFailure[] = [];
   let result: unknown;
-  let started = verifier.model;
+  let started: string | undefined;
   for (const model of models) {
     try {
       result = await create(model);
       started = model;
       break;
     } catch (error) {
-      refusals.push(
-        models.length > 1 ? `${model}: ${formatErrorMessage(error)}` : formatErrorMessage(error),
-      );
+      refusals.push({ model, error: formatErrorMessage(error) });
     }
   }
-  if (refusals.length === models.length) {
-    throw new Error(refusals.join("; "));
+  if (started === undefined) {
+    throw new VerificationModelsRefused(refusals);
   }
   const record = isRecord(result) ? result : {};
   if (record.runStarted === false) {
@@ -432,7 +442,64 @@ async function createVerificationSession(params: {
       typeof resolved.modelProvider === "string" && typeof resolved.model === "string"
         ? `${resolved.modelProvider}/${resolved.model}`
         : started,
+    refusals,
   };
+}
+
+/** The `error` a verification records when no configured model did its work. */
+function notRunResult(
+  failures: readonly WorkboardVerificationModelFailure[],
+): Pick<
+  Extract<WorkboardNodeVerification, { phase: "done" }>,
+  "verdict" | "summary" | "findings" | "notRun"
+> {
+  const list = failures.map((failure) => `${failure.model}: ${failure.error}`).join("; ");
+  return {
+    verdict: "error",
+    summary:
+      capText(
+        `Verification did not run: ${list}. Re-run it with workboard.cards.verify once a verifier model is available.`,
+        MAX_VERIFICATION_SUMMARY_CHARS,
+      ) ?? "",
+    findings: [],
+    notRun: true,
+  };
+}
+
+const TOOL_RESULT_ROLES = new Set(["toolResult", "tool", "tool_result"]);
+
+/**
+ * Why the verifier session's run failed before it did any work, or undefined
+ * when it did work or did not fail. Failed: the history's last reply is the
+ * run's failure notice (`openclawRunError`, written when the run ended on a
+ * provider or model error) or an assistant message that stopped on `error`.
+ * No work: no tool result anywhere in the history. A verification runs
+ * commands on the node from its first step, so a run that executed nothing
+ * never started the proof.
+ */
+function verifierRunFailure(messages: readonly unknown[]): string | undefined {
+  if (
+    messages.some((message) => isRecord(message) && TOOL_RESULT_ROLES.has(String(message.role)))
+  ) {
+    return undefined;
+  }
+  const last = messages.findLast(
+    (message) =>
+      isRecord(message) && (message.role === "assistant" || isRecord(message.openclawRunError)),
+  );
+  if (!isRecord(last)) {
+    return undefined;
+  }
+  const notice = isRecord(last.openclawRunError) ? last.openclawRunError.summary : undefined;
+  if (typeof notice === "string" && notice.trim()) {
+    return notice.trim();
+  }
+  if (last.role !== "assistant" || last.stopReason !== "error") {
+    return undefined;
+  }
+  const error =
+    typeof last.errorMessage === "string" ? last.errorMessage : lastAssistantReply([last]);
+  return error.trim() || "the model run failed";
 }
 
 function verificationComment(
@@ -464,6 +531,8 @@ type NodeVerificationParams = {
   runtime: WorkboardNodeTicketRuntime;
   readSessions: WorkboardLifecycleSessionReader | undefined;
   card: WorkboardCard;
+  /** The board's verifiers, read when a failed run falls through to the next model. */
+  verifiers: () => Promise<NodeVerifiers | undefined>;
   now: () => number;
   warn: (message: string) => void;
 };
@@ -532,17 +601,25 @@ async function finishNodeVerification(
 async function startNodeVerification(
   params: NodeVerificationParams,
   step: Extract<NodeVerificationStep, { kind: "start" }>,
+  fallthrough?: { startedAt: number; failedModels: WorkboardVerificationModelFailure[] },
 ): Promise<"running" | "done"> {
   const { card } = params;
   const { round, slot, verifier } = step;
-  const key = verificationSessionKey(card, round, slot, verifier);
+  const failedModels = fallthrough?.failedModels ?? [];
+  // Index-based: each failed model is one configured model, tried in order.
+  const models = [verifier.model, ...(verifier.fallbacks ?? [])].slice(failedModels.length);
+  const key = verificationSessionKey(card, round, slot, verifier, failedModels.length);
   const verifyPath = path.posix.join(
     round.target.worktreesRoot,
     verificationName(card, round.round),
   );
-  const startedAt = params.now();
+  const startedAt = fallthrough?.startedAt ?? params.now();
   const facts = { round: round.round, headCommit: round.handoff.headCommit, startedAt };
-  let session: { sessionKey: string; model?: string };
+  let session: {
+    sessionKey: string;
+    model?: string;
+    refusals?: WorkboardVerificationModelFailure[];
+  };
   let prepared = false;
   try {
     const existing = params.readSessions
@@ -564,13 +641,15 @@ async function startNodeVerification(
         runtime: params.runtime,
         card,
         round,
-        verifier,
+        agentId: verifier.agentId,
+        models,
         key,
         verifyPath,
         projectEnv: step.projectEnv,
       });
     }
   } catch (error) {
+    const refused = error instanceof VerificationModelsRefused;
     await finishNodeVerification(
       params,
       { ...round, slot },
@@ -578,15 +657,21 @@ async function startNodeVerification(
         phase: "done",
         ...facts,
         endedAt: params.now(),
-        model: verifier.model,
-        verdict: "error",
-        summary: `The verification could not start: ${formatErrorMessage(error)}`,
-        findings: [],
+        // A refusal of every model leaves the last one tried.
+        model: models.at(refused ? -1 : 0) ?? verifier.model,
+        ...(refused
+          ? notRunResult([...failedModels, ...error.refusals])
+          : {
+              verdict: "error" as const,
+              summary: `The verification could not start: ${formatErrorMessage(error)}`,
+              findings: [],
+            }),
       },
       prepared ? verifyPath : undefined,
     );
     return "done";
   }
+  const failed = [...failedModels, ...(session.refusals ?? [])];
   const recorded = await params.store.setNodeVerification(card.id, {
     worktreePath: round.worktree.path,
     slot,
@@ -595,7 +680,8 @@ async function startNodeVerification(
       ...facts,
       sessionKey: session.sessionKey,
       path: verifyPath,
-      model: session.model ?? verifier.model,
+      model: session.model ?? models[0] ?? verifier.model,
+      ...(failed.length > 0 ? { failedModels: failed } : {}),
     },
   });
   if (!recorded) {
@@ -609,7 +695,10 @@ async function startNodeVerification(
 /**
  * Settles a running verification once its session has no active run: its
  * last reply's block is the result, and a missing or invalid block is an
- * `error` verdict.
+ * `error` verdict. A run that failed before doing any work (see
+ * `verifierRunFailure`) starts a fresh session on the verifier's next
+ * configured model while the round still waits in review; with none left the
+ * record is a not-run `error` naming every model's failure.
  */
 async function settleNodeVerification(
   params: NodeVerificationParams,
@@ -628,11 +717,39 @@ async function settleNodeVerification(
     { scopes: ["operator.read"] },
   );
   const messages = isRecord(history) && Array.isArray(history.messages) ? history.messages : [];
+  const { path: verifyPath, failedModels = [], ...running } = verification;
+  const failure = verifierRunFailure(messages);
+  if (failure !== undefined) {
+    const failed = [
+      ...failedModels,
+      { model: verification.model ?? "unknown model", error: failure },
+    ];
+    const round = importedReviewRound(params.card);
+    const verifiers =
+      round?.round === verification.round && round.handoff.headCommit === verification.headCommit
+        ? await params.verifiers()
+        : undefined;
+    const verifier =
+      step.slot === "crossVerification" ? verifiers?.crossVerifier : verifiers?.verifier;
+    if (round && verifier && 1 + (verifier.fallbacks?.length ?? 0) > failed.length) {
+      return await startNodeVerification(
+        params,
+        { kind: "start", round, slot: step.slot, verifier, projectEnv: verifiers?.env },
+        { startedAt: verification.startedAt, failedModels: failed },
+      );
+    }
+    await finishNodeVerification(
+      params,
+      step,
+      { ...running, phase: "done", endedAt: params.now(), ...notRunResult(failed) },
+      verifyPath,
+    );
+    return "done";
+  }
   const reply = lastAssistantReply(messages);
   if (!reply.trim() && params.now() - verification.startedAt < VERIFICATION_START_GRACE_MS) {
     return "running";
   }
-  const { path: verifyPath, ...running } = verification;
   await finishNodeVerification(
     params,
     step,

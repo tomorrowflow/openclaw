@@ -12,6 +12,7 @@ import type {
   WorkboardNodeRework,
   WorkboardNodeVerification,
   WorkboardNodeWorktree,
+  WorkboardVerificationModelFailure,
   WorkboardVerificationVerdict,
 } from "@openclaw/workboard-contract";
 import { resolveOptionalIntegerOption } from "openclaw/plugin-sdk/number-runtime";
@@ -417,8 +418,20 @@ function normalizeNodeVerification(value: unknown): WorkboardNodeVerification | 
   const model = verificationModel(value.model);
   if (value.phase === "running") {
     const path = normalizeBoundedString(value.path, undefined, 2000, "node verification path");
+    const failedModels = Array.isArray(value.failedModels)
+      ? value.failedModels.flatMap(normalizeModelFailure)
+      : [];
     return sessionKey && path
-      ? { phase: "running", round, headCommit, startedAt, sessionKey, path, ...model }
+      ? {
+          phase: "running",
+          round,
+          headCommit,
+          startedAt,
+          sessionKey,
+          path,
+          ...model,
+          ...(failedModels.length > 0 ? { failedModels } : {}),
+        }
       : undefined;
   }
   const endedAt = resolveOptionalIntegerOption(value.endedAt, { min: 0 });
@@ -446,7 +459,22 @@ function normalizeNodeVerification(value: unknown): WorkboardNodeVerification | 
     findings: normalizeVerificationFindings(value.findings),
     ...(value.visual === undefined ? {} : { visual: normalizeNodeVisualRead(value.visual) }),
     ...(visualCheck ? { visualCheck } : {}),
+    ...(value.notRun === true ? { notRun: true as const } : {}),
   };
+}
+
+function normalizeModelFailure(value: unknown): WorkboardVerificationModelFailure[] {
+  if (!isRecord(value)) {
+    return [];
+  }
+  const { model } = verificationModel(value.model);
+  const error = normalizeBoundedString(
+    value.error,
+    undefined,
+    MAX_VERIFICATION_SUMMARY_CHARS,
+    "node verification model error",
+  );
+  return model && error ? [{ model, error }] : [];
 }
 
 function normalizeNodeReusedWorktree(value: unknown): WorkboardNodeReusedWorktree | undefined {

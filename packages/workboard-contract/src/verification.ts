@@ -7,8 +7,8 @@
 /**
  * The board's verifier: a session of `agentId` on `model` (`provider/model`).
  * `fallbacks`, tried in order, start the session when the Gateway refuses
- * `model` (for example while its account is in a rate-limit cooldown); the
- * verification records the model that ran.
+ * `model` (for example while its account is in a rate-limit cooldown) or its
+ * run fails before doing any work; the verification records the model that ran.
  * `sampleEvery`, allowed on the `crossVerifier` only, cross-verifies every
  * reworked rung c round and 1 in `sampleEvery` others, chosen by the card id
  * independently of the review sample; without it every rung c round is
@@ -55,6 +55,11 @@ export type WorkboardNodeVerification =
       /** The detached verify worktree on the node; removed when the run settles. */
       path: string;
       model?: string;
+      /**
+       * The configured models tried before `model` on this record, in order:
+       * refused at create, or whose run failed before it did any work.
+       */
+      failedModels?: WorkboardVerificationModelFailure[];
     }
   | {
       phase: "done";
@@ -76,7 +81,16 @@ export type WorkboardNodeVerification =
       visual?: WorkboardNodeVisualRead;
       /** The operator's own visual check of the round; recording it reveals `visual`. */
       visualCheck?: WorkboardNodeVisualCheck;
+      /**
+       * Set on an `error` when no configured model ran the verification: each
+       * was refused or failed before doing any work. Such a round is not
+       * decided until `workboard.cards.verify` re-runs it.
+       */
+      notRun?: true;
     };
+
+/** A verifier model that never did the verification's work, and why. */
+export type WorkboardVerificationModelFailure = { model: string; error: string };
 
 export type WorkboardVisualVerdict = "looks_right" | "problem";
 

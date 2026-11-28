@@ -129,7 +129,9 @@ export function redactOperatorCard(card: WorkboardCard): WorkboardOperatorCard {
  * drops the record before its comment is replaced), the verifier's part of
  * every visual check comment (the operator's verdict and note stay), and the
  * round's verification records. A round that runs at rung b or c is the
- * agent's to decide, so its finished verification results stay visible.
+ * agent's to decide, so its finished verification results stay visible. A
+ * verification that did not run carries no result, so its record and comment
+ * stay visible at every rung: the operator has to re-run it before deciding.
  */
 function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): WorkboardCard {
   const pending = undecidedImportedRound(card);
@@ -148,7 +150,7 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
       return record;
     }
     // A running record holds no result, and its session key is required.
-    if (rungA || record.phase === "running") {
+    if (record.phase === "running" || (rungA && !record.notRun)) {
       return undefined;
     }
     const { sessionKey: _session, ...blind } = record;
@@ -156,6 +158,10 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
   };
   const verification = blindRecord(worktree.verification);
   const crossVerification = blindRecord(worktree.crossVerification);
+  // The comment a not-run record posted comes after the record started.
+  const notRunSince = [verification, crossVerification].flatMap((record) =>
+    record?.phase === "done" && record.notRun ? [record.startedAt] : [],
+  );
   const hiddenBody = (comment: WorkboardComment): string | undefined => {
     if (comment.createdAt < handoff.importedAt) {
       return undefined;
@@ -167,7 +173,9 @@ function hidePendingVerdicts(redacted: WorkboardCard, card: WorkboardCard): Work
       return undefined;
     }
     if (isVerificationComment(comment)) {
-      return HIDDEN_VERIFICATION_NOTICE;
+      return notRunSince.some((since) => comment.createdAt >= since)
+        ? undefined
+        : HIDDEN_VERIFICATION_NOTICE;
     }
     return isVisualCheckComment(comment) ? blindVisualCheckComment(comment.body) : undefined;
   };

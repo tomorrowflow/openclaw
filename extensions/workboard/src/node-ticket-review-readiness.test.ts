@@ -63,15 +63,19 @@ async function importedTicket(params: { verify?: boolean; hostRepo?: boolean } =
     token: claim.token,
     status: "review",
   });
-  const settleVerification = async (verdict: "pass" | "fail" = "pass", startedAt = Date.now()) => {
+  const settleVerification = async (
+    verdict: "pass" | "fail" | "notRun" = "pass",
+    startedAt = Date.now(),
+  ) => {
     const verification: WorkboardNodeVerification = {
       phase: "done",
       round: 0,
       headCommit,
       startedAt,
       endedAt: Date.now(),
-      verdict,
-      summary: "checked",
+      ...(verdict === "notRun"
+        ? { verdict: "error", summary: "Verification did not run: m: 429", notRun: true }
+        : { verdict, summary: "checked" }),
       findings: [],
     };
     await store.setNodeVerification(card.id, { worktreePath: worktree.path, verification });
@@ -100,6 +104,24 @@ describe("imported round readiness", () => {
     expect((await store.get(card.id))?.status).toBe("review");
 
     await postVerdict(store, card.id);
+    await expect(store.move(card.id, "done", undefined)).resolves.toMatchObject({ status: "done" });
+  });
+
+  it("refuses the operator's accept of a round whose verification did not run until a re-run finishes", async () => {
+    const { store, card, settleVerification } = await importedTicket({ verify: true });
+    await settleVerification("notRun");
+    await postVerdict(store, card.id);
+
+    await expect(store.move(card.id, "done", undefined)).rejects.toThrow(
+      "Re-run it with workboard.cards.verify once a verifier model is available",
+    );
+    // Past the readiness deadline too: nothing verified the round.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + REVIEW_READINESS_DEADLINE_MS });
+    await expect(store.move(card.id, "done", undefined)).rejects.toThrow("did not run");
+    expect((await store.get(card.id))?.status).toBe("review");
+
+    await store.dropNodeVerification(card.id);
+    await settleVerification("fail");
     await expect(store.move(card.id, "done", undefined)).resolves.toMatchObject({ status: "done" });
   });
 

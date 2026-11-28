@@ -436,6 +436,26 @@ describe("redactOperatorCard", () => {
     ).toEqual(done);
   });
 
+  it("shows a rung a round's verification that did not run, which carries no result", () => {
+    const summary = "Verification did not run: openai/gpt-6-sol: 429 weekly usage limit.";
+    const card = visualCard({ verdict: "error", summary, notRun: true });
+    const body = `**Verification:** error (openai/gpt-6-sol)\n\n${summary}`;
+    const redacted = redactOperatorCard({
+      ...card,
+      metadata: {
+        ...card.metadata,
+        comments: [{ id: "v", body, createdAt: 12, source: "agent:verifier" }],
+      },
+    });
+
+    expect(redacted.metadata?.comments?.map((comment) => comment.body)).toEqual([body]);
+    expect(redacted.metadata?.automation?.target?.worktree?.verification).toMatchObject({
+      verdict: "error",
+      notRun: true,
+      summary,
+    });
+  });
+
   it("derives the visual check at every rung and shows the visual read only once checked", () => {
     const visual = { verdict: "looks_right" as const, screenshots: [] };
     const check = { verdict: "problem" as const, note: "Record button grey in dark mode", at: 30 };

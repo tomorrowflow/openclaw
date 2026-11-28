@@ -557,6 +557,7 @@ export function createNodeTicketHandoffs(params: {
           runtime: params.runtime,
           readSessions: params.readSessions,
           card: current,
+          verifiers: readVerifiers,
           now,
           warn,
         },

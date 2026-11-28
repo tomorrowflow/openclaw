@@ -121,6 +121,17 @@ export function currentNodeVerification(
     : undefined;
 }
 
+/** Whether the imported round's verification or cross-verification finished without running. */
+export function verificationNotRun(
+  worktree: WorkboardNodeWorktree,
+  handoff: ImportedHandoff,
+): boolean {
+  return (["verification", "crossVerification"] as const).some((slot) => {
+    const record = currentNodeVerification(worktree, handoff, slot);
+    return record?.phase === "done" && record.notRun === true;
+  });
+}
+
 /**
  * The imported round that waits for the operator's decision, whose review
  * stays blind on operator reads. Undefined once the operator decided it by
