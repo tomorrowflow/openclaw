@@ -115,6 +115,14 @@ Only its child opens state databases, so the supervisor does not hold them open
 while the child publishes a startup migration. No launcher format change is
 needed.
 
+Read-only config inputs and inputs below retained dependency-directory symlinks
+are copied into independent private files without changing their live permissions
+or contents. If a changed config cannot be published safely, including a
+single-file mount or a path omitted by the swap under a symlinked directory,
+startup refuses before publishing the database plan and leaves live state unchanged.
+Run `openclaw doctor --fix` before retrying; a single-file mount must also allow
+the config replacement.
+
 During copy-and-swap upgrades, Doctor records carried-over scheduled jobs against
 credential databases at their eventual live paths. Reads and repairs remain on
 the private copy. The updater passes this destination directly to Doctor; no
@@ -537,6 +545,22 @@ that belongs to another update. Update history records rollback, success with
 recovery, or an actionable failure. Lost ownership, named data risk, and
 unverifiable runtime identity still keep the Gateway stopped. The helper that starts the update must contain this
 change; staging a newer candidate cannot repair an older helper.
+
+Only an explicit `--timeout` bounds the migrated finalizer process; without
+one, finalization keeps running until it finishes. The waiting updater joins the
+worker's process tree before returning control to the managed helper. A
+finalizer stopped at that deadline, a killed waiting updater, and a killed
+worker all enter the same interrupted recovery that `openclaw update repair`
+runs: the helper waits for the worker's lease to settle, then either
+finishes the published candidate or keeps the previous installation, starts the
+Gateway, and verifies it. Recovery requires a successful health RPC and the
+expected version and build from the same authenticated connection; HTTP readiness
+or a recorded recovery result alone is not proof that the Gateway serves.
+Existing data-risk and process-ownership refusals still apply. The installed
+updater and its managed helper must contain these changes. A candidate installed
+by an older helper cannot retrofit its waiting parent or helper. Release-launcher
+trials have their own restart and rollback deadline and do not use the migrated
+finalizer.
 
 During overlapping Gateway restarts, config recovery reads health facts through
 the same isolated read-only transaction used for startup plugin metadata while

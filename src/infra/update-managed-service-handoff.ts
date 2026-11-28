@@ -16,6 +16,7 @@ import {
   isGatewayRestartDraining,
 } from "../process/gateway-work-admission.js";
 import { isPidAlive } from "../shared/pid-alive.js";
+import { UPDATE_ACTIVATION_TIMEOUT_REASON } from "../shared/update-outcome.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { readActiveGatewayLockIdentity } from "./gateway-lock.js";
 import { readGatewayOwnerLeaseAsync } from "./gateway-owner-lease.js";
@@ -32,7 +33,7 @@ import {
   type ControlPlaneUpdateSentinelMetaFile,
 } from "./update-control-plane-sentinel.js";
 import { applyDevUpdateTargetEnv } from "./update-dev-target.js";
-import { verifyPackageUpdateRecovery } from "./update-global.js";
+import { resolvePnpmGlobalInstallOwner, verifyPackageUpdateRecovery } from "./update-global.js";
 import { resolveUpdateInstallRoot } from "./update-install-root.js";
 import { MANAGED_SERVICE_UPDATE_HANDOFF_TEMP_PREFIX } from "./update-managed-service-handoff-cleanup.js";
 import { MANAGED_HANDOFF_COMMAND_SOURCE } from "./update-managed-service-handoff-command-source.js";
@@ -747,7 +748,11 @@ async function collectUpdateFailureTriage() {
     // Success may change install roots; only recovery requires the original root.
     // Sentinels and diagnostic exports never authorize activation.
     const result = outputOverflow ? null : parseManagedUpdateResult(updaterOutput);
-    if ((exit.signal || !result) && shouldRecoverInterruptedUpdater()) {
+    // A finalizer stopped at its deadline leaves recovery pending for this helper, like a
+    // killed updater; the same verified recovery restores service without a manual repair.
+    const finalizerTimedOut = !exit.signal && result?.status === "error" &&
+      result.reason === ${JSON.stringify(UPDATE_ACTIVATION_TIMEOUT_REASON)} && !result.recovery?.dataAtRisk;
+    if ((exit.signal || !result || finalizerTimedOut) && shouldRecoverInterruptedUpdater()) {
       await recoverInterruptedUpdater();
       return;
     }
@@ -1077,6 +1082,13 @@ async function spawnManagedServiceUpdateHandoff(
       ? readCurrentGitUpdateRecovery(rootIdentity, owner.recoveryTimeoutMs)
       : verifyPackageUpdateRecovery(rootIdentity)),
     recoveryModulePath: path.join(rootIdentity, "dist", "cli", "daemon-cli.js"),
+    // pnpm replaces this versioned root on install; interrupted recovery follows the
+    // stable package link to the generation the service runs.
+    installLink: await resolvePnpmGlobalInstallOwner(rootIdentity).then(
+      (installation) =>
+        installation?.packageRoot === rootIdentity ? undefined : installation?.packageRoot,
+      () => undefined,
+    ),
   };
 
   let child!: HandoffChild;

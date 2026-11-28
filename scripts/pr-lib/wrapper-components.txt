@@ -1251,6 +1251,7 @@ src/infra/runtime-process-script-file.ts
 src/infra/runtime-process-url.ts
 src/infra/runtime-profile.ts
 src/infra/runtime-worker-generation.ts
+src/infra/runtime-worker-process-generation.ts
 src/infra/runtime-worker-url.ts
 src/infra/safe-cwd.ts
 src/infra/sealed-runtime-registry.ts
@@ -1481,6 +1482,7 @@ src/infra/update-run-admission.types.ts
 src/infra/update-run-admission.ts
 src/infra/update-run-cause.ts
 src/infra/update-run-codec.ts
+src/infra/update-run-omission.ts
 src/infra/update-run-owed-step.ts
 src/infra/update-run-gateway-stop.ts
 src/infra/update-run-legacy-expiry.ts
@@ -2180,6 +2182,7 @@ src/state/openclaw-agent-execution-owner.ts
 src/state/openclaw-agent-execution-preparation.ts
 src/state/openclaw-agent-execution-scope.ts
 src/state/openclaw-agent-execution.ts
+src/state/openclaw-agent-fts-schema.ts
 src/state/openclaw-agent-goal-operations-schema.ts
 src/state/openclaw-agent-json-predicate-schema.ts
 src/state/openclaw-agent-active-event-facts-schema.ts

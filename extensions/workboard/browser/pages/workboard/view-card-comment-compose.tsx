@@ -45,7 +45,6 @@ export function CardCommentCompose(
         class="settings-input workboard-detail__note"
         aria-label={t("workboard.detailOperatorNotes")}
         rows="2"
-        maxlength="8000"
         placeholder={t("workboard.detailNotePlaceholder")}
         ref={noteValue}
         disabled={props.busy}

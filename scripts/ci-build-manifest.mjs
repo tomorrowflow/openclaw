@@ -1159,7 +1159,9 @@ const postgresConformancePaths = [
   "src/gateway/server-methods/cron-add.ts",
   "src/gateway/server-methods/cron-run.ts",
   "src/infra/gateway-lock.ts",
+  "src/infra/gateway-lock-payload.ts",
   "src/infra/gateway-lock-recovery*.ts",
+  "src/infra/gateway-owner-lease*.ts",
   "src/infra/gateway-postgres-*.ts",
   "src/cli/gateway-cli/run.ts",
   "src/commands/*preflight*.ts",
@@ -2227,7 +2229,7 @@ if (hybridHostedEligible) {
     "check-docs": count(manifest.run_check_docs),
     "postgres-conformance": count(
       manifest.run_postgres_conformance,
-      workflowEventName === "pull_request" ? 5 : 4,
+      workflowEventName === "pull_request" ? 7 : 6,
     ),
     "skills-python": count(manifest.run_skills_python_job),
     "checks-windows": count(
