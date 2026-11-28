@@ -232,9 +232,7 @@ CREATE TABLE "workboard_start_requests" (
   "requested_at" bigint NOT NULL,
   "wait_kind" text COLLATE "C",
   "wait_until" bigint,
-  "coalesced_count" bigint NOT NULL DEFAULT 0,
   "claimed_at" bigint,
-  "claimed_run_id" text COLLATE "C",
   "closed_at" bigint,
   PRIMARY KEY ("id")
 );

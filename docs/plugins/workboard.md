@@ -1962,10 +1962,11 @@ moving the card back does not restore it; start it again to requeue. A closed
 row stays as `claimed` or `cancelled`; the table keeps the last 20 closed rows
 of each card.
 
-The first open of the database after an update moves each request stored in
-the earlier `metadata.automation.startRequest` field to an open row and
-removes the field. A moved request has the source `migrated`, or
-`usage_limit_retry` when it named a reset.
+The table arrived with Workboard schema 5. The first open of an earlier
+database moves each request stored in the `metadata.automation.startRequest`
+field to an open row and removes the field. A moved request has the source
+`migrated`, or `usage_limit_retry` when it named a reset. See
+[Storage](#storage) for what a rollback does to queued starts.
 
 #### Probes
 
@@ -2425,6 +2426,16 @@ an absent kind still means a Cards board. Rolling back to a release without Sess
 boards shows each Sessions board as an empty Cards board and ignores the placement
 table; cards created against it there are rejected once the newer release runs again. Session transcripts and the Board agent
 conversation remain in the normal session store.
+
+Workboard schema 5 adds the `workboard_start_requests` table and moves queued
+node ticket starts into it when an earlier database opens. A PostgreSQL store
+upgrades through its registered version 5 migration, and an earlier release
+refuses a version 5 PostgreSQL store. An earlier release opens a version 5
+SQLite database without an error but does not read the table: tickets that
+were queued are no longer queued there, and a start queued there is not
+carried forward. Start those tickets again after a rollback. When the newer
+release runs again, it cancels a queued start whose card left `todo` and
+`ready` in the meantime.
 
 SQLite opening, queries, and transactions run in a background database worker.
 Disabling or reloading the plugin drains admitted storage work before closing

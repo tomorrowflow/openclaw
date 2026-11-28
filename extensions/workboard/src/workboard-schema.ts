@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const WORKBOARD_SCHEMA_SQL = `
     CREATE TABLE IF NOT EXISTS workboard_schema_migrations (
@@ -123,9 +123,7 @@ export const WORKBOARD_SCHEMA_SQL = `
       requested_at INTEGER NOT NULL,
       wait_kind TEXT,
       wait_until INTEGER,
-      coalesced_count INTEGER NOT NULL DEFAULT 0,
       claimed_at INTEGER,
-      claimed_run_id TEXT,
       closed_at INTEGER
     ) STRICT;
     CREATE UNIQUE INDEX IF NOT EXISTS workboard_start_requests_open_idx

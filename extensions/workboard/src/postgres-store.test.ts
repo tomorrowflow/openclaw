@@ -326,6 +326,90 @@ describe.skipIf(!postgresUrl)("experimental PostgreSQL workboard admission and r
     expect(await indexRows()).toEqual(after);
   });
 
+  it("upgrades version 4: adds the start request table and moves JSON start requests to rows", async () => {
+    const dbPath = databasePath();
+    const schema = withEngineStoreAdmission(() => {
+      using anchor = new DatabaseSync(dbPath);
+      const db = openEngineStore({
+        anchor,
+        input: postgresInput,
+        schema: {
+          ...workboardEngineSchema,
+          ...workboardEngineSchema.postgresMigrations![1]!.fromSchema,
+          version: 4,
+        },
+        prepareAnchor: () => {},
+        inspectSqlite: () => ({ hasEngineAnchor: false, hasExistingData: false }),
+        openSqlite: () => {},
+      });
+      try {
+        const insertCard = db.prepare(
+          `INSERT INTO workboard_cards
+             (id, board_id, title, status, priority, position, created_at, updated_at, automation_json)
+           VALUES (?, 'default', ?, 'todo', 'normal', 1, 1, 2, ?)`,
+        );
+        insertCard.run(
+          "queued",
+          "Queued",
+          '{"boardId":"default","startRequest":{"requestedAt":40}}',
+        );
+        insertCard.run(
+          "limited",
+          "Limited",
+          '{"startRequest":{"requestedAt":50,"usageLimitResetsAt":90}}',
+        );
+        insertCard.run("plain", "Plain", '{"boardId":"default"}');
+        return String(anchor.prepare("SELECT schema FROM openclaw_engine_anchor").get()?.schema);
+      } finally {
+        db.close();
+      }
+    });
+    schemas.add(schema);
+
+    const upgraded = await openDatabase(dbPath);
+    await upgraded.close();
+
+    const namespace = quoteIdentifier(schema);
+    expect(
+      await rows(
+        `SELECT card_id, source, status, requested_at::integer, wait_kind, wait_until::integer, closed_at
+         FROM ${namespace}.workboard_start_requests ORDER BY requested_at`,
+      ),
+    ).toEqual([
+      {
+        card_id: "queued",
+        source: "migrated",
+        status: "open",
+        requested_at: 40,
+        wait_kind: null,
+        wait_until: null,
+        closed_at: null,
+      },
+      {
+        card_id: "limited",
+        source: "usage_limit_retry",
+        status: "open",
+        requested_at: 50,
+        wait_kind: "usage_limit",
+        wait_until: 90,
+        closed_at: null,
+      },
+    ]);
+    expect(
+      await rows(
+        `SELECT id, automation_json::jsonb AS automation FROM ${namespace}.workboard_cards ORDER BY id`,
+      ),
+    ).toEqual([
+      { id: "limited", automation: null },
+      { id: "plain", automation: { boardId: "default" } },
+      { id: "queued", automation: { boardId: "default" } },
+    ]);
+    expect(await rows(`SELECT version::integer FROM ${namespace}.openclaw_schema_meta`)).toEqual([
+      { version: SCHEMA_VERSION },
+    ]);
+    await (await openDatabase(dbPath)).close();
+  });
+
   it("refuses a PostgreSQL schema version mismatch without migrating it", async () => {
     const dbPath = databasePath();
     const opened = await openDatabase(dbPath);

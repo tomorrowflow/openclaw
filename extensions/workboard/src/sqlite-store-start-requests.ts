@@ -11,7 +11,6 @@ import {
   iterateSqliteQuerySync,
   runSqliteImmediateTransactionSync,
   sqliteStringSet,
-  type Generated,
 } from "openclaw/plugin-sdk/sqlite-worker-runtime";
 import { definedFields } from "../record-fields.js";
 import type { WorkboardSqlConnection } from "./sqlite-store-schema.js";
@@ -32,9 +31,7 @@ type StartRequestRow = {
   /** What the request waits on. Only a usage limit records it so far. */
   wait_kind: "usage_limit" | null;
   wait_until: number | null;
-  coalesced_count: Generated<number>;
   claimed_at: number | null;
-  claimed_run_id: string | null;
   closed_at: number | null;
 };
 type StartRequestDatabase = { workboard_start_requests: StartRequestRow };
@@ -135,18 +132,29 @@ export function syncStartRequest(db: WorkboardSqlConnection, card: WorkboardCard
 }
 
 /**
- * Before the table, a queued start was `startRequest` inside a card's
- * `automation_json`. Each becomes the card's live row once, and the JSON
- * loses the field. A request that named a usage-limit reset came from a
- * usage-limit retry; any other one recorded no source.
+ * Closes the open row of every card that cannot hold a queued start. Card
+ * writes keep rows and cards in line, so only a build from before the table
+ * leaves such a row: it ignores the table while it runs and finishes cards.
+ * Left open, the row would queue a done card again.
+ */
+export function cancelStaleStartRequests(db: DatabaseSync): void {
+  db.prepare(
+    `UPDATE workboard_start_requests SET status = 'cancelled', closed_at = ?
+     WHERE closed_at IS NULL AND EXISTS (
+       SELECT 1 FROM workboard_cards AS card
+       WHERE card.id = workboard_start_requests.card_id
+         AND (card.status NOT IN ('todo', 'ready') OR card.archived_at IS NOT NULL)
+     )`,
+  ).run(Date.now());
+}
+
+/**
+ * Before schema 5, a queued start was `startRequest` inside a card's
+ * `automation_json`. Each becomes the card's live row, and the JSON loses the
+ * field. A request that named a usage-limit reset came from a usage-limit
+ * retry; any other one recorded no source.
  */
 export function migrateStartRequestsFromAutomationJson(db: DatabaseSync): void {
-  const migrationId = "start-requests-from-automation-json";
-  if (
-    db.prepare("SELECT 1 AS found FROM workboard_schema_migrations WHERE id = ?").get(migrationId)
-  ) {
-    return;
-  }
   const timestamp = (value: unknown) =>
     typeof value === "number" && Number.isFinite(value) && value >= 0
       ? Math.trunc(value)
@@ -186,8 +194,5 @@ export function migrateStartRequestsFromAutomationJson(db: DatabaseSync): void {
       }
       strip.run(Object.keys(rest).length ? JSON.stringify(rest) : null, String(card.id));
     }
-    db.prepare(
-      "INSERT OR IGNORE INTO workboard_schema_migrations (id, applied_at) VALUES (?, ?)",
-    ).run(migrationId, Date.now());
   });
 }
