@@ -705,7 +705,7 @@ describe("node ticket verification", () => {
     });
   });
 
-  it("names every refused model when no configured model can start", async () => {
+  it("records a not-run error naming every refused model when no configured model can start", async () => {
     const ticket = await verifiedTicket({
       fallbacks: ["ollama/kimi-k3:cloud"],
       refuse: ["openai/gpt-6-sol", "ollama/kimi-k3:cloud"],
@@ -716,9 +716,100 @@ describe("node ticket verification", () => {
     await expect(ticket.verificationOf()).resolves.toMatchObject({
       phase: "done",
       verdict: "error",
+      notRun: true,
       summary:
-        "The verification could not start: openai/gpt-6-sol: openai/gpt-6-sol is temporarily unavailable; ollama/kimi-k3:cloud: ollama/kimi-k3:cloud is temporarily unavailable",
+        "Verification did not run: openai/gpt-6-sol: openai/gpt-6-sol is temporarily unavailable; ollama/kimi-k3:cloud: ollama/kimi-k3:cloud is temporarily unavailable. Re-run it with workboard.cards.verify once a verifier model is available.",
     });
+  });
+
+  it("moves on to the next model when the verifier's run fails before doing any work", async () => {
+    const ticket = await verifiedTicket({ fallbacks: ["ollama/glm-5.3:cloud"] });
+    const { card, handoffs, warn, onReview, verifier } = ticket;
+    const key = `agent:verifier:verify-${card.id.slice(0, 8)}-r0-v0`;
+    await handoffs.resume(warn);
+
+    // The incident: the first model call returned a 429 and the run ended with no tool call.
+    verifier.running = false;
+    verifier.history = [
+      { role: "user", content: "Verify this" },
+      {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: '429 {"error":"you have reached your weekly usage limit"}',
+      },
+    ];
+    await handoffs.resume(warn);
+
+    expect(onReview).not.toHaveBeenCalled();
+    expect(verifier.creates).toEqual([
+      expect.objectContaining({ key, model: "openai/gpt-6-sol" }),
+      expect.objectContaining({ key: `${key}-f1`, model: "ollama/glm-5.3:cloud" }),
+    ]);
+    await expect(ticket.verificationOf()).resolves.toMatchObject({
+      phase: "running",
+      sessionKey: `${key}-f1`,
+      model: "ollama/glm-5.3:cloud",
+      failedModels: [
+        {
+          model: "openai/gpt-6-sol",
+          error: '429 {"error":"you have reached your weekly usage limit"}',
+        },
+      ],
+    });
+
+    verifier.running = false;
+    verifier.history = [
+      { role: "user", content: "Verify this" },
+      { role: "toolResult", toolName: "exec", content: [{ type: "text", text: "3 passed" }] },
+      ...verificationReply({ verdict: "pass", summary: "pytest passed" }).slice(1),
+    ];
+    await handoffs.resume(warn);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(onReview).toHaveBeenCalledOnce();
+    const done = await ticket.verificationOf();
+    expect(done).toMatchObject({ phase: "done", verdict: "pass", model: "ollama/glm-5.3:cloud" });
+    expect(done).not.toHaveProperty("notRun");
+  });
+
+  it("records a not-run error when every model's run fails before doing any work", async () => {
+    const ticket = await verifiedTicket({ fallbacks: ["ollama/glm-5.3:cloud"] });
+    const { store, card, handoffs, warn, onReview, verifier } = ticket;
+    await handoffs.resume(warn);
+    verifier.running = false;
+    verifier.history = [
+      { role: "user", content: "Verify this" },
+      { role: "assistant", content: [], stopReason: "error", errorMessage: "rate limited" },
+    ];
+    await handoffs.resume(warn);
+
+    // The run failure notice the Gateway writes when a run ends on a provider error.
+    verifier.running = false;
+    verifier.history = [
+      { role: "user", content: "Verify this" },
+      {
+        role: "custom",
+        customType: "run-failed-before-reply",
+        content: "weekly usage limit",
+        openclawRunError: { runId: "run-verify", summary: "429 weekly usage limit" },
+      },
+    ];
+    await handoffs.resume(warn);
+
+    expect(verifier.creates).toHaveLength(2);
+    expect(onReview).toHaveBeenCalledOnce();
+    await expect(ticket.verificationOf()).resolves.toMatchObject({
+      phase: "done",
+      verdict: "error",
+      notRun: true,
+      model: "ollama/glm-5.3:cloud",
+      summary:
+        "Verification did not run: openai/gpt-6-sol: rate limited; ollama/glm-5.3:cloud: 429 weekly usage limit. Re-run it with workboard.cards.verify once a verifier model is available.",
+    });
+    expect((await store.get(card.id))?.metadata?.comments?.at(-1)?.body).toContain(
+      "**Verification:** error (ollama/glm-5.3:cloud)\n\nVerification did not run:",
+    );
   });
 });
 

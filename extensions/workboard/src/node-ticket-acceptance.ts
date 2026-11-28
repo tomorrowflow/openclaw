@@ -18,6 +18,7 @@ import {
   type ImportedHandoff,
   importedReworkRefusal,
   nodeReviewReadiness,
+  verificationNotRun,
   reviewVerdictOf,
   type VerificationSlot,
 } from "./review-readiness.js";
@@ -100,6 +101,11 @@ function requirePassedVerification(
   if (verification.verdict === "fail") {
     throw new Error(
       `The ${name} failed: ${verification.summary || "see its comment"}. Post \`Verdict: rework: …\` and rework it.`,
+    );
+  }
+  if (verification.notRun) {
+    throw new Error(
+      `The ${name} did not run (${verification.summary}). Leave the card in review; the operator re-runs it.`,
     );
   }
   if (verification.verdict === "error") {
@@ -202,6 +208,12 @@ export async function withImportedNodeTicketMove(params: {
   if (readiness?.kind === "reviewing") {
     throw new Error(
       "The board automation hasn't posted its verdict on this round yet; wait for its comment before deciding.",
+    );
+  }
+  // Accepting a round nothing verified would merge it unchecked; reworking it needs no verification.
+  if (readiness && !rework && verificationNotRun(worktree, worktree.handoff)) {
+    throw new Error(
+      "This round's verification did not run: no verifier model could do its work. Re-run it with workboard.cards.verify once a verifier model is available, then decide.",
     );
   }
   const handoff = nodeTicketAcceptance({
