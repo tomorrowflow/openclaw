@@ -7,6 +7,7 @@ import type {
   WorkboardNodeHandoff,
   WorkboardNodePreview,
   WorkboardNodeQuestions,
+  WorkboardNodeReusedWorktree,
   WorkboardNodeReviewVerdict,
   WorkboardNodeRework,
   WorkboardNodeVerification,
@@ -448,6 +449,27 @@ function normalizeNodeVerification(value: unknown): WorkboardNodeVerification | 
   };
 }
 
+function normalizeNodeReusedWorktree(value: unknown): WorkboardNodeReusedWorktree | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.headCommit !== "string" ||
+    !Array.isArray(value.dirtyPaths)
+  ) {
+    return undefined;
+  }
+  const commitsSinceBase = resolveOptionalIntegerOption(value.commitsSinceBase, { min: 0 });
+  const dirtyCount = resolveOptionalIntegerOption(value.dirtyCount, { min: 0 });
+  if (commitsSinceBase === undefined || dirtyCount === undefined) {
+    return undefined;
+  }
+  return {
+    headCommit: value.headCommit,
+    commitsSinceBase,
+    dirtyPaths: value.dirtyPaths.filter((entry): entry is string => typeof entry === "string"),
+    dirtyCount,
+  };
+}
+
 function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -471,6 +493,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
   const crossVerification = normalizeNodeVerification(value.crossVerification);
   const stopRequestedAt = resolveOptionalIntegerOption(value.stopRequestedAt, { min: 0 });
   const preview = normalizeNodePreview(value.preview);
+  const reusedFrom = normalizeNodeReusedWorktree(value.reusedFrom);
   return worktreePath && branch && baseCommit
     ? {
         path: worktreePath,
@@ -488,6 +511,7 @@ function normalizeNodeWorktree(value: unknown): WorkboardNodeWorktree | undefine
         ...(value.rung === "b" || value.rung === "c" ? { rung: value.rung } : {}),
         ...(stopRequestedAt !== undefined ? { stopRequestedAt } : {}),
         ...(preview ? { preview } : {}),
+        ...(reusedFrom ? { reusedFrom } : {}),
       }
     : undefined;
 }

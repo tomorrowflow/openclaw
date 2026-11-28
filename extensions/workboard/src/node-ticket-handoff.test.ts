@@ -397,7 +397,7 @@ describe("node ticket questions", () => {
 
     expect(message).toContain("## Answers to your questions");
     expect(message).toContain("Return [].");
-    expect(message?.split("## Turn contract")[0]).not.toContain("node went offline");
+    expect(message?.split("## Previous attempt")[0]).not.toContain("node went offline");
     expect((await store.get(card.id))?.metadata?.automation?.target?.worktree?.questions).toEqual({
       rounds: 1,
       operatorAnswers: 0,
