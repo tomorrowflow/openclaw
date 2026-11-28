@@ -81,16 +81,25 @@ export function nodeTicketStartRequestPatch(
  * The nodes whose login hit a provider usage limit, each with when it
  * resets, read from the queued tickets that carry that reset. Nothing starts
  * on such a node until then, since every run there would fail the same way.
+ * A released ticket's agent has another account the Gateway runs its next
+ * turn on, so its limit holds nothing.
  */
 export function nodeTicketUsageLimits(
   cards: readonly WorkboardCard[],
   now: number,
+  released: ReadonlySet<string> = new Set(),
 ): Map<string, number> {
   const limits = new Map<string, number>();
   for (const card of cards) {
     const resetsAt = card.startRequest?.usageLimitResetsAt;
     const nodeId = nodeTicketTarget(card)?.nodeId;
-    if (nodeId && resetsAt !== undefined && resetsAt > now && !card.metadata?.archivedAt) {
+    if (
+      nodeId &&
+      resetsAt !== undefined &&
+      resetsAt > now &&
+      !card.metadata?.archivedAt &&
+      !released.has(card.id)
+    ) {
       limits.set(nodeId, Math.max(resetsAt, limits.get(nodeId) ?? 0));
     }
   }

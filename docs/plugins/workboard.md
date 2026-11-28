@@ -1948,6 +1948,12 @@ scheduled pass leaves them in `ready`, and the operator's **Start** queues with
 a comment naming the reset. Tickets on other nodes keep starting, but a
 multi-node route waits while the node it would place on is paused. The lifecycle sweep
 runs every minute, so the queue starts again within a minute after the reset.
+The hold applies only while the ticket's agent has no other Claude account to
+run on. A usage limit puts the Gateway account that hit it in cooldown, so when
+the agent's account order (`openclaw models auth order set --agent <id>
+--provider anthropic ...`) lists another account outside cooldown, the queued
+ticket starts on the next pass and the Gateway runs it on that account. With
+two subscriptions in the order, a node pauses only once both are limited.
 Any other failed run blocks its card with the run's error as the comment.
 
 The request is a row in the Workboard database's `workboard_start_requests`
