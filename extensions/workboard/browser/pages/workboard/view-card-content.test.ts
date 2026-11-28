@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { loadMessages } from "../../i18n/locales.ts";
 import { normalizeCardsPayload } from "../../lib/workboard/normalization.ts";
 import { createWorkboardCard } from "../../lib/workboard/test/index-helpers.ts";
+import type { WorkboardCard } from "../../lib/workboard/types.ts";
 import { workboardTestHost } from "../../test/host.setup.ts";
 import { CardMeta, CardPullRequest, CardStage } from "./view-card-content.tsx";
 
@@ -164,17 +165,16 @@ it("shows a queued card's chip in the tile meta, which is visible without hover"
     worktreesRoot: "/Users/factory/worktrees",
     hostRepoPath: "/home/openclaw/repos/app",
   } as const;
-  const meta = (startRequest?: { requestedAt: number }) => {
-    const automation = { target, ...(startRequest ? { startRequest } : {}) };
+  const meta = (startRequest?: WorkboardCard["startRequest"]) => {
     const container = mount(CardMeta, {
-      card: createWorkboardCard({ metadata: { automation } }),
+      card: createWorkboardCard({ metadata: { automation: { target } }, startRequest }),
       archived: false,
     });
     return container.querySelector(".workboard-card__meta .workboard-card__queued");
   };
 
   expect(meta()).toBeNull();
-  expect(meta({ requestedAt: 1 })?.textContent?.trim()).toBe("Queued");
+  expect(meta({ requestedAt: 1, source: "operator" })?.textContent?.trim()).toBe("Queued");
 });
 
 it("links a card's draft PR by its number, and renders nothing before a PR exists", () => {

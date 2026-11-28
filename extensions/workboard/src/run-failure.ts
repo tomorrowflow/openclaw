@@ -49,7 +49,7 @@ export function runFailurePatch(
     failure.kind === "usage_limit" && nodeId && isWorkboardNodeTicket(card)
       ? nodeTicketStartRequestPatch(
           { ...card, status: "todo", metadata: { ...card.metadata, claim: undefined } },
-          { requestedAt: now, usageLimitResetsAt: failure.resetsAt },
+          { requestedAt: now, source: "usage_limit_retry", usageLimitResetsAt: failure.resetsAt },
           () =>
             `The model login on node ${nodeId} hit its usage limit (${failure.message}). This ticket is queued again and starts after the reset at ${formatUsageLimitReset(failure.resetsAt)}; until then nothing else starts on that node.`,
           now,

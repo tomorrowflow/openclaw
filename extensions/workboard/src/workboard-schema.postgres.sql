@@ -224,6 +224,19 @@ CREATE TABLE "workboard_session_placements" (
   CHECK (("source" IN ('state', 'model', 'operator')))
 );
 
+CREATE TABLE "workboard_start_requests" (
+  "id" text COLLATE "C" NOT NULL,
+  "card_id" text COLLATE "C" NOT NULL,
+  "source" text COLLATE "C" NOT NULL,
+  "status" text COLLATE "C" NOT NULL,
+  "requested_at" bigint NOT NULL,
+  "wait_kind" text COLLATE "C",
+  "wait_until" bigint,
+  "claimed_at" bigint,
+  "closed_at" bigint,
+  PRIMARY KEY ("id")
+);
+
 CREATE TABLE "workboard_worker_logs" (
   "id" text COLLATE "C" NOT NULL,
   "card_id" text COLLATE "C" NOT NULL,
@@ -264,6 +277,10 @@ CREATE INDEX "workboard_cards_board_status_idx" ON "workboard_cards" (("board_id
 
 CREATE INDEX "workboard_cards_session_idx" ON "workboard_cards" (("session_key") ASC NULLS FIRST, ("run_id") ASC NULLS FIRST);
 
+CREATE INDEX "workboard_start_requests_card_idx" ON "workboard_start_requests" (("card_id") ASC, ("closed_at") ASC NULLS FIRST);
+
+CREATE UNIQUE INDEX "workboard_start_requests_open_idx" ON "workboard_start_requests" (("card_id") ASC) WHERE "closed_at" IS NULL;
+
 CREATE INDEX "workboard_worker_logs_card_idx" ON "workboard_worker_logs" (("card_id") ASC, ("ordinal") ASC);
 
 ALTER TABLE "workboard_card_artifacts" ADD FOREIGN KEY ("card_id") REFERENCES "workboard_cards" ("id") ON UPDATE NO ACTION ON DELETE CASCADE NOT DEFERRABLE;
@@ -287,6 +304,8 @@ ALTER TABLE "workboard_card_notifications" ADD FOREIGN KEY ("card_id") REFERENCE
 ALTER TABLE "workboard_card_proof" ADD FOREIGN KEY ("card_id") REFERENCES "workboard_cards" ("id") ON UPDATE NO ACTION ON DELETE CASCADE NOT DEFERRABLE;
 
 ALTER TABLE "workboard_session_placements" ADD FOREIGN KEY ("board_id") REFERENCES "workboard_boards" ("id") ON UPDATE NO ACTION ON DELETE CASCADE NOT DEFERRABLE;
+
+ALTER TABLE "workboard_start_requests" ADD FOREIGN KEY ("card_id") REFERENCES "workboard_cards" ("id") ON UPDATE NO ACTION ON DELETE CASCADE NOT DEFERRABLE;
 
 ALTER TABLE "workboard_worker_logs" ADD FOREIGN KEY ("card_id") REFERENCES "workboard_cards" ("id") ON UPDATE NO ACTION ON DELETE CASCADE NOT DEFERRABLE;
 

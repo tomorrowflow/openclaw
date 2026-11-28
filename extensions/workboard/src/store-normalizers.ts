@@ -68,7 +68,7 @@ import type {
   WorkboardProofInput,
   WorkboardWorkerLogInput,
 } from "./store-inputs.js";
-import { normalizeProbe, normalizeStartRequest } from "./store-launch-normalizers.js";
+import { normalizeProbe } from "./store-launch-normalizers.js";
 import { capAttachments, isDependencyLink, trimMetadataToBudget } from "./store-metadata-budget.js";
 import { normalizeExecutionTarget } from "./store-target-normalizers.js";
 import {
@@ -321,11 +321,6 @@ export function normalizeAutomation(
       : fallback.maxRetries,
     scheduledAt: timestamp("scheduledAt") || undefined,
     // Host-owned dispatch state: only trusted store writes may set it from raw metadata.
-    startRequest: normalizeStartRequest(
-      options.allowLaunchState && Object.hasOwn(record, "startRequest")
-        ? record.startRequest
-        : fallback.startRequest,
-    ),
     probe: normalizeProbe(
       options.allowLaunchState && Object.hasOwn(record, "probe") ? record.probe : fallback.probe,
     ),

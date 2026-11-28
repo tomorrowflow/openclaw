@@ -12,6 +12,7 @@ import {
   type WorkboardCardDatabase,
 } from "./sqlite-store-records.js";
 import type { WorkboardSqlConnection } from "./sqlite-store-schema.js";
+import { syncStartRequest } from "./sqlite-store-start-requests.js";
 
 function cardBoardId(card: WorkboardCard): string {
   return card.metadata?.automation?.boardId ?? "default";
@@ -288,5 +289,6 @@ export function insertCard(
     );
     db.prepare(compiled.sql).run(...bind());
   }
+  syncStartRequest(db, card);
   return true;
 }

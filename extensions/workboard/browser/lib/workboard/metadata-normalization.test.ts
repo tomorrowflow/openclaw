@@ -72,7 +72,6 @@ describe("Workboard automation metadata boundary", () => {
           hostRepoPath: "/host",
           model: "anthropic/claude-sonnet-5-5",
         },
-        startRequest: { requestedAt: 5 },
       },
     },
     {
@@ -88,4 +87,11 @@ describe("Workboard automation metadata boundary", () => {
       expected ? { automation: expected } : undefined,
     );
   });
+});
+
+it("keeps a queued start whose source a newer Gateway added", () => {
+  const startRequest = { requestedAt: 5, source: "dependency", usageLimitResetsAt: 9 };
+  expect(
+    normalizeCardPayload({ card: { id: "card", title: "Card", startRequest } }).startRequest,
+  ).toEqual({ requestedAt: 5, source: "migrated", usageLimitResetsAt: 9 });
 });

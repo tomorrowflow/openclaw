@@ -1,5 +1,6 @@
-import type { WorkboardCard } from "@openclaw/workboard-contract";
+import type { WorkboardCard, WorkboardStartRequestSource } from "@openclaw/workboard-contract";
 import { nodeTicketStartRequestPatch } from "./node-ticket-start-queue.js";
+import { nodeTicketReopen } from "./node-ticket.js";
 import { WorkboardWorkflowStore } from "./store-workflow.js";
 
 export class WorkboardNodeTicketQueueStore extends WorkboardWorkflowStore {
@@ -8,22 +9,26 @@ export class WorkboardNodeTicketQueueStore extends WorkboardWorkflowStore {
    * says what it waits for, in one write. A queued card keeps its first
    * request so its place in line holds. Queueing a backlog card moves it to
    * todo in the same write, so moving it back to backlog stays the way to
-   * cancel.
+   * cancel. A reopened ticket's request names the reopen as its source,
+   * whoever asked for the start.
    */
   async requestNodeTicketStart(
     id: string,
-    input: { notice: (card: WorkboardCard) => string },
+    input: {
+      source: Extract<WorkboardStartRequestSource, "operator" | "merge_wait">;
+      notice: (card: WorkboardCard) => string;
+    },
   ): Promise<{ card: WorkboardCard; queued: boolean }> {
     return await this.enqueueMutation(async () => {
       const now = Date.now();
       const result = await this.updateLatestCard(
         id,
         (card) =>
-          card.metadata?.automation?.startRequest
+          card.startRequest
             ? undefined
             : nodeTicketStartRequestPatch(
                 card.status === "backlog" ? { ...card, status: "todo" } : card,
-                { requestedAt: now },
+                { requestedAt: now, source: nodeTicketReopen(card, now) ? "reopen" : input.source },
                 input.notice,
                 now,
               ),
@@ -31,7 +36,7 @@ export class WorkboardNodeTicketQueueStore extends WorkboardWorkflowStore {
       );
       return {
         card: result.card,
-        queued: Boolean(result.card.metadata?.automation?.startRequest),
+        queued: Boolean(result.card.startRequest),
       };
     });
   }

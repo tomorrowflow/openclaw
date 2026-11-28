@@ -118,7 +118,7 @@ export async function drainStartQueue(params: {
   }
   // A start that claimed the card already blocked it on failure.
   const current = await params.store.get(params.card.id);
-  if (!current?.metadata?.automation?.startRequest) {
+  if (!current?.startRequest) {
     return undefined;
   }
   await params.store.block(

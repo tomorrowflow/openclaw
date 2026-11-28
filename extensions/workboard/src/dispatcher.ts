@@ -303,7 +303,7 @@ async function runWorkboardDispatch(
     ? await params.store.prepareStart(directCardId, now, assertOwnerCurrent)
     : undefined;
   const queue = directCard ? params.options?.queue : undefined;
-  if (queue === "drain" && !directCard?.metadata?.automation?.startRequest) {
+  if (queue === "drain" && !directCard?.startRequest) {
     // The operator moved the card away, or another start took it, meanwhile.
     return {
       promoted: [],
@@ -733,7 +733,7 @@ async function runWorkboardDispatch(
 
   const queued =
     directCard && queue && wait && started.length === 0
-      ? await queueNodeTicketStart(params.store, directCard.id, wait, now)
+      ? await queueNodeTicketStart(params.store, directCard.id, wait, now, "operator")
       : undefined;
   return {
     ...dispatch,

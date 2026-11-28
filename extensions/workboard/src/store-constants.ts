@@ -8,6 +8,7 @@ import type {
   WorkboardExecutionTarget,
   WorkboardMetadata,
   WorkboardOrchestrationSettings,
+  WorkboardStartRequest,
   WorkboardTargetRoute,
 } from "@openclaw/workboard-contract";
 import {
@@ -170,16 +171,20 @@ export function workboardNodeTicketStartQueueable(
 }
 
 /**
- * The card without its queued start once it can no longer hold one; a move
- * away cancels the request, so moving the card back never starts it.
+ * The card with the start this write queues, and without a queued start once
+ * it can no longer hold one; a move away cancels the request, so moving the
+ * card back never starts it.
  */
-export function withoutStaleStartRequest(card: WorkboardCard, now: number): WorkboardCard {
-  const automation = card.metadata?.automation;
-  if (!automation?.startRequest || workboardNodeTicketStartQueueable(card, now)) {
-    return card;
-  }
-  const { startRequest: _cancelled, ...rest } = automation;
-  return { ...card, metadata: { ...card.metadata, automation: rest } };
+export function withStartRequest(
+  card: WorkboardCard,
+  queued: WorkboardStartRequest | undefined,
+  now: number,
+): WorkboardCard {
+  const { startRequest: held, ...rest } = card;
+  const startRequest = queued ?? held;
+  return startRequest && workboardNodeTicketStartQueueable(card, now)
+    ? { ...rest, startRequest }
+    : rest;
 }
 
 export function workboardCardConsumesOwnerSlot(card: WorkboardOwnerSlotCard, now: number): boolean {

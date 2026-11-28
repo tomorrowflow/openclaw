@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const WORKBOARD_SCHEMA_SQL = `
     CREATE TABLE IF NOT EXISTS workboard_schema_migrations (
@@ -114,6 +114,22 @@ export const WORKBOARD_SCHEMA_SQL = `
     ) STRICT;
     CREATE INDEX IF NOT EXISTS workboard_card_attempts_card_idx
       ON workboard_card_attempts(card_id, ordinal);
+
+    CREATE TABLE IF NOT EXISTS workboard_start_requests (
+      id TEXT PRIMARY KEY,
+      card_id TEXT NOT NULL REFERENCES workboard_cards(id) ON DELETE CASCADE,
+      source TEXT NOT NULL,
+      status TEXT NOT NULL,
+      requested_at INTEGER NOT NULL,
+      wait_kind TEXT,
+      wait_until INTEGER,
+      claimed_at INTEGER,
+      closed_at INTEGER
+    ) STRICT;
+    CREATE UNIQUE INDEX IF NOT EXISTS workboard_start_requests_open_idx
+      ON workboard_start_requests(card_id) WHERE closed_at IS NULL;
+    CREATE INDEX IF NOT EXISTS workboard_start_requests_card_idx
+      ON workboard_start_requests(card_id, closed_at);
 
     CREATE TABLE IF NOT EXISTS workboard_card_comments (
       id TEXT PRIMARY KEY,

@@ -187,7 +187,7 @@ it("shows a queued node ticket's Start as queued and disabled", async () => {
   const queued = {
     ...card,
     updatedAt: 2,
-    metadata: { automation: { target: NODE_TICKET_TARGET, startRequest: { requestedAt: 2 } } },
+    startRequest: { requestedAt: 2, source: "operator" },
   };
   const client = createWorkboardTestClient({
     "workboard.cards.start": { queued: true, card: queued },
@@ -208,7 +208,7 @@ it("shows a queued node ticket's Start as queued and disabled", async () => {
 
   expect(state.error).toBeNull();
   expect(props.onOpenSession).not.toHaveBeenCalled();
-  expect(state.cards[0]?.metadata?.automation?.startRequest).toEqual({ requestedAt: 2 });
+  expect(state.cards[0]?.startRequest).toEqual({ requestedAt: 2, source: "operator" });
   expect(start().textContent?.trim()).toBe("Queued");
   // A node ticket starts only through its own Start; engine starts would bypass the node.
   const controls = [...container.querySelectorAll<HTMLButtonElement>(".workboard-card__start")];

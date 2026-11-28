@@ -76,10 +76,10 @@ describe("node ticket start queue", () => {
       expect(warn).not.toHaveBeenCalled();
       const started = await store.get(older.id);
       expect(started?.status).toBe("running");
-      expect(started?.metadata?.automation?.startRequest).toBeUndefined();
+      expect(started?.startRequest).toBeUndefined();
       const waiting = await store.get(newer.id);
       expect(waiting?.status).toBe("todo");
-      expect(waiting?.metadata?.automation?.startRequest).toBeDefined();
+      expect(waiting?.startRequest).toBeDefined();
     } finally {
       vi.useRealTimers();
     }
@@ -144,7 +144,7 @@ describe("node ticket start queue", () => {
       expect((await store.get(server.id))?.status).toBe("running");
       const waiting = await store.get(ios.id);
       expect(waiting?.status).toBe("todo");
-      expect(waiting?.metadata?.automation?.startRequest).toBeDefined();
+      expect(waiting?.startRequest).toBeDefined();
     } finally {
       vi.useRealTimers();
     }
@@ -180,7 +180,7 @@ describe("node ticket start queue", () => {
       const resetsAt = Date.parse("2026-11-25T22:10:00Z");
       const requeued = await store.get(runningIos.id);
       expect(requeued?.status).toBe("todo");
-      expect(requeued?.metadata?.automation?.startRequest?.usageLimitResetsAt).toBe(resetsAt);
+      expect(requeued?.startRequest?.usageLimitResetsAt).toBe(resetsAt);
       expect(requeued?.metadata?.comments?.at(-1)?.body).toBe(
         `The model login on node mac-factory hit its usage limit (${limit}). This ticket is queued again and starts after the reset at 2026-11-25 22:10 UTC; until then nothing else starts on that node.`,
       );
@@ -227,14 +227,14 @@ describe("node ticket start queue", () => {
     });
     expect((await start(child.id, "request")).queued).toBeDefined();
     await handoffs.resume(vi.fn());
-    expect((await store.get(child.id))?.metadata?.automation?.startRequest).toBeDefined();
+    expect((await store.get(child.id))?.startRequest).toBeDefined();
 
     await store.move(parent.id, "done", undefined);
     await handoffs.resume(vi.fn());
 
     const started = await store.get(child.id);
     expect(started?.status).toBe("running");
-    expect(started?.metadata?.automation?.startRequest).toBeUndefined();
+    expect(started?.startRequest).toBeUndefined();
   });
 
   it("drops a request when the card moves to backlog and never starts it after it moves back", async () => {
@@ -243,14 +243,14 @@ describe("node ticket start queue", () => {
     expect((await start(card.id, "request")).queued).toBeDefined();
 
     await store.move(card.id, "backlog", undefined);
-    expect((await store.get(card.id))?.metadata?.automation?.startRequest).toBeUndefined();
+    expect((await store.get(card.id))?.startRequest).toBeUndefined();
     await store.move(card.id, "todo", undefined);
     await toReview(runningIos.id);
     await handoffs.resume(vi.fn());
 
     const stored = await store.get(card.id);
     expect(stored?.status).toBe("todo");
-    expect(stored?.metadata?.automation?.startRequest).toBeUndefined();
+    expect(stored?.startRequest).toBeUndefined();
   });
 
   it("blocks a queued card whose start fails for another reason than a full slot", async () => {
@@ -264,7 +264,7 @@ describe("node ticket start queue", () => {
 
     const blocked = await store.get(card.id);
     expect(blocked?.status).toBe("blocked");
-    expect(blocked?.metadata?.automation?.startRequest).toBeUndefined();
+    expect(blocked?.startRequest).toBeUndefined();
     expect(blocked?.metadata?.comments?.at(-1)?.body).toContain(
       "The queued start failed: node-claude targets use a node worktree",
     );
@@ -286,7 +286,7 @@ describe("node ticket start queue", () => {
 
     const waiting = await store.get(card.id);
     expect(waiting?.status).toBe("todo");
-    expect(waiting?.metadata?.automation?.startRequest).toBeDefined();
+    expect(waiting?.startRequest).toBeDefined();
 
     await handoffs.resume(vi.fn());
     expect((await store.get(card.id))?.status).toBe("running");

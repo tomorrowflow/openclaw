@@ -79,9 +79,7 @@ describe("workboardCardStage", () => {
     },
     {
       name: "a start queued for a node slot",
-      card: card("todo", {
-        automation: { ...nodeTicket().automation, startRequest: { requestedAt: 40 } },
-      }),
+      card: card("todo", nodeTicket(), { startRequest: { requestedAt: 40, source: "operator" } }),
       stage: { kind: "queued", since: 40 },
     },
     {

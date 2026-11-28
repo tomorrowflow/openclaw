@@ -39,17 +39,18 @@ import {
   assertWorkboardSlotClaimed,
   POSITION_STEP,
   withWorkboardRouteTarget,
-  withoutStaleStartRequest,
+  withStartRequest,
 } from "./store-constants.js";
 import { normalizeWithoutEvidence, withStoredEvidence } from "./store-evidence.js";
-import type {
-  WorkboardCardPatch,
-  WorkboardCommentInput,
-  WorkboardLinkInput,
-  WorkboardLinkedCreateInput,
-  WorkboardMutationScope,
-  WorkboardOwnedCardPatch,
-  WorkboardUpdateCardOptions,
+import {
+  splitOwnedCardPatch,
+  type WorkboardCardPatch,
+  type WorkboardCommentInput,
+  type WorkboardLinkInput,
+  type WorkboardLinkedCreateInput,
+  type WorkboardMutationScope,
+  type WorkboardOwnedCardPatch,
+  type WorkboardUpdateCardOptions,
 } from "./store-inputs.js";
 import { trimMetadataToBudget } from "./store-metadata-budget.js";
 import {
@@ -133,11 +134,10 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
     if (!ownedPatch) {
       return { card: current, updated: false };
     }
-    const { ownedLaunch, ownedEvidence, ...patch } = ownedPatch;
+    const { patch, owned } = splitOwnedCardPatch(ownedPatch);
     const card = await this.updateCard(current, patch, {
       ...options,
-      automationLaunch: ownedLaunch,
-      automationEvidence: ownedEvidence,
+      ...owned,
       expectedUpdatedAt: current.updatedAt,
     });
     return { card, updated: card.updatedAt !== current.updatedAt };
@@ -522,7 +522,7 @@ export class WorkboardCoreStore extends WorkboardBoardStore {
       existing,
       options,
     );
-    next = withoutStaleStartRequest(next, now);
+    next = withStartRequest(next, options.startRequest, now);
     assertAgentMayMoveCard(existing, next, options.actor);
     const moved = next;
     next = await withImportedNodeTicketMove({

@@ -1,4 +1,8 @@
-import type { WorkboardCard, WorkboardStartRequest } from "@openclaw/workboard-contract";
+import type {
+  WorkboardCard,
+  WorkboardStartRequest,
+  WorkboardStartRequestSource,
+} from "@openclaw/workboard-contract";
 import { nodeTicketReopen, nodeTicketReopenSubject, nodeTicketTarget } from "./node-ticket.js";
 import { appendComment, cardParentIds, workboardClaimRefusal } from "./store-card-helpers.js";
 import {
@@ -54,12 +58,12 @@ export function nodeTicketStartRequestPatch(
   const noted = !reopened || handoff.slotWaitNotedAt === undefined;
   return {
     status: queued.status,
+    ownedStartRequest: request,
     metadata: {
       ...queued.metadata,
       ...(noted ? { comments: appendComment(queued.metadata?.comments, notice(queued), now) } : {}),
       automation: {
         ...automation,
-        startRequest: request,
         ...(reopened && noted && automation.target && worktree
           ? {
               target: {
@@ -84,7 +88,7 @@ export function nodeTicketUsageLimits(
 ): Map<string, number> {
   const limits = new Map<string, number>();
   for (const card of cards) {
-    const resetsAt = card.metadata?.automation?.startRequest?.usageLimitResetsAt;
+    const resetsAt = card.startRequest?.usageLimitResetsAt;
     const nodeId = nodeTicketTarget(card)?.nodeId;
     if (nodeId && resetsAt !== undefined && resetsAt > now && !card.metadata?.archivedAt) {
       limits.set(nodeId, Math.max(resetsAt, limits.get(nodeId) ?? 0));
@@ -234,9 +238,11 @@ export async function queueNodeTicketStart(
   cardId: string,
   wait: NodeTicketStartWait,
   now: number,
+  source: Extract<WorkboardStartRequestSource, "operator" | "merge_wait">,
 ): Promise<WorkboardCard | undefined> {
   const cards = wait.kind === "dependencies" ? await store.list() : [];
   const request = await store.requestNodeTicketStart(cardId, {
+    source,
     notice: (card) => nodeTicketStartWaitNotice(card, wait, cards, now),
   });
   return request.queued ? request.card : undefined;
@@ -256,13 +262,11 @@ export async function queueMergeWaits(
 ): Promise<void> {
   for (const card of candidates) {
     const wait =
-      card.status === "ready" &&
-      !card.metadata?.automation?.startRequest &&
-      nodeTicketSlots.has(card.id)
+      card.status === "ready" && !card.startRequest && nodeTicketSlots.has(card.id)
         ? nodeTicketDependencyWait(card, cards, now, undefined)
         : undefined;
     if (wait) {
-      await queueNodeTicketStart(store, card.id, wait, now);
+      await queueNodeTicketStart(store, card.id, wait, now, "merge_wait");
     }
   }
 }

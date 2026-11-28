@@ -17,6 +17,7 @@ import {
   WORKBOARD_LINK_TYPES,
   WORKBOARD_NOTIFICATION_KINDS,
   WORKBOARD_PROOF_STATUSES,
+  WORKBOARD_START_REQUEST_SOURCES,
   WORKBOARD_STATUSES,
   WORKBOARD_WORKER_STATES,
   WORKBOARD_DIAGNOSTIC_ACTION_KINDS,
@@ -122,11 +123,6 @@ const automationSchema = sparseObject({
   maxRuntimeSeconds: automationNumberSchema,
   maxRetries: automationNumberSchema,
   scheduledAt: automationNumberSchema,
-  startRequest: z
-    .object({ requestedAt: z.number() })
-    .transform(({ requestedAt }) => ({ requestedAt }))
-    .optional()
-    .catch(undefined),
   summary: optionalStringSchema,
   dispatchCount: automationNumberSchema,
   lastDispatchAt: automationNumberSchema,
@@ -138,6 +134,13 @@ const automationSchema = sparseObject({
 const diagnosticActionSchema = z.object({
   kind: z.enum(WORKBOARD_DIAGNOSTIC_ACTION_KINDS),
   label: z.string(),
+});
+
+const workboardStartRequestSchema = z.object({
+  requestedAt: z.number(),
+  // A newer Gateway may name a source this bundle predates; the card is still queued.
+  source: z.enum(WORKBOARD_START_REQUEST_SOURCES).catch("migrated"),
+  usageLimitResetsAt: z.number().optional(),
 });
 
 const workboardExecutionSchema = z
@@ -586,6 +589,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
   const execution: WorkboardExecution | undefined = executionResult.success
     ? executionResult.data
     : undefined;
+  const startRequest = workboardStartRequestSchema.safeParse(value.startRequest);
   const eventsResult = workboardEventsSchema.safeParse(value.events);
   const events: WorkboardEvent[] = eventsResult.success ? (eventsResult.data ?? []) : [];
   const metadataResult = workboardMetadataSchema.safeParse(value.metadata);
@@ -626,6 +630,7 @@ function normalizeCard(value: unknown): WorkboardCard | null {
     ...(typeof value.completedAt === "number" ? { completedAt: value.completedAt } : {}),
     ...(events.length ? { events } : {}),
     ...(metadata ? { metadata } : {}),
+    ...(startRequest.success ? { startRequest: startRequest.data } : {}),
     ...(stage ? { stage } : {}),
     ...(sessions.length > 0 ? { sessions } : {}),
     ...(rounds.length > 0 ? { rounds } : {}),

@@ -19,6 +19,10 @@ import {
   getAdmittedSqliteSchemaFacts,
   type SqliteDatabaseAdmissionKey,
 } from "openclaw/plugin-sdk/sqlite-worker-runtime";
+import {
+  cancelStaleStartRequests,
+  migrateStartRequestsFromAutomationJson,
+} from "./sqlite-store-start-requests.js";
 import { workboardEngineSchema } from "./store-engine-schema.js";
 import { SCHEMA_VERSION, WORKBOARD_SCHEMA_SQL } from "./workboard-schema.js";
 export type WorkboardSqlConnection = EngineConnection;
@@ -88,6 +92,7 @@ function ensureWorkboardSchema(db: DatabaseSync): void {
     .prepare("SELECT 1 AS found FROM workboard_schema_migrations WHERE id = ?")
     .get(migrationId);
   if (!current) {
+    migrateStartRequestsFromAutomationJson(db);
     migrateSqliteSchemaToStrict(db, WORKBOARD_SCHEMA_SQL, {
       databaseLabel: "workboard database",
     });
@@ -95,6 +100,7 @@ function ensureWorkboardSchema(db: DatabaseSync): void {
       "INSERT OR IGNORE INTO workboard_schema_migrations (id, applied_at) VALUES (?, ?)",
     ).run(migrationId, Date.now());
   }
+  cancelStaleStartRequests(db);
   publishSqliteDatabaseAdmission(db, schemaAdmission, true);
 }
 
