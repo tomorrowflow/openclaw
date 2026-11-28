@@ -70,6 +70,7 @@ describe.skipIf(!fixtures.connection)("family-scoped database port", () => {
       workboard,
       `${metadata.sqlite};
       INSERT INTO workboard_schema_migrations VALUES ('schema-${metadata.version}', 17);
+      INSERT INTO workboard_schema_migrations VALUES ('card-kinds-from-class-labels', 17);
       INSERT INTO workboard_boards (id, name, created_at, updated_at) VALUES ('mixed-board', 'retained board', 1, 2)`,
     );
     client = new Client({ connectionString: fixtures.connection });

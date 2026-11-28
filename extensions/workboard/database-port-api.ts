@@ -5,7 +5,10 @@ import {
   admitSqliteSchema,
   getAdmittedSqliteSchemaFacts,
 } from "openclaw/plugin-sdk/sqlite-worker-runtime";
-import { createWorkboardDatabase } from "./src/sqlite-store-schema.js";
+import {
+  createWorkboardDatabase,
+  WORKBOARD_DATA_MIGRATION_IDS,
+} from "./src/sqlite-store-schema.js";
 import { WORKBOARD_POSTGRES_SCHEMA_SQL } from "./src/workboard-postgres-schema.js";
 import { SCHEMA_VERSION } from "./src/workboard-schema.js";
 
@@ -23,6 +26,9 @@ function inspectWorkboardPortSource(db: DatabaseSync) {
   const rows = db.prepare("SELECT id FROM workboard_schema_migrations").all();
   let version = 0;
   for (const row of rows) {
+    if (typeof row.id === "string" && WORKBOARD_DATA_MIGRATION_IDS.has(row.id)) {
+      continue;
+    }
     const match = typeof row.id === "string" && /^schema-([1-9][0-9]*)$/.exec(row.id);
     if (!match || Number(match[1]) > SCHEMA_VERSION) {
       throw new WorkboardPortSchemaError(
